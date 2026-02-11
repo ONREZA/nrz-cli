@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2026-02-11
+
+### 🐛 Bug Fixes
+
+- **dev:** use cfg(unix) for SIGTERM, fix Windows build ([dc8fd1c](https://github.com/ONREZA/nrz-cli/commit/dc8fd1c41f1940d6c1564fe58bad0306df13fed7))
+
 ## [0.1.2] - 2026-02-11
 
 ### 👷 CI/CD
