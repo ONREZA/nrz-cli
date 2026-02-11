@@ -64,7 +64,30 @@ CLI не зависит от адаптеров. Связь — через BUILD
 | `nrz kv list` | Список ключей |
 | `nrz kv clear` | Очистить KV |
 
-## Сборка и запуск
+## Установка
+
+### Quick install (Linux/macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/onreza/nrz-cli/main/install.sh | bash
+```
+
+### Скачать вручную
+
+Скачайте бинарник для вашей платформы из [GitHub Releases](https://github.com/onreza/nrz-cli/releases):
+
+- `nrz-linux-x64` — Linux x86_64
+- `nrz-macos-x64` — macOS Intel
+- `nrz-macos-arm64` — macOS Apple Silicon
+- `nrz-windows-x64.exe` — Windows x86_64
+
+### Сборка из исходников
+
+```bash
+cargo install --git https://github.com/onreza/nrz-cli
+```
+
+### Для разработки
 
 ```bash
 cargo build                  # debug build
@@ -157,6 +180,20 @@ nrz dev
   6. Framework dev server видит globalThis.ONREZA — всё работает
   7. Ctrl+C → graceful shutdown child process + emulator
 ```
+
+## Релизы
+
+Релизы публикуются автоматически через GitHub Actions при создании тега `v*.*.*`:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Workflow (`.github/workflows/release.yml`):
+- Запускает тесты на каждом PR/push
+- Собирает бинарники под Linux x64, macOS x64/arm64, Windows x64
+- Создаёт GitHub Release с чек-суммами
 
 ## Связанные репозитории
 
