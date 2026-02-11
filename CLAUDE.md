@@ -39,6 +39,12 @@ src/
 tests/              — интеграционные тесты
   emulator_http_test.rs — тесты HTTP API эмулятора
   cli_integration_test.rs — интеграционные тесты CLI
+
+Конфигурация:
+  lefthook.yml      — Git hooks конфигурация
+  commitlint.config.js — Правила для commitlint
+  cliff.toml        — Конфигурация git-cliff (changelog)
+  package.json      — Node.js зависимости (commitlint, lefthook)
 ```
 
 ## Контракт
@@ -207,15 +213,58 @@ git-cliff --latest --strip header -o RELEASE_NOTES.md
 
 ### Формат коммитов (Conventional Commits)
 
+Все коммиты должны следовать [Conventional Commits](https://www.conventionalcommits.org/):
+
 ```
-feat(scope): добавить новую функцию
-fix(scope): исправить баг
-docs(scope): обновить документацию
-perf(scope): оптимизация производительности
-refactor(scope): рефакторинг кода
-test(scope): добавить тесты
-chore(scope): рутинные задачи
-ci(scope): изменения CI/CD
+<type>(<scope>): <subject>
+
+[optional body]
+
+[optional footer]
+```
+
+**Допустимые типы:**
+- `feat` — новая функциональность
+- `fix` — исправление бага
+- `docs` — документация
+- `style` — форматирование (не влияет на код)
+- `refactor` — рефакторинг
+- `perf` — производительность
+- `test` — тесты
+- `chore` — рутинные задачи
+- `ci` — CI/CD
+- `build` — система сборки
+- `revert` — откат изменений
+
+**Допустимые скопы:** `cli`, `dev`, `build`, `deploy`, `emulator`, `kv`, `db`, `deps`, `ci`, `release`, `tests`
+
+Примеры:
+```bash
+git commit -m "feat(dev): add framework detection for sveltekit"
+git commit -m "fix(kv): handle expired entries in list command"
+git commit -m "docs: update installation instructions"
+```
+
+### Git Hooks (Lefthook)
+
+Проект использует [lefthook](https://github.com/evilmartians/lefthook) для проверки коммитов перед созданием:
+
+```bash
+# Установить lefthook и hooks
+npm install
+
+# Или установить lefthook глобально
+cargo install lefthook
+lefthook install
+```
+
+**Автоматические проверки:**
+- `commit-msg` — проверка формата сообщения (commitlint)
+- `pre-commit` — `cargo fmt` и `cargo clippy`
+
+Чтобы обойти hooks (не рекомендуется):
+```bash
+git commit -m "wip: temporary" --no-verify
 ```
 
 ### Создание релиза
