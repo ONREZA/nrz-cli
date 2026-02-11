@@ -41,10 +41,10 @@ tests/              — интеграционные тесты
   cli_integration_test.rs — интеграционные тесты CLI
 
 Конфигурация:
-  lefthook.yml      — Git hooks конфигурация
-  commitlint.config.js — Правила для commitlint
-  cliff.toml        — Конфигурация git-cliff (changelog)
-  package.json      — Node.js зависимости (commitlint, lefthook)
+  lefthook.yml          — Git hooks конфигурация
+  commitlint.config.js  — Правила для commitlint (standalone, без extends)
+  .onrezarelease.jsonc  — Конфигурация onreza-release (versioning, changelog, binaries)
+  package.json          — Node.js зависимости (commitlint, lefthook, onreza-release)
 ```
 
 ## Контракт
@@ -198,22 +198,28 @@ nrz dev
 
 ## Релизы и Changelog
 
-### Создание релиза
+Релизы управляются через [onreza-release](https://github.com/onreza/onreza-release) — автоматическое определение версии по conventional commits, встроенный changelog, загрузка бинарников, npm-дистрибуция через trusted publishing (OIDC).
 
-Релизы создаются вручную через GitHub Actions:
+Конфигурация: `.onrezarelease.jsonc`
+
+### Создание релиза
 
 1. Перейди в [Actions → Release](https://github.com/ONREZA/nrz-cli/actions/workflows/release.yml)
 2. Нажми **"Run workflow"**
-3. Введи версию (например, `0.1.0`)
-4. Опционально: отметь "Create as draft release"
-5. Нажми **"Run workflow"**
 
 Workflow автоматически:
-- Обновит версию в `Cargo.toml`
-- Сгенерирует changelog
+- Определит следующую версию по conventional commits
+- Обновит `Cargo.toml`, `Cargo.lock`, `CHANGELOG.md`
 - Создаст коммит и тег
-- Соберёт бинарники под все платформы
-- Создаст GitHub Release с заметками
+- Соберёт бинарники под все платформы (linux-x64, darwin-x64, darwin-arm64, win32-x64)
+- Создаст GitHub Release
+- Опубликует npm-пакеты (основной + platform-specific) с provenance
+
+### Локальный dry-run
+
+```bash
+npx onreza-release --dry-run --verbose
+```
 
 ### Формат коммитов (Conventional Commits)
 
@@ -267,42 +273,11 @@ lefthook install
 - `pre-commit` — `cargo fmt` и `cargo clippy`
 - `pre-push` — `cargo test`
 
-Чтобы обойти hooks (не рекомендуется):
-```bash
-git commit -m "wip: temporary" --no-verify
-```
-
-### Локальная генерация changelog
+### Перегенерация commitlint конфига
 
 ```bash
-# Установка git-cliff
-cargo install git-cliff
-
-# Генерация полного changelog
-git-cliff --config cliff.toml -o CHANGELOG.md
-
-# Генерация только последнего релиза
-git-cliff --latest --strip header -o RELEASE_NOTES.md
+npx onreza-release generate-commitlint --format js --output commitlint.config.js
 ```
-
-### Создание релиза
-
-```bash
-# 1. Обновить версию в Cargo.toml
-# 2. Создать коммит
-git add Cargo.toml
-git commit -m "chore(release): bump version to 0.1.0"
-
-# 3. Создать и запушить тег
-git tag v0.1.0
-git push origin main
-git push origin v0.1.0
-```
-
-GitHub Actions автоматически:
-- Обновит `CHANGELOG.md` (при пуше в main)
-- Соберёт бинарники под все платформы
-- Создаст Release с красивым changelog
 
 ### Самообновление
 

@@ -1,15 +1,22 @@
 {
-  "name": "nrz-cli",
+  "name": "nrz",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "ONREZA platform CLI",
+  "files": [
+    "bin",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "prepare": "lefthook install || echo 'Install lefthook: https://github.com/evilmartians/lefthook'",
-    "commitlint": "commitlint"
+    "commitlint": "commitlint",
+    "release": "onreza-release"
   },
   "devDependencies": {
     "@commitlint/cli": "^18.6.0",
-    "@commitlint/config-conventional": "^18.6.0",
-    "lefthook": "^1.6.0"
+    "lefthook": "^1.6.0",
+    "onreza-release": "^2.5.0"
   }
 }

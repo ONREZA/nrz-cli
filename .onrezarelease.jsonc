@@ -1,0 +1,51 @@
+{
+  "projectType": "rust",
+  "git": {
+    "commitMessage": "chore(release): v{{version}} [skip ci]",
+    "tagMessage": "Release v{{version}}",
+    "push": true,
+    "skipHooks": true,
+    "beforeCommit": "cargo generate-lockfile && git add Cargo.lock"
+  },
+  "changelog": {
+    "types": {
+      "feat": "✨ Features",
+      "fix": "🐛 Bug Fixes",
+      "perf": "⚡ Performance",
+      "docs": "📚 Documentation",
+      "refactor": "♻️ Changed",
+      "style": "🎨 Changed",
+      "chore": "🔧 Changed",
+      "ci": "👷 CI/CD",
+      "test": "✅ Testing"
+    },
+    "showHash": true,
+    "showAuthor": false
+  },
+  "versioning": {
+    "tagPrefix": "v",
+    "preMajorMode": "auto"
+  },
+  "release": {
+    "enabled": true,
+    "platform": "github",
+    "checkExisting": true
+  },
+  "binaries": {
+    "enabled": true,
+    "name": "nrz",
+    "distDir": "./dist",
+    "inputFormat": "tar.gz",
+    "platforms": ["linux-x64", "darwin-x64", "darwin-arm64", "win32-x64"],
+    "retryAttempts": 3,
+    "npm": {
+      "generateScripts": true,
+      "updatePackageJson": false
+    }
+  },
+  "commitlint": {
+    "output": "commitlint.config.js",
+    "format": "js",
+    "scopes": ["cli", "dev", "build", "deploy", "emulator", "kv", "db", "deps", "ci", "release", "tests"]
+  }
+}
