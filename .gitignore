@@ -1,6 +1,5 @@
 /target
 /node_modules
-/package-lock.json
 
 # Generated files
 RELEASE_NOTES.md
