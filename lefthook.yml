@@ -7,11 +7,18 @@ commit-msg:
       run: npx --yes commitlint --edit {1}
 
 pre-commit:
-  parallel: true
+  parallel: false
   commands:
     fmt:
-      run: cargo fmt -- --check
+      run: cargo fmt
       glob: "*.rs"
     clippy:
       run: cargo clippy -- -D warnings
+      glob: "*.rs"
+
+pre-push:
+  parallel: false
+  commands:
+    test:
+      run: cargo test
       glob: "*.rs"

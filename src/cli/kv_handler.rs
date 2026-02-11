@@ -2,9 +2,7 @@
 
 use std::path::Path;
 
-use nrz::emulator::kv::{
-    KvFileEntry, is_expired, kv_file_path, load_kv_file, save_kv_file,
-};
+use nrz::emulator::kv::{KvFileEntry, is_expired, kv_file_path, load_kv_file, save_kv_file};
 
 use super::kv::{KvArgs, KvCommand};
 
