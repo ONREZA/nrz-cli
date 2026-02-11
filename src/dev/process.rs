@@ -49,10 +49,10 @@ pub async fn spawn_dev_server(
         }
         _ = signal::ctrl_c() => {
             tracing::info!("shutting down dev server...");
-            // Send SIGTERM for graceful shutdown
+            // Graceful shutdown: SIGTERM on Unix, kill on Windows
+            #[cfg(unix)]
             if let Some(pid) = child.id() {
                 unsafe { libc::kill(pid as i32, libc::SIGTERM); }
-                // Wait up to 5 seconds
                 match tokio::time::timeout(
                     std::time::Duration::from_secs(5),
                     child.wait()
@@ -64,6 +64,10 @@ pub async fn spawn_dev_server(
                     }
                 }
             } else {
+                let _ = child.kill().await;
+            }
+            #[cfg(not(unix))]
+            {
                 let _ = child.kill().await;
             }
         }
