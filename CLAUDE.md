@@ -6,26 +6,37 @@
 
 ```
 src/
+  lib.rs            — библиотечный интерфейс (для тестов)
   main.rs           — entrypoint, clap парсинг
   cli/              — CLI определения (clap derive)
-    mod.rs           — Cli, Command enum, DevArgs, BuildArgs, DeployArgs
+    mod.rs           — Cli, Command enum
     db.rs            — DbArgs, DbCommand
+    db_handler.rs    — обработчик команд db
     kv.rs            — KvArgs, KvCommand
+    kv_handler.rs    — обработчик команд kv
   dev/              — nrz dev
     mod.rs           — оркестрация: detect → emulator → spawn
     detect.rs        — определение фреймворка по package.json
+    detect_tests.rs  — тесты detect
     inject.rs        — генерация JS bootstrap для globalThis.ONREZA
+    inject_tests.rs  — тесты inject
     process.rs       — child process менеджмент
   build/            — nrz build
     mod.rs           — валидация output dir + manifest
-    manifest.rs      — парсинг и валидация manifest.json (BUILD_OUTPUT_SPEC v1)
+    manifest.rs      — парсинг и валидация manifest.json
+    manifest_tests.rs — тесты manifest
   deploy/           — nrz deploy
     mod.rs           — upload + activate
   emulator/         — локальная эмуляция платформы
     mod.rs           — data dir, общие утилиты
     kv.rs            — in-memory KV store с TTL (BTreeMap)
+    kv_tests.rs      — тесты KV store
     db.rs            — D1-compatible SQLite (rusqlite)
     server.rs        — HTTP API для JS bootstrap (/__nrz/kv/*, /__nrz/db/*)
+
+tests/              — интеграционные тесты
+  emulator_http_test.rs — тесты HTTP API эмулятора
+  cli_integration_test.rs — интеграционные тесты CLI
 ```
 
 ## Контракт
@@ -72,6 +83,51 @@ cargo test                   # тесты
 - **reqwest** — HTTP клиент для deploy API
 - **command-group** — child process groups (graceful shutdown)
 - **console/indicatif** — цветной вывод, прогресс-бары
+
+## Тестирование
+
+### Структура тестов
+
+**Unit-тесты** — в отдельных файлах `*_tests.rs` рядом с тестируемым модулем:
+```
+src/
+  emulator/
+    kv.rs           — основной код
+    kv_tests.rs     — unit-тесты (18 тестов)
+  dev/
+    detect.rs
+    detect_tests.rs — unit-тесты (10 тестов)
+    inject.rs
+    inject_tests.rs — unit-тесты (8 тестов)
+  build/
+    manifest.rs
+    manifest_tests.rs — unit-тесты (14 тестов)
+```
+
+Подключение в `mod.rs`:
+```rust
+#[cfg(test)]
+mod xxx_tests;
+```
+
+**Интеграционные тесты** — в папке `tests/`:
+- `tests/emulator_http_test.rs` — HTTP API эмулятора (5 тестов)
+- `tests/cli_integration_test.rs` — CLI команды через assert_cmd (13 тестов)
+
+### Запуск тестов
+
+```bash
+cargo test                    # все тесты
+cargo test --test emulator_http_test   # конкретный интеграционный тест
+cargo test kv_tests           # тесты конкретного модуля
+```
+
+### Правила написания тестов
+
+1. **Unit-тесты** — тестируют отдельные функции/методы, используют `tempfile::tempdir()` для изоляции
+2. **Интеграционные тесты** — тестируют публичный API (HTTP endpoints, CLI команды)
+3. Никаких inline `#[cfg(test)] mod tests {}` в файлах с кодом — только отдельные `*_tests.rs`
+4. Используем `assert_cmd` для CLI тестов, `reqwest` для HTTP тестов
 
 ## Конвенции
 

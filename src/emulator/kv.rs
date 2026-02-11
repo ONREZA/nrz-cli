@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::cli::kv::{KvArgs, KvCommand};
+use serde::{Deserialize, Serialize};
+
+use super::data_dir;
 
 struct Entry {
     value: String,
@@ -25,13 +28,14 @@ impl KvStore {
     }
 
     pub fn get(&self, key: &str) -> Option<String> {
-        let mut store = self.inner.lock().unwrap();
+        let mut store = self.inner.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!("KV store mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         if let Some(entry) = store.get(key) {
-            if let Some(expires_at) = entry.expires_at {
-                if Instant::now() > expires_at {
-                    store.remove(key);
-                    return None;
-                }
+            if entry.expires_at.is_some_and(|e| Instant::now() > e) {
+                store.remove(key);
+                return None;
             }
             Some(entry.value.clone())
         } else {
@@ -46,68 +50,126 @@ impl KvStore {
             None
         };
 
-        self.inner.lock().unwrap().insert(
-            key,
-            Entry { value, expires_at },
-        );
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("KV store mutex was poisoned, recovering");
+                poisoned.into_inner()
+            })
+            .insert(key, Entry { value, expires_at });
     }
 
     pub fn delete(&self, key: &str) -> bool {
-        self.inner.lock().unwrap().remove(key).is_some()
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("KV store mutex was poisoned, recovering");
+                poisoned.into_inner()
+            })
+            .remove(key)
+            .is_some()
     }
 
     pub fn has(&self, key: &str) -> bool {
-        self.get(key).is_some()
+        let mut store = self.inner.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!("KV store mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
+        if let Some(entry) = store.get(key) {
+            if entry.expires_at.is_some_and(|e| Instant::now() > e) {
+                store.remove(key);
+                return false;
+            }
+            true
+        } else {
+            false
+        }
     }
 
     pub fn list(&self, prefix: Option<&str>, limit: usize) -> Vec<String> {
-        let store = self.inner.lock().unwrap();
+        let mut store = self.inner.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!("KV store mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
         let now = Instant::now();
 
+        // Collect expired keys first
+        let expired: Vec<String> = store
+            .iter()
+            .filter_map(|(k, entry)| {
+                if entry.expires_at.is_some_and(|e| now > e) {
+                    return Some(k.clone());
+                }
+                None
+            })
+            .collect();
+
+        for key in &expired {
+            store.remove(key.as_str());
+        }
+
+        // Now collect the result after removing expired entries
         store
             .iter()
-            .filter(|(k, entry)| {
-                if let Some(p) = prefix {
-                    if !k.starts_with(p) {
-                        return false;
-                    }
-                }
-                entry.expires_at.is_none_or(|exp| now <= exp)
-            })
+            .filter(|(k, _)| prefix.is_none_or(|p| k.starts_with(p)))
             .take(limit)
             .map(|(k, _)| k.clone())
             .collect()
     }
 
     pub fn clear(&self) {
-        self.inner.lock().unwrap().clear();
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("KV store mutex was poisoned, recovering");
+                poisoned.into_inner()
+            })
+            .clear();
     }
 }
 
-/// CLI handler for `nrz kv` subcommands.
-pub async fn run(args: KvArgs) -> anyhow::Result<()> {
-    // For CLI commands, we read/write from a JSON file for persistence.
-    // The in-memory KvStore is used during `nrz dev` runtime.
-    match args.command {
-        KvCommand::Get { key } => {
-            eprintln!("nrz kv get: not yet implemented (key: {key})");
-        }
-        KvCommand::Set { key, value, ttl } => {
-            eprintln!("nrz kv set: not yet implemented (key: {key}, value: {value}, ttl: {ttl})");
-        }
-        KvCommand::Delete { key } => {
-            eprintln!("nrz kv delete: not yet implemented (key: {key})");
-        }
-        KvCommand::List { prefix, limit } => {
-            eprintln!("nrz kv list: not yet implemented (prefix: {prefix:?}, limit: {limit})");
-        }
-        KvCommand::Clear { force } => {
-            if !force {
-                eprintln!("use --force to confirm clearing all KV data");
-                return Ok(());
-            }
-            eprintln!("nrz kv clear: not yet implemented");
-        }
+// --- Persistent KV file format for CLI commands ---
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct KvFile {
+    pub entries: BTreeMap<String, KvFileEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct KvFileEntry {
+    pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<u64>,
+}
+
+pub fn kv_file_path(project_dir: &Path) -> std::path::PathBuf {
+    data_dir(project_dir).join("kv.json")
+}
+
+pub fn load_kv_file(path: &Path) -> KvFile {
+    match std::fs::read_to_string(path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+        Err(_) => KvFile::default(),
     }
+}
+
+pub fn save_kv_file(path: &Path, kv: &KvFile) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let content = serde_json::to_string_pretty(kv)?;
+    std::fs::write(path, content)?;
     Ok(())
+}
+
+pub fn is_expired(entry: &KvFileEntry) -> bool {
+    if let Some(expires_at) = entry.expires_at {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        now > expires_at
+    } else {
+        false
+    }
 }

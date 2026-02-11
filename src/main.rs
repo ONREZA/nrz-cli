@@ -1,8 +1,10 @@
+use nrz::emulator;
+
+mod auth;
 mod build;
 mod cli;
 mod deploy;
 mod dev;
-mod emulator;
 
 use clap::Parser;
 use cli::{Cli, Command};
@@ -20,7 +22,9 @@ async fn main() -> anyhow::Result<()> {
         Command::Dev(args) => dev::run(args).await,
         Command::Build(args) => build::run(args).await,
         Command::Deploy(args) => deploy::run(args).await,
-        Command::Db(args) => emulator::db::run(args).await,
-        Command::Kv(args) => emulator::kv::run(args).await,
+        Command::Db(args) => cli::db_handler::run(args).await,
+        Command::Kv(args) => cli::kv_handler::run(args).await,
+        Command::Login => auth::login().await,
+        Command::Whoami => auth::whoami().await,
     }
 }

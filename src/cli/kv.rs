@@ -9,9 +9,7 @@ pub struct KvArgs {
 #[derive(Subcommand)]
 pub enum KvCommand {
     /// Get a value by key
-    Get {
-        key: String,
-    },
+    Get { key: String },
 
     /// Set a key-value pair
     Set {
@@ -24,9 +22,7 @@ pub enum KvCommand {
     },
 
     /// Delete a key
-    Delete {
-        key: String,
-    },
+    Delete { key: String },
 
     /// List keys with optional prefix
     List {

@@ -1,5 +1,7 @@
 pub mod db;
+pub mod db_handler;
 pub mod kv;
+pub mod kv_handler;
 
 pub use db::DbArgs;
 pub use kv::KvArgs;
@@ -8,7 +10,11 @@ use clap::{Parser, Subcommand};
 
 /// ONREZA platform CLI
 #[derive(Parser)]
-#[command(name = "nrz", version, about = "ONREZA platform CLI — dev, build, deploy")]
+#[command(
+    name = "nrz",
+    version,
+    about = "ONREZA platform CLI — dev, build, deploy"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -30,6 +36,12 @@ pub enum Command {
 
     /// Manage local KV store
     Kv(KvArgs),
+
+    /// Log in to ONREZA platform
+    Login,
+
+    /// Show current user info
+    Whoami,
 }
 
 #[derive(Parser)]

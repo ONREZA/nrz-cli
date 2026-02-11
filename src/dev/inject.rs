@@ -15,6 +15,17 @@ pub fn generate_bootstrap(data_dir: &Path, port: u16) -> anyhow::Result<String> 
 const NRZ_EMULATOR = "http://127.0.0.1:{port}";
 const DB_PATH = {db_path};
 
+async function __nrzFetch(url, options, operation) {{
+  const res = await fetch(url, options).catch(e => {{
+    throw new Error(`[nrz] ${{operation}} failed: is nrz dev running? (${{e.message}})`);
+  }});
+  if (!res.ok) {{
+    const text = await res.text();
+    throw new Error(`[nrz] ${{operation}} returned ${{res.status}}: ${{text}}`);
+  }}
+  return res;
+}}
+
 globalThis.ONREZA = {{
   env: new Map(Object.entries(process.env)),
   context: {{
@@ -29,11 +40,11 @@ globalThis.ONREZA = {{
   kv: new Proxy({{}}, {{
     get(_, method) {{
       return async (...args) => {{
-        const res = await fetch(`${{NRZ_EMULATOR}}/__nrz/kv/${{method}}`, {{
+        const res = await __nrzFetch(`${{NRZ_EMULATOR}}/__nrz/kv/${{method}}`, {{
           method: "POST",
           headers: {{ "content-type": "application/json" }},
           body: JSON.stringify({{ args }}),
-        }});
+        }}, `kv.${{method}}`);
         return res.json();
       }};
     }},
@@ -46,35 +57,35 @@ globalThis.ONREZA = {{
           return {{
             bind(...args) {{ bindings = args; return this; }},
             async all() {{
-              const res = await fetch(`${{NRZ_EMULATOR}}/__nrz/db/query`, {{
+              const res = await __nrzFetch(`${{NRZ_EMULATOR}}/__nrz/db/query`, {{
                 method: "POST",
                 headers: {{ "content-type": "application/json" }},
                 body: JSON.stringify({{ sql, bindings, mode: "all" }}),
-              }});
+              }}, "db.prepare().all");
               return res.json();
             }},
             async first(col) {{
-              const res = await fetch(`${{NRZ_EMULATOR}}/__nrz/db/query`, {{
+              const res = await __nrzFetch(`${{NRZ_EMULATOR}}/__nrz/db/query`, {{
                 method: "POST",
                 headers: {{ "content-type": "application/json" }},
                 body: JSON.stringify({{ sql, bindings, mode: "first", column: col }}),
-              }});
+              }}, "db.prepare().first");
               return res.json();
             }},
             async run() {{
-              const res = await fetch(`${{NRZ_EMULATOR}}/__nrz/db/query`, {{
+              const res = await __nrzFetch(`${{NRZ_EMULATOR}}/__nrz/db/query`, {{
                 method: "POST",
                 headers: {{ "content-type": "application/json" }},
                 body: JSON.stringify({{ sql, bindings, mode: "run" }}),
-              }});
+              }}, "db.prepare().run");
               return res.json();
             }},
             async raw(opts) {{
-              const res = await fetch(`${{NRZ_EMULATOR}}/__nrz/db/query`, {{
+              const res = await __nrzFetch(`${{NRZ_EMULATOR}}/__nrz/db/query`, {{
                 method: "POST",
                 headers: {{ "content-type": "application/json" }},
                 body: JSON.stringify({{ sql, bindings, mode: "raw", columnNames: opts?.columnNames }}),
-              }});
+              }}, "db.prepare().raw");
               return res.json();
             }},
           }};
@@ -82,21 +93,21 @@ globalThis.ONREZA = {{
       }}
       if (method === "batch") {{
         return async (stmts) => {{
-          const res = await fetch(`${{NRZ_EMULATOR}}/__nrz/db/batch`, {{
+          const res = await __nrzFetch(`${{NRZ_EMULATOR}}/__nrz/db/batch`, {{
             method: "POST",
             headers: {{ "content-type": "application/json" }},
             body: JSON.stringify({{ statements: stmts }}),
-          }});
+          }}, "db.batch");
           return res.json();
         }};
       }}
       if (method === "exec") {{
         return async (sql) => {{
-          const res = await fetch(`${{NRZ_EMULATOR}}/__nrz/db/exec`, {{
+          const res = await __nrzFetch(`${{NRZ_EMULATOR}}/__nrz/db/exec`, {{
             method: "POST",
             headers: {{ "content-type": "application/json" }},
             body: JSON.stringify({{ sql }}),
-          }});
+          }}, "db.exec");
           return res.json();
         }};
       }}
@@ -107,8 +118,15 @@ globalThis.ONREZA = {{
 console.log("[nrz] ONREZA runtime emulator injected");
 "#,
         port = port,
-        db_path = serde_json::to_string(&db_path.to_string_lossy().to_string())?,
+        db_path = serde_json::to_string(db_path.to_str().ok_or_else(|| {
+            anyhow::anyhow!(
+                "project path contains invalid UTF-8: {}. Move project to a UTF-8 path.",
+                db_path.display()
+            )
+        })?)?,
     );
 
     Ok(script)
 }
+
+

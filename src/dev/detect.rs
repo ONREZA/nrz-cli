@@ -26,9 +26,7 @@ pub fn detect_framework(project_dir: &Path) -> anyhow::Result<Framework> {
         serde_json::from_str(&pkg_content).context("invalid package.json")?;
 
     let has_dep = |name: &str| -> bool {
-        pkg.get("dependencies")
-            .and_then(|d| d.get(name))
-            .is_some()
+        pkg.get("dependencies").and_then(|d| d.get(name)).is_some()
             || pkg
                 .get("devDependencies")
                 .and_then(|d| d.get(name))
@@ -67,3 +65,5 @@ pub fn detect_framework(project_dir: &Path) -> anyhow::Result<Framework> {
         "could not detect framework — expected astro, nuxt, @sveltejs/kit, or nitropack in dependencies"
     );
 }
+
+

@@ -1,6 +1,11 @@
 mod manifest;
 
+#[cfg(test)]
+mod manifest_tests;
+
 use std::path::Path;
+
+use anyhow::Context;
 
 use crate::cli::BuildArgs;
 
@@ -12,7 +17,9 @@ use crate::cli::BuildArgs;
 /// 4. Verify referenced files exist (server entry, assets dir, prerender dir)
 /// 5. Report results
 pub async fn run(args: BuildArgs) -> anyhow::Result<()> {
-    let project_dir = Path::new(&args.dir).canonicalize()?;
+    let project_dir = Path::new(&args.dir)
+        .canonicalize()
+        .with_context(|| format!("project directory not found: {}", args.dir))?;
 
     let output_dir = detect_output_dir(&project_dir)?;
     tracing::info!(?output_dir, "found output directory");
@@ -58,11 +65,15 @@ fn detect_output_dir(project_dir: &Path) -> anyhow::Result<std::path::PathBuf> {
         }
     }
 
-    // Fallback: check if .onreza exists directly (custom output dir)
+    // Check if output dir exists but without .onreza
     for name in ["dist", ".output", "build"] {
         let candidate = project_dir.join(name);
         if candidate.is_dir() {
-            return Ok(candidate);
+            anyhow::bail!(
+                "found '{}' but it doesn't contain .onreza/. \
+                 Make sure you're using an @onreza/* adapter in your framework config.",
+                candidate.display()
+            );
         }
     }
 

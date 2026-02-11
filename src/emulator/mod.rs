@@ -1,6 +1,9 @@
 pub mod db;
 pub mod kv;
-mod server;
+pub mod server;
+
+#[cfg(test)]
+mod kv_tests;
 
 use std::path::{Path, PathBuf};
 
