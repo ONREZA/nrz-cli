@@ -31,6 +31,9 @@ struct Asset {
 
 /// Run the upgrade process
 pub async fn run(args: UpgradeArgs) -> anyhow::Result<()> {
+    // Cleanup old update debris first
+    cleanup_old_files();
+    
     let current_version = env!("CARGO_PKG_VERSION");
     eprintln!("Current version: {}", current_version);
 
@@ -240,4 +243,30 @@ async fn replace_binary(new_binary: &[u8]) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Cleanup old update debris from previous runs
+fn cleanup_old_files() {
+    let Ok(current_exe) = std::env::current_exe() else { return };
+    let Some(exe_dir) = current_exe.parent() else { return };
+    let Some(exe_name) = current_exe.file_stem() else { return };
+    let exe_name = exe_name.to_string_lossy();
+
+    // Cleanup patterns: .old.exe, .new.exe, .tmp
+    let patterns: Vec<Box<dyn Fn() -> std::path::PathBuf>> = vec![
+        #[cfg(windows)]
+        Box::new(|| exe_dir.join(format!("{}.old.exe", exe_name))),
+        #[cfg(windows)]
+        Box::new(|| exe_dir.join(format!("{}.new.exe", exe_name))),
+        #[cfg(not(windows))]
+        Box::new(|| exe_dir.join(format!("{}.tmp", exe_name))),
+    ];
+
+    for path_fn in patterns {
+        let path = path_fn();
+        if path.exists() {
+            tracing::debug!("Cleaning up old file: {}", path.display());
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }

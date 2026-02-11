@@ -58,6 +58,16 @@ tempfile = "3"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
 [profile.release]
+# Fast release builds with minimal size/perf trade-off
+# - thin LTO: ~2-3x faster than full LTO, ~5-10% larger binary
+# - codegen-units=4: parallel code generation
+lto = "thin"
+codegen-units = 4
+strip = true
+
+# Maximum optimization profile for production releases (slower build)
+# Use: cargo build --profile=optimized
+[profile.optimized]
+inherits = "release"
 lto = true
 codegen-units = 1
-strip = true
