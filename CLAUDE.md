@@ -33,6 +33,8 @@ src/
     kv_tests.rs      — тесты KV store
     db.rs            — D1-compatible SQLite (rusqlite)
     server.rs        — HTTP API для JS bootstrap (/__nrz/kv/*, /__nrz/db/*)
+  upgrade/          — самообновление
+    mod.rs           — скачивание и замена бинарника
 
 tests/              — интеграционные тесты
   emulator_http_test.rs — тесты HTTP API эмулятора
@@ -63,6 +65,7 @@ CLI не зависит от адаптеров. Связь — через BUILD
 | `nrz kv set <key> <val>` | Установить значение |
 | `nrz kv list` | Список ключей |
 | `nrz kv clear` | Очистить KV |
+| `nrz upgrade` | Обновить до последней версии |
 
 ## Установка
 
@@ -200,6 +203,16 @@ Workflow (`.github/workflows/release.yml`):
 - Запускает тесты на каждом PR/push
 - Собирает бинарники под Linux x64, macOS x64/arm64, Windows x64
 - Создаёт GitHub Release с чек-суммами
+
+### Самообновление
+
+```bash
+nrz upgrade              # Обновить до последней версии
+nrz upgrade --force      # Принудительно переустановить
+nrz upgrade --version v0.1.0  # Установить конкретную версию
+```
+
+Команда автоматически определяет платформу, скачивает нужный бинарник с GitHub Releases и заменяет текущий исполняемый файл.
 
 ## Связанные репозитории
 
