@@ -70,13 +70,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install git-cliff
+        run: cargo install git-cliff
+
       - name: Generate changelog
-        uses: orhun/git-cliff-action@v3
-        with:
-          config: cliff.toml
-          args: --verbose
-        env:
-          OUTPUT: CHANGELOG.md
+        run: git-cliff --config cliff.toml --output CHANGELOG.md
 
       - name: Check for changes
         id: verify_changed_files
@@ -164,6 +165,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install git-cliff
+        run: cargo install git-cliff
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -178,12 +185,7 @@ jobs:
           ls -la
 
       - name: Generate release changelog
-        uses: orhun/git-cliff-action@v3
-        with:
-          config: cliff.toml
-          args: --latest --strip header
-        env:
-          OUTPUT: RELEASE_NOTES.md
+        run: git-cliff --config cliff.toml --latest --strip header --output RELEASE_NOTES.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
