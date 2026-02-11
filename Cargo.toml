@@ -1,0 +1,61 @@
+[package]
+name = "nrz"
+version = "0.1.0"
+edition = "2024"
+description = "ONREZA platform CLI — dev, build, deploy"
+license = "MIT"
+
+[[bin]]
+name = "nrz"
+path = "src/main.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Emulator: D1-compatible SQLite
+rusqlite = { version = "0.34", features = ["bundled"] }
+
+# HTTP client (deploy, API calls)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Child process management (nrz dev)
+command-group = "5"
+
+# File watching (nrz dev — restart on config change)
+notify = "8"
+
+# Colors and progress
+console = "0.15"
+indicatif = "0.17"
+
+# Path and glob
+globset = "0.4"
+
+# Errors
+thiserror = "2"
+anyhow = "1"
+
+# Manifest validation
+jsonschema = "0.28"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
