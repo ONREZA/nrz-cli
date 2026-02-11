@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6] - 2026-02-11
+
+### 🔧 Changed
+
+- **deps:** update onreza-release to 2.6.2 ([f0eb7bb](https://github.com/ONREZA/nrz-cli/commit/f0eb7bbeb643eb508099337239d41021c554823d))
+
 ## [0.1.5] - 2026-02-11
 
 ### 🔧 Changed
