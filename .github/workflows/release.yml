@@ -41,6 +41,8 @@ jobs:
       - name: Run onreza-release
         id: release
         run: npx onreza-release --verbose
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract outputs
         if: steps.release.outputs.released == 'true'
