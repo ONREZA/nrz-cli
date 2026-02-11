@@ -1,3 +1,9 @@
 /target
 
+# Generated files
+RELEASE_NOTES.md
+*.old.exe
+*.new.exe
+
+# Config files
 yougile.config.json

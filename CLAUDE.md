@@ -190,19 +190,52 @@ nrz dev
   7. Ctrl+C → graceful shutdown child process + emulator
 ```
 
-## Релизы
+## Релизы и Changelog
 
-Релизы публикуются автоматически через GitHub Actions при создании тега `v*.*.*`:
+### Автоматический changelog
+
+Проект использует [git-cliff](https://git-cliff.org/) для генерации changelog из Conventional Commits:
 
 ```bash
+# Локальная генерация (требуется установка git-cliff)
+cargo install git-cliff
+git-cliff --config cliff.toml -o CHANGELOG.md
+
+# Генерация только последнего релиза
+git-cliff --latest --strip header -o RELEASE_NOTES.md
+```
+
+### Формат коммитов (Conventional Commits)
+
+```
+feat(scope): добавить новую функцию
+fix(scope): исправить баг
+docs(scope): обновить документацию
+perf(scope): оптимизация производительности
+refactor(scope): рефакторинг кода
+test(scope): добавить тесты
+chore(scope): рутинные задачи
+ci(scope): изменения CI/CD
+```
+
+### Создание релиза
+
+```bash
+# 1. Обновить версию в Cargo.toml
+# 2. Создать коммит
+git add Cargo.toml
+git commit -m "chore(release): bump version to 0.1.0"
+
+# 3. Создать и запушить тег
 git tag v0.1.0
+git push origin main
 git push origin v0.1.0
 ```
 
-Workflow (`.github/workflows/release.yml`):
-- Запускает тесты на каждом PR/push
-- Собирает бинарники под Linux x64, macOS x64/arm64, Windows x64
-- Создаёт GitHub Release с чек-суммами
+GitHub Actions автоматически:
+- Обновит `CHANGELOG.md` (при пуше в main)
+- Соберёт бинарники под все платформы
+- Создаст Release с красивым changelog
 
 ### Самообновление
 

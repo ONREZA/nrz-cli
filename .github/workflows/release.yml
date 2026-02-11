@@ -39,6 +39,39 @@ jobs:
       - name: Run clippy
         run: cargo clippy -- -D warnings
 
+  # Update CHANGELOG.md on push to main
+  changelog:
+    name: Update Changelog
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v3
+        with:
+          config: cliff.toml
+          args: --verbose
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: Check for changes
+        id: verify_changed_files
+        uses: tj-actions/verify-changed-files@v20
+        with:
+          files: CHANGELOG.md
+
+      - name: Commit changes
+        if: steps.verify_changed_files.outputs.files_changed == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add CHANGELOG.md
+          git commit -m "docs(changelog): update CHANGELOG.md"
+          git push
+
   # Build release binaries
   build-release:
     name: Build Release
@@ -97,7 +130,7 @@ jobs:
           name: ${{ matrix.asset_name }}
           path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
-  # Create GitHub Release and upload binaries
+  # Create GitHub Release with changelog
   release:
     name: Create Release
     needs: build-release
@@ -107,6 +140,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -121,12 +156,20 @@ jobs:
           done
           ls -la
 
+      - name: Generate release changelog
+        uses: orhun/git-cliff-action@v3
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: RELEASE_NOTES.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          body_path: RELEASE_NOTES.md
           files: |
             artifacts/**/*
-          generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
         env:
