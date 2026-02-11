@@ -66,10 +66,16 @@ CLI не зависит от адаптеров. Связь — через BUILD
 
 ## Установка
 
-### Quick install (Linux/macOS)
+### Quick install
 
+**Linux/macOS:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/onreza/nrz-cli/main/install.sh | bash
+```
+
+**Windows (PowerShell 7+):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/onreza/nrz-cli/main/install.ps1 | iex
 ```
 
 ### Скачать вручную
