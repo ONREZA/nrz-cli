@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Replace git-cliff-action with cargo install
 
+- Split CI and release workflows, add manual release trigger
+
 
 ### Changed
 
@@ -41,6 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update CLAUDE.md with upgrade command and architecture
 
 - Add project README (readme)
+
+- Update CHANGELOG.md (changelog)
 
 
 ### Fixed
