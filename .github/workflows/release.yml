@@ -27,9 +27,6 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
       - name: Install dependencies
         run: npm ci
 
@@ -39,24 +36,10 @@ jobs:
           git config user.email 'github-actions[bot]@users.noreply.github.com'
 
       - name: Run onreza-release
-        run: npx onreza-release --verbose 2>&1 | tee /tmp/release-output.txt
+        id: release
+        run: npx onreza-release --verbose
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set outputs
-        id: release
-        run: |
-          if grep -q '"success": true' /tmp/release-output.txt; then
-            VERSION=$(grep -oP '"newVersion": "\K[^"]+' /tmp/release-output.txt)
-            TAG=$(grep -oP '"tag": "\K[^"]+' /tmp/release-output.txt)
-            echo "released=true" >> $GITHUB_OUTPUT
-            echo "version=${VERSION}" >> $GITHUB_OUTPUT
-            echo "tag=${TAG}" >> $GITHUB_OUTPUT
-            echo "Released: v${VERSION} (${TAG})"
-          else
-            echo "released=false" >> $GITHUB_OUTPUT
-            echo "No release created"
-          fi
 
   build:
     name: Build (${{ matrix.platform }})
@@ -132,11 +115,8 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
       - name: Install dependencies
-        run: npm ci && npm install -g npm@latest
+        run: npm ci
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4

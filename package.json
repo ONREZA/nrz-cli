@@ -17,6 +17,6 @@
   "devDependencies": {
     "@commitlint/cli": "^18.6.0",
     "lefthook": "^1.6.0",
-    "onreza-release": "^2.5.0"
+    "onreza-release": "^2.6.0"
   }
 }
