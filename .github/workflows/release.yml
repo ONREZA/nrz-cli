@@ -39,16 +39,24 @@ jobs:
           git config user.email 'github-actions[bot]@users.noreply.github.com'
 
       - name: Run onreza-release
-        id: release
-        run: npx onreza-release --verbose
+        run: npx onreza-release --verbose 2>&1 | tee /tmp/release-output.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract outputs
-        if: steps.release.outputs.released == 'true'
+      - name: Set outputs
+        id: release
         run: |
-          echo "Released version: ${{ steps.release.outputs.version }}"
-          echo "Tag: ${{ steps.release.outputs.tag }}"
+          if grep -q '"success": true' /tmp/release-output.txt; then
+            VERSION=$(grep -oP '"newVersion": "\K[^"]+' /tmp/release-output.txt)
+            TAG=$(grep -oP '"tag": "\K[^"]+' /tmp/release-output.txt)
+            echo "released=true" >> $GITHUB_OUTPUT
+            echo "version=${VERSION}" >> $GITHUB_OUTPUT
+            echo "tag=${TAG}" >> $GITHUB_OUTPUT
+            echo "Released: v${VERSION} (${TAG})"
+          else
+            echo "released=false" >> $GITHUB_OUTPUT
+            echo "No release created"
+          fi
 
   build:
     name: Build (${{ matrix.platform }})
