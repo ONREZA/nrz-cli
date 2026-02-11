@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2026-02-11
+
+### 👷 CI/CD
+
+- **release:** update onreza-release to 2.6.0, remove bun and stdout parsing workarounds ([2eb0020](https://github.com/ONREZA/nrz-cli/commit/2eb0020192fa990204f569aae38d7e645c2ecca9))
+
 ## [0.1.3] - 2026-02-11
 
 ### 🐛 Bug Fixes
