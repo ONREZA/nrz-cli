@@ -12,6 +12,7 @@ pub struct Manifest {
     pub assets: AssetsConfig,
     pub routes: Vec<Route>,
     pub prerender: Option<PrerenderConfig>,
+    #[allow(dead_code)]
     pub features: Option<serde_json::Value>,
 }
 
@@ -36,6 +37,7 @@ pub struct ServerConfig {
 #[derive(Debug, Deserialize)]
 pub struct AssetsConfig {
     pub directory: String,
+    #[allow(dead_code)]
     pub prefix: String,
 }
 
@@ -54,21 +56,27 @@ pub struct Route {
     pub pattern: String,
     #[serde(rename = "type")]
     pub route_type: RouteType,
+    #[allow(dead_code)]
     pub priority: Option<i32>,
     pub revalidate: Option<u64>,
+    #[allow(dead_code)]
     pub methods: Option<Vec<String>>,
+    #[allow(dead_code)]
     pub headers: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct PrerenderConfig {
     pub directory: String,
+    #[allow(dead_code)]
     pub pages: std::collections::HashMap<String, PrerenderPage>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct PrerenderPage {
+    #[allow(dead_code)]
     pub html: String,
+    #[allow(dead_code)]
     pub data: Option<String>,
 }
 

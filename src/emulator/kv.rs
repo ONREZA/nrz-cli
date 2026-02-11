@@ -20,6 +20,12 @@ pub struct KvStore {
     inner: Arc<Mutex<BTreeMap<String, Entry>>>,
 }
 
+impl Default for KvStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KvStore {
     pub fn new() -> Self {
         Self {

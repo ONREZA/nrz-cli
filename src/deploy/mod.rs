@@ -7,6 +7,7 @@ use crate::cli::{BuildArgs, DeployArgs};
 // --- API response types ---
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct DeploymentResponse {
     id: String,
     status: String,
@@ -15,6 +16,7 @@ struct DeploymentResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 struct UploadUrls {
     server: String,
     assets: String,
