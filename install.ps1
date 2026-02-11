@@ -10,7 +10,7 @@ function Detect-Platform {
     $arch = $env:PROCESSOR_ARCHITECTURE
     
     switch ($arch) {
-        "AMD64" { return "windows-x64.exe" }
+        "AMD64" { return "win32-x64" }
         "x86" { 
             Write-Host "❌ x86 architecture not supported. Use x64." -ForegroundColor Red
             exit 1
@@ -44,17 +44,34 @@ Write-Host "💻 Platform: $Platform" -ForegroundColor Gray
 # Create temp directory
 $TmpDir = New-TemporaryFile | ForEach-Object { Remove-Item $_; New-Item -ItemType Directory -Path $_ }
 
-# Download binary
-$AssetName = "nrz-$Platform"
+# Download archive
+$AssetName = "nrz-$Platform.tar.gz"
 $Url = "https://github.com/$Repo/releases/download/$Version/$AssetName"
-$TmpFile = Join-Path $TmpDir $BinaryName
+$ArchivePath = Join-Path $TmpDir $AssetName
 
 try {
     Write-Host "⬇️  Downloading from $Url..." -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $Url -OutFile $TmpFile -UseBasicParsing
+    Invoke-WebRequest -Uri $Url -OutFile $ArchivePath -UseBasicParsing
 }
 catch {
     Write-Host "❌ Download failed: $_" -ForegroundColor Red
+    exit 1
+}
+
+# Extract archive
+try {
+    Write-Host "📂 Extracting archive..." -ForegroundColor Cyan
+    tar -xzf $ArchivePath -C $TmpDir
+}
+catch {
+    Write-Host "❌ Failed to extract archive: $_" -ForegroundColor Red
+    exit 1
+}
+
+# Find extracted binary
+$BinaryPath = Join-Path $TmpDir $BinaryName
+if (!(Test-Path $BinaryPath)) {
+    Write-Host "❌ Binary not found in archive" -ForegroundColor Red
     exit 1
 }
 
@@ -79,7 +96,7 @@ $InstallPath = Join-Path $InstallDir $BinaryName
 # Install
 Write-Host "📁 Installing to $InstallPath..." -ForegroundColor Cyan
 try {
-    Copy-Item $TmpFile $InstallPath -Force
+    Copy-Item $BinaryPath $InstallPath -Force
 }
 catch {
     Write-Host "❌ Installation failed (try running as Administrator): $_" -ForegroundColor Red

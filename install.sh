@@ -24,13 +24,13 @@ detect_platform() {
             ;;
         darwin)
             case "$arch" in
-                x86_64) echo "macos-x64" ;;
-                aarch64|arm64) echo "macos-arm64" ;;
+                x86_64) echo "darwin-x64" ;;
+                aarch64|arm64) echo "darwin-arm64" ;;
                 *) echo "unsupported: $os $arch" ;;
             esac
             ;;
         mingw*|cygwin*|msys*|windows*)
-            echo "windows-x64.exe"
+            echo "win32-x64"
             ;;
         *)
             echo "unsupported: $os"
@@ -66,19 +66,39 @@ echo "💻 Platform: $PLATFORM"
 TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
-# Download binary
-ASSET_NAME="${BINARY_NAME}-${PLATFORM}"
+# Download archive
+ASSET_NAME="${BINARY_NAME}-${PLATFORM}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET_NAME}"
+ARCHIVE_PATH="${TMP_DIR}/${ASSET_NAME}"
 
 echo "⬇️  Downloading from $URL..."
-if ! curl -fsSL "$URL" -o "${TMP_DIR}/${BINARY_NAME}"; then
+if ! curl -fsSL "$URL" -o "$ARCHIVE_PATH"; then
     echo "❌ Download failed"
     exit 1
 fi
 
+# Extract archive
+echo "📂 Extracting archive..."
+if ! tar -xzf "$ARCHIVE_PATH" -C "$TMP_DIR"; then
+    echo "❌ Failed to extract archive"
+    exit 1
+fi
+
+# Find extracted binary
+if [[ "$PLATFORM" == "win32-x64" ]]; then
+    BINARY_PATH="${TMP_DIR}/${BINARY_NAME}.exe"
+else
+    BINARY_PATH="${TMP_DIR}/${BINARY_NAME}"
+fi
+
+if [ ! -f "$BINARY_PATH" ]; then
+    echo "❌ Binary not found in archive"
+    exit 1
+fi
+
 # Make executable (not for Windows)
-if [[ "$PLATFORM" != *".exe" ]]; then
-    chmod +x "${TMP_DIR}/${BINARY_NAME}"
+if [[ "$PLATFORM" != "win32-x64" ]]; then
+    chmod +x "$BINARY_PATH"
 fi
 
 # Determine install location
@@ -93,11 +113,17 @@ fi
 
 # Install
 echo "📁 Installing to $INSTALL_LOCATION..."
+if [[ "$PLATFORM" == "win32-x64" ]]; then
+    INSTALL_PATH="${INSTALL_LOCATION}/${BINARY_NAME}.exe"
+else
+    INSTALL_PATH="${INSTALL_LOCATION}/${BINARY_NAME}"
+fi
+
 if [ -w "$INSTALL_LOCATION" ]; then
-    mv "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_LOCATION}/"
+    mv "$BINARY_PATH" "$INSTALL_PATH"
 else
     echo "🔑 sudo required for $INSTALL_LOCATION"
-    sudo mv "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_LOCATION}/"
+    sudo mv "$BINARY_PATH" "$INSTALL_PATH"
 fi
 
 # Verify installation
