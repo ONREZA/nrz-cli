@@ -3,6 +3,7 @@ pub mod db_handler;
 pub mod kv;
 pub mod kv_handler;
 
+
 pub use db::DbArgs;
 pub use kv::KvArgs;
 
@@ -42,6 +43,9 @@ pub enum Command {
 
     /// Show current user info
     Whoami,
+
+    /// Upgrade nrz to the latest version
+    Upgrade(crate::upgrade::UpgradeArgs),
 }
 
 #[derive(Parser)]

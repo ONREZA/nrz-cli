@@ -1,10 +1,9 @@
-use nrz::emulator;
-
 mod auth;
 mod build;
 mod cli;
 mod deploy;
 mod dev;
+mod upgrade;
 
 use clap::Parser;
 use cli::{Cli, Command};
@@ -26,5 +25,6 @@ async fn main() -> anyhow::Result<()> {
         Command::Kv(args) => cli::kv_handler::run(args).await,
         Command::Login => auth::login().await,
         Command::Whoami => auth::whoami().await,
+        Command::Upgrade(args) => upgrade::run(args).await,
     }
 }
