@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use super::kv::{load_kv_file, save_kv_file, KvFile, KvFileEntry, KvStore};
+use super::kv::{KvFile, KvFileEntry, KvStore, load_kv_file, save_kv_file};
 
 // --- KvStore in-memory tests ---
 

@@ -149,5 +149,3 @@ pub fn verify_files(output_dir: &Path, manifest: &Manifest) -> anyhow::Result<()
 
     Ok(())
 }
-
-

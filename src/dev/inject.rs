@@ -128,5 +128,3 @@ console.log("[nrz] ONREZA runtime emulator injected");
 
     Ok(script)
 }
-
-

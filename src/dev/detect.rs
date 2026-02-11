@@ -65,5 +65,3 @@ pub fn detect_framework(project_dir: &Path) -> anyhow::Result<Framework> {
         "could not detect framework — expected astro, nuxt, @sveltejs/kit, or nitropack in dependencies"
     );
 }
-
-

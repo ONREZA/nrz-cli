@@ -63,8 +63,18 @@ async fn kv_set(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(req): Json<KvRequest>,
 ) -> Json<serde_json::Value> {
-    let key = req.args.first().and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let value = req.args.get(1).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let key = req
+        .args
+        .first()
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let value = req
+        .args
+        .get(1)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     state.kv.set(key, value, 0);
     Json(serde_json::json!("OK"))
 }
@@ -96,18 +106,20 @@ async fn db_query(
     Json(req): Json<DbQueryRequest>,
 ) -> Json<serde_json::Value> {
     use std::time::Instant;
-    
+
     let start = Instant::now();
     let conn = state.db.lock().unwrap();
-    
+
     let mut stmt = match conn.prepare(&req.sql) {
         Ok(s) => s,
-        Err(e) => return Json(serde_json::json!({
-            "success": false,
-            "error": e.to_string()
-        })),
+        Err(e) => {
+            return Json(serde_json::json!({
+                "success": false,
+                "error": e.to_string()
+            }));
+        }
     };
-    
+
     // Bind parameters
     for (i, val) in req.bindings.iter().enumerate() {
         let idx = i + 1;
@@ -127,11 +139,11 @@ async fn db_query(
             other => stmt.raw_bind_parameter(idx, other.to_string()),
         };
     }
-    
+
     // Get column names
     let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
     let mut rows = Vec::new();
-    
+
     let mut raw_rows = stmt.raw_query();
     while let Some(row) = raw_rows.next().unwrap() {
         let mut obj = serde_json::Map::new();
@@ -152,9 +164,9 @@ async fn db_query(
         }
         rows.push(serde_json::Value::Object(obj));
     }
-    
+
     let duration = start.elapsed().as_secs_f64();
-    
+
     Json(serde_json::json!({
         "success": true,
         "results": rows,
@@ -176,15 +188,16 @@ fn temp_db_path() -> (PathBuf, tempfile::TempDir) {
 async fn start_test_server() -> (String, KvStore, tempfile::TempDir) {
     let kv = KvStore::new();
     let (db_path, temp_dir) = temp_db_path();
-    
+
     let conn = Connection::open(&db_path).unwrap();
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;").unwrap();
-    
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+        .unwrap();
+
     let state = AppState {
         kv: kv.clone(),
         db: Arc::new(Mutex::new(conn)),
     };
-    
+
     let app = Router::new()
         .route("/__nrz/health", get(health))
         .route("/__nrz/kv/get", post(kv_get))
@@ -192,15 +205,15 @@ async fn start_test_server() -> (String, KvStore, tempfile::TempDir) {
         .route("/__nrz/db/query", post(db_query))
         .route("/__nrz/db/exec", post(db_exec))
         .with_state(state);
-    
+
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let base_url = format!("http://127.0.0.1:{}", port);
-    
+
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    
+
     // Wait for server to be ready
     for _ in 0..50 {
         match reqwest::get(format!("{}/__nrz/health", base_url)).await {
@@ -208,7 +221,7 @@ async fn start_test_server() -> (String, KvStore, tempfile::TempDir) {
             _ => tokio::time::sleep(Duration::from_millis(50)).await,
         }
     }
-    
+
     (base_url, kv, temp_dir)
 }
 
@@ -216,10 +229,12 @@ async fn start_test_server() -> (String, KvStore, tempfile::TempDir) {
 async fn health_endpoint_returns_ok() {
     let (base_url, _kv, _temp) = start_test_server().await;
 
-    let resp = reqwest::get(format!("{}/__nrz/health", base_url)).await.unwrap();
-    
+    let resp = reqwest::get(format!("{}/__nrz/health", base_url))
+        .await
+        .unwrap();
+
     assert!(resp.status().is_success());
-    
+
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], "ok");
 }
@@ -238,7 +253,7 @@ async fn kv_set_and_get() {
         .send()
         .await
         .unwrap();
-    
+
     assert!(set_resp.status().is_success());
     let set_body: serde_json::Value = set_resp.json().await.unwrap();
     assert_eq!(set_body, "OK");
@@ -252,7 +267,7 @@ async fn kv_set_and_get() {
         .send()
         .await
         .unwrap();
-    
+
     assert!(get_resp.status().is_success());
     let get_body: serde_json::Value = get_resp.json().await.unwrap();
     assert_eq!(get_body, "test_value");
@@ -271,7 +286,7 @@ async fn kv_get_nonexistent_key_returns_null() {
         .send()
         .await
         .unwrap();
-    
+
     assert!(resp.status().is_success());
     let body: serde_json::Value = resp.json().await.unwrap();
     assert!(body.is_null());
@@ -291,7 +306,7 @@ async fn db_exec_and_query() {
         .send()
         .await
         .unwrap();
-    
+
     assert!(exec_resp.status().is_success());
     let exec_body: serde_json::Value = exec_resp.json().await.unwrap();
     assert_eq!(exec_body["success"], true);
@@ -307,7 +322,7 @@ async fn db_exec_and_query() {
         .send()
         .await
         .unwrap();
-    
+
     assert!(insert_resp.status().is_success());
     let insert_body: serde_json::Value = insert_resp.json().await.unwrap();
     assert_eq!(insert_body["success"], true);
@@ -324,18 +339,18 @@ async fn db_exec_and_query() {
         .send()
         .await
         .unwrap();
-    
+
     assert!(query_resp.status().is_success());
     let query_body: serde_json::Value = query_resp.json().await.unwrap();
     assert_eq!(query_body["success"], true);
-    
+
     let results = query_body["results"].as_array().unwrap();
     assert_eq!(results.len(), 2);
-    
+
     // Check first row
     assert_eq!(results[0]["id"], 1);
     assert_eq!(results[0]["name"], "Alice");
-    
+
     // Check second row
     assert_eq!(results[1]["id"], 2);
     assert_eq!(results[1]["name"], "Bob");
@@ -379,7 +394,7 @@ async fn db_query_with_bindings() {
         .send()
         .await
         .unwrap();
-    
+
     assert!(resp.status().is_success());
     let body: serde_json::Value = resp.json().await.unwrap();
     let results = body["results"].as_array().unwrap();

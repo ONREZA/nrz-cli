@@ -33,7 +33,7 @@ struct Asset {
 pub async fn run(args: UpgradeArgs) -> anyhow::Result<()> {
     // Cleanup old update debris first
     cleanup_old_files();
-    
+
     let current_version = env!("CARGO_PKG_VERSION");
     eprintln!("Current version: {}", current_version);
 
@@ -199,7 +199,7 @@ async fn download_binary(url: &str) -> anyhow::Result<Vec<u8>> {
 /// Replace current binary with new one
 async fn replace_binary(new_binary: &[u8]) -> anyhow::Result<()> {
     let current_exe = std::env::current_exe()?;
-    
+
     #[cfg(windows)]
     {
         // On Windows, we can't replace a running executable
@@ -247,9 +247,15 @@ async fn replace_binary(new_binary: &[u8]) -> anyhow::Result<()> {
 
 /// Cleanup old update debris from previous runs
 fn cleanup_old_files() {
-    let Ok(current_exe) = std::env::current_exe() else { return };
-    let Some(exe_dir) = current_exe.parent() else { return };
-    let Some(exe_name) = current_exe.file_stem() else { return };
+    let Ok(current_exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(exe_dir) = current_exe.parent() else {
+        return;
+    };
+    let Some(exe_name) = current_exe.file_stem() else {
+        return;
+    };
     let exe_name = exe_name.to_string_lossy();
 
     // Cleanup patterns: .old.exe, .new.exe, .tmp

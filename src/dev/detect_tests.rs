@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::detect::{detect_framework, FrameworkName};
+use super::detect::{FrameworkName, detect_framework};
 
 fn write_pkg(dir: &Path, content: &str) {
     std::fs::write(dir.join("package.json"), content).unwrap();

@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::manifest::{load_and_validate, verify_files, RouteType};
+use super::manifest::{RouteType, load_and_validate, verify_files};
 
 const VALID_MANIFEST: &str = r#"{
     "version": 1,
