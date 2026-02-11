@@ -198,18 +198,22 @@ nrz dev
 
 ## Релизы и Changelog
 
-### Автоматический changelog
+### Создание релиза
 
-Проект использует [git-cliff](https://git-cliff.org/) для генерации changelog из Conventional Commits:
+Релизы создаются вручную через GitHub Actions:
 
-```bash
-# Локальная генерация (требуется установка git-cliff)
-cargo install git-cliff
-git-cliff --config cliff.toml -o CHANGELOG.md
+1. Перейди в [Actions → Release](https://github.com/ONREZA/nrz-cli/actions/workflows/release.yml)
+2. Нажми **"Run workflow"**
+3. Введи версию (например, `0.1.0`)
+4. Опционально: отметь "Create as draft release"
+5. Нажми **"Run workflow"**
 
-# Генерация только последнего релиза
-git-cliff --latest --strip header -o RELEASE_NOTES.md
-```
+Workflow автоматически:
+- Обновит версию в `Cargo.toml`
+- Сгенерирует changelog
+- Создаст коммит и тег
+- Соберёт бинарники под все платформы
+- Создаст GitHub Release с заметками
 
 ### Формат коммитов (Conventional Commits)
 
@@ -261,10 +265,24 @@ lefthook install
 **Автоматические проверки:**
 - `commit-msg` — проверка формата сообщения (commitlint)
 - `pre-commit` — `cargo fmt` и `cargo clippy`
+- `pre-push` — `cargo test`
 
 Чтобы обойти hooks (не рекомендуется):
 ```bash
 git commit -m "wip: temporary" --no-verify
+```
+
+### Локальная генерация changelog
+
+```bash
+# Установка git-cliff
+cargo install git-cliff
+
+# Генерация полного changelog
+git-cliff --config cliff.toml -o CHANGELOG.md
+
+# Генерация только последнего релиза
+git-cliff --latest --strip header -o RELEASE_NOTES.md
 ```
 
 ### Создание релиза
