@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.7] - 2026-02-11
+
+### 🔧 Changed
+
+- **deps:** fix typo package-lock.json ([f476255](https://github.com/ONREZA/nrz-cli/commit/f4762555bd391da05a041eaeccdf986d78d596fb))
+- update install scripts, add MIT license, update deps ([f3719e8](https://github.com/ONREZA/nrz-cli/commit/f3719e856d310fb656452662d7ab394a331c6fc5))
+
 ## [0.1.6] - 2026-02-11
 
 ### 🔧 Changed
