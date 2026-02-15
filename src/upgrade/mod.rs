@@ -68,7 +68,7 @@ pub async fn run(args: UpgradeArgs) -> anyhow::Result<()> {
     eprintln!("Platform: {}", platform);
 
     // Find matching asset
-    let asset_name = format!("nrz-{}", platform);
+    let asset_name = format!("nrz-{}.tar.gz", platform);
     let asset = release
         .assets
         .iter()
@@ -77,8 +77,9 @@ pub async fn run(args: UpgradeArgs) -> anyhow::Result<()> {
 
     eprintln!("Downloading {}...", asset.browser_download_url);
 
-    // Download new binary
-    let new_binary = download_binary(&asset.browser_download_url).await?;
+    // Download and extract binary from tar.gz
+    let archive_data = download_binary(&asset.browser_download_url).await?;
+    let new_binary = extract_binary_from_tar_gz(&archive_data)?;
 
     // Replace current binary
     replace_binary(&new_binary).await?;
@@ -93,13 +94,13 @@ fn detect_platform() -> &'static str {
     return "linux-x64";
 
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    return "macos-x64";
+    return "darwin-x64";
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    return "macos-arm64";
+    return "darwin-arm64";
 
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    return "windows-x64.exe";
+    return "win32-x64";
 
     #[allow(unreachable_code)]
     {
@@ -177,6 +178,29 @@ async fn fetch_release(tag: &str) -> anyhow::Result<ReleaseInfo> {
         .collect();
 
     Ok(ReleaseInfo { tag_name, assets })
+}
+
+/// Extract binary from tar.gz archive
+fn extract_binary_from_tar_gz(data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    use flate2::read::GzDecoder;
+    use std::io::Read;
+
+    let decoder = GzDecoder::new(data);
+    let mut archive = tar::Archive::new(decoder);
+
+    let binary_name = if cfg!(windows) { "nrz.exe" } else { "nrz" };
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?;
+        if path.file_name().and_then(|n| n.to_str()) == Some(binary_name) {
+            let mut buf = Vec::new();
+            entry.read_to_end(&mut buf)?;
+            return Ok(buf);
+        }
+    }
+
+    anyhow::bail!("Binary '{}' not found in archive", binary_name)
 }
 
 /// Download binary from URL
