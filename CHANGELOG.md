@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-02-15
+
+### ✨ Features
+
+- **cli:** add projects, deployments, logs, env, domains, rollback commands ([91778d9](https://github.com/ONREZA/nrz-cli/commit/91778d94e8bfa208b83bd269b31ffd4c2040da3a))
+
 ## [0.1.7] - 2026-02-11
 
 ### 🔧 Changed
