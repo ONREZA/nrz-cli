@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-02-15
+
+### 🐛 Bug Fixes
+
+- **cli:** fix upgrade command failing to find release binaries ([93f5da9](https://github.com/ONREZA/nrz-cli/commit/93f5da99477fc68f699ee07940cd42f309c1067d))
+
 ## [0.2.0] - 2026-02-15
 
 ### ✨ Features
