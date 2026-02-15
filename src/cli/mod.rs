@@ -6,11 +6,14 @@ pub mod env;
 pub mod env_handler;
 pub mod kv;
 pub mod kv_handler;
+pub mod workspace;
+pub mod workspace_handler;
 
 pub use db::DbArgs;
 pub use domains::DomainsArgs;
 pub use env::EnvArgs;
 pub use kv::KvArgs;
+pub use workspace::WorkspaceArgs;
 
 use clap::{Parser, Subcommand};
 
@@ -32,6 +35,10 @@ pub struct Cli {
     /// API token for authentication
     #[arg(long, global = true, env = "NRZ_TOKEN")]
     pub token: Option<String>,
+
+    /// Workspace slug to use
+    #[arg(long, global = true, env = "NRZ_WORKSPACE")]
+    pub workspace: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -58,7 +65,7 @@ pub enum Command {
     Whoami,
 
     /// Log out from ONREZA platform
-    Logout,
+    Logout(LogoutArgs),
 
     /// Link this directory to an ONREZA project
     Link(LinkArgs),
@@ -83,6 +90,16 @@ pub enum Command {
 
     /// Rollback a deployment
     Rollback(RollbackArgs),
+
+    /// Manage workspaces
+    Workspace(WorkspaceArgs),
+}
+
+#[derive(Parser)]
+pub struct LogoutArgs {
+    /// Log out from all workspaces
+    #[arg(long)]
+    pub all: bool,
 }
 
 #[derive(Parser)]

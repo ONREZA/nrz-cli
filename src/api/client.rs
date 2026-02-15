@@ -81,6 +81,22 @@ impl ApiClient {
         check_response(resp).await
     }
 
+    /// POST that returns the raw response without checking status.
+    /// Used for device flow polling where 400 with `authorization_pending` is expected.
+    pub async fn post_raw<B: Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> anyhow::Result<reqwest::Response> {
+        let url = format!("{}{}", self.base_url, path);
+        self.client
+            .post(&url)
+            .json(body)
+            .send()
+            .await
+            .with_context(|| format!("request failed: POST {path}"))
+    }
+
     pub async fn post_empty<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
         let url = format!("{}{}", self.base_url, path);
         let resp = self

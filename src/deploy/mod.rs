@@ -67,13 +67,17 @@ struct DeployOutput {
     status: String,
 }
 
-pub async fn run(args: DeployArgs, json: bool, token: Option<&str>) -> anyhow::Result<()> {
+pub async fn run(
+    args: DeployArgs,
+    json: bool,
+    token: Option<&str>,
+    workspace: Option<&str>,
+) -> anyhow::Result<()> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
 
-    let tok = auth::resolve_token(token)
-        .ok_or_else(|| anyhow::anyhow!("not logged in. Use --token or run `nrz login`."))?;
+    let tok = auth::resolve_token(token, workspace)?;
 
     let client = ApiClient::authenticated(&tok)?;
 
@@ -82,6 +86,7 @@ pub async fn run(args: DeployArgs, json: bool, token: Option<&str>) -> anyhow::R
         project_ref::ProjectRef {
             project_id: pid.clone(),
             project_name: String::new(),
+            workspace_slug: None,
         }
     } else {
         match project_ref::load(&project_dir)? {

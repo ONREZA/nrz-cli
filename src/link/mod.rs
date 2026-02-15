@@ -49,13 +49,18 @@ struct LinkOutput {
     project_name: String,
 }
 
-pub async fn run(args: LinkArgs, json: bool, token: Option<&str>) -> anyhow::Result<()> {
+pub async fn run(
+    args: LinkArgs,
+    json: bool,
+    token: Option<&str>,
+    workspace: Option<&str>,
+) -> anyhow::Result<()> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("directory not found: {}", args.dir))?;
 
-    let tok = auth::resolve_token(token)
-        .ok_or_else(|| anyhow::anyhow!("not logged in. Run `nrz login` first."))?;
+    let ctx = auth::workspace::resolve_workspace_context(token, workspace)?;
+    let tok = ctx.token;
 
     let client = ApiClient::authenticated(&tok)?;
 
@@ -69,6 +74,10 @@ pub async fn run(args: LinkArgs, json: bool, token: Option<&str>) -> anyhow::Res
         select_project_interactive(&client).await?
     };
 
+    let mut project = project;
+    if !ctx.workspace_slug.is_empty() {
+        project.workspace_slug = Some(ctx.workspace_slug);
+    }
     project_ref::save(&project_dir, &project)?;
 
     if json {
@@ -105,6 +114,7 @@ async fn find_project_by_id(
     Ok(project_ref::ProjectRef {
         project_id: project.id.clone(),
         project_name: project.display_name.clone(),
+        workspace_slug: None,
     })
 }
 
@@ -137,6 +147,7 @@ pub async fn select_project_interactive(
     Ok(project_ref::ProjectRef {
         project_id: project.id.clone(),
         project_name: project.display_name.clone(),
+        workspace_slug: None,
     })
 }
 

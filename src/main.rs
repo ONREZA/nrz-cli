@@ -27,8 +27,9 @@ async fn main() {
     let cli = Cli::parse();
     let json = cli.json || !std::io::stdout().is_terminal();
     let token = cli.token.clone();
+    let workspace = cli.workspace.clone();
 
-    let result = run_command(cli.command, json, token.as_deref()).await;
+    let result = run_command(cli.command, json, token.as_deref(), workspace.as_deref()).await;
 
     if let Err(ref e) = result {
         if json {
@@ -41,23 +42,29 @@ async fn main() {
     }
 }
 
-async fn run_command(command: Command, json: bool, token: Option<&str>) -> anyhow::Result<()> {
+async fn run_command(
+    command: Command,
+    json: bool,
+    token: Option<&str>,
+    workspace: Option<&str>,
+) -> anyhow::Result<()> {
     match command {
         Command::Dev(args) => dev::run(args).await,
         Command::Build(args) => build::run(args, json).await,
-        Command::Deploy(args) => deploy::run(args, json, token).await,
+        Command::Deploy(args) => deploy::run(args, json, token, workspace).await,
         Command::Db(args) => cli::db_handler::run(args, json).await,
         Command::Kv(args) => cli::kv_handler::run(args, json).await,
         Command::Login => auth::login(json, token).await,
-        Command::Whoami => auth::whoami(json, token).await,
-        Command::Logout => auth::logout(json).await,
-        Command::Link(args) => link::run(args, json, token).await,
+        Command::Whoami => auth::whoami(json, token, workspace).await,
+        Command::Logout(args) => auth::logout(json, workspace, args.all).await,
+        Command::Link(args) => link::run(args, json, token, workspace).await,
         Command::Upgrade(args) => upgrade::run(args).await,
-        Command::Projects(args) => projects::run(args, json, token).await,
-        Command::Deployments(args) => deployments::run(args, json, token).await,
-        Command::Logs(args) => logs::run(args, json, token).await,
-        Command::Env(args) => cli::env_handler::run(args, json, token).await,
-        Command::Domains(args) => cli::domains_handler::run(args, json, token).await,
-        Command::Rollback(args) => rollback::run(args, json, token).await,
+        Command::Projects(args) => projects::run(args, json, token, workspace).await,
+        Command::Deployments(args) => deployments::run(args, json, token, workspace).await,
+        Command::Logs(args) => logs::run(args, json, token, workspace).await,
+        Command::Env(args) => cli::env_handler::run(args, json, token, workspace).await,
+        Command::Domains(args) => cli::domains_handler::run(args, json, token, workspace).await,
+        Command::Rollback(args) => rollback::run(args, json, token, workspace).await,
+        Command::Workspace(args) => cli::workspace_handler::run(args, json).await,
     }
 }

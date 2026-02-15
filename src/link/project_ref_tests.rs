@@ -4,6 +4,7 @@ fn make_ref() -> ProjectRef {
     ProjectRef {
         project_id: "proj_abc123".to_string(),
         project_name: "My Cool App".to_string(),
+        workspace_slug: None,
     }
 }
 
@@ -60,6 +61,7 @@ fn save_overwrites_existing() {
         &ProjectRef {
             project_id: "old_id".into(),
             project_name: "Old".into(),
+            workspace_slug: None,
         },
     )
     .unwrap();

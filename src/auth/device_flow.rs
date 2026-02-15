@@ -60,10 +60,18 @@ pub async fn poll_for_token(
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
         });
 
-        let resp: TokenResponse = client
-            .post("/v1/device/token", &body)
+        let raw_resp = client
+            .post_raw("/v1/device/token", &body)
             .await
             .context("failed to poll for token")?;
+
+        let resp_body = raw_resp
+            .text()
+            .await
+            .context("failed to read poll response")?;
+
+        let resp: TokenResponse =
+            serde_json::from_str(&resp_body).context("failed to parse poll response")?;
 
         match &resp {
             TokenResponse::Error { error } if error == "authorization_pending" => continue,

@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 pub struct ProjectRef {
     pub project_id: String,
     pub project_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_slug: Option<String>,
 }
 
 pub fn load(project_dir: &Path) -> anyhow::Result<Option<ProjectRef>> {

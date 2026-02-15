@@ -46,9 +46,13 @@ struct DeleteEnvResponse {
     key: Option<String>,
 }
 
-pub async fn run(args: EnvArgs, json: bool, token: Option<&str>) -> anyhow::Result<()> {
-    let tok = auth::resolve_token(token)
-        .ok_or_else(|| anyhow::anyhow!("not logged in. Run `nrz login` first."))?;
+pub async fn run(
+    args: EnvArgs,
+    json: bool,
+    token: Option<&str>,
+    workspace: Option<&str>,
+) -> anyhow::Result<()> {
+    let tok = auth::resolve_token(token, workspace)?;
 
     let client = ApiClient::authenticated(&tok)?;
     let project_id = project_ref::resolve_project_id(args.project_id.as_deref())?;

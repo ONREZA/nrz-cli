@@ -1,8 +1,11 @@
-pub mod credentials;
+pub mod config;
 mod device_flow;
+pub mod workspace;
 
 #[cfg(test)]
-mod credentials_tests;
+mod config_tests;
+#[cfg(test)]
+mod workspace_tests;
 
 use anyhow::Context;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -40,11 +43,10 @@ struct StatusOutput {
     status: String,
 }
 
-/// Resolve token from explicit arg or saved credentials.
-pub fn resolve_token(token: Option<&str>) -> Option<String> {
-    token
-        .map(String::from)
-        .or_else(|| credentials::load().map(|c| c.access_token))
+/// Resolve token from explicit arg, workspace config, or legacy credentials.
+pub fn resolve_token(token: Option<&str>, ws: Option<&str>) -> anyhow::Result<String> {
+    let ctx = workspace::resolve_workspace_context(token, ws)?;
+    Ok(ctx.token)
 }
 
 pub async fn login(json: bool, token: Option<&str>) -> anyhow::Result<()> {
@@ -56,12 +58,13 @@ pub async fn login(json: bool, token: Option<&str>) -> anyhow::Result<()> {
             .await
             .context("invalid token — failed to fetch user info")?;
 
-        // We need workspace info — fetch from projects or store minimal
-        credentials::save(&credentials::Credentials {
-            access_token: tok.to_string(),
-            workspace_slug: String::new(),
-            workspace_name: String::new(),
-        })?;
+        let mut cfg = config::load();
+        cfg.add_workspace(
+            "personal",
+            tok.to_string(),
+            user.name.clone().unwrap_or_default(),
+        );
+        config::save(&cfg)?;
 
         if json {
             output::json_output(&serde_json::json!({
@@ -139,11 +142,15 @@ pub async fn login(json: bool, token: Option<&str>) -> anyhow::Result<()> {
             workspace_name,
             ..
         } => {
-            credentials::save(&credentials::Credentials {
-                access_token,
-                workspace_slug: workspace_slug.clone(),
-                workspace_name: workspace_name.clone(),
-            })?;
+            let slug = if workspace_slug.is_empty() {
+                "personal".to_string()
+            } else {
+                workspace_slug.clone()
+            };
+
+            let mut cfg = config::load();
+            cfg.add_workspace(&slug, access_token, workspace_name.clone());
+            config::save(&cfg)?;
 
             if json {
                 output::json_output(&LoginOutput {
@@ -154,7 +161,7 @@ pub async fn login(json: bool, token: Option<&str>) -> anyhow::Result<()> {
                 output::success(
                     false,
                     format!(
-                        "Logged in to workspace: {} ({workspace_slug})",
+                        "Logged in to workspace: {} ({slug})",
                         console::style(&workspace_name).bold(),
                     ),
                 );
@@ -168,24 +175,20 @@ pub async fn login(json: bool, token: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn whoami(json: bool, token: Option<&str>) -> anyhow::Result<()> {
-    let tok = resolve_token(token)
-        .ok_or_else(|| anyhow::anyhow!("not logged in. Run `nrz login` first."))?;
+pub async fn whoami(json: bool, token: Option<&str>, ws: Option<&str>) -> anyhow::Result<()> {
+    let ctx = workspace::resolve_workspace_context(token, ws)?;
 
-    let client = ApiClient::authenticated(&tok)?;
+    let client = ApiClient::authenticated(&ctx.token)?;
     let user: UserInfo = client
         .get("/v1/user")
         .await
         .context("failed to fetch user info")?;
 
-    let creds = credentials::load();
-    let workspace_slug = creds
-        .as_ref()
-        .map(|c| c.workspace_slug.clone())
-        .unwrap_or_default();
-    let workspace_name = creds
-        .as_ref()
-        .map(|c| c.workspace_name.clone())
+    let cfg = config::load();
+    let workspace_name = cfg
+        .workspaces
+        .get(&ctx.workspace_slug)
+        .map(|w| w.name.clone())
         .unwrap_or_default();
 
     if json {
@@ -193,7 +196,7 @@ pub async fn whoami(json: bool, token: Option<&str>) -> anyhow::Result<()> {
             email: user.email,
             name: user.name,
             username: user.username,
-            workspace_slug,
+            workspace_slug: ctx.workspace_slug,
             workspace_name,
         });
     } else {
@@ -206,9 +209,10 @@ pub async fn whoami(json: bool, token: Option<&str>) -> anyhow::Result<()> {
         }
         if !workspace_name.is_empty() {
             eprintln!(
-                "  {} {} ({workspace_slug})",
+                "  {} {} ({})",
                 console::style("Workspace:").dim(),
                 workspace_name,
+                ctx.workspace_slug,
             );
         }
     }
@@ -216,8 +220,25 @@ pub async fn whoami(json: bool, token: Option<&str>) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn logout(json: bool) -> anyhow::Result<()> {
-    credentials::remove()?;
+pub async fn logout(json: bool, ws: Option<&str>, all: bool) -> anyhow::Result<()> {
+    let mut cfg = config::load();
+
+    if all {
+        cfg.workspaces.clear();
+        cfg.default_workspace = None;
+    } else if let Some(slug) = ws {
+        cfg.remove_workspace(slug);
+    } else if let Some(slug) = cfg.default_workspace.clone() {
+        cfg.remove_workspace(&slug);
+    } else if cfg.workspaces.len() == 1 {
+        cfg.workspaces.clear();
+        cfg.default_workspace = None;
+    } else {
+        anyhow::bail!("multiple workspaces found. Use --workspace <slug> or --all.");
+    }
+
+    config::save(&cfg)?;
+
     if json {
         output::json_output(&StatusOutput {
             status: "ok".into(),
