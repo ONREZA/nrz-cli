@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-02-15
+
+### ✨ Features
+
+- **cli:** add multi-workspace token support ([b3a90a7](https://github.com/ONREZA/nrz-cli/commit/b3a90a7e2271d9514b4c0ca42891acf278dec38e))
+
 ## [0.2.1] - 2026-02-15
 
 ### 🐛 Bug Fixes
