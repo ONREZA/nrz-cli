@@ -37,8 +37,19 @@ axum = "0.8"
 # HTTP client (deploy, API calls)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
-# Colors
+# Colors / UI
 console = "0.15"
+indicatif = "0.17"
+
+# Browser open (device flow)
+open = "5"
+
+# Archive (deploy)
+flate2 = "1"
+tar = "0.4"
+
+# URL encoding
+percent-encoding = "2"
 
 # Errors
 thiserror = "2"

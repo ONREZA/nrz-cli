@@ -1,9 +1,15 @@
 pub mod db;
 pub mod db_handler;
+pub mod domains;
+pub mod domains_handler;
+pub mod env;
+pub mod env_handler;
 pub mod kv;
 pub mod kv_handler;
 
 pub use db::DbArgs;
+pub use domains::DomainsArgs;
+pub use env::EnvArgs;
 pub use kv::KvArgs;
 
 use clap::{Parser, Subcommand};
@@ -18,6 +24,14 @@ use clap::{Parser, Subcommand};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
+
+    /// Machine-readable JSON output
+    #[arg(long, global = true, env = "NRZ_JSON")]
+    pub json: bool,
+
+    /// API token for authentication
+    #[arg(long, global = true, env = "NRZ_TOKEN")]
+    pub token: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -43,8 +57,91 @@ pub enum Command {
     /// Show current user info
     Whoami,
 
+    /// Log out from ONREZA platform
+    Logout,
+
+    /// Link this directory to an ONREZA project
+    Link(LinkArgs),
+
     /// Upgrade nrz to the latest version
     Upgrade(crate::upgrade::UpgradeArgs),
+
+    /// List your projects
+    Projects(ProjectsArgs),
+
+    /// List deployments for a project
+    Deployments(DeploymentsArgs),
+
+    /// View runtime logs
+    Logs(LogsArgs),
+
+    /// Manage environment variables
+    Env(EnvArgs),
+
+    /// Manage custom domains
+    Domains(DomainsArgs),
+
+    /// Rollback a deployment
+    Rollback(RollbackArgs),
+}
+
+#[derive(Parser)]
+pub struct ProjectsArgs {
+    /// Maximum number of projects to list
+    #[arg(long, default_value = "20", value_parser = clap::value_parser!(u32).range(1..=100))]
+    pub limit: u32,
+}
+
+#[derive(Parser)]
+pub struct DeploymentsArgs {
+    /// Maximum number of deployments to list
+    #[arg(long, default_value = "10", value_parser = clap::value_parser!(u32).range(1..=100))]
+    pub limit: u32,
+
+    /// Project ID (skip auto-detection)
+    #[arg(long)]
+    pub project_id: Option<String>,
+}
+
+#[derive(Parser)]
+pub struct LogsArgs {
+    /// Filter by deployment ID
+    #[arg(long)]
+    pub deployment_id: Option<String>,
+
+    /// Project ID (skip auto-detection)
+    #[arg(long)]
+    pub project_id: Option<String>,
+
+    /// Maximum number of log entries
+    #[arg(long, default_value = "50", value_parser = clap::value_parser!(u32).range(1..=1000))]
+    pub limit: u32,
+
+    /// Search filter
+    #[arg(long)]
+    pub search: Option<String>,
+}
+
+#[derive(Parser)]
+pub struct RollbackArgs {
+    /// Deployment ID to rollback (default: current live)
+    #[arg(long)]
+    pub deployment_id: Option<String>,
+
+    /// Project ID (skip auto-detection)
+    #[arg(long)]
+    pub project_id: Option<String>,
+}
+
+#[derive(Parser)]
+pub struct LinkArgs {
+    /// Path to project directory
+    #[arg(default_value = ".")]
+    pub dir: String,
+
+    /// Project ID (skip interactive selection)
+    #[arg(long)]
+    pub project_id: Option<String>,
 }
 
 #[derive(Parser)]
@@ -79,11 +176,11 @@ pub struct DeployArgs {
     #[arg(default_value = ".")]
     pub dir: String,
 
-    /// Deploy token (or NRZ_TOKEN env var)
-    #[arg(long, env = "NRZ_TOKEN")]
-    pub token: Option<String>,
-
     /// Production deployment
     #[arg(long)]
     pub prod: bool,
+
+    /// Project ID (skip interactive selection)
+    #[arg(long)]
+    pub project_id: Option<String>,
 }

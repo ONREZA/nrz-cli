@@ -2,6 +2,16 @@
 
 Аналог `vercel` / `wrangler` для ONREZA. Rust-based, single binary.
 
+## Принципы разработки
+
+**LLM-First CLI.** Все команды проектируются для автономного использования LLM-агентами:
+- `--json` глобальный флаг (`NRZ_JSON=1`) — машинный вывод в stdout
+- `--token` глобальный флаг (`NRZ_TOKEN`) — аутентификация без device flow
+- Интерактивные prompts имеют non-interactive альтернативу (`--project-id`, `--force`)
+- JSON output: один объект в stdout, ошибки `{"error": "..."}`, exit code 1
+- Human output: цветной текст в stderr (по умолчанию)
+- Новые команды обязаны поддерживать оба режима
+
 ## Архитектура
 
 ```
@@ -14,6 +24,14 @@ src/
     db_handler.rs    — обработчик команд db
     kv.rs            — KvArgs, KvCommand
     kv_handler.rs    — обработчик команд kv
+    env.rs           — EnvArgs, EnvCommand
+    env_handler.rs   — обработчик команд env
+    domains.rs       — DomainsArgs, DomainsCommand
+    domains_handler.rs — обработчик команд domains
+  projects.rs       — nrz projects
+  deployments.rs    — nrz deployments
+  logs.rs           — nrz logs
+  rollback.rs       — nrz rollback
   dev/              — nrz dev
     mod.rs           — оркестрация: detect → emulator → spawn
     detect.rs        — определение фреймворка по package.json
@@ -72,6 +90,18 @@ CLI не зависит от адаптеров. Связь — через BUILD
 | `nrz kv list` | Список ключей |
 | `nrz kv clear` | Очистить KV |
 | `nrz upgrade` | Обновить до последней версии |
+| `nrz projects` | Список проектов |
+| `nrz deployments` | Список деплоев проекта |
+| `nrz logs` | Runtime логи проекта |
+| `nrz env list` | Список переменных окружения |
+| `nrz env set <key> <val>` | Установить переменную окружения |
+| `nrz env delete <key>` | Удалить переменную окружения |
+| `nrz env pull` | Скачать переменные в .env.local |
+| `nrz domains list` | Список кастомных доменов |
+| `nrz domains add <domain>` | Добавить кастомный домен |
+| `nrz domains remove <id>` | Удалить кастомный домен |
+| `nrz domains verify <id>` | Проверить DNS домена |
+| `nrz rollback` | Откат деплоя |
 
 ## Установка
 

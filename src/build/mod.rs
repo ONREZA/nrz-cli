@@ -6,17 +6,22 @@ mod manifest_tests;
 use std::path::Path;
 
 use anyhow::Context;
+use serde::Serialize;
 
 use crate::cli::BuildArgs;
+use crate::output;
 
-/// Validate build output and manifest.
-///
-/// 1. Locate output directory (dist/, build/, .output/)
-/// 2. Find .onreza/manifest.json
-/// 3. Parse and validate against BUILD_OUTPUT_SPEC v1
-/// 4. Verify referenced files exist (server entry, assets dir, prerender dir)
-/// 5. Report results
-pub async fn run(args: BuildArgs) -> anyhow::Result<()> {
+#[derive(Serialize)]
+struct BuildOutput {
+    adapter: String,
+    adapter_version: String,
+    framework: String,
+    framework_version: String,
+    routes: usize,
+    output_dir: String,
+}
+
+pub async fn run(args: BuildArgs, json: bool) -> anyhow::Result<()> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
@@ -38,20 +43,31 @@ pub async fn run(args: BuildArgs) -> anyhow::Result<()> {
         manifest::verify_files(&output_dir, &manifest)?;
     }
 
-    eprintln!(
-        "  {} {} v{} ({} v{})",
-        console::style("✓").green().bold(),
-        manifest.adapter.name,
-        manifest.adapter.version,
-        manifest.framework.name,
-        manifest.framework.version,
-    );
-    eprintln!(
-        "  {} {} routes, server entry: {}",
-        console::style("✓").green().bold(),
-        manifest.routes.len(),
-        manifest.server.entry,
-    );
+    if json {
+        output::json_output(&BuildOutput {
+            adapter: manifest.adapter.name.clone(),
+            adapter_version: manifest.adapter.version.clone(),
+            framework: manifest.framework.name.clone(),
+            framework_version: manifest.framework.version.clone(),
+            routes: manifest.routes.len(),
+            output_dir: output_dir.to_string_lossy().into_owned(),
+        });
+    } else {
+        eprintln!(
+            "  {} {} v{} ({} v{})",
+            console::style("✓").green().bold(),
+            manifest.adapter.name,
+            manifest.adapter.version,
+            manifest.framework.name,
+            manifest.framework.version,
+        );
+        eprintln!(
+            "  {} {} routes, server entry: {}",
+            console::style("✓").green().bold(),
+            manifest.routes.len(),
+            manifest.server.entry,
+        );
+    }
 
     Ok(())
 }
@@ -65,7 +81,6 @@ fn detect_output_dir(project_dir: &Path) -> anyhow::Result<std::path::PathBuf> {
         }
     }
 
-    // Check if output dir exists but without .onreza
     for name in ["dist", ".output", "build"] {
         let candidate = project_dir.join(name);
         if candidate.is_dir() {

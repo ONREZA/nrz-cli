@@ -1,10 +1,7 @@
 //! CLI integration tests
 //!
-//! Tests:
-//! - nrz --help → exit 0
-//! - nrz kv set/get в tempdir
-//! - nrz db execute + nrz db info в tempdir
-//! - nrz dev без package.json → ошибка
+//! Note: binary is run through a pipe, so stdout.is_terminal() = false
+//! and JSON mode activates automatically. All assertions check JSON in stdout.
 
 use assert_cmd::Command;
 use predicates::str::contains;
@@ -26,13 +23,13 @@ fn help_returns_exit_0() {
 fn kv_set_and_get_in_tempdir() {
     let temp = tempfile::tempdir().unwrap();
 
-    // Set a key
+    // Set a key (JSON: {"status":"ok"})
     let mut cmd = nrz();
     cmd.current_dir(&temp)
         .args(["kv", "set", "mykey", "myvalue"]);
-    cmd.assert().success().stderr(contains("OK"));
+    cmd.assert().success().stdout(contains("\"status\""));
 
-    // Get the key
+    // Get the key (JSON: {"key":"mykey","value":"myvalue"})
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["kv", "get", "mykey"]);
     cmd.assert().success().stdout(contains("myvalue"));
@@ -42,20 +39,21 @@ fn kv_set_and_get_in_tempdir() {
 fn kv_get_nonexistent_key() {
     let temp = tempfile::tempdir().unwrap();
 
+    // JSON: {"key":"nonexistent","value":null}
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["kv", "get", "nonexistent"]);
-    cmd.assert().success().stderr(contains("(not found)"));
+    cmd.assert().success().stdout(contains("null"));
 }
 
 #[test]
 fn kv_set_with_ttl() {
     let temp = tempfile::tempdir().unwrap();
 
-    // Set with TTL
+    // Set with TTL (JSON: {"status":"ok"})
     let mut cmd = nrz();
     cmd.current_dir(&temp)
         .args(["kv", "set", "tempkey", "tempvalue", "--ttl", "3600"]);
-    cmd.assert().success().stderr(contains("OK"));
+    cmd.assert().success().stdout(contains("\"status\""));
 
     // Verify it's set
     let mut cmd = nrz();
@@ -75,7 +73,7 @@ fn kv_list_keys() {
         cmd.assert().success();
     }
 
-    // List keys
+    // List keys (JSON: {"keys":[...]})
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["kv", "list"]);
     cmd.assert().success().stdout(contains("key1"));
@@ -91,21 +89,21 @@ fn kv_delete_key() {
         .args(["kv", "set", "delkey", "delvalue"]);
     cmd.assert().success();
 
+    // JSON: {"status":"ok"}
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["kv", "delete", "delkey"]);
-    cmd.assert().success().stderr(contains("deleted"));
+    cmd.assert().success().stdout(contains("\"status\""));
 
-    // Verify it's gone
+    // Verify it's gone (JSON: {"key":"delkey","value":null})
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["kv", "get", "delkey"]);
-    cmd.assert().success().stderr(contains("(not found)"));
+    cmd.assert().success().stdout(contains("null"));
 }
 
 #[test]
 fn db_execute_creates_database() {
     let temp = tempfile::tempdir().unwrap();
 
-    // Execute CREATE TABLE
     let mut cmd = nrz();
     cmd.current_dir(&temp).args([
         "db",
@@ -114,7 +112,6 @@ fn db_execute_creates_database() {
     ]);
     cmd.assert().success();
 
-    // Verify database was created
     let db_path = temp.path().join(".onreza").join("data").join("dev.db");
     assert!(db_path.exists(), "Database file should be created");
 }
@@ -123,7 +120,6 @@ fn db_execute_creates_database() {
 fn db_execute_and_info() {
     let temp = tempfile::tempdir().unwrap();
 
-    // Create table and insert data
     let mut cmd = nrz();
     cmd.current_dir(&temp).args([
         "db",
@@ -140,29 +136,32 @@ fn db_execute_and_info() {
     ]);
     cmd.assert().success();
 
-    // Check info shows the table
+    // JSON: {"path":"...","size":N,"tables":[{"name":"users","rows":2}]}
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["db", "info"]);
     cmd.assert()
         .success()
-        .stderr(contains("database:"))
-        .stderr(contains("users"));
+        .stdout(contains("users"))
+        .stdout(contains("\"tables\""));
 }
 
 #[test]
-fn db_info_shows_not_created_yet() {
+fn db_info_shows_empty_when_not_created() {
     let temp = tempfile::tempdir().unwrap();
 
+    // JSON: {"path":"...","size":0,"tables":[]}
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["db", "info"]);
-    cmd.assert().success().stderr(contains("not created yet"));
+    cmd.assert()
+        .success()
+        .stdout(contains("\"size\":0"))
+        .stdout(contains("\"tables\":[]"));
 }
 
 #[test]
 fn db_query_with_results() {
     let temp = tempfile::tempdir().unwrap();
 
-    // Create and insert
     let mut cmd = nrz();
     cmd.current_dir(&temp).args([
         "db",
@@ -179,75 +178,63 @@ fn db_query_with_results() {
     ]);
     cmd.assert().success();
 
-    // Query and check output format
+    // JSON: {"columns":["id","val"],"rows":[[1,"hello"],[2,"world"]]}
     let mut cmd = nrz();
     cmd.current_dir(&temp)
         .args(["db", "execute", "SELECT * FROM items ORDER BY id"]);
     cmd.assert()
         .success()
-        .stderr(contains("id"))
-        .stderr(contains("val"))
-        .stderr(contains("hello"))
-        .stderr(contains("world"));
+        .stdout(contains("\"columns\""))
+        .stdout(contains("hello"))
+        .stdout(contains("world"));
 }
 
 #[test]
 fn dev_without_package_json_fails() {
     let temp = tempfile::tempdir().unwrap();
 
-    // Ensure no package.json exists
-    let pkg_path = temp.path().join("package.json");
-    assert!(!pkg_path.exists());
+    assert!(!temp.path().join("package.json").exists());
 
+    // JSON error in stdout: {"error":"...package.json..."}
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["dev"]);
-
-    // Should fail because package.json is missing
-    cmd.assert().failure().stderr(contains("package.json"));
+    cmd.assert().failure().stdout(contains("package.json"));
 }
 
 #[test]
 fn dev_with_unknown_framework_fails() {
     let temp = tempfile::tempdir().unwrap();
 
-    // Create package.json with unknown framework
     fs::write(
         temp.path().join("package.json"),
         r#"{"dependencies":{"express":"^4.0"}}"#,
     )
     .unwrap();
 
+    // JSON error in stdout: {"error":"could not detect framework..."}
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["dev"]);
-
-    // Should fail because framework is unknown
     cmd.assert()
         .failure()
-        .stderr(contains("could not detect framework"));
+        .stdout(contains("could not detect framework"));
 }
 
 #[test]
 fn dev_with_custom_command_works_without_detection() {
     let temp = tempfile::tempdir().unwrap();
 
-    // Create empty package.json (no recognizable framework)
     fs::write(temp.path().join("package.json"), r#"{"name":"test"}"#).unwrap();
 
-    // Use --command flag to bypass detection
-    // Note: This would still fail to spawn the actual process,
-    // but we're just testing that the command parsing works
     let mut cmd = nrz();
     cmd.current_dir(&temp)
         .args(["dev", "--command", "echo test"]);
 
-    // The command parsing should succeed even if the dev server spawn fails
-    // We expect this to fail at process spawn stage, not at framework detection
     let output = cmd.output().unwrap();
 
     // Should not contain "could not detect framework" error
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        !stderr.contains("could not detect framework"),
+        !stdout.contains("could not detect framework"),
         "Should not fail on framework detection when --command is provided"
     );
 }

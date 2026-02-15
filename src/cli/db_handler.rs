@@ -4,19 +4,49 @@ use std::path::Path;
 
 use anyhow::Context;
 use rusqlite::Connection;
+use serde::Serialize;
 
 use nrz::emulator::data_dir;
 
 use super::db::{DbArgs, DbCommand};
+use crate::output;
 
-pub async fn run(args: DbArgs) -> anyhow::Result<()> {
+#[derive(Serialize)]
+struct DbExecuteOutput {
+    changes: usize,
+}
+
+#[derive(Serialize)]
+struct DbQueryOutput {
+    columns: Vec<String>,
+    rows: Vec<Vec<serde_json::Value>>,
+}
+
+#[derive(Serialize)]
+struct DbInfoOutput {
+    path: String,
+    size: u64,
+    tables: Vec<TableInfo>,
+}
+
+#[derive(Serialize)]
+struct TableInfo {
+    name: String,
+    rows: i64,
+}
+
+#[derive(Serialize)]
+struct StatusOutput {
+    status: String,
+}
+
+pub async fn run(args: DbArgs, json: bool) -> anyhow::Result<()> {
     let project_dir = Path::new(".").canonicalize()?;
     let data_dir = data_dir(&project_dir);
     let db_path = data_dir.join("dev.db");
 
     match args.command {
         DbCommand::Shell => {
-            // TODO: interactive SQLite REPL
             eprintln!("nrz db shell: not yet implemented");
             eprintln!("  use `nrz db execute <sql>` for now");
         }
@@ -35,25 +65,29 @@ pub async fn run(args: DbArgs) -> anyhow::Result<()> {
                 stmt.column_names().iter().map(|s| s.to_string()).collect();
 
             if col_names.is_empty() {
-                // Non-query statement (CREATE, INSERT, etc.)
                 let changes = stmt.raw_execute()?;
-                eprintln!("{changes} row(s) affected");
+                if json {
+                    output::json_output(&DbExecuteOutput { changes });
+                } else {
+                    eprintln!("{changes} row(s) affected");
+                }
             } else {
-                // Query with results — print as table
-                let mut rows: Vec<Vec<String>> = Vec::new();
+                let mut rows: Vec<Vec<serde_json::Value>> = Vec::new();
                 let mut raw_rows = stmt.raw_query();
                 while let Some(row) = raw_rows.next()? {
                     let mut values = Vec::new();
                     for i in 0..col_names.len() {
                         let val = match row.get_ref(i)? {
-                            rusqlite::types::ValueRef::Null => "NULL".to_string(),
-                            rusqlite::types::ValueRef::Integer(n) => n.to_string(),
-                            rusqlite::types::ValueRef::Real(f) => f.to_string(),
+                            rusqlite::types::ValueRef::Null => serde_json::Value::Null,
+                            rusqlite::types::ValueRef::Integer(n) => {
+                                serde_json::Value::Number(n.into())
+                            }
+                            rusqlite::types::ValueRef::Real(f) => serde_json::json!(f),
                             rusqlite::types::ValueRef::Text(s) => {
-                                String::from_utf8_lossy(s).into_owned()
+                                serde_json::Value::String(String::from_utf8_lossy(s).into_owned())
                             }
                             rusqlite::types::ValueRef::Blob(b) => {
-                                format!("<blob {} bytes>", b.len())
+                                serde_json::Value::String(format!("<blob {} bytes>", b.len()))
                             }
                         };
                         values.push(val);
@@ -61,47 +95,71 @@ pub async fn run(args: DbArgs) -> anyhow::Result<()> {
                     rows.push(values);
                 }
 
-                // Calculate column widths
-                let mut widths: Vec<usize> = col_names.iter().map(|n| n.len()).collect();
-                for row in &rows {
-                    for (i, val) in row.iter().enumerate() {
-                        widths[i] = widths[i].max(val.len());
+                if json {
+                    output::json_output(&DbQueryOutput {
+                        columns: col_names,
+                        rows,
+                    });
+                } else {
+                    // Human-readable table output
+                    let str_rows: Vec<Vec<String>> = rows
+                        .iter()
+                        .map(|row| {
+                            row.iter()
+                                .map(|v| match v {
+                                    serde_json::Value::Null => "NULL".to_string(),
+                                    serde_json::Value::String(s) => s.clone(),
+                                    other => other.to_string(),
+                                })
+                                .collect()
+                        })
+                        .collect();
+
+                    let mut widths: Vec<usize> = col_names.iter().map(|n| n.len()).collect();
+                    for row in &str_rows {
+                        for (i, val) in row.iter().enumerate() {
+                            widths[i] = widths[i].max(val.len());
+                        }
                     }
-                }
 
-                // Print header
-                let header: Vec<String> = col_names
-                    .iter()
-                    .enumerate()
-                    .map(|(i, n)| format!("{:width$}", n, width = widths[i]))
-                    .collect();
-                eprintln!("{}", header.join(" | "));
-                let sep: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
-                eprintln!("{}", sep.join("-+-"));
-
-                // Print rows
-                for row in &rows {
-                    let formatted: Vec<String> = row
+                    let header: Vec<String> = col_names
                         .iter()
                         .enumerate()
-                        .map(|(i, v)| format!("{:width$}", v, width = widths[i]))
+                        .map(|(i, n)| format!("{:width$}", n, width = widths[i]))
                         .collect();
-                    eprintln!("{}", formatted.join(" | "));
-                }
+                    eprintln!("{}", header.join(" | "));
+                    let sep: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
+                    eprintln!("{}", sep.join("-+-"));
 
-                eprintln!("\n{} row(s)", rows.len());
+                    for row in &str_rows {
+                        let formatted: Vec<String> = row
+                            .iter()
+                            .enumerate()
+                            .map(|(i, v)| format!("{:width$}", v, width = widths[i]))
+                            .collect();
+                        eprintln!("{}", formatted.join(" | "));
+                    }
+
+                    eprintln!("\n{} row(s)", str_rows.len());
+                }
             }
         }
         DbCommand::Info => {
             if !db_path.exists() {
-                eprintln!("database: {} (not created yet)", db_path.display());
-                eprintln!("  run `nrz dev` or `nrz db execute` to create it");
+                if json {
+                    output::json_output(&DbInfoOutput {
+                        path: db_path.to_string_lossy().into_owned(),
+                        size: 0,
+                        tables: vec![],
+                    });
+                } else {
+                    eprintln!("database: {} (not created yet)", db_path.display());
+                    eprintln!("  run `nrz dev` or `nrz db execute` to create it");
+                }
                 return Ok(());
             }
 
             let file_size = std::fs::metadata(&db_path)?.len();
-            eprintln!("database: {}", db_path.display());
-            eprintln!("size: {}", format_size(file_size));
 
             let conn = Connection::open(&db_path)?;
             let mut stmt =
@@ -116,15 +174,36 @@ pub async fn run(args: DbArgs) -> anyhow::Result<()> {
             drop(rows);
             drop(stmt);
 
-            if tables.is_empty() {
-                eprintln!("tables: (none)");
-            } else {
-                eprintln!("\ntables:");
-                for table in &tables {
+            let table_info: Vec<TableInfo> = tables
+                .iter()
+                .map(|table| {
                     let count: i64 = conn
                         .query_row(&format!("SELECT COUNT(*) FROM [{table}]"), [], |r| r.get(0))
                         .unwrap_or(0);
-                    eprintln!("  {table}: {count} row(s)");
+                    TableInfo {
+                        name: table.clone(),
+                        rows: count,
+                    }
+                })
+                .collect();
+
+            if json {
+                output::json_output(&DbInfoOutput {
+                    path: db_path.to_string_lossy().into_owned(),
+                    size: file_size,
+                    tables: table_info,
+                });
+            } else {
+                eprintln!("database: {}", db_path.display());
+                eprintln!("size: {}", format_size(file_size));
+
+                if table_info.is_empty() {
+                    eprintln!("tables: (none)");
+                } else {
+                    eprintln!("\ntables:");
+                    for t in &table_info {
+                        eprintln!("  {}: {} row(s)", t.name, t.rows);
+                    }
                 }
             }
         }
@@ -135,12 +214,21 @@ pub async fn run(args: DbArgs) -> anyhow::Result<()> {
             }
             if db_path.exists() {
                 std::fs::remove_file(&db_path)?;
-                // Also remove WAL/SHM files if they exist
                 let wal = db_path.with_extension("db-wal");
                 let shm = db_path.with_extension("db-shm");
                 let _ = std::fs::remove_file(wal);
                 let _ = std::fs::remove_file(shm);
-                eprintln!("database reset: {}", db_path.display());
+                if json {
+                    output::json_output(&StatusOutput {
+                        status: "ok".into(),
+                    });
+                } else {
+                    eprintln!("database reset: {}", db_path.display());
+                }
+            } else if json {
+                output::json_output(&StatusOutput {
+                    status: "ok".into(),
+                });
             } else {
                 eprintln!("database does not exist yet: {}", db_path.display());
             }

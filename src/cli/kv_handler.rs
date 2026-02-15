@@ -2,23 +2,47 @@
 
 use std::path::Path;
 
+use serde::Serialize;
+
 use nrz::emulator::kv::{KvFileEntry, is_expired, kv_file_path, load_kv_file, save_kv_file};
 
 use super::kv::{KvArgs, KvCommand};
+use crate::output;
 
-pub async fn run(args: KvArgs) -> anyhow::Result<()> {
+#[derive(Serialize)]
+struct KvGetOutput {
+    key: String,
+    value: Option<String>,
+}
+
+#[derive(Serialize)]
+struct KvListOutput {
+    keys: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct StatusOutput {
+    status: String,
+}
+
+pub async fn run(args: KvArgs, json: bool) -> anyhow::Result<()> {
     let project_dir = Path::new(".").canonicalize()?;
     let path = kv_file_path(&project_dir);
 
     match args.command {
         KvCommand::Get { key } => {
             let kv = load_kv_file(&path);
-            match kv.entries.get(&key) {
-                Some(entry) if !is_expired(entry) => {
-                    println!("{}", entry.value);
-                }
-                _ => {
-                    eprintln!("(not found)");
+            let value = match kv.entries.get(&key) {
+                Some(entry) if !is_expired(entry) => Some(entry.value.clone()),
+                _ => None,
+            };
+
+            if json {
+                output::json_output(&KvGetOutput { key, value });
+            } else {
+                match value {
+                    Some(v) => println!("{v}"),
+                    None => eprintln!("(not found)"),
                 }
             }
         }
@@ -36,12 +60,27 @@ pub async fn run(args: KvArgs) -> anyhow::Result<()> {
             kv.entries
                 .insert(key.clone(), KvFileEntry { value, expires_at });
             save_kv_file(&path, &kv)?;
-            eprintln!("OK");
+
+            if json {
+                output::json_output(&StatusOutput {
+                    status: "ok".into(),
+                });
+            } else {
+                eprintln!("OK");
+            }
         }
         KvCommand::Delete { key } => {
             let mut kv = load_kv_file(&path);
-            if kv.entries.remove(&key).is_some() {
+            let found = kv.entries.remove(&key).is_some();
+            if found {
                 save_kv_file(&path, &kv)?;
+            }
+
+            if json {
+                output::json_output(&StatusOutput {
+                    status: "ok".into(),
+                });
+            } else if found {
                 eprintln!("deleted");
             } else {
                 eprintln!("(not found)");
@@ -49,7 +88,7 @@ pub async fn run(args: KvArgs) -> anyhow::Result<()> {
         }
         KvCommand::List { prefix, limit } => {
             let kv = load_kv_file(&path);
-            let mut count = 0;
+            let mut keys = Vec::new();
             for (key, entry) in &kv.entries {
                 if is_expired(entry) {
                     continue;
@@ -59,14 +98,20 @@ pub async fn run(args: KvArgs) -> anyhow::Result<()> {
                 {
                     continue;
                 }
-                println!("{key}");
-                count += 1;
-                if count >= limit {
+                keys.push(key.clone());
+                if keys.len() >= limit {
                     break;
                 }
             }
-            if count == 0 {
+
+            if json {
+                output::json_output(&KvListOutput { keys });
+            } else if keys.is_empty() {
                 eprintln!("(empty)");
+            } else {
+                for key in &keys {
+                    println!("{key}");
+                }
             }
         }
         KvCommand::Clear { force } => {
@@ -76,9 +121,13 @@ pub async fn run(args: KvArgs) -> anyhow::Result<()> {
             }
             if path.exists() {
                 std::fs::remove_file(&path)?;
-                eprintln!("KV store cleared");
+            }
+            if json {
+                output::json_output(&StatusOutput {
+                    status: "ok".into(),
+                });
             } else {
-                eprintln!("KV store is already empty");
+                eprintln!("KV store cleared");
             }
         }
     }
