@@ -15,6 +15,7 @@ use crate::cli::LinkArgs;
 use crate::output;
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ProjectListResponse {
     projects: Vec<Project>,
     #[allow(dead_code)]
@@ -22,25 +23,12 @@ struct ProjectListResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Project {
     id: String,
     #[allow(dead_code)]
     name: String,
     display_name: String,
-    #[allow(dead_code)]
-    framework: Option<String>,
-    #[allow(dead_code)]
-    workspace: ProjectWorkspace,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProjectWorkspace {
-    #[allow(dead_code)]
-    id: String,
-    #[allow(dead_code)]
-    slug: String,
-    #[allow(dead_code)]
-    name: String,
 }
 
 #[derive(Serialize)]
@@ -95,25 +83,19 @@ pub async fn run(
     Ok(())
 }
 
-/// Find project by ID from user's project list.
+/// Find project by ID via GET /v1/projects/:id.
 async fn find_project_by_id(
     client: &ApiClient,
     project_id: &str,
 ) -> anyhow::Result<project_ref::ProjectRef> {
-    let resp: ProjectListResponse = client
-        .get("/v1/user/projects")
+    let project: Project = client
+        .get(&format!("/v1/projects/{project_id}"))
         .await
-        .context("failed to fetch projects")?;
-
-    let project = resp
-        .projects
-        .iter()
-        .find(|p| p.id == project_id)
-        .ok_or_else(|| anyhow::anyhow!("project not found: {project_id}"))?;
+        .with_context(|| format!("failed to fetch project {project_id}"))?;
 
     Ok(project_ref::ProjectRef {
-        project_id: project.id.clone(),
-        project_name: project.display_name.clone(),
+        project_id: project.id,
+        project_name: project.display_name,
         workspace_slug: None,
     })
 }
@@ -123,7 +105,7 @@ pub async fn select_project_interactive(
     client: &ApiClient,
 ) -> anyhow::Result<project_ref::ProjectRef> {
     let resp: ProjectListResponse = client
-        .get("/v1/user/projects")
+        .get("/v1/projects")
         .await
         .context("failed to fetch projects")?;
 
