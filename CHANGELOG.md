@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-02-16
+
+### ⚠️ BREAKING CHANGES
+
+- **cli:** add full CRUD subcommands for nrz projects ([8a5a086](https://github.com/ONREZA/nrz-cli/commit/8a5a086b021dd26f16ae10aacd113915afa76789))
+
 ## [0.3.1] - 2026-02-16
 
 ### 🐛 Bug Fixes
