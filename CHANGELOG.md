@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-02-16
+
+### ✨ Features
+
+- **deploy:** replace tar.gz uploads with flat per-file uploads ([e943a74](https://github.com/ONREZA/nrz-cli/commit/e943a74db8b1730bb691d089d0d2f07adfa2a583))
+
+### 🔧 Changed
+
+- **deps:** upgrade rusqlite 0.38, reqwest 0.13, console 0.16, indicatif 0.18 ([e2a0ecd](https://github.com/ONREZA/nrz-cli/commit/e2a0ecd2ad6390438168a5b112bf181331ddada2))
+
 ## [0.5.0] - 2026-02-16
 
 ### ✨ Features
