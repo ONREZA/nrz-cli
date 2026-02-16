@@ -110,7 +110,7 @@ pub async fn select_project_interactive(
         .context("failed to fetch projects")?;
 
     if resp.projects.is_empty() {
-        bail!("no projects found. Create a project at https://onreza.ru first.");
+        bail!("no projects found. Create one with: nrz projects create --name <name>");
     }
 
     eprintln!();

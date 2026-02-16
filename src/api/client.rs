@@ -149,7 +149,6 @@ impl ApiClient {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn patch<B: Serialize, T: DeserializeOwned>(
         &self,
         path: &str,

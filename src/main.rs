@@ -8,7 +8,6 @@ mod dev;
 mod link;
 mod logs;
 mod output;
-mod projects;
 mod rollback;
 mod upgrade;
 
@@ -59,7 +58,7 @@ async fn run_command(
         Command::Logout(args) => auth::logout(json, workspace, args.all).await,
         Command::Link(args) => link::run(args, json, token, workspace).await,
         Command::Upgrade(args) => upgrade::run(args).await,
-        Command::Projects(args) => projects::run(args, json, token, workspace).await,
+        Command::Projects(args) => cli::projects_handler::run(args, json, token, workspace).await,
         Command::Deployments(args) => deployments::run(args, json, token, workspace).await,
         Command::Logs(args) => logs::run(args, json, token, workspace).await,
         Command::Env(args) => cli::env_handler::run(args, json, token, workspace).await,

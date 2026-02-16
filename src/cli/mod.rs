@@ -6,6 +6,8 @@ pub mod env;
 pub mod env_handler;
 pub mod kv;
 pub mod kv_handler;
+pub mod projects;
+pub mod projects_handler;
 pub mod workspace;
 pub mod workspace_handler;
 
@@ -13,6 +15,7 @@ pub use db::DbArgs;
 pub use domains::DomainsArgs;
 pub use env::EnvArgs;
 pub use kv::KvArgs;
+pub use projects::ProjectsArgs;
 pub use workspace::WorkspaceArgs;
 
 use clap::{Parser, Subcommand};
@@ -73,7 +76,7 @@ pub enum Command {
     /// Upgrade nrz to the latest version
     Upgrade(crate::upgrade::UpgradeArgs),
 
-    /// List your projects
+    /// Manage projects
     Projects(ProjectsArgs),
 
     /// List deployments for a project
@@ -100,13 +103,6 @@ pub struct LogoutArgs {
     /// Log out from all workspaces
     #[arg(long)]
     pub all: bool,
-}
-
-#[derive(Parser)]
-pub struct ProjectsArgs {
-    /// Maximum number of projects to list
-    #[arg(long, default_value = "20", value_parser = clap::value_parser!(u32).range(1..=100))]
-    pub limit: u32,
 }
 
 #[derive(Parser)]
