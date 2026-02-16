@@ -12,6 +12,8 @@ struct ApiError {
 
 pub struct ApiClient {
     client: reqwest::Client,
+    /// Plain client without auth headers, reused for presigned S3 uploads.
+    upload_client: reqwest::Client,
     base_url: String,
 }
 
@@ -29,7 +31,13 @@ impl ApiClient {
             .build()
             .context("failed to create HTTP client")?;
 
-        Ok(Self { client, base_url })
+        let upload_client = reqwest::Client::new();
+
+        Ok(Self {
+            client,
+            upload_client,
+            base_url,
+        })
     }
 
     pub fn authenticated(token: &str) -> anyhow::Result<Self> {
@@ -49,7 +57,13 @@ impl ApiClient {
             .build()
             .context("failed to create HTTP client")?;
 
-        Ok(Self { client, base_url })
+        let upload_client = reqwest::Client::new();
+
+        Ok(Self {
+            client,
+            upload_client,
+            base_url,
+        })
     }
 
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
@@ -174,8 +188,8 @@ impl ApiClient {
         data: Vec<u8>,
         content_type: &str,
     ) -> anyhow::Result<()> {
-        let plain_client = reqwest::Client::new();
-        let resp = plain_client
+        let resp = self
+            .upload_client
             .put(url)
             .header("Content-Type", content_type)
             .body(data)

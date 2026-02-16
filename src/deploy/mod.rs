@@ -1,13 +1,19 @@
-mod archive;
-
 #[cfg(test)]
-mod archive_tests;
+mod deploy_tests;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, bail};
+use futures::stream::{self, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+const MAX_FILES_HOBBY: usize = 500;
+const MAX_FILES_PAID: usize = 5_000;
+const MAX_SIZE_HOBBY: u64 = 100 * 1024 * 1024; // 100 MB
+const MAX_SIZE_PAID: u64 = 1024 * 1024 * 1024; // 1 GB
 
 use crate::api::ApiClient;
 use crate::auth;
@@ -16,10 +22,53 @@ use crate::cli::{BuildArgs, DeployArgs};
 use crate::link::{self, project_ref};
 use crate::output;
 
+// ── Workspace / plan ─────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceInfo {
+    #[allow(dead_code)]
+    id: String,
+    #[allow(dead_code)]
+    slug: String,
+    subscription: Option<SubscriptionInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubscriptionInfo {
+    plan_slug: String,
+}
+
+fn is_paid_plan(workspace: &WorkspaceInfo) -> bool {
+    workspace
+        .subscription
+        .as_ref()
+        .is_some_and(|s| s.plan_slug == "PRO" || s.plan_slug == "ENTERPRISE")
+}
+
+fn plan_limits(workspace: &WorkspaceInfo) -> (usize, u64) {
+    if is_paid_plan(workspace) {
+        (MAX_FILES_PAID, MAX_SIZE_PAID)
+    } else {
+        (MAX_FILES_HOBBY, MAX_SIZE_HOBBY)
+    }
+}
+
+// ── API structs ──────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileEntry {
+    path: String,
+    size: u64,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateDeploymentBody {
     manifest: serde_json::Value,
+    files: Vec<FileEntry>,
     production: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     branch: Option<String>,
@@ -34,18 +83,19 @@ struct CreateDeploymentResponse {
     #[allow(dead_code)]
     status: String,
     url: String,
-    upload_urls: UploadUrls,
     #[allow(dead_code)]
-    artifact_key: String,
+    artifact_prefix: String,
+    upload_urls: Vec<FileUploadUrl>,
     #[allow(dead_code)]
     expires_in: u64,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct UploadUrls {
-    artifact: String,
-    server_bundle: Option<String>,
+struct FileUploadUrl {
+    #[allow(dead_code)]
+    path: String,
+    url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,6 +133,8 @@ struct DeployOutput {
     status: String,
 }
 
+// ── Main deploy flow ─────────────────────────────────────────
+
 pub async fn run(
     args: DeployArgs,
     json: bool,
@@ -94,8 +146,13 @@ pub async fn run(
         .with_context(|| format!("project directory not found: {}", args.dir))?;
 
     let tok = auth::resolve_token(token, workspace)?;
-
     let client = ApiClient::authenticated(&tok)?;
+
+    // Fetch workspace info for plan-based limits
+    let ws_info: WorkspaceInfo = client
+        .get("/v1/workspace")
+        .await
+        .context("failed to fetch workspace info")?;
 
     // Resolve project: --project-id > .onreza/project.json > interactive
     let project = if let Some(pid) = &args.project_id {
@@ -142,18 +199,56 @@ pub async fn run(
             .with_context(|| format!("failed to read {}", manifest_path.display()))?,
     )?;
 
-    // Git info (optional)
+    // Scan output directory for flat file list
+    output::status(json, "~", "Scanning output directory...");
+    let files = scan_files(&output_dir)?;
+    if files.is_empty() {
+        bail!("output directory is empty: {}", output_dir.display());
+    }
+
+    // Validate plan-based limits
+    let (max_files, max_size) = plan_limits(&ws_info);
+    if files.len() > max_files {
+        bail!(
+            "Deployment exceeds maximum file count ({} / {}). \
+             Consider using blob storage for large assets. \
+             For higher limits contact support@onreza.ru",
+            files.len(),
+            max_files
+        );
+    }
+    let total_size: u64 = files.iter().map(|f| f.size).sum();
+    if total_size > max_size {
+        let total_mb = total_size / (1024 * 1024);
+        let limit_mb = max_size / (1024 * 1024);
+        bail!(
+            "Deployment artifact size ({total_mb} MB) exceeds the {limit_mb} MB limit \
+             for your plan. Use blob storage for large assets. \
+             For higher limits contact support@onreza.ru"
+        );
+    }
+
+    // Git info
     let branch = git_cmd(&["rev-parse", "--abbrev-ref", "HEAD"]);
-    let commit_sha = git_cmd(&["rev-parse", "HEAD"]);
+    let commit_sha = match git_cmd(&["rev-parse", "HEAD"]) {
+        Some(sha) => Some(sha),
+        None => {
+            output::warn(json, "git not available, using synthetic commit SHA");
+            Some(synthetic_sha(&files))
+        }
+    };
 
     // Create deployment
     output::status(json, "~", "Creating deployment...");
     let body = CreateDeploymentBody {
         manifest: manifest_raw,
+        files,
         production: args.prod,
         branch,
         commit_sha,
     };
+    let file_count = body.files.len();
+
     let deployment: CreateDeploymentResponse = client
         .post(
             &format!("/v1/projects/{}/deployments", project.project_id),
@@ -162,50 +257,84 @@ pub async fn run(
         .await
         .context("failed to create deployment")?;
 
-    // Create tar.gz of output dir
-    let spinner = make_spinner(json, "Uploading artifact...");
-    let archive_data = archive::create_tar_gz(&output_dir).context("failed to create archive")?;
-    let archive_size = archive_data.len();
+    // Validate server returned correct number of upload URLs
+    if deployment.upload_urls.len() != file_count {
+        bail!(
+            "server returned {} upload URLs, but {} files were sent. \
+             This may indicate an API version mismatch.",
+            deployment.upload_urls.len(),
+            file_count
+        );
+    }
 
-    // Upload artifact
-    client
-        .put_bytes(
-            &deployment.upload_urls.artifact,
-            archive_data,
-            "application/gzip",
-        )
-        .await
-        .context("failed to upload artifact")?;
-    finish_spinner(
-        spinner,
-        &format!("Artifact uploaded ({})", format_bytes(archive_size)),
+    // Upload files in parallel (concurrency = 20)
+    let spinner = make_spinner(
+        json,
+        &format!(
+            "Uploading {file_count} files ({})...",
+            format_bytes(total_size as usize)
+        ),
     );
 
-    // Upload server bundle if SSR
-    if let Some(server_url) = &deployment.upload_urls.server_bundle {
-        let spinner = make_spinner(json, "Uploading server bundle...");
-        let server_entry = manifest_path
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("server");
-        if server_entry.is_dir() {
-            let bundle = archive::create_tar_gz(&server_entry)
-                .context("failed to create server bundle archive")?;
-            let bundle_size = bundle.len();
-            client
-                .put_bytes(server_url, bundle, "application/gzip")
-                .await
-                .context("failed to upload server bundle")?;
-            finish_spinner(
-                spinner,
-                &format!("Server bundle uploaded ({})", format_bytes(bundle_size)),
-            );
-        } else {
-            finish_spinner(spinner, "Server bundle: no server dir found, skipping");
+    let uploaded = AtomicUsize::new(0);
+    let upload_results: Vec<anyhow::Result<()>> =
+        stream::iter(deployment.upload_urls.iter().map(|file_url| {
+            let client = &client;
+            let output_dir = &output_dir;
+            let spinner = &spinner;
+            let uploaded = &uploaded;
+            async move {
+                let file_path = output_dir.join(&file_url.path);
+                let data = tokio::fs::read(&file_path)
+                    .await
+                    .with_context(|| format!("failed to read {}", file_path.display()))?;
+
+                let content_type = guess_content_type(&file_url.path);
+
+                client
+                    .put_bytes(&file_url.url, data, content_type)
+                    .await
+                    .with_context(|| format!("failed to upload {}", file_url.path))?;
+
+                let done = uploaded.fetch_add(1, Ordering::Relaxed) + 1;
+                if let Some(s) = spinner {
+                    s.set_message(format!("[{done}/{file_count}] {}", file_url.path));
+                }
+
+                Ok(())
+            }
+        }))
+        .buffer_unordered(20)
+        .collect()
+        .await;
+
+    // Check for upload errors
+    let errors: Vec<_> = upload_results.into_iter().filter_map(|r| r.err()).collect();
+    if !errors.is_empty() {
+        finish_spinner(spinner, "");
+        let error_details: Vec<String> = errors.iter().map(|e| format!("{e:#}")).collect();
+
+        if json {
+            output::json_output(&serde_json::json!({
+                "error": format!("{} of {file_count} file uploads failed", errors.len()),
+                "failedUploads": error_details,
+            }));
+            std::process::exit(1);
         }
+
+        for detail in &error_details {
+            output::warn(false, format!("upload error: {detail}"));
+        }
+        bail!("{} of {file_count} file uploads failed", errors.len());
     }
+
+    finish_spinner(
+        spinner,
+        &format!(
+            "Uploaded {file_count} files ({})",
+            format_bytes(total_size as usize)
+        ),
+    );
 
     // Signal upload complete
     let _: UploadCompleteResponse = client
@@ -271,6 +400,91 @@ pub async fn run(
         }
     }
 }
+
+// ── File scanning ────────────────────────────────────────────
+
+fn scan_files(dir: &Path) -> anyhow::Result<Vec<FileEntry>> {
+    let mut files = Vec::new();
+    scan_dir_recursive(dir, dir, &mut files)?;
+    files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    Ok(files)
+}
+
+fn scan_dir_recursive(
+    base: &Path,
+    current: &Path,
+    files: &mut Vec<FileEntry>,
+) -> anyhow::Result<()> {
+    let entries = std::fs::read_dir(current)
+        .with_context(|| format!("failed to read directory {}", current.display()))?;
+
+    for entry in entries {
+        let entry = entry?;
+        let ft = entry.file_type()?;
+        let path = entry.path();
+
+        // Skip symlinks to avoid loops and directory traversal
+        if ft.is_symlink() {
+            continue;
+        }
+
+        if ft.is_dir() {
+            scan_dir_recursive(base, &path, files)?;
+        } else if ft.is_file() {
+            let rel = path
+                .strip_prefix(base)
+                .context("failed to compute relative path")?;
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+
+            files.push(FileEntry {
+                path: rel_str,
+                size: entry.metadata()?.len(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+// ── Synthetic commit SHA ─────────────────────────────────────
+
+fn synthetic_sha(files: &[FileEntry]) -> String {
+    let mut hasher = Sha256::new();
+    for f in files {
+        hasher.update(format!("{}:{}\n", f.path, f.size).as_bytes());
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+// ── Content-Type guessing ────────────────────────────────────
+
+fn guess_content_type(path: &str) -> &'static str {
+    match path.rsplit('.').next().unwrap_or("") {
+        "html" | "htm" => "text/html",
+        "js" | "mjs" | "cjs" => "application/javascript",
+        "css" => "text/css",
+        "json" => "application/json",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "woff2" => "font/woff2",
+        "woff" => "font/woff",
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
+        "wasm" => "application/wasm",
+        "txt" => "text/plain",
+        "xml" => "application/xml",
+        "ico" => "image/x-icon",
+        "map" => "application/json",
+        "webmanifest" => "application/manifest+json",
+        _ => "application/octet-stream",
+    }
+}
+
+// ── Helpers ──────────────────────────────────────────────────
 
 fn detect_output_dir(project_dir: &Path) -> anyhow::Result<std::path::PathBuf> {
     for name in ["dist", ".output", "build"] {

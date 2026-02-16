@@ -44,9 +44,15 @@ indicatif = "0.17"
 # Browser open (device flow)
 open = "5"
 
-# Archive (deploy)
+# Archive (upgrade — self-update extraction)
 flate2 = "1"
 tar = "0.4"
+
+# Parallel uploads (deploy)
+futures = "0.3"
+
+# Hashing (synthetic commit SHA)
+sha2 = "0.10"
 
 # URL encoding
 percent-encoding = "2"
