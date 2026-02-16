@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-02-16
+
+### ✨ Features
+
+- **db:** add --file, stdin, and multi-statement support to db execute ([3495216](https://github.com/ONREZA/nrz-cli/commit/3495216cba36d3c4485fce64dd8d8ee337434bed))
+
 ## [0.4.0] - 2026-02-16
 
 ### ⚠️ BREAKING CHANGES
