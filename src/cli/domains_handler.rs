@@ -14,12 +14,29 @@ struct DomainsListResponse {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Domain {
     id: String,
     domain: String,
-    verified: Option<bool>,
-    #[serde(rename = "environmentId")]
-    environment_id: Option<String>,
+    environment_id: String,
+    dns_status: String,
+    tls_status: String,
+    dns_validated_at: Option<String>,
+    tls_issued_at: Option<String>,
+    tls_expires_at: Option<String>,
+    dns_error: Option<String>,
+    tls_error: Option<String>,
+    target_cname: Option<String>,
+    redirect_from_www: bool,
+    created_at: String,
+    environment: DomainEnvironment,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DomainEnvironment {
+    #[serde(rename = "type")]
+    env_type: String,
+    name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -28,6 +45,7 @@ struct EnvironmentsResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Environment {
     id: String,
     #[serde(rename = "type")]
@@ -39,17 +57,28 @@ struct AddDomainBody {
     domain: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AddDomainResponse {
+    domain: AddedDomain,
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddedDomain {
     id: String,
     domain: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct VerifyDomainResponse {
-    id: String,
-    domain: Option<String>,
-    verified: Option<bool>,
+    domain: String,
+    verified: bool,
+    dns_status: String,
+    #[serde(default)]
+    is_apex: Option<bool>,
 }
 
 pub async fn run(
@@ -95,33 +124,39 @@ async fn list(client: &ApiClient, project_id: &str, json: bool) -> anyhow::Resul
 
     if json {
         output::json_output(&resp);
+    } else if resp.domains.is_empty() {
+        eprintln!("  No custom domains found.");
+        return Ok(());
     } else {
-        if resp.domains.is_empty() {
-            eprintln!("  No custom domains found.");
-            return Ok(());
-        }
-
         eprintln!();
         eprintln!(
-            "  {:<40} {:<12} {}",
+            "  {:<40} {:<12} {:<10} {}",
             console::style("Domain").bold(),
-            console::style("Verified").bold(),
-            console::style("ID").bold(),
+            console::style("DNS").bold(),
+            console::style("TLS").bold(),
+            console::style("Environment").bold(),
         );
-        eprintln!("  {}", "-".repeat(70));
+        eprintln!("  {}", "-".repeat(75));
 
         for d in &resp.domains {
-            let verified = if d.verified.unwrap_or(false) {
-                console::style("yes").green().to_string()
-            } else {
-                console::style("no").red().to_string()
-            };
-            eprintln!("  {:<40} {:<12} {}", d.domain, verified, d.id);
+            let dns = format_status(&d.dns_status);
+            let tls = format_status(&d.tls_status);
+            let env_name = &d.environment.name;
+            eprintln!("  {:<40} {:<12} {:<10} {}", d.domain, dns, tls, env_name);
         }
         eprintln!();
     }
 
     Ok(())
+}
+
+fn format_status(status: &str) -> String {
+    match status.to_uppercase().as_str() {
+        "VALIDATED" | "ISSUED" => console::style(status.to_lowercase()).green().to_string(),
+        "PENDING" => console::style(status.to_lowercase()).yellow().to_string(),
+        "FAILED" => console::style(status.to_lowercase()).red().to_string(),
+        _ => status.to_lowercase(),
+    }
 }
 
 async fn add(
@@ -150,11 +185,18 @@ async fn add(
         .context("failed to add domain")?;
 
     if json {
-        output::json_output(&resp);
+        output::json_output(&serde_json::json!({
+            "id": resp.domain.id,
+            "domain": resp.domain.domain,
+            "message": resp.message,
+        }));
     } else {
         output::success(
             false,
-            format!("Added domain {}", console::style(&resp.domain).bold(),),
+            format!(
+                "Added domain {}",
+                console::style(&resp.domain.domain).bold(),
+            ),
         );
     }
 
@@ -197,16 +239,13 @@ async fn verify(
 
     if json {
         output::json_output(&resp);
+    } else if resp.verified {
+        output::success(false, "Domain verified.");
     } else {
-        let verified = resp.verified.unwrap_or(false);
-        if verified {
-            output::success(false, "Domain verified.");
-        } else {
-            output::warn(
-                false,
-                "Domain verification pending. Check your DNS records.",
-            );
-        }
+        output::warn(
+            false,
+            "Domain verification pending. Check your DNS records.",
+        );
     }
 
     Ok(())

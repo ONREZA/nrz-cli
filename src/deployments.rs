@@ -8,21 +8,35 @@ use crate::link::project_ref;
 use crate::output;
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DeploymentsResponse {
     deployments: Vec<Deployment>,
     total: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Deployment {
     pub id: String,
     pub status: DeploymentStatus,
+    #[serde(default)]
+    pub is_preview: Option<bool>,
+    #[serde(default)]
+    pub is_rollback: Option<bool>,
+    #[serde(default)]
+    pub is_active: Option<bool>,
+    #[serde(default)]
+    pub commit_sha: Option<String>,
     #[serde(default)]
     pub branch: Option<String>,
     #[serde(default)]
     pub url: Option<String>,
     #[serde(default)]
     pub created_at: Option<String>,
+    #[serde(default)]
+    pub deployed_at: Option<String>,
+    #[serde(default)]
+    pub finished_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

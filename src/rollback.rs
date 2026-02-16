@@ -9,8 +9,11 @@ use crate::link::project_ref;
 use crate::output;
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RollbackResponse {
     id: String,
+    #[serde(default)]
+    status: Option<String>,
     message: Option<String>,
     rollback_from: Option<String>,
     rollback_to: Option<String>,

@@ -17,6 +17,7 @@ use crate::link::{self, project_ref};
 use crate::output;
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct CreateDeploymentBody {
     manifest: serde_json::Value,
     production: bool,
@@ -27,25 +28,40 @@ struct CreateDeploymentBody {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct CreateDeploymentResponse {
     id: String,
     #[allow(dead_code)]
     status: String,
     url: String,
     upload_urls: UploadUrls,
+    #[allow(dead_code)]
+    artifact_key: String,
+    #[allow(dead_code)]
+    expires_in: u64,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct UploadUrls {
     artifact: String,
     server_bundle: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct DeploymentStatus {
+#[serde(rename_all = "camelCase")]
+struct DeploymentStatusResponse {
+    #[allow(dead_code)]
+    id: String,
     status: String,
     url: Option<String>,
+    #[allow(dead_code)]
+    production: Option<bool>,
     error: Option<String>,
+    #[allow(dead_code)]
+    created_at: Option<String>,
+    #[allow(dead_code)]
+    ready_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -219,7 +235,7 @@ pub async fn run(
             bail!("deployment timed out after 120s");
         }
 
-        let status: DeploymentStatus = client
+        let status: DeploymentStatusResponse = client
             .get(&format!("/v1/deployments/{}/status", deployment.id))
             .await
             .context("failed to check deployment status")?;

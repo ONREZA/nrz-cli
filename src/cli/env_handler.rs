@@ -8,42 +8,45 @@ use crate::output;
 
 use super::env::{EnvArgs, EnvCommand};
 
-const ENV_SCOPE_ALL: &str = "ALL";
-
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct EnvListResponse {
-    vars: Vec<EnvVar>,
+    env_vars: Vec<EnvVar>,
+    total: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct EnvVar {
     key: String,
     value: Option<String>,
-    #[serde(rename = "isSecret")]
-    is_secret: Option<bool>,
-    #[serde(rename = "scopeType")]
-    scope_type: Option<String>,
+    is_secret: bool,
+    /// "ALL" or ["PRODUCTION", "PREVIEW", ...]
+    target: serde_json::Value,
+    updated_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SetEnvBody<'a> {
     key: &'a str,
     value: &'a str,
-    #[serde(rename = "isSecret")]
     is_secret: bool,
-    #[serde(rename = "scopeType")]
-    scope_type: &'static str,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SetEnvResponse {
     key: String,
+    created: bool,
+    #[serde(default)]
+    warnings: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize)]
 struct DeleteEnvResponse {
-    #[serde(default)]
-    key: Option<String>,
+    #[allow(dead_code)]
+    deleted: bool,
 }
 
 pub async fn run(
@@ -75,34 +78,44 @@ async fn list(client: &ApiClient, project_id: &str, json: bool) -> anyhow::Resul
 
     if json {
         output::json_output(&resp);
+    } else if resp.env_vars.is_empty() {
+        eprintln!("  No environment variables found.");
+        return Ok(());
     } else {
-        if resp.vars.is_empty() {
-            eprintln!("  No environment variables found.");
-            return Ok(());
-        }
-
         eprintln!();
         eprintln!(
             "  {:<30} {:<30} {}",
             console::style("Key").bold(),
             console::style("Value").bold(),
-            console::style("Scope").bold(),
+            console::style("Target").bold(),
         );
         eprintln!("  {}", "-".repeat(70));
 
-        for v in &resp.vars {
-            let display_val = if v.is_secret.unwrap_or(false) {
+        for v in &resp.env_vars {
+            let display_val = if v.is_secret {
                 "*****".to_string()
             } else {
                 v.value.as_deref().unwrap_or("-").to_string()
             };
-            let scope = v.scope_type.as_deref().unwrap_or("ALL");
-            eprintln!("  {:<30} {:<30} {}", v.key, display_val, scope);
+            let target = format_target(&v.target);
+            eprintln!("  {:<30} {:<30} {}", v.key, display_val, target);
         }
         eprintln!();
     }
 
     Ok(())
+}
+
+fn format_target(target: &serde_json::Value) -> String {
+    match target {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        _ => "ALL".to_string(),
+    }
 }
 
 async fn set(
@@ -117,7 +130,6 @@ async fn set(
         key,
         value,
         is_secret: secret,
-        scope_type: ENV_SCOPE_ALL,
     };
 
     let resp: SetEnvResponse = client
@@ -135,13 +147,16 @@ async fn set(
 }
 
 async fn delete(client: &ApiClient, project_id: &str, key: &str, json: bool) -> anyhow::Result<()> {
-    let resp: DeleteEnvResponse = client
+    let _resp: DeleteEnvResponse = client
         .delete(&format!("/v1/projects/{}/env/{}", project_id, key))
         .await
         .context("failed to delete environment variable")?;
 
     if json {
-        output::json_output(&resp);
+        output::json_output(&serde_json::json!({
+            "key": key,
+            "deleted": true,
+        }));
     } else {
         output::success(false, format!("Deleted {}", console::style(key).bold()));
     }
