@@ -82,7 +82,7 @@ CLI не зависит от адаптеров. Связь — через BUILD
 | `nrz build` | Валидация build output и manifest |
 | `nrz deploy` | Деплой на платформу |
 | `nrz db shell` | Интерактивная SQLite консоль |
-| `nrz db execute <sql>` | Выполнение SQL запроса |
+| `nrz db execute [sql]` | Выполнение SQL (аргумент, `--file`, или stdin) |
 | `nrz db info` | Информация о базе (таблицы, размер) |
 | `nrz db reset` | Сброс локальной БД |
 | `nrz kv get <key>` | Получить значение |

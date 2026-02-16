@@ -1,5 +1,7 @@
 pub mod db;
 pub mod db_handler;
+#[cfg(test)]
+mod db_handler_tests;
 pub mod domains;
 pub mod domains_handler;
 pub mod env;

@@ -238,3 +238,176 @@ fn dev_with_custom_command_works_without_detection() {
         "Should not fail on framework detection when --command is provided"
     );
 }
+
+// --- db execute: multi-statement, --file, stdin ---
+
+#[test]
+fn db_execute_multi_statement() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let sql = "CREATE TABLE t1 (id INTEGER PRIMARY KEY, name TEXT); \
+               INSERT INTO t1 (name) VALUES ('alice'); \
+               INSERT INTO t1 (name) VALUES ('bob');";
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["db", "execute", sql]);
+    cmd.assert().success().stdout(contains("changes"));
+
+    // Verify both rows were inserted
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["db", "execute", "SELECT COUNT(*) as cnt FROM t1"]);
+    let output = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("2"), "expected 2 rows, got: {stdout}");
+}
+
+#[test]
+fn db_execute_file_flag() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let schema = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);\n\
+                  INSERT INTO users (email) VALUES ('test@example.com');";
+    let schema_path = temp.path().join("schema.sql");
+    fs::write(&schema_path, schema).unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["db", "execute", "--file", schema_path.to_str().unwrap()]);
+    cmd.assert().success().stdout(contains("changes"));
+
+    // Verify data was inserted
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["db", "execute", "SELECT * FROM users"]);
+    cmd.assert().success().stdout(contains("test@example.com"));
+}
+
+#[test]
+fn db_execute_stdin() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let sql = "CREATE TABLE items (id INTEGER PRIMARY KEY, val TEXT);\n\
+               INSERT INTO items (val) VALUES ('hello');";
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["db", "execute", "-"]);
+    cmd.write_stdin(sql);
+    cmd.assert().success().stdout(contains("changes"));
+}
+
+#[test]
+fn db_execute_stdin_implicit() {
+    let temp = tempfile::tempdir().unwrap();
+
+    // When no sql arg and stdin is piped, should read from stdin
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["db", "execute"]);
+    cmd.write_stdin("CREATE TABLE auto (id INTEGER PRIMARY KEY);");
+    cmd.assert().success().stdout(contains("changes"));
+}
+
+#[test]
+fn db_execute_sql_with_comments() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let sql = "-- This is a comment\nCREATE TABLE commented (id INTEGER PRIMARY KEY);";
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["db", "execute", sql]);
+    cmd.assert().success();
+
+    // Verify table was actually created
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args([
+        "db",
+        "execute",
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='commented'",
+    ]);
+    cmd.assert().success().stdout(contains("commented"));
+}
+
+#[test]
+fn db_execute_file_takes_priority_over_positional() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let schema_path = temp.path().join("schema.sql");
+    fs::write(
+        &schema_path,
+        "CREATE TABLE from_file (id INTEGER PRIMARY KEY);",
+    )
+    .unwrap();
+
+    // --file should take priority, positional arg should be ignored
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args([
+        "db",
+        "execute",
+        "CREATE TABLE from_arg (id INT)",
+        "--file",
+        schema_path.to_str().unwrap(),
+    ]);
+    cmd.assert().success();
+
+    // Verify from_file table exists
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args([
+        "db",
+        "execute",
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='from_file'",
+    ]);
+    cmd.assert().success().stdout(contains("from_file"));
+
+    // Verify from_arg table does NOT exist
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args([
+        "db",
+        "execute",
+        "SELECT COUNT(*) as cnt FROM sqlite_master WHERE type='table' AND name='from_arg'",
+    ]);
+    let output = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("0"),
+        "from_arg table should not exist, got: {stdout}"
+    );
+}
+
+#[test]
+fn db_execute_file_not_found() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["db", "execute", "--file", "nonexistent.sql"]);
+    cmd.assert().failure().stdout(contains("error"));
+}
+
+#[test]
+fn db_execute_empty_file() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let schema_path = temp.path().join("empty.sql");
+    fs::write(&schema_path, "   \n  ").unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["db", "execute", "--file", schema_path.to_str().unwrap()]);
+    cmd.assert().failure().stdout(contains("empty"));
+}
+
+#[test]
+fn db_execute_batch_json_has_batch_field() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let sql = "CREATE TABLE b1 (id INT); INSERT INTO b1 VALUES (1);";
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["db", "execute", sql]);
+    let output = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"batch\":true"),
+        "batch JSON should have batch field, got: {stdout}"
+    );
+}

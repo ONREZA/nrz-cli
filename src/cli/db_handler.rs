@@ -1,8 +1,9 @@
 //! CLI handler for `nrz db` subcommands.
 
+use std::io::{IsTerminal, Read as _};
 use std::path::Path;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use rusqlite::Connection;
 use serde::Serialize;
 
@@ -14,6 +15,12 @@ use crate::output;
 #[derive(Serialize)]
 struct DbExecuteOutput {
     changes: usize,
+}
+
+#[derive(Serialize)]
+struct DbBatchOutput {
+    batch: bool,
+    changes_last_statement: usize,
 }
 
 #[derive(Serialize)]
@@ -50,98 +57,53 @@ pub async fn run(args: DbArgs, json: bool) -> anyhow::Result<()> {
             eprintln!("nrz db shell: not yet implemented");
             eprintln!("  use `nrz db execute <sql>` for now");
         }
-        DbCommand::Execute { sql } => {
-            if !db_path.exists() {
-                std::fs::create_dir_all(&data_dir)?;
+        DbCommand::Execute { sql, file } => {
+            // Resolve SQL source: --file, stdin ("-"), or positional argument
+            let sql = if let Some(path) = file {
+                std::fs::read_to_string(&path).with_context(|| format!("failed to read {path}"))?
+            } else if sql.as_deref() == Some("-")
+                || (sql.is_none() && !std::io::stdin().is_terminal())
+            {
+                let mut buf = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut buf)
+                    .context("failed to read from stdin")?;
+                buf
+            } else if let Some(s) = sql {
+                s
+            } else {
+                bail!("provide SQL as argument, --file <path>, or pipe to stdin");
+            };
+
+            let sql = sql.trim();
+            if sql.is_empty() {
+                bail!("SQL input is empty");
             }
-            let conn = Connection::open(&db_path)
+
+            if !db_path.exists() {
+                std::fs::create_dir_all(&data_dir).with_context(|| {
+                    format!("failed to create data directory {}", data_dir.display())
+                })?;
+            }
+            let mut conn = Connection::open(&db_path)
                 .with_context(|| format!("failed to open {}", db_path.display()))?;
 
-            let mut stmt = conn
-                .prepare(&sql)
-                .with_context(|| format!("SQL error: {sql}"))?;
-
-            let col_names: Vec<String> =
-                stmt.column_names().iter().map(|s| s.to_string()).collect();
-
-            if col_names.is_empty() {
-                let changes = stmt.raw_execute()?;
+            if is_multi_statement(sql) {
+                let tx = conn.transaction().context("failed to begin transaction")?;
+                tx.execute_batch(sql)
+                    .context("SQL batch execution failed (all changes rolled back)")?;
+                let changes = tx.changes() as usize;
+                tx.commit().context("failed to commit transaction")?;
                 if json {
-                    output::json_output(&DbExecuteOutput { changes });
-                } else {
-                    eprintln!("{changes} row(s) affected");
-                }
-            } else {
-                let mut rows: Vec<Vec<serde_json::Value>> = Vec::new();
-                let mut raw_rows = stmt.raw_query();
-                while let Some(row) = raw_rows.next()? {
-                    let mut values = Vec::new();
-                    for i in 0..col_names.len() {
-                        let val = match row.get_ref(i)? {
-                            rusqlite::types::ValueRef::Null => serde_json::Value::Null,
-                            rusqlite::types::ValueRef::Integer(n) => {
-                                serde_json::Value::Number(n.into())
-                            }
-                            rusqlite::types::ValueRef::Real(f) => serde_json::json!(f),
-                            rusqlite::types::ValueRef::Text(s) => {
-                                serde_json::Value::String(String::from_utf8_lossy(s).into_owned())
-                            }
-                            rusqlite::types::ValueRef::Blob(b) => {
-                                serde_json::Value::String(format!("<blob {} bytes>", b.len()))
-                            }
-                        };
-                        values.push(val);
-                    }
-                    rows.push(values);
-                }
-
-                if json {
-                    output::json_output(&DbQueryOutput {
-                        columns: col_names,
-                        rows,
+                    output::json_output(&DbBatchOutput {
+                        batch: true,
+                        changes_last_statement: changes,
                     });
                 } else {
-                    // Human-readable table output
-                    let str_rows: Vec<Vec<String>> = rows
-                        .iter()
-                        .map(|row| {
-                            row.iter()
-                                .map(|v| match v {
-                                    serde_json::Value::Null => "NULL".to_string(),
-                                    serde_json::Value::String(s) => s.clone(),
-                                    other => other.to_string(),
-                                })
-                                .collect()
-                        })
-                        .collect();
-
-                    let mut widths: Vec<usize> = col_names.iter().map(|n| n.len()).collect();
-                    for row in &str_rows {
-                        for (i, val) in row.iter().enumerate() {
-                            widths[i] = widths[i].max(val.len());
-                        }
-                    }
-
-                    let header: Vec<String> = col_names
-                        .iter()
-                        .enumerate()
-                        .map(|(i, n)| format!("{:width$}", n, width = widths[i]))
-                        .collect();
-                    eprintln!("{}", header.join(" | "));
-                    let sep: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
-                    eprintln!("{}", sep.join("-+-"));
-
-                    for row in &str_rows {
-                        let formatted: Vec<String> = row
-                            .iter()
-                            .enumerate()
-                            .map(|(i, v)| format!("{:width$}", v, width = widths[i]))
-                            .collect();
-                        eprintln!("{}", formatted.join(" | "));
-                    }
-
-                    eprintln!("\n{} row(s)", str_rows.len());
+                    eprintln!("batch executed ({changes} row(s) affected by last statement)");
                 }
+            } else {
+                execute_single(&conn, sql, json)?;
             }
         }
         DbCommand::Info => {
@@ -235,6 +197,148 @@ pub async fn run(args: DbArgs, json: bool) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Check if SQL contains multiple statements.
+/// Handles `'...'`, `"..."`, `-- ...`, and `/* ... */`.
+#[cfg_attr(test, allow(dead_code))]
+pub(crate) fn is_multi_statement(sql: &str) -> bool {
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut found_semi = false;
+    let mut chars = sql.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
+            '"' if !in_single_quote => in_double_quote = !in_double_quote,
+            '-' if !in_single_quote && !in_double_quote => {
+                if chars.peek() == Some(&'-') {
+                    for c2 in chars.by_ref() {
+                        if c2 == '\n' {
+                            break;
+                        }
+                    }
+                }
+            }
+            '/' if !in_single_quote && !in_double_quote => {
+                if chars.peek() == Some(&'*') {
+                    chars.next(); // consume '*'
+                    loop {
+                        match chars.next() {
+                            Some('*') if chars.peek() == Some(&'/') => {
+                                chars.next(); // consume '/'
+                                break;
+                            }
+                            Some(_) => {}
+                            None => break,
+                        }
+                    }
+                }
+            }
+            ';' if !in_single_quote && !in_double_quote => {
+                if found_semi {
+                    return true;
+                }
+                found_semi = true;
+            }
+            c if !c.is_whitespace() && !in_single_quote && !in_double_quote && found_semi => {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn execute_single(conn: &Connection, sql: &str, json: bool) -> anyhow::Result<()> {
+    let mut stmt = conn
+        .prepare(sql)
+        .with_context(|| format!("SQL error: {sql}"))?;
+
+    let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+
+    if col_names.is_empty() {
+        let changes = stmt.raw_execute()?;
+        if json {
+            output::json_output(&DbExecuteOutput { changes });
+        } else {
+            eprintln!("{changes} row(s) affected");
+        }
+    } else {
+        let mut rows: Vec<Vec<serde_json::Value>> = Vec::new();
+        let mut raw_rows = stmt.raw_query();
+        while let Some(row) = raw_rows.next()? {
+            let mut values = Vec::new();
+            for i in 0..col_names.len() {
+                let val = match row.get_ref(i)? {
+                    rusqlite::types::ValueRef::Null => serde_json::Value::Null,
+                    rusqlite::types::ValueRef::Integer(n) => serde_json::Value::Number(n.into()),
+                    rusqlite::types::ValueRef::Real(f) => serde_json::json!(f),
+                    rusqlite::types::ValueRef::Text(s) => {
+                        serde_json::Value::String(String::from_utf8_lossy(s).into_owned())
+                    }
+                    rusqlite::types::ValueRef::Blob(b) => {
+                        serde_json::Value::String(format!("<blob {} bytes>", b.len()))
+                    }
+                };
+                values.push(val);
+            }
+            rows.push(values);
+        }
+
+        if json {
+            output::json_output(&DbQueryOutput {
+                columns: col_names,
+                rows,
+            });
+        } else {
+            print_table(&col_names, &rows);
+        }
+    }
+    Ok(())
+}
+
+fn print_table(col_names: &[String], rows: &[Vec<serde_json::Value>]) {
+    let str_rows: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|v| match v {
+                    serde_json::Value::Null => "NULL".to_string(),
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                })
+                .collect()
+        })
+        .collect();
+
+    let mut widths: Vec<usize> = col_names.iter().map(|n| n.len()).collect();
+    for row in &str_rows {
+        for (i, val) in row.iter().enumerate() {
+            widths[i] = widths[i].max(val.len());
+        }
+    }
+
+    let header: Vec<String> = col_names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| format!("{:width$}", n, width = widths[i]))
+        .collect();
+    eprintln!("{}", header.join(" | "));
+    let sep: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
+    eprintln!("{}", sep.join("-+-"));
+
+    for row in &str_rows {
+        let formatted: Vec<String> = row
+            .iter()
+            .enumerate()
+            .map(|(i, v)| format!("{:width$}", v, width = widths[i]))
+            .collect();
+        eprintln!("{}", formatted.join(" | "));
+    }
+
+    eprintln!("\n{} row(s)", str_rows.len());
 }
 
 fn format_size(bytes: u64) -> String {

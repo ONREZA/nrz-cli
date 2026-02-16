@@ -11,10 +11,15 @@ pub enum DbCommand {
     /// Open interactive SQLite shell
     Shell,
 
-    /// Execute a SQL query
+    /// Execute SQL query (from argument, --file, or stdin)
     Execute {
-        /// SQL query to execute
-        sql: String,
+        /// SQL query to execute (use '-' to read from stdin)
+        #[arg(allow_hyphen_values = true)]
+        sql: Option<String>,
+
+        /// Read SQL from a file
+        #[arg(long, short)]
+        file: Option<String>,
     },
 
     /// Show database info (tables, size)
