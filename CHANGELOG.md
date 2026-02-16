@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-02-16
+
+### 🐛 Bug Fixes
+
+- **cli:** align API structs with actual server responses ([c38c7f7](https://github.com/ONREZA/nrz-cli/commit/c38c7f767a8b708b89b2fbb466a5f69c43c386b1))
+- **cli:** migrate from removed /v1/user/projects to workspace-scoped API ([83091b0](https://github.com/ONREZA/nrz-cli/commit/83091b05cb6b2699a6cb9daa11afc3f954444268))
+
 ## [0.3.0] - 2026-02-15
 
 ### ✨ Features
