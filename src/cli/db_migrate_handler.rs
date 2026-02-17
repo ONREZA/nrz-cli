@@ -11,7 +11,7 @@ use nrz::emulator::data_dir;
 
 use crate::api::ApiClient;
 use crate::auth;
-use crate::link::project_ref;
+use crate::link::{environment_ref, project_ref};
 use crate::migrations::{self, tracking};
 use crate::output;
 
@@ -88,6 +88,7 @@ pub async fn handle_migrate(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    env: Option<&str>,
 ) -> anyhow::Result<()> {
     let project_dir = Path::new(".")
         .canonicalize()
@@ -108,6 +109,7 @@ pub async fn handle_migrate(
                     json,
                     token,
                     workspace,
+                    env,
                 )
                 .await
             } else {
@@ -116,7 +118,8 @@ pub async fn handle_migrate(
         }
         DbMigrateCommand::Status { remote, project_id } => {
             if remote {
-                status_remote(&project_dir, project_id.as_deref(), json, token, workspace).await
+                status_remote(&project_dir, project_id.as_deref(), json, token, workspace, env)
+                    .await
             } else {
                 status_local(&project_dir, json)
             }
@@ -133,18 +136,20 @@ pub async fn handle_push(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    env: Option<&str>,
 ) -> anyhow::Result<()> {
     let sql = resolve_sql(sql, file)?;
 
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
     let pid = project_ref::resolve_project_id(project_id.as_deref())?;
+    let (eid, _) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     output::status(json, "~", "Pushing SQL to remote database...");
 
     let resp: RemoteExecResponse = client
         .post(
-            &format!("/api/d1/databases/{pid}/exec"),
+            &format!("/api/d1/databases/{pid}/exec?environmentId={eid}"),
             &serde_json::json!({ "sql": sql }),
         )
         .await
@@ -312,6 +317,7 @@ async fn apply_remote(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    env: Option<&str>,
 ) -> anyhow::Result<()> {
     let all_migrations = migrations::scan_migrations_dir(project_dir)?;
     if all_migrations.is_empty() {
@@ -329,12 +335,13 @@ async fn apply_remote(
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
     let pid = project_ref::resolve_project_id(project_id)?;
+    let (eid, _) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     output::status(json, "~", "Applying migrations to remote database...");
 
     let resp: RemoteApplyResponse = client
         .post(
-            &format!("/api/d1/databases/{pid}/migrations/apply"),
+            &format!("/api/d1/databases/{pid}/migrations/apply?environmentId={eid}"),
             &serde_json::json!({
                 "migrations": all_migrations,
                 "dryRun": dry_run,
@@ -426,13 +433,15 @@ async fn status_remote(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    env: Option<&str>,
 ) -> anyhow::Result<()> {
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
     let pid = project_ref::resolve_project_id(project_id)?;
+    let (eid, _) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     let remote_applied: Vec<RemoteMigrationEntry> = client
-        .get(&format!("/api/d1/databases/{pid}/migrations"))
+        .get(&format!("/api/d1/databases/{pid}/migrations?environmentId={eid}"))
         .await
         .context("failed to fetch remote migrations")?;
 

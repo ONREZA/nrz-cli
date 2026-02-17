@@ -47,6 +47,10 @@ pub struct Cli {
     /// Workspace slug to use
     #[arg(long, global = true, env = "NRZ_WORKSPACE")]
     pub workspace: Option<String>,
+
+    /// Environment type or ID (production, preview, development)
+    #[arg(long, global = true, env = "NRZ_ENV")]
+    pub env: Option<String>,
 }
 
 #[derive(Subcommand)]

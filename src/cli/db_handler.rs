@@ -1,6 +1,6 @@
 //! CLI handler for `nrz db` subcommands.
 
-use std::io::{IsTerminal, Read as _};
+use std::io::{BufRead, IsTerminal, Read as _, Write as _};
 use std::path::Path;
 
 use anyhow::{Context, bail};
@@ -10,6 +10,9 @@ use serde::Serialize;
 use nrz::emulator::data_dir;
 
 use super::db::{DbArgs, DbCommand};
+use crate::api::ApiClient;
+use crate::auth;
+use crate::link::{environment_ref, project_ref};
 use crate::output;
 
 #[derive(Serialize)]
@@ -52,6 +55,7 @@ pub async fn run(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    env: Option<&str>,
 ) -> anyhow::Result<()> {
     let project_dir = Path::new(".").canonicalize()?;
     let data_dir = data_dir(&project_dir);
@@ -175,7 +179,7 @@ pub async fn run(
             }
         }
         DbCommand::Migrate { command } => {
-            return super::db_migrate_handler::handle_migrate(command, json, token, workspace)
+            return super::db_migrate_handler::handle_migrate(command, json, token, workspace, env)
                 .await;
         }
         DbCommand::Push {
@@ -184,11 +188,19 @@ pub async fn run(
             project_id,
         } => {
             return super::db_migrate_handler::handle_push(
-                sql, file, project_id, json, token, workspace,
+                sql, file, project_id, json, token, workspace, env,
             )
             .await;
         }
-        DbCommand::Reset { force } => {
+        DbCommand::Reset {
+            force,
+            remote,
+            project_id,
+        } => {
+            if remote {
+                return reset_remote(project_id.as_deref(), force, json, token, workspace, env)
+                    .await;
+            }
             if !force {
                 eprintln!("use --force to confirm database reset");
                 return Ok(());
@@ -358,6 +370,83 @@ fn print_table(col_names: &[String], rows: &[Vec<serde_json::Value>]) {
     }
 
     eprintln!("\n{} row(s)", str_rows.len());
+}
+
+async fn reset_remote(
+    project_id: Option<&str>,
+    force: bool,
+    json: bool,
+    token: Option<&str>,
+    workspace: Option<&str>,
+    env: Option<&str>,
+) -> anyhow::Result<()> {
+    let tok = auth::resolve_token(token, workspace)?;
+    let client = ApiClient::authenticated(&tok)?;
+    let pid = project_ref::resolve_project_id(project_id)?;
+    let (eid, env_type) =
+        environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
+
+    // Require confirmation for production environments
+    if !force {
+        if json || !std::io::stdin().is_terminal() {
+            bail!("--force is required to reset remote database in non-interactive mode");
+        }
+
+        if env_type == environment_ref::EnvironmentType::Production {
+            eprintln!(
+                "  {} This will delete ALL data in the production database.",
+                console::style("WARNING:").red().bold(),
+            );
+            eprint!(
+                "  {} ",
+                console::style("Type 'production' to confirm:").bold(),
+            );
+            std::io::stderr().flush()?;
+
+            let mut line = String::new();
+            std::io::stdin().lock().read_line(&mut line)?;
+            if line.trim() != "production" {
+                bail!("reset cancelled");
+            }
+        } else {
+            eprintln!(
+                "  {} This will delete ALL data in the remote database.",
+                console::style("WARNING:").red().bold(),
+            );
+            eprint!("  {} ", console::style("Continue? (y/N):").bold());
+            std::io::stderr().flush()?;
+
+            let mut line = String::new();
+            std::io::stdin().lock().read_line(&mut line)?;
+            if !matches!(line.trim().to_lowercase().as_str(), "y" | "yes") {
+                bail!("reset cancelled");
+            }
+        }
+    }
+
+    output::status(json, "~", "Resetting remote database...");
+
+    let resp: serde_json::Value = client
+        .post(
+            &format!("/api/d1/databases/{pid}/reset?environmentId={eid}"),
+            &serde_json::json!({}),
+        )
+        .await
+        .context("failed to reset remote database")?;
+
+    if let Some(err) = resp.get("error").and_then(|e| e.as_str()) {
+        bail!("remote database reset failed: {err}");
+    }
+
+    if json {
+        output::json_output(&StatusOutput {
+            status: "ok".into(),
+        });
+    } else {
+        output::success(false, "Remote database reset successfully.");
+    }
+
+    Ok(())
 }
 
 fn format_size(bytes: u64) -> String {

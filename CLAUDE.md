@@ -7,6 +7,7 @@
 **LLM-First CLI.** Все команды проектируются для автономного использования LLM-агентами:
 - `--json` глобальный флаг (`NRZ_JSON=1`) — машинный вывод в stdout
 - `--token` глобальный флаг (`NRZ_TOKEN`) — аутентификация без device flow
+- `--env` глобальный флаг (`NRZ_ENV`) — выбор environment (production/preview/development или ID)
 - Интерактивные prompts имеют non-interactive альтернативу (`--project-id`, `--force`)
 - JSON output: один объект в stdout, ошибки `{"error": "..."}`, exit code 1
 - Human output: цветной текст в stderr (по умолчанию)
@@ -29,6 +30,9 @@ src/
     domains.rs       — DomainsArgs, DomainsCommand
     domains_handler.rs — обработчик команд domains
     db_migrate_handler.rs — обработчик команд db migrate/push
+  link/
+    environment_ref.rs   — load/save/resolve environment (per-environment DB)
+    environment_ref_tests.rs — тесты environment_ref
   projects.rs       — nrz projects
   deployments.rs    — nrz deployments
   logs.rs           — nrz logs
@@ -94,6 +98,7 @@ CLI не зависит от адаптеров. Связь — через BUILD
 | `nrz db execute [sql]` | Выполнение SQL (аргумент, `--file`, или stdin) |
 | `nrz db info` | Информация о базе (таблицы, размер) |
 | `nrz db reset` | Сброс локальной БД |
+| `nrz db reset --remote` | Сброс удалённой D1 БД (с подтверждением) |
 | `nrz db migrate create <name>` | Создать новый файл миграции |
 | `nrz db migrate apply` | Применить pending миграции (локально) |
 | `nrz db migrate apply --remote` | Применить миграции на удалённой D1 |
@@ -190,6 +195,8 @@ src/
     tracking_tests.rs — unit-тесты (5 тестов)
   init/
     init_tests.rs     — unit-тесты (6 тестов)
+  link/
+    environment_ref_tests.rs — unit-тесты (9 тестов)
 ```
 
 Подключение в `mod.rs`:

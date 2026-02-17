@@ -25,11 +25,19 @@ pub enum DbCommand {
     /// Show database info (tables, size)
     Info,
 
-    /// Reset local database (delete and recreate)
+    /// Reset database (local by default, or --remote for remote D1)
     Reset {
         /// Skip confirmation prompt
         #[arg(long)]
         force: bool,
+
+        /// Reset remote D1 database
+        #[arg(long)]
+        remote: bool,
+
+        /// Project ID (skip auto-detection)
+        #[arg(long)]
+        project_id: Option<String>,
     },
 
     /// Manage database migrations

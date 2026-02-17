@@ -1,5 +1,8 @@
+pub mod environment_ref;
 pub mod project_ref;
 
+#[cfg(test)]
+mod environment_ref_tests;
 #[cfg(test)]
 mod project_ref_tests;
 

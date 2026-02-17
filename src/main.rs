@@ -29,8 +29,11 @@ async fn main() {
     let json = cli.json || !std::io::stdout().is_terminal();
     let token = cli.token.clone();
     let workspace = cli.workspace.clone();
+    let env = cli.env.clone();
 
-    let result = run_command(cli.command, json, token.as_deref(), workspace.as_deref()).await;
+    let result =
+        run_command(cli.command, json, token.as_deref(), workspace.as_deref(), env.as_deref())
+            .await;
 
     if let Err(ref e) = result {
         if json {
@@ -48,12 +51,13 @@ async fn run_command(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    env: Option<&str>,
 ) -> anyhow::Result<()> {
     match command {
         Command::Dev(args) => dev::run(args).await,
         Command::Build(args) => build::run(args, json).await,
         Command::Deploy(args) => deploy::run(args, json, token, workspace).await,
-        Command::Db(args) => cli::db_handler::run(args, json, token, workspace).await,
+        Command::Db(args) => cli::db_handler::run(args, json, token, workspace, env).await,
         Command::Kv(args) => cli::kv_handler::run(args, json).await,
         Command::Login => auth::login(json, token).await,
         Command::Whoami => auth::whoami(json, token, workspace).await,
