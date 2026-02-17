@@ -20,6 +20,7 @@ use crate::auth;
 use crate::build;
 use crate::cli::{BuildArgs, DeployArgs};
 use crate::link::{self, project_ref};
+use crate::migrations;
 use crate::output;
 
 // ── Workspace / plan ─────────────────────────────────────────
@@ -74,6 +75,8 @@ struct CreateDeploymentBody {
     branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     commit_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    migrations: Option<Vec<migrations::Migration>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -238,6 +241,9 @@ pub async fn run(
         }
     };
 
+    // Detect migrations
+    let mig_entries = detect_migrations(&manifest_raw, &project_dir, json, args.skip_migrations);
+
     // Create deployment
     output::status(json, "~", "Creating deployment...");
     let body = CreateDeploymentBody {
@@ -246,6 +252,7 @@ pub async fn run(
         production: args.prod,
         branch,
         commit_sha,
+        migrations: mig_entries,
     };
     let file_count = body.files.len();
 
@@ -396,7 +403,71 @@ pub async fn run(
                 let msg = status.error.unwrap_or_else(|| "unknown error".into());
                 bail!("deployment failed: {msg}");
             }
-            _ => continue,
+            "migration_failed" => {
+                finish_spinner(spinner, "");
+                let msg = status
+                    .error
+                    .unwrap_or_else(|| "migration failed during deployment".into());
+                bail!("migration failed: {msg}");
+            }
+            "migrating" => {
+                if let Some(ref s) = spinner {
+                    s.set_message("Applying migrations...");
+                }
+                continue;
+            }
+            other => {
+                if let Some(ref s) = spinner {
+                    s.set_message(format!("Status: {other}..."));
+                }
+                continue;
+            }
+        }
+    }
+}
+
+// ── Migration detection ──────────────────────────────────────
+
+fn detect_migrations(
+    manifest: &serde_json::Value,
+    project_dir: &Path,
+    json: bool,
+    skip: bool,
+) -> Option<Vec<migrations::Migration>> {
+    if skip {
+        return None;
+    }
+
+    // Check if manifest declares DB binding
+    let has_db = manifest
+        .pointer("/features/bindings/db")
+        .is_some_and(|v| !v.is_null());
+
+    if !has_db {
+        return None;
+    }
+
+    let migrations_dir = project_dir.join("migrations");
+    if !migrations_dir.is_dir() {
+        return None;
+    }
+
+    match migrations::scan_migrations_dir(project_dir) {
+        Ok(migs) if migs.is_empty() => None,
+        Ok(migs) => {
+            output::status(
+                json,
+                "~",
+                format!(
+                    "Detected {} migration(s), will apply during activation",
+                    migs.len()
+                ),
+            );
+            Some(migs)
+        }
+        Err(e) => {
+            output::warn(json, format!("Failed to scan migrations: {e:#}"));
+            None
         }
     }
 }

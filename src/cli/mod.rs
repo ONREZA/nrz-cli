@@ -2,6 +2,9 @@ pub mod db;
 pub mod db_handler;
 #[cfg(test)]
 mod db_handler_tests;
+pub mod db_migrate_handler;
+#[cfg(test)]
+mod db_migrate_handler_tests;
 pub mod domains;
 pub mod domains_handler;
 pub mod env;
@@ -98,6 +101,9 @@ pub enum Command {
 
     /// Manage workspaces
     Workspace(WorkspaceArgs),
+
+    /// Initialize an existing project on ONREZA platform
+    Init(InitArgs),
 }
 
 #[derive(Parser)]
@@ -198,4 +204,19 @@ pub struct DeployArgs {
     /// Project ID (skip interactive selection)
     #[arg(long)]
     pub project_id: Option<String>,
+
+    /// Skip database migrations during deploy
+    #[arg(long)]
+    pub skip_migrations: bool,
+}
+
+#[derive(Parser)]
+pub struct InitArgs {
+    /// Project name (default: directory name)
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// Skip framework/package manager detection
+    #[arg(long)]
+    pub skip_detection: bool,
 }

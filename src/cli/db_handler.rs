@@ -47,7 +47,12 @@ struct StatusOutput {
     status: String,
 }
 
-pub async fn run(args: DbArgs, json: bool) -> anyhow::Result<()> {
+pub async fn run(
+    args: DbArgs,
+    json: bool,
+    token: Option<&str>,
+    workspace: Option<&str>,
+) -> anyhow::Result<()> {
     let project_dir = Path::new(".").canonicalize()?;
     let data_dir = data_dir(&project_dir);
     let db_path = data_dir.join("dev.db");
@@ -168,6 +173,20 @@ pub async fn run(args: DbArgs, json: bool) -> anyhow::Result<()> {
                     }
                 }
             }
+        }
+        DbCommand::Migrate { command } => {
+            return super::db_migrate_handler::handle_migrate(command, json, token, workspace)
+                .await;
+        }
+        DbCommand::Push {
+            sql,
+            file,
+            project_id,
+        } => {
+            return super::db_migrate_handler::handle_push(
+                sql, file, project_id, json, token, workspace,
+            )
+            .await;
         }
         DbCommand::Reset { force } => {
             if !force {

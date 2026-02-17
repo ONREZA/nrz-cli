@@ -5,8 +5,10 @@ mod cli;
 mod deploy;
 mod deployments;
 mod dev;
+mod init;
 mod link;
 mod logs;
+mod migrations;
 mod output;
 mod rollback;
 mod upgrade;
@@ -51,7 +53,7 @@ async fn run_command(
         Command::Dev(args) => dev::run(args).await,
         Command::Build(args) => build::run(args, json).await,
         Command::Deploy(args) => deploy::run(args, json, token, workspace).await,
-        Command::Db(args) => cli::db_handler::run(args, json).await,
+        Command::Db(args) => cli::db_handler::run(args, json, token, workspace).await,
         Command::Kv(args) => cli::kv_handler::run(args, json).await,
         Command::Login => auth::login(json, token).await,
         Command::Whoami => auth::whoami(json, token, workspace).await,
@@ -65,5 +67,6 @@ async fn run_command(
         Command::Domains(args) => cli::domains_handler::run(args, json, token, workspace).await,
         Command::Rollback(args) => rollback::run(args, json, token, workspace).await,
         Command::Workspace(args) => cli::workspace_handler::run(args, json).await,
+        Command::Init(args) => init::run(args, json, token, workspace).await,
     }
 }

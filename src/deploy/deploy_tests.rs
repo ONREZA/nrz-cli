@@ -134,6 +134,90 @@ fn synthetic_sha_is_64_hex_chars() {
     assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
 }
 
+// ── detect_migrations tests ─────────────────────────────────
+
+#[test]
+fn detect_migrations_skip_flag() {
+    let manifest = serde_json::json!({ "features": { "bindings": { "db": true } } });
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("migrations")).unwrap();
+    fs::write(
+        dir.path().join("migrations/0001_init.sql"),
+        "CREATE TABLE t;",
+    )
+    .unwrap();
+
+    let result = detect_migrations(&manifest, dir.path(), true, true);
+    assert!(result.is_none());
+}
+
+#[test]
+fn detect_migrations_no_db_binding() {
+    let manifest = serde_json::json!({ "features": { "bindings": {} } });
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("migrations")).unwrap();
+    fs::write(
+        dir.path().join("migrations/0001_init.sql"),
+        "CREATE TABLE t;",
+    )
+    .unwrap();
+
+    let result = detect_migrations(&manifest, dir.path(), true, false);
+    assert!(result.is_none());
+}
+
+#[test]
+fn detect_migrations_db_null() {
+    let manifest = serde_json::json!({ "features": { "bindings": { "db": null } } });
+    let dir = tempdir().unwrap();
+
+    let result = detect_migrations(&manifest, dir.path(), true, false);
+    assert!(result.is_none());
+}
+
+#[test]
+fn detect_migrations_no_migrations_dir() {
+    let manifest = serde_json::json!({ "features": { "bindings": { "db": true } } });
+    let dir = tempdir().unwrap();
+
+    let result = detect_migrations(&manifest, dir.path(), true, false);
+    assert!(result.is_none());
+}
+
+#[test]
+fn detect_migrations_empty_migrations_dir() {
+    let manifest = serde_json::json!({ "features": { "bindings": { "db": true } } });
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("migrations")).unwrap();
+
+    let result = detect_migrations(&manifest, dir.path(), true, false);
+    assert!(result.is_none());
+}
+
+#[test]
+fn detect_migrations_returns_entries() {
+    let manifest = serde_json::json!({ "features": { "bindings": { "db": true } } });
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("migrations")).unwrap();
+    fs::write(
+        dir.path().join("migrations/0001_init.sql"),
+        "CREATE TABLE t;",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("migrations/0002_users.sql"),
+        "CREATE TABLE users;",
+    )
+    .unwrap();
+
+    let result = detect_migrations(&manifest, dir.path(), true, false);
+    let entries = result.expect("should return migrations");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].name, "0001_init");
+    assert_eq!(entries[1].name, "0002_users");
+    assert!(!entries[0].checksum.is_empty());
+}
+
 // ── guess_content_type tests ────────────────────────────────
 
 #[test]

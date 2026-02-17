@@ -28,6 +28,7 @@ src/
     env_handler.rs   — обработчик команд env
     domains.rs       — DomainsArgs, DomainsCommand
     domains_handler.rs — обработчик команд domains
+    db_migrate_handler.rs — обработчик команд db migrate/push
   projects.rs       — nrz projects
   deployments.rs    — nrz deployments
   logs.rs           — nrz logs
@@ -44,7 +45,15 @@ src/
     manifest.rs      — парсинг и валидация manifest.json
     manifest_tests.rs — тесты manifest
   deploy/           — nrz deploy
-    mod.rs           — upload + activate
+    mod.rs           — upload + activate + migrations detection
+  init/             — nrz init
+    mod.rs           — инициализация проекта на платформе
+    init_tests.rs    — тесты init
+  migrations/       — D1 migration system
+    mod.rs           — scan, checksum, next number
+    tracking.rs      — _nrz_migrations tracking table
+    mod_tests.rs     — тесты core логики
+    tracking_tests.rs — тесты tracking
   emulator/         — локальная эмуляция платформы
     mod.rs           — data dir, общие утилиты
     kv.rs            — in-memory KV store с TTL (BTreeMap)
@@ -85,6 +94,11 @@ CLI не зависит от адаптеров. Связь — через BUILD
 | `nrz db execute [sql]` | Выполнение SQL (аргумент, `--file`, или stdin) |
 | `nrz db info` | Информация о базе (таблицы, размер) |
 | `nrz db reset` | Сброс локальной БД |
+| `nrz db migrate create <name>` | Создать новый файл миграции |
+| `nrz db migrate apply` | Применить pending миграции (локально) |
+| `nrz db migrate apply --remote` | Применить миграции на удалённой D1 |
+| `nrz db migrate status` | Показать статус миграций |
+| `nrz db push` | Выполнить SQL на удалённой D1 |
 | `nrz kv get <key>` | Получить значение |
 | `nrz kv set <key> <val>` | Установить значение |
 | `nrz kv list` | Список ключей |
@@ -102,6 +116,7 @@ CLI не зависит от адаптеров. Связь — через BUILD
 | `nrz domains remove <id>` | Удалить кастомный домен |
 | `nrz domains verify <id>` | Проверить DNS домена |
 | `nrz rollback` | Откат деплоя |
+| `nrz init` | Инициализация проекта на ONREZA платформе |
 
 ## Установка
 
@@ -170,6 +185,11 @@ src/
   build/
     manifest.rs
     manifest_tests.rs — unit-тесты (14 тестов)
+  migrations/
+    mod_tests.rs      — unit-тесты (9 тестов)
+    tracking_tests.rs — unit-тесты (5 тестов)
+  init/
+    init_tests.rs     — unit-тесты (6 тестов)
 ```
 
 Подключение в `mod.rs`:
