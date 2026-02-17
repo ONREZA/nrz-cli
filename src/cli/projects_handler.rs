@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::api::ApiClient;
 use crate::auth;
-use crate::link::project_ref;
 use crate::output;
+use nrz::config;
 
 use super::projects::{ProjectsArgs, ProjectsCommand};
 
@@ -247,12 +247,9 @@ async fn create(
 
     let linked = if link {
         let cwd = std::env::current_dir().context("failed to get current directory")?;
-        let pref = project_ref::ProjectRef {
-            project_id: resp.id.clone(),
-            project_name: display_name.unwrap_or(name.clone()),
-            workspace_slug: None,
-        };
-        project_ref::save(&cwd, &pref)?;
+        let display = display_name.as_deref().unwrap_or(&name);
+        config::save_or_update(&cwd, &resp.id, Some(display), None)?;
+        crate::init::add_to_gitignore(&cwd);
         true
     } else {
         false

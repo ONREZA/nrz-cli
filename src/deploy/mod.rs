@@ -19,7 +19,7 @@ use crate::api::ApiClient;
 use crate::auth;
 use crate::build;
 use crate::cli::{BuildArgs, DeployArgs};
-use crate::link::{self, project_ref};
+use crate::link;
 use crate::migrations;
 use crate::output;
 use nrz::config::ProjectConfig;
@@ -159,38 +159,34 @@ pub async fn run(
         .await
         .context("failed to fetch workspace info")?;
 
-    // Resolve project: --project-id > onreza.toml > .onreza/project.json > interactive
-    let project = if let Some(pid) = &args.project_id {
-        project_ref::ProjectRef {
-            project_id: pid.clone(),
-            project_name: String::new(),
-            workspace_slug: None,
-        }
+    // Resolve project: --project-id > onreza.toml > interactive
+    let project_id = if let Some(pid) = &args.project_id {
+        pid.clone()
     } else if let Some(id) = &config.project.id {
-        project_ref::ProjectRef {
-            project_id: id.clone(),
-            project_name: config.project.name.clone().unwrap_or_default(),
-            workspace_slug: None,
-        }
+        id.clone()
     } else {
-        match project_ref::load(&project_dir)? {
-            Some(p) => p,
-            None => {
-                if json {
-                    bail!(
-                        "no linked project. Use --project-id, set [project] id in onreza.toml, or run `nrz link` first."
-                    );
-                }
-                output::warn(false, "No linked project. Select one:");
-                let pref = link::select_project_interactive(&client).await?;
-                project_ref::save(&project_dir, &pref)?;
-                output::success(
-                    false,
-                    format!("Linked to {}", console::style(&pref.project_name).bold()),
-                );
-                pref
-            }
+        if json {
+            bail!(
+                "no linked project. Use --project-id, set [project] id in onreza.toml, or run `nrz link` first."
+            );
         }
+        output::warn(false, "No linked project. Select one:");
+        let selected = link::select_project_interactive(&client).await?;
+        nrz::config::save_or_update(
+            &project_dir,
+            &selected.project_id,
+            Some(&selected.project_name),
+            None,
+        )?;
+        crate::init::add_to_gitignore(&project_dir);
+        output::success(
+            false,
+            format!(
+                "Linked to {}",
+                console::style(&selected.project_name).bold()
+            ),
+        );
+        selected.project_id
     };
 
     // Validate build output
@@ -275,10 +271,7 @@ pub async fn run(
     let file_count = body.files.len();
 
     let deployment: CreateDeploymentResponse = client
-        .post(
-            &format!("/v1/projects/{}/deployments", project.project_id),
-            &body,
-        )
+        .post(&format!("/v1/projects/{}/deployments", project_id), &body)
         .await
         .context("failed to create deployment")?;
 

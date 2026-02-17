@@ -106,7 +106,7 @@ pub enum Command {
     /// Manage workspaces
     Workspace(WorkspaceArgs),
 
-    /// Initialize an existing project on ONREZA platform
+    /// Initialize project scaffold (optionally create/link on platform)
     Init(InitArgs),
 }
 
@@ -223,4 +223,12 @@ pub struct InitArgs {
     /// Skip framework/package manager detection
     #[arg(long)]
     pub skip_detection: bool,
+
+    /// Create project on platform
+    #[arg(long)]
+    pub create: bool,
+
+    /// Link existing project by ID
+    #[arg(long)]
+    pub project_id: Option<String>,
 }

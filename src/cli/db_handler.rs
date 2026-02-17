@@ -12,8 +12,9 @@ use nrz::config::ProjectConfig;
 use super::db::{DbArgs, DbCommand};
 use crate::api::ApiClient;
 use crate::auth;
-use crate::link::{environment_ref, project_ref};
+use crate::link::environment_ref;
 use crate::output;
+use nrz::config;
 
 #[derive(Serialize)]
 struct DbExecuteOutput {
@@ -395,7 +396,7 @@ async fn reset_remote(
 ) -> anyhow::Result<()> {
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
-    let pid = project_ref::resolve_project_id(project_id, config)?;
+    let pid = config::resolve_project_id(project_id, config)?;
     let (eid, env_type) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     // Require confirmation for production environments

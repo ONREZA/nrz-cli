@@ -5,8 +5,8 @@ use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::RollbackArgs;
 use crate::deployments::{Deployment, DeploymentStatus, truncate_id};
-use crate::link::project_ref;
 use crate::output;
+use nrz::config;
 use nrz::config::ProjectConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -39,7 +39,7 @@ pub async fn run(
     let deployment_id = if let Some(id) = &args.deployment_id {
         id.clone()
     } else {
-        let project_id = project_ref::resolve_project_id(args.project_id.as_deref(), config)?;
+        let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
         find_live_deployment(&client, &project_id).await?
     };
 

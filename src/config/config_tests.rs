@@ -36,6 +36,7 @@ default_env = "preview"
     let config = load(dir.path()).unwrap();
     assert_eq!(config.project.id.as_deref(), Some("proj_123"));
     assert_eq!(config.project.name.as_deref(), Some("my-app"));
+    assert!(config.project.workspace.is_none());
     assert_eq!(config.dev.command.as_deref(), Some("astro dev"));
     assert_eq!(config.dev_port(), 3000);
     assert_eq!(config.dev_host(), "0.0.0.0");
@@ -100,16 +101,57 @@ fn load_invalid_toml_returns_error() {
 
 #[test]
 fn generate_template_contains_project_id() {
-    let content = generate_template("proj_test");
+    let content = generate_template(Some("proj_test"), None, None);
     assert!(content.contains("id = \"proj_test\""));
     assert!(content.contains("[project]"));
     assert!(content.contains("# port = 4321"));
+    assert!(content.contains("#:schema"));
+}
+
+#[test]
+fn generate_template_with_name_and_workspace() {
+    let content = generate_template(Some("proj_test"), Some("my-app"), Some("team-x"));
+    assert!(content.contains("id = \"proj_test\""));
+    assert!(content.contains("name = \"my-app\""));
+    assert!(content.contains("workspace = \"team-x\""));
+}
+
+#[test]
+fn generate_template_without_project_id() {
+    let content = generate_template(None, None, None);
+    assert!(content.contains("# id = \"\""));
+    assert!(content.contains("[project]"));
+}
+
+#[test]
+fn resolve_project_id_explicit_wins() {
+    let mut config = ProjectConfig::default();
+    config.project.id = Some("from_config".into());
+    let result = resolve_project_id(Some("explicit_id"), &config).unwrap();
+    assert_eq!(result, "explicit_id");
+}
+
+#[test]
+fn resolve_project_id_from_config() {
+    let mut config = ProjectConfig::default();
+    config.project.id = Some("from_config".into());
+    let result = resolve_project_id(None, &config).unwrap();
+    assert_eq!(result, "from_config");
+}
+
+#[test]
+fn resolve_project_id_no_source_fails() {
+    let config = ProjectConfig::default();
+    let result = resolve_project_id(None, &config);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("no project specified"), "got: {err}");
 }
 
 #[test]
 fn save_or_update_creates_new_file() {
     let dir = tempfile::tempdir().unwrap();
-    save_or_update(dir.path(), "proj_new").unwrap();
+    save_or_update(dir.path(), "proj_new", None, None).unwrap();
 
     let content = std::fs::read_to_string(dir.path().join("onreza.toml")).unwrap();
     assert!(content.contains("id = \"proj_new\""));
@@ -132,7 +174,7 @@ port = 3000
     )
     .unwrap();
 
-    save_or_update(dir.path(), "proj_new").unwrap();
+    save_or_update(dir.path(), "proj_new", None, None).unwrap();
 
     let config = load(dir.path()).unwrap();
     assert_eq!(config.project.id.as_deref(), Some("proj_new"));
@@ -145,7 +187,7 @@ fn save_or_update_noop_when_same_id() {
     let original = "[project]\nid = \"proj_same\"\n\n[dev]\nport = 5000\n";
     std::fs::write(dir.path().join("onreza.toml"), original).unwrap();
 
-    save_or_update(dir.path(), "proj_same").unwrap();
+    save_or_update(dir.path(), "proj_same", None, None).unwrap();
 
     let content = std::fs::read_to_string(dir.path().join("onreza.toml")).unwrap();
     assert_eq!(content, original);
@@ -181,7 +223,7 @@ fn save_or_update_inserts_id_when_missing_in_project_section() {
     )
     .unwrap();
 
-    save_or_update(dir.path(), "proj_new").unwrap();
+    save_or_update(dir.path(), "proj_new", None, None).unwrap();
 
     let config = load(dir.path()).unwrap();
     assert_eq!(config.project.id.as_deref(), Some("proj_new"));
@@ -194,7 +236,7 @@ fn save_or_update_adds_project_section_when_missing() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("onreza.toml"), "[dev]\nport = 3000\n").unwrap();
 
-    save_or_update(dir.path(), "proj_new").unwrap();
+    save_or_update(dir.path(), "proj_new", None, None).unwrap();
 
     let config = load(dir.path()).unwrap();
     assert_eq!(config.project.id.as_deref(), Some("proj_new"));
@@ -210,7 +252,7 @@ fn save_or_update_does_not_replace_id_in_wrong_section() {
     )
     .unwrap();
 
-    save_or_update(dir.path(), "proj_new").unwrap();
+    save_or_update(dir.path(), "proj_new", None, None).unwrap();
 
     let content = std::fs::read_to_string(dir.path().join("onreza.toml")).unwrap();
     assert!(content.contains("id = \"proj_new\""));
@@ -225,7 +267,7 @@ fn save_or_update_preserves_comments() {
         "# My project config\n[project]\n# Project ID\nid = \"proj_old\"\n\n[dev]\nport = 3000\n";
     std::fs::write(dir.path().join("onreza.toml"), original).unwrap();
 
-    save_or_update(dir.path(), "proj_new").unwrap();
+    save_or_update(dir.path(), "proj_new", None, None).unwrap();
 
     let content = std::fs::read_to_string(dir.path().join("onreza.toml")).unwrap();
     assert!(content.contains("# My project config"));
@@ -238,7 +280,7 @@ fn save_or_update_fails_on_corrupt_existing_file() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("onreza.toml"), "{{invalid}}").unwrap();
 
-    let result = save_or_update(dir.path(), "proj_new");
+    let result = save_or_update(dir.path(), "proj_new", None, None);
     assert!(result.is_err());
 }
 
@@ -267,4 +309,58 @@ fn load_config_with_unknown_fields_in_known_section() {
 
     let result = load(dir.path());
     assert!(result.is_ok());
+}
+
+#[test]
+fn save_or_update_replaces_commented_out_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    // Simulate what scaffold_local creates (template with commented-out fields)
+    let template = generate_template(None, None, None);
+    std::fs::write(dir.path().join("onreza.toml"), &template).unwrap();
+
+    save_or_update(dir.path(), "proj_abc", Some("my-app"), Some("ws-1")).unwrap();
+
+    let config = load(dir.path()).unwrap();
+    assert_eq!(config.project.id.as_deref(), Some("proj_abc"));
+    assert_eq!(config.project.name.as_deref(), Some("my-app"));
+    assert_eq!(config.project.workspace.as_deref(), Some("ws-1"));
+
+    // Verify the file doesn't contain duplicated fields
+    let content = std::fs::read_to_string(dir.path().join("onreza.toml")).unwrap();
+    assert_eq!(
+        content.matches("\nid = ").count(),
+        1,
+        "id should appear once, got:\n{content}"
+    );
+    // Use line-by-line check to avoid matching "db_name = " as substring
+    let name_lines = content
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            t.starts_with("name = ") || t.starts_with("# name = ")
+        })
+        .count();
+    assert_eq!(name_lines, 1, "name should appear once, got:\n{content}");
+}
+
+#[test]
+fn resolve_project_id_rejects_empty_string() {
+    let config = ProjectConfig::default();
+    let result = resolve_project_id(Some(""), &config);
+    assert!(result.is_err());
+
+    let mut config_with_empty = ProjectConfig::default();
+    config_with_empty.project.id = Some(String::new());
+    let result = resolve_project_id(None, &config_with_empty);
+    assert!(result.is_err());
+}
+
+#[test]
+fn toml_values_are_escaped() {
+    let content = generate_template(Some("proj_1"), Some("my \"app\""), None);
+    assert!(content.contains(r#"name = "my \"app\"""#));
+
+    // Verify it round-trips through TOML parser
+    let config: ProjectConfig = toml::from_str(&content).unwrap();
+    assert_eq!(config.project.name.as_deref(), Some("my \"app\""));
 }

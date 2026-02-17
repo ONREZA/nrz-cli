@@ -1,0 +1,113 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ONREZA Project Configuration",
+  "description": "Configuration file for ONREZA platform projects (onreza.toml)",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "project": {
+      "type": "object",
+      "description": "Project identity and platform binding",
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Project ID on ONREZA platform",
+          "pattern": "^proj_"
+        },
+        "name": {
+          "type": "string",
+          "description": "Project display name"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "Workspace slug"
+        }
+      }
+    },
+    "dev": {
+      "type": "object",
+      "description": "Local development server settings",
+      "additionalProperties": true,
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Framework dev command (e.g. \"npm run dev\")"
+        },
+        "port": {
+          "type": "integer",
+          "description": "Port for the emulator HTTP server",
+          "default": 4321,
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "host": {
+          "type": "string",
+          "description": "Bind host for the emulator",
+          "default": "127.0.0.1"
+        },
+        "data_dir": {
+          "type": "string",
+          "description": "Directory for local data (SQLite, KV)",
+          "default": ".onreza/data"
+        },
+        "db_name": {
+          "type": "string",
+          "description": "SQLite database filename for D1 emulation",
+          "default": "dev.db"
+        }
+      }
+    },
+    "build": {
+      "type": "object",
+      "description": "Build output settings",
+      "additionalProperties": true,
+      "properties": {
+        "output_dirs": {
+          "type": "array",
+          "description": "Directories to search for build output",
+          "items": {
+            "type": "string"
+          },
+          "default": ["dist", ".output", "build"]
+        }
+      }
+    },
+    "deploy": {
+      "type": "object",
+      "description": "Deployment settings",
+      "additionalProperties": true,
+      "properties": {
+        "skip_migrations": {
+          "type": "boolean",
+          "description": "Skip database migrations during deploy",
+          "default": false
+        }
+      }
+    },
+    "migrations": {
+      "type": "object",
+      "description": "Database migration settings",
+      "additionalProperties": true,
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "Directory containing migration files",
+          "default": "migrations"
+        }
+      }
+    },
+    "db": {
+      "type": "object",
+      "description": "Database settings",
+      "additionalProperties": true,
+      "properties": {
+        "default_env": {
+          "type": "string",
+          "description": "Default environment for remote DB commands",
+          "enum": ["production", "preview", "development"]
+        }
+      }
+    }
+  }
+}

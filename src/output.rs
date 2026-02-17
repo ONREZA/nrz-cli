@@ -1,3 +1,5 @@
+use std::io::{BufRead, Write};
+
 use serde::Serialize;
 
 /// Print structured data as JSON to stdout.
@@ -41,5 +43,32 @@ pub fn success(json: bool, msg: impl std::fmt::Display) {
 pub fn warn(json: bool, msg: impl std::fmt::Display) {
     if !json {
         eprintln!("  {} {msg}", console::style("!").yellow().bold());
+    }
+}
+
+/// Interactive numeric choice prompt. Returns 1-based selection.
+/// Bails on EOF (e.g. piped stdin).
+pub fn prompt_choice(label: &str, max: usize) -> anyhow::Result<usize> {
+    loop {
+        eprint!(
+            "  {} ",
+            console::style(format!("{label} (1-{max}):")).bold(),
+        );
+        std::io::stderr().flush()?;
+
+        let mut line = String::new();
+        let bytes = std::io::stdin().lock().read_line(&mut line)?;
+        if bytes == 0 {
+            anyhow::bail!("unexpected end of input");
+        }
+        let trimmed = line.trim();
+
+        if let Ok(n) = trimmed.parse::<usize>()
+            && n >= 1
+            && n <= max
+        {
+            return Ok(n);
+        }
+        eprintln!("  Invalid choice. Enter a number between 1 and {max}.");
     }
 }

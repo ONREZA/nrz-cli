@@ -11,9 +11,10 @@ use nrz::config::ProjectConfig;
 
 use crate::api::ApiClient;
 use crate::auth;
-use crate::link::{environment_ref, project_ref};
+use crate::link::environment_ref;
 use crate::migrations::{self, tracking};
 use crate::output;
+use nrz::config;
 
 use super::db::DbMigrateCommand;
 
@@ -155,7 +156,7 @@ pub async fn handle_push(
 
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
-    let pid = project_ref::resolve_project_id(project_id.as_deref(), config)?;
+    let pid = config::resolve_project_id(project_id.as_deref(), config)?;
     let (eid, _) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     output::status(json, "~", "Pushing SQL to remote database...");
@@ -356,7 +357,7 @@ async fn apply_remote(
 
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
-    let pid = project_ref::resolve_project_id(project_id, config)?;
+    let pid = config::resolve_project_id(project_id, config)?;
     let (eid, _) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     output::status(json, "~", "Applying migrations to remote database...");
@@ -460,7 +461,7 @@ async fn status_remote(
 ) -> anyhow::Result<()> {
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
-    let pid = project_ref::resolve_project_id(project_id, config)?;
+    let pid = config::resolve_project_id(project_id, config)?;
     let (eid, _) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     let remote_applied: Vec<RemoteMigrationEntry> = client

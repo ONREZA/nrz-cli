@@ -1,12 +1,8 @@
 pub mod environment_ref;
-pub mod project_ref;
 
 #[cfg(test)]
 mod environment_ref_tests;
-#[cfg(test)]
-mod project_ref_tests;
 
-use std::io::{BufRead, Write};
 use std::path::Path;
 
 use anyhow::{Context, bail};
@@ -16,6 +12,7 @@ use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::LinkArgs;
 use crate::output;
+use nrz::config;
 use nrz::config::ProjectConfig;
 
 #[derive(Debug, Deserialize)]
@@ -33,6 +30,12 @@ struct Project {
     #[allow(dead_code)]
     name: String,
     display_name: String,
+}
+
+/// Minimal project info returned from interactive selection or API lookup.
+pub struct SelectedProject {
+    pub project_id: String,
+    pub project_name: String,
 }
 
 #[derive(Serialize)]
@@ -59,20 +62,26 @@ pub async fn run(
 
     let project = if let Some(pid) = &args.project_id {
         find_project_by_id(&client, pid).await?
-    } else if let Some(existing) = project_ref::load(&project_dir)? {
-        existing
     } else if json {
         bail!("--project-id is required in non-interactive mode (--json)");
     } else {
         select_project_interactive(&client).await?
     };
 
-    let mut project = project;
-    if !ctx.workspace_slug.is_empty() {
-        project.workspace_slug = Some(ctx.workspace_slug);
-    }
-    project_ref::save(&project_dir, &project)?;
-    nrz::config::save_or_update(&project_dir, &project.project_id)?;
+    let ws = if ctx.workspace_slug.is_empty() {
+        None
+    } else {
+        Some(ctx.workspace_slug.as_str())
+    };
+    config::save_or_update(
+        &project_dir,
+        &project.project_id,
+        Some(&project.project_name),
+        ws,
+    )?;
+
+    // Ensure .onreza/ is in .gitignore
+    crate::init::add_to_gitignore(&project_dir);
 
     if json {
         output::json_output(&LinkOutput {
@@ -90,26 +99,23 @@ pub async fn run(
 }
 
 /// Find project by ID via GET /v1/projects/:id.
-async fn find_project_by_id(
+pub async fn find_project_by_id(
     client: &ApiClient,
     project_id: &str,
-) -> anyhow::Result<project_ref::ProjectRef> {
+) -> anyhow::Result<SelectedProject> {
     let project: Project = client
         .get(&format!("/v1/projects/{project_id}"))
         .await
         .with_context(|| format!("failed to fetch project {project_id}"))?;
 
-    Ok(project_ref::ProjectRef {
+    Ok(SelectedProject {
         project_id: project.id,
         project_name: project.display_name,
-        workspace_slug: None,
     })
 }
 
 /// Interactive project selection (human mode only).
-pub async fn select_project_interactive(
-    client: &ApiClient,
-) -> anyhow::Result<project_ref::ProjectRef> {
+pub async fn select_project_interactive(client: &ApiClient) -> anyhow::Result<SelectedProject> {
     let resp: ProjectListResponse = client
         .get("/v1/projects")
         .await
@@ -129,34 +135,11 @@ pub async fn select_project_interactive(
     }
     eprintln!();
 
-    let choice = prompt_choice(resp.projects.len())?;
+    let choice = crate::output::prompt_choice("Select project", resp.projects.len())?;
     let project = &resp.projects[choice - 1];
 
-    Ok(project_ref::ProjectRef {
+    Ok(SelectedProject {
         project_id: project.id.clone(),
         project_name: project.display_name.clone(),
-        workspace_slug: None,
     })
-}
-
-fn prompt_choice(max: usize) -> anyhow::Result<usize> {
-    loop {
-        eprint!(
-            "  {} ",
-            console::style(format!("Select project (1-{max}):")).bold(),
-        );
-        std::io::stderr().flush()?;
-
-        let mut line = String::new();
-        std::io::stdin().lock().read_line(&mut line)?;
-        let trimmed = line.trim();
-
-        if let Ok(n) = trimmed.parse::<usize>()
-            && n >= 1
-            && n <= max
-        {
-            return Ok(n);
-        }
-        eprintln!("  Invalid choice. Enter a number between 1 and {max}.");
-    }
 }

@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::DeploymentsArgs;
-use crate::link::project_ref;
 use crate::output;
+use nrz::config;
 use nrz::config::ProjectConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -78,7 +78,7 @@ pub async fn run(
 
     let client = ApiClient::authenticated(&tok)?;
 
-    let project_id = project_ref::resolve_project_id(args.project_id.as_deref(), config)?;
+    let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
 
     let resp: DeploymentsResponse = client
         .get(&format!(
