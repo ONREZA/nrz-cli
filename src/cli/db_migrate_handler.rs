@@ -118,8 +118,15 @@ pub async fn handle_migrate(
         }
         DbMigrateCommand::Status { remote, project_id } => {
             if remote {
-                status_remote(&project_dir, project_id.as_deref(), json, token, workspace, env)
-                    .await
+                status_remote(
+                    &project_dir,
+                    project_id.as_deref(),
+                    json,
+                    token,
+                    workspace,
+                    env,
+                )
+                .await
             } else {
                 status_local(&project_dir, json)
             }
@@ -441,7 +448,9 @@ async fn status_remote(
     let (eid, _) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     let remote_applied: Vec<RemoteMigrationEntry> = client
-        .get(&format!("/api/d1/databases/{pid}/migrations?environmentId={eid}"))
+        .get(&format!(
+            "/api/d1/databases/{pid}/migrations?environmentId={eid}"
+        ))
         .await
         .context("failed to fetch remote migrations")?;
 

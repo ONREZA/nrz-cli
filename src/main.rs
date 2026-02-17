@@ -31,9 +31,14 @@ async fn main() {
     let workspace = cli.workspace.clone();
     let env = cli.env.clone();
 
-    let result =
-        run_command(cli.command, json, token.as_deref(), workspace.as_deref(), env.as_deref())
-            .await;
+    let result = run_command(
+        cli.command,
+        json,
+        token.as_deref(),
+        workspace.as_deref(),
+        env.as_deref(),
+    )
+    .await;
 
     if let Err(ref e) = result {
         if json {

@@ -37,10 +37,7 @@ fn load_returns_error_on_corrupt_json() {
     let result = load(tmp.path());
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(
-        err.contains("corrupt environment link file"),
-        "got: {err}"
-    );
+    assert!(err.contains("corrupt environment link file"), "got: {err}");
 }
 
 #[test]

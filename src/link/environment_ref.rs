@@ -52,10 +52,7 @@ pub fn load(project_dir: &Path) -> anyhow::Result<Option<EnvironmentRef>> {
             Ok(Some(eref))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(anyhow::anyhow!(
-            "failed to read {}: {e}",
-            path.display()
-        )),
+        Err(e) => Err(anyhow::anyhow!("failed to read {}: {e}", path.display())),
     }
 }
 

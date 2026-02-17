@@ -383,8 +383,7 @@ async fn reset_remote(
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
     let pid = project_ref::resolve_project_id(project_id)?;
-    let (eid, env_type) =
-        environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
+    let (eid, env_type) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     // Require confirmation for production environments
     if !force {
