@@ -19,7 +19,7 @@ const config = {
     "type-enum": [2, "always", ["build","chore","ci","docs","feat","fix","perf","refactor","revert","style","test"]],
     "type-empty": [2, "never"],
     "type-case": [2, "always", "lower-case"],
-    "scope-enum": [2, "always", ["build","ci","cli","db","deploy","deps","dev","docs","emulator","kv","release","tests"]],
+    "scope-enum": [2, "always", ["build","ci","cli","config","db","deploy","deps","dev","docs","emulator","kv","release","tests"]],
     "scope-empty": [0], // scope optional
     "subject-case": [0], // disabled - any case allowed
     "subject-empty": [2, "never"],

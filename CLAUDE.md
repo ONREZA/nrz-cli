@@ -18,7 +18,10 @@
 ```
 src/
   lib.rs            — библиотечный интерфейс (для тестов)
-  main.rs           — entrypoint, clap парсинг
+  main.rs           — entrypoint, clap парсинг, загрузка конфига
+  config/           — onreza.toml конфигурация проекта
+    mod.rs           — ProjectConfig, load/save/generate_template
+    config_tests.rs  — тесты конфига (11 тестов)
   cli/              — CLI определения (clap derive)
     mod.rs           — Cli, Command enum
     db.rs            — DbArgs, DbCommand
@@ -38,9 +41,7 @@ src/
   logs.rs           — nrz logs
   rollback.rs       — nrz rollback
   dev/              — nrz dev
-    mod.rs           — оркестрация: detect → emulator → spawn
-    detect.rs        — определение фреймворка по package.json
-    detect_tests.rs  — тесты detect
+    mod.rs           — оркестрация: emulator → spawn
     inject.rs        — генерация JS bootstrap для globalThis.ONREZA
     inject_tests.rs  — тесты inject
     process.rs       — child process менеджмент
@@ -72,6 +73,7 @@ tests/              — интеграционные тесты
   cli_integration_test.rs — интеграционные тесты CLI
 
 Конфигурация:
+  onreza.toml           — Конфигурация проекта (коммитится в git)
   lefthook.yml          — Git hooks конфигурация
   commitlint.config.js  — Правила для commitlint (standalone, без extends)
   .onrezarelease.jsonc  — Конфигурация onreza-release (versioning, changelog, binaries)
@@ -167,6 +169,7 @@ cargo test                   # тесты
 - **clap** — CLI парсинг (derive macros)
 - **tokio** — async runtime
 - **rusqlite** (bundled) — SQLite для D1 эмуляции
+- **toml** — парсинг onreza.toml конфига
 - **serde/serde_json** — JSON парсинг манифеста
 - **reqwest** — HTTP клиент для deploy API
 - **command-group** — child process groups (graceful shutdown)
@@ -179,12 +182,12 @@ cargo test                   # тесты
 **Unit-тесты** — в отдельных файлах `*_tests.rs` рядом с тестируемым модулем:
 ```
 src/
+  config/
+    config_tests.rs — unit-тесты (11 тестов)
   emulator/
     kv.rs           — основной код
     kv_tests.rs     — unit-тесты (18 тестов)
   dev/
-    detect.rs
-    detect_tests.rs — unit-тесты (10 тестов)
     inject.rs
     inject_tests.rs — unit-тесты (8 тестов)
   build/
@@ -230,26 +233,57 @@ cargo test kv_tests           # тесты конкретного модуля
 - `cargo fmt` перед коммитом
 - `cargo clippy` без warnings
 - Conventional Commits: `feat(dev):`, `fix(build):`, `chore(deps):` и т.д.
-- Scopes: `dev`, `build`, `deploy`, `emulator`, `cli`, `deps`, `ci`
+- Scopes: `dev`, `build`, `deploy`, `emulator`, `cli`, `config`, `deps`, `ci`
+
+## Конфигурация проекта — onreza.toml
+
+`onreza.toml` в корне проекта — единый конфиг, коммитится в git. Создаётся автоматически при `nrz init` / `nrz link`.
+
+```toml
+[project]
+id = "proj_abc123"      # ID проекта на платформе
+
+[dev]
+# command = "npm run dev"
+# port = 4321            # порт dev-сервера
+# host = "127.0.0.1"     # bind host для эмулятора
+
+# data_dir = ".onreza/data"
+# db_name = "dev.db"
+
+[build]
+# output_dirs = ["dist", ".output", "build"]
+
+[deploy]
+# skip_migrations = false
+
+[migrations]
+# dir = "migrations"
+
+[db]
+# default_env = "development"
+```
+
+Приоритет: `CLI flag > env var (NRZ_*) > onreza.toml > hardcoded default`
 
 ## Локальные данные
 
-`nrz dev` создаёт `.onreza/data/` в проекте пользователя:
-- `dev.db` — SQLite файл для D1 эмуляции
-- `kv.json` — персистенция KV store (опционально)
-
-Эта директория должна быть в `.gitignore`.
+`.onreza/` — полностью локальная директория (gitignored целиком, `nrz init` автоматически добавляет в `.gitignore`):
+- `.onreza/data/dev.db` — SQLite файл для D1 эмуляции
+- `.onreza/data/kv.json` — персистенция KV store (опционально)
+- `.onreza/project.json` — legacy ссылка на проект (для обратной совместимости)
+- `.onreza/environment.json` — личный выбор environment разработчика
 
 ## Как работает nrz dev
 
 ```
 nrz dev
-  1. Определяет фреймворк (astro, nuxt, sveltekit, nitro) по package.json
+  1. Читает dev command из onreza.toml или CLI флага
   2. Создаёт .onreza/data/ директорию
   3. Поднимает emulator HTTP сервер (/__nrz/kv/*, /__nrz/db/*)
   4. Генерирует JS bootstrap скрипт (globalThis.ONREZA = {...})
-  5. Запускает `bunx <framework> dev` с NODE_OPTIONS=--import <bootstrap>
-  6. Framework dev server видит globalThis.ONREZA — всё работает
+  5. Запускает dev command с NODE_OPTIONS=--import <bootstrap>
+  6. Dev server видит globalThis.ONREZA — всё работает
   7. Ctrl+C → graceful shutdown child process + emulator
 ```
 
@@ -307,7 +341,7 @@ npx onreza-release --dry-run --verbose
 
 Примеры:
 ```bash
-git commit -m "feat(dev): add framework detection for sveltekit"
+git commit -m "feat(dev): add custom command support"
 git commit -m "fix(kv): handle expired entries in list command"
 git commit -m "docs: update installation instructions"
 ```

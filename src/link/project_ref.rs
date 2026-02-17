@@ -35,9 +35,16 @@ pub fn save(project_dir: &Path, project_ref: &ProjectRef) -> anyhow::Result<()> 
     Ok(())
 }
 
-pub fn resolve_project_id(explicit: Option<&str>) -> anyhow::Result<String> {
+pub fn resolve_project_id(
+    explicit: Option<&str>,
+    config: &nrz::config::ProjectConfig,
+) -> anyhow::Result<String> {
     if let Some(id) = explicit {
         return Ok(id.to_string());
+    }
+
+    if let Some(id) = &config.project.id {
+        return Ok(id.clone());
     }
 
     let cwd = std::env::current_dir().context("failed to get current directory")?;
@@ -45,5 +52,7 @@ pub fn resolve_project_id(explicit: Option<&str>) -> anyhow::Result<String> {
         return Ok(pref.project_id);
     }
 
-    bail!("no project specified. Use --project-id or run `nrz link` first.");
+    bail!(
+        "no project specified. Use --project-id, set [project] id in onreza.toml, or run `nrz link` first."
+    );
 }

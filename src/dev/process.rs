@@ -5,7 +5,7 @@ use anyhow::Context;
 use tokio::process::Command;
 use tokio::signal;
 
-/// Spawn the framework dev server as a child process.
+/// Spawn the dev server as a child process.
 ///
 /// Injects the ONREZA bootstrap script via `NODE_OPTIONS=--import`.
 /// Forwards stdout/stderr to the terminal.
@@ -28,10 +28,8 @@ pub async fn spawn_dev_server(
         format!("{existing} --import {bootstrap_url}")
     };
 
-    // Use npx/bunx to resolve the binary
-    let mut cmd = Command::new("bunx");
-    cmd.arg(bin)
-        .args(args)
+    let mut cmd = Command::new(bin);
+    cmd.args(args)
         .current_dir(project_dir)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

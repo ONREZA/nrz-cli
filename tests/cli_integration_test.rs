@@ -190,33 +190,15 @@ fn db_query_with_results() {
 }
 
 #[test]
-fn dev_without_package_json_fails() {
+fn dev_without_command_fails() {
     let temp = tempfile::tempdir().unwrap();
 
-    assert!(!temp.path().join("package.json").exists());
-
-    // JSON error in stdout: {"error":"...package.json..."}
-    let mut cmd = nrz();
-    cmd.current_dir(&temp).args(["dev"]);
-    cmd.assert().failure().stdout(contains("package.json"));
-}
-
-#[test]
-fn dev_with_unknown_framework_fails() {
-    let temp = tempfile::tempdir().unwrap();
-
-    fs::write(
-        temp.path().join("package.json"),
-        r#"{"dependencies":{"express":"^4.0"}}"#,
-    )
-    .unwrap();
-
-    // JSON error in stdout: {"error":"could not detect framework..."}
+    // No onreza.toml, no --command flag → error
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["dev"]);
     cmd.assert()
         .failure()
-        .stdout(contains("could not detect framework"));
+        .stdout(contains("no dev command specified"));
 }
 
 #[test]

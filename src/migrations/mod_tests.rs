@@ -20,7 +20,7 @@ fn test_compute_checksum_different_sql() {
 fn test_scan_migrations_dir_empty() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("migrations")).unwrap();
-    let result = scan_migrations_dir(dir.path()).unwrap();
+    let result = scan_migrations_dir(dir.path(), "migrations").unwrap();
     assert!(result.is_empty());
 }
 
@@ -28,7 +28,7 @@ fn test_scan_migrations_dir_empty() {
 fn test_scan_migrations_dir_no_dir() {
     let dir = tempfile::tempdir().unwrap();
     // no migrations/ subdir
-    let result = scan_migrations_dir(dir.path()).unwrap();
+    let result = scan_migrations_dir(dir.path(), "migrations").unwrap();
     assert!(result.is_empty());
 }
 
@@ -42,7 +42,7 @@ fn test_scan_migrations_dir_sorted() {
     std::fs::write(mig_dir.join("0001_init.sql"), "CREATE TABLE init;").unwrap();
     std::fs::write(mig_dir.join("0003_add_posts.sql"), "CREATE TABLE posts;").unwrap();
 
-    let result = scan_migrations_dir(dir.path()).unwrap();
+    let result = scan_migrations_dir(dir.path(), "migrations").unwrap();
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].name, "0001_init");
     assert_eq!(result[1].name, "0002_add_users");
@@ -59,7 +59,7 @@ fn test_scan_migrations_ignores_non_sql() {
     std::fs::write(mig_dir.join("readme.md"), "some notes").unwrap();
     std::fs::write(mig_dir.join("backup.bak"), "backup").unwrap();
 
-    let result = scan_migrations_dir(dir.path()).unwrap();
+    let result = scan_migrations_dir(dir.path(), "migrations").unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].name, "0001_init");
 }
@@ -73,7 +73,7 @@ fn test_scan_migrations_computes_checksum() {
     let sql = "CREATE TABLE foo (id INTEGER);";
     std::fs::write(mig_dir.join("0001_foo.sql"), sql).unwrap();
 
-    let result = scan_migrations_dir(dir.path()).unwrap();
+    let result = scan_migrations_dir(dir.path(), "migrations").unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].checksum, compute_checksum(sql));
 }
@@ -81,7 +81,7 @@ fn test_scan_migrations_computes_checksum() {
 #[test]
 fn test_next_migration_number_empty() {
     let dir = tempfile::tempdir().unwrap();
-    assert_eq!(next_migration_number(dir.path()).unwrap(), 1);
+    assert_eq!(next_migration_number(dir.path(), "migrations").unwrap(), 1);
 }
 
 #[test]
@@ -93,5 +93,30 @@ fn test_next_migration_number_existing() {
     std::fs::write(mig_dir.join("0001_init.sql"), "").unwrap();
     std::fs::write(mig_dir.join("0003_skip.sql"), "").unwrap();
 
-    assert_eq!(next_migration_number(dir.path()).unwrap(), 4);
+    assert_eq!(next_migration_number(dir.path(), "migrations").unwrap(), 4);
+}
+
+#[test]
+fn test_scan_migrations_custom_subdir() {
+    let dir = tempfile::tempdir().unwrap();
+    let mig_dir = dir.path().join("db/schema");
+    std::fs::create_dir_all(&mig_dir).unwrap();
+
+    std::fs::write(mig_dir.join("0001_init.sql"), "CREATE TABLE init;").unwrap();
+
+    let result = scan_migrations_dir(dir.path(), "db/schema").unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].name, "0001_init");
+}
+
+#[test]
+fn test_next_migration_number_custom_subdir() {
+    let dir = tempfile::tempdir().unwrap();
+    let mig_dir = dir.path().join("db/schema");
+    std::fs::create_dir_all(&mig_dir).unwrap();
+
+    std::fs::write(mig_dir.join("0001_init.sql"), "").unwrap();
+    std::fs::write(mig_dir.join("0002_add.sql"), "").unwrap();
+
+    assert_eq!(next_migration_number(dir.path(), "db/schema").unwrap(), 3);
 }

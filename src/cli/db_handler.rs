@@ -7,7 +7,7 @@ use anyhow::{Context, bail};
 use rusqlite::Connection;
 use serde::Serialize;
 
-use nrz::emulator::data_dir;
+use nrz::config::ProjectConfig;
 
 use super::db::{DbArgs, DbCommand};
 use crate::api::ApiClient;
@@ -56,10 +56,12 @@ pub async fn run(
     token: Option<&str>,
     workspace: Option<&str>,
     env: Option<&str>,
+    config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let project_dir = Path::new(".").canonicalize()?;
-    let data_dir = data_dir(&project_dir);
-    let db_path = data_dir.join("dev.db");
+    let env = env.or(config.db.default_env.as_deref());
+    let data_dir = config.data_dir_path(&project_dir);
+    let db_path = data_dir.join(config.db_name());
 
     match args.command {
         DbCommand::Shell => {
@@ -179,8 +181,10 @@ pub async fn run(
             }
         }
         DbCommand::Migrate { command } => {
-            return super::db_migrate_handler::handle_migrate(command, json, token, workspace, env)
-                .await;
+            return super::db_migrate_handler::handle_migrate(
+                command, json, token, workspace, env, config,
+            )
+            .await;
         }
         DbCommand::Push {
             sql,
@@ -188,7 +192,7 @@ pub async fn run(
             project_id,
         } => {
             return super::db_migrate_handler::handle_push(
-                sql, file, project_id, json, token, workspace, env,
+                sql, file, project_id, json, token, workspace, env, config,
             )
             .await;
         }
@@ -198,8 +202,16 @@ pub async fn run(
             project_id,
         } => {
             if remote {
-                return reset_remote(project_id.as_deref(), force, json, token, workspace, env)
-                    .await;
+                return reset_remote(
+                    project_id.as_deref(),
+                    force,
+                    json,
+                    token,
+                    workspace,
+                    env,
+                    config,
+                )
+                .await;
             }
             if !force {
                 eprintln!("use --force to confirm database reset");
@@ -379,10 +391,11 @@ async fn reset_remote(
     token: Option<&str>,
     workspace: Option<&str>,
     env: Option<&str>,
+    config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
-    let pid = project_ref::resolve_project_id(project_id)?;
+    let pid = project_ref::resolve_project_id(project_id, config)?;
     let (eid, env_type) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     // Require confirmation for production environments

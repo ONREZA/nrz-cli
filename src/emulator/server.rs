@@ -87,12 +87,15 @@ struct HealthResponse {
 type AppError = (StatusCode, String);
 
 impl EmulatorServer {
-    pub fn new(kv: KvStore, db_path: PathBuf, port: u16) -> Self {
-        Self {
+    pub fn new(kv: KvStore, db_path: PathBuf, port: u16, host: &str) -> anyhow::Result<Self> {
+        let ip: std::net::IpAddr = host
+            .parse()
+            .map_err(|e| anyhow::anyhow!("invalid host '{}': {}", host, e))?;
+        Ok(Self {
             kv,
             db_path,
-            addr: SocketAddr::from(([127, 0, 0, 1], port)),
-        }
+            addr: SocketAddr::new(ip, port),
+        })
     }
 
     /// Start the emulator HTTP server.

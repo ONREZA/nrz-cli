@@ -10,6 +10,7 @@ use serde::Serialize;
 
 use crate::cli::BuildArgs;
 use crate::output;
+use nrz::config::ProjectConfig;
 
 #[derive(Serialize)]
 struct BuildOutput {
@@ -21,12 +22,12 @@ struct BuildOutput {
     output_dir: String,
 }
 
-pub async fn run(args: BuildArgs, json: bool) -> anyhow::Result<()> {
+pub async fn run(args: BuildArgs, json: bool, config: &ProjectConfig) -> anyhow::Result<()> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
 
-    let output_dir = detect_output_dir(&project_dir)?;
+    let output_dir = detect_output_dir(&project_dir, &config.output_dirs())?;
     tracing::info!(?output_dir, "found output directory");
 
     let manifest_path = output_dir.join(".onreza/manifest.json");
@@ -73,15 +74,18 @@ pub async fn run(args: BuildArgs, json: bool) -> anyhow::Result<()> {
 }
 
 /// Try common output directory names.
-fn detect_output_dir(project_dir: &Path) -> anyhow::Result<std::path::PathBuf> {
-    for name in ["dist", ".output", "build"] {
+fn detect_output_dir(
+    project_dir: &Path,
+    output_dirs: &[&str],
+) -> anyhow::Result<std::path::PathBuf> {
+    for name in output_dirs {
         let candidate = project_dir.join(name);
         if candidate.is_dir() && candidate.join(".onreza").is_dir() {
             return Ok(candidate);
         }
     }
 
-    for name in ["dist", ".output", "build"] {
+    for name in output_dirs {
         let candidate = project_dir.join(name);
         if candidate.is_dir() {
             anyhow::bail!(
@@ -92,8 +96,10 @@ fn detect_output_dir(project_dir: &Path) -> anyhow::Result<std::path::PathBuf> {
         }
     }
 
+    let dirs_display: Vec<_> = output_dirs.iter().map(|d| format!("{d}/")).collect();
     anyhow::bail!(
-        "no output directory found in {}. Expected dist/, .output/, or build/",
-        project_dir.display()
+        "no output directory found in {}. Expected {}",
+        project_dir.display(),
+        dirs_display.join(", ")
     );
 }

@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::InitArgs;
-use crate::dev::detect;
 use crate::link::project_ref;
 use crate::output;
+use nrz::config::ProjectConfig;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,12 +45,19 @@ pub async fn run(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let project_dir = Path::new(".")
         .canonicalize()
         .context("failed to resolve current directory")?;
 
-    // Check if already linked
+    // Check if already linked (onreza.toml or .onreza/project.json)
+    if let Some(id) = &config.project.id {
+        bail!(
+            "project already configured in onreza.toml ({}). Use `nrz link` to change.",
+            id
+        );
+    }
     if let Some(existing) = project_ref::load(&project_dir)? {
         bail!(
             "project already linked to {} ({}). Use `nrz link` to change.",
@@ -59,23 +66,17 @@ pub async fn run(
         );
     }
 
-    // Detect framework
+    // Detect framework from package.json dependencies
     let framework = if args.skip_detection {
         None
     } else {
-        match detect::detect_framework(&project_dir) {
-            Ok(f) => {
-                let name = format!("{:?}", f.name).to_lowercase();
-                if !json {
-                    output::status(false, "~", format!("Detected framework: {name}"));
-                }
-                Some(name)
-            }
-            Err(e) => {
-                output::warn(json, format!("Could not detect framework: {e:#}"));
-                None
-            }
+        let detected = detect_framework(&project_dir);
+        if let Some(ref name) = detected
+            && !json
+        {
+            output::status(false, "~", format!("Detected framework: {name}"));
         }
+        detected
     };
 
     // Detect package manager
@@ -116,6 +117,10 @@ pub async fn run(
         workspace_slug: None,
     };
     project_ref::save(&project_dir, &pref)?;
+    nrz::config::save_or_update(&project_dir, &resp.id)?;
+
+    // Add .onreza/ to .gitignore if the file exists
+    add_to_gitignore(&project_dir);
 
     if json {
         output::json_output(&InitOutput {
@@ -139,6 +144,60 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+fn add_to_gitignore(project_dir: &Path) {
+    let gitignore = project_dir.join(".gitignore");
+    if !gitignore.exists() {
+        return;
+    }
+    let content = match std::fs::read_to_string(&gitignore) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("  Warning: could not read .gitignore: {e}");
+            return;
+        }
+    };
+    // Check if .onreza/ is already in .gitignore
+    if content.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed == ".onreza/"
+            || trimmed == ".onreza"
+            || trimmed == "/.onreza/"
+            || trimmed == "/.onreza"
+    }) {
+        return;
+    }
+    // Append .onreza/ to .gitignore
+    let separator = if content.ends_with('\n') { "" } else { "\n" };
+    if let Err(e) = std::fs::write(&gitignore, format!("{content}{separator}.onreza/\n")) {
+        eprintln!("  Warning: could not update .gitignore: {e}");
+    }
+}
+
+fn detect_framework(project_dir: &Path) -> Option<String> {
+    let pkg_content = std::fs::read_to_string(project_dir.join("package.json")).ok()?;
+    let pkg: serde_json::Value = serde_json::from_str(&pkg_content).ok()?;
+
+    let has_dep = |name: &str| -> bool {
+        pkg.get("dependencies").and_then(|d| d.get(name)).is_some()
+            || pkg
+                .get("devDependencies")
+                .and_then(|d| d.get(name))
+                .is_some()
+    };
+
+    if has_dep("astro") {
+        Some("astro".into())
+    } else if has_dep("nuxt") {
+        Some("nuxt".into())
+    } else if has_dep("@sveltejs/kit") {
+        Some("sveltekit".into())
+    } else if has_dep("nitropack") {
+        Some("nitro".into())
+    } else {
+        None
+    }
 }
 
 fn detect_package_manager(project_dir: &Path) -> String {

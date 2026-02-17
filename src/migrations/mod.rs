@@ -21,9 +21,9 @@ pub struct Migration {
     pub checksum: String,
 }
 
-/// Scan `migrations/` directory, read `.sql` files, sort by name, compute checksums.
-pub fn scan_migrations_dir(dir: &Path) -> anyhow::Result<Vec<Migration>> {
-    let migrations_dir = dir.join("migrations");
+/// Scan migrations directory, read `.sql` files, sort by name, compute checksums.
+pub fn scan_migrations_dir(dir: &Path, migrations_subdir: &str) -> anyhow::Result<Vec<Migration>> {
+    let migrations_dir = dir.join(migrations_subdir);
     if !migrations_dir.is_dir() {
         return Ok(vec![]);
     }
@@ -72,8 +72,8 @@ pub fn compute_checksum(sql: &str) -> String {
 }
 
 /// Parse `NNNN_desc.sql` filenames and return max+1, or 1 if empty.
-pub fn next_migration_number(dir: &Path) -> anyhow::Result<u32> {
-    let migrations_dir = dir.join("migrations");
+pub fn next_migration_number(dir: &Path, migrations_subdir: &str) -> anyhow::Result<u32> {
+    let migrations_dir = dir.join(migrations_subdir);
     if !migrations_dir.is_dir() {
         return Ok(1);
     }

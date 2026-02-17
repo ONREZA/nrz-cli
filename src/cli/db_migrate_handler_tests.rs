@@ -58,7 +58,7 @@ fn test_apply_migrations_records_in_tracking() {
     )
     .unwrap();
 
-    let all = migrations::scan_migrations_dir(dir.path()).unwrap();
+    let all = migrations::scan_migrations_dir(dir.path(), "migrations").unwrap();
     assert_eq!(all.len(), 2);
 
     let mut conn = Connection::open_in_memory().unwrap();
@@ -89,7 +89,7 @@ fn test_apply_idempotent_skips_already_applied() {
     )
     .unwrap();
 
-    let all = migrations::scan_migrations_dir(dir.path()).unwrap();
+    let all = migrations::scan_migrations_dir(dir.path(), "migrations").unwrap();
 
     let mut conn = Connection::open_in_memory().unwrap();
     tracking::init_tracking_table(&conn).unwrap();
@@ -156,7 +156,7 @@ fn test_partial_failure_preserves_successful_migrations() {
     .unwrap();
     std::fs::write(mig_dir.join("0002_bad.sql"), "THIS IS NOT VALID SQL;").unwrap();
 
-    let all = migrations::scan_migrations_dir(dir.path()).unwrap();
+    let all = migrations::scan_migrations_dir(dir.path(), "migrations").unwrap();
     assert_eq!(all.len(), 2);
 
     let mut conn = Connection::open_in_memory().unwrap();
@@ -193,7 +193,7 @@ fn test_checksum_drift_detected() {
     )
     .unwrap();
 
-    let all = migrations::scan_migrations_dir(dir.path()).unwrap();
+    let all = migrations::scan_migrations_dir(dir.path(), "migrations").unwrap();
 
     let conn = Connection::open_in_memory().unwrap();
     tracking::init_tracking_table(&conn).unwrap();

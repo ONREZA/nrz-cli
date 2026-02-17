@@ -1,4 +1,4 @@
-use super::project_ref::{ProjectRef, load, save};
+use super::project_ref::{ProjectRef, load, resolve_project_id, save};
 
 fn make_ref() -> ProjectRef {
     ProjectRef {
@@ -71,4 +71,29 @@ fn save_overwrites_existing() {
 
     let loaded = load(tmp.path()).unwrap().unwrap();
     assert_eq!(loaded.project_id, new_ref.project_id);
+}
+
+#[test]
+fn resolve_project_id_explicit_wins_over_config() {
+    let mut config = nrz::config::ProjectConfig::default();
+    config.project.id = Some("from_config".into());
+    let result = resolve_project_id(Some("explicit_id"), &config).unwrap();
+    assert_eq!(result, "explicit_id");
+}
+
+#[test]
+fn resolve_project_id_from_config() {
+    let mut config = nrz::config::ProjectConfig::default();
+    config.project.id = Some("from_config".into());
+    let result = resolve_project_id(None, &config).unwrap();
+    assert_eq!(result, "from_config");
+}
+
+#[test]
+fn resolve_project_id_no_source_fails() {
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_project_id(None, &config);
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("no project specified"), "got: {err}");
 }

@@ -175,9 +175,9 @@ pub struct DevArgs {
     #[arg(long)]
     pub command: Option<String>,
 
-    /// Port for the dev server
-    #[arg(short, long, default_value = "4321")]
-    pub port: u16,
+    /// Port for the dev server (default: 4321, or from onreza.toml)
+    #[arg(short, long)]
+    pub port: Option<u16>,
 
     /// Path to project directory
     #[arg(default_value = ".")]

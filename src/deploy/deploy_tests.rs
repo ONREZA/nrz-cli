@@ -147,7 +147,7 @@ fn detect_migrations_skip_flag() {
     )
     .unwrap();
 
-    let result = detect_migrations(&manifest, dir.path(), true, true);
+    let result = detect_migrations(&manifest, dir.path(), true, true, "migrations");
     assert!(result.is_none());
 }
 
@@ -162,7 +162,7 @@ fn detect_migrations_no_db_binding() {
     )
     .unwrap();
 
-    let result = detect_migrations(&manifest, dir.path(), true, false);
+    let result = detect_migrations(&manifest, dir.path(), true, false, "migrations");
     assert!(result.is_none());
 }
 
@@ -171,7 +171,7 @@ fn detect_migrations_db_null() {
     let manifest = serde_json::json!({ "features": { "bindings": { "db": null } } });
     let dir = tempdir().unwrap();
 
-    let result = detect_migrations(&manifest, dir.path(), true, false);
+    let result = detect_migrations(&manifest, dir.path(), true, false, "migrations");
     assert!(result.is_none());
 }
 
@@ -180,7 +180,7 @@ fn detect_migrations_no_migrations_dir() {
     let manifest = serde_json::json!({ "features": { "bindings": { "db": true } } });
     let dir = tempdir().unwrap();
 
-    let result = detect_migrations(&manifest, dir.path(), true, false);
+    let result = detect_migrations(&manifest, dir.path(), true, false, "migrations");
     assert!(result.is_none());
 }
 
@@ -190,7 +190,7 @@ fn detect_migrations_empty_migrations_dir() {
     let dir = tempdir().unwrap();
     fs::create_dir(dir.path().join("migrations")).unwrap();
 
-    let result = detect_migrations(&manifest, dir.path(), true, false);
+    let result = detect_migrations(&manifest, dir.path(), true, false, "migrations");
     assert!(result.is_none());
 }
 
@@ -210,12 +210,29 @@ fn detect_migrations_returns_entries() {
     )
     .unwrap();
 
-    let result = detect_migrations(&manifest, dir.path(), true, false);
+    let result = detect_migrations(&manifest, dir.path(), true, false, "migrations");
     let entries = result.expect("should return migrations");
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].name, "0001_init");
     assert_eq!(entries[1].name, "0002_users");
     assert!(!entries[0].checksum.is_empty());
+}
+
+#[test]
+fn detect_migrations_custom_dir() {
+    let manifest = serde_json::json!({ "features": { "bindings": { "db": true } } });
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("db/migrations")).unwrap();
+    fs::write(
+        dir.path().join("db/migrations/0001_init.sql"),
+        "CREATE TABLE t;",
+    )
+    .unwrap();
+
+    let result = detect_migrations(&manifest, dir.path(), true, false, "db/migrations");
+    let entries = result.expect("should find migrations in custom dir");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "0001_init");
 }
 
 // ── guess_content_type tests ────────────────────────────────

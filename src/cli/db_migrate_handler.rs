@@ -7,7 +7,7 @@ use anyhow::{Context, bail};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use nrz::emulator::data_dir;
+use nrz::config::ProjectConfig;
 
 use crate::api::ApiClient;
 use crate::auth;
@@ -89,13 +89,15 @@ pub async fn handle_migrate(
     token: Option<&str>,
     workspace: Option<&str>,
     env: Option<&str>,
+    config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let project_dir = Path::new(".")
         .canonicalize()
         .context("failed to resolve current directory")?;
+    let mig_dir = config.migrations_dir();
 
     match command {
-        DbMigrateCommand::Create { name } => create(&project_dir, &name, json),
+        DbMigrateCommand::Create { name } => create(&project_dir, &name, json, mig_dir),
         DbMigrateCommand::Apply {
             remote,
             dry_run,
@@ -110,10 +112,11 @@ pub async fn handle_migrate(
                     token,
                     workspace,
                     env,
+                    config,
                 )
                 .await
             } else {
-                apply_local(&project_dir, dry_run, json)
+                apply_local(&project_dir, dry_run, json, config)
             }
         }
         DbMigrateCommand::Status { remote, project_id } => {
@@ -125,10 +128,11 @@ pub async fn handle_migrate(
                     token,
                     workspace,
                     env,
+                    config,
                 )
                 .await
             } else {
-                status_local(&project_dir, json)
+                status_local(&project_dir, json, config)
             }
         }
     }
@@ -136,6 +140,7 @@ pub async fn handle_migrate(
 
 // ── Push handler ────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_push(
     sql: Option<String>,
     file: Option<String>,
@@ -144,12 +149,13 @@ pub async fn handle_push(
     token: Option<&str>,
     workspace: Option<&str>,
     env: Option<&str>,
+    config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let sql = resolve_sql(sql, file)?;
 
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
-    let pid = project_ref::resolve_project_id(project_id.as_deref())?;
+    let pid = project_ref::resolve_project_id(project_id.as_deref(), config)?;
     let (eid, _) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     output::status(json, "~", "Pushing SQL to remote database...");
@@ -183,11 +189,11 @@ pub async fn handle_push(
 
 // ── Create ──────────────────────────────────────────────────
 
-fn create(project_dir: &Path, name: &str, json: bool) -> anyhow::Result<()> {
-    let num = migrations::next_migration_number(project_dir)?;
+fn create(project_dir: &Path, name: &str, json: bool, mig_dir: &str) -> anyhow::Result<()> {
+    let num = migrations::next_migration_number(project_dir, mig_dir)?;
     let filename = format!("{num:04}_{name}.sql");
 
-    let migrations_dir = project_dir.join("migrations");
+    let migrations_dir = project_dir.join(mig_dir);
     std::fs::create_dir_all(&migrations_dir)
         .with_context(|| format!("failed to create {}", migrations_dir.display()))?;
 
@@ -200,10 +206,10 @@ fn create(project_dir: &Path, name: &str, json: bool) -> anyhow::Result<()> {
 
     if json {
         output::json_output(&CreateOutput {
-            path: format!("migrations/{filename}"),
+            path: format!("{mig_dir}/{filename}"),
         });
     } else {
-        output::success(false, format!("Created migrations/{filename}"));
+        output::success(false, format!("Created {mig_dir}/{filename}"));
     }
 
     Ok(())
@@ -211,8 +217,14 @@ fn create(project_dir: &Path, name: &str, json: bool) -> anyhow::Result<()> {
 
 // ── Apply (local) ───────────────────────────────────────────
 
-fn apply_local(project_dir: &Path, dry_run: bool, json: bool) -> anyhow::Result<()> {
-    let all_migrations = migrations::scan_migrations_dir(project_dir)?;
+fn apply_local(
+    project_dir: &Path,
+    dry_run: bool,
+    json: bool,
+    config: &ProjectConfig,
+) -> anyhow::Result<()> {
+    let mig_dir = config.migrations_dir();
+    let all_migrations = migrations::scan_migrations_dir(project_dir, mig_dir)?;
     if all_migrations.is_empty() {
         if json {
             output::json_output(&ApplyOutput {
@@ -220,17 +232,17 @@ fn apply_local(project_dir: &Path, dry_run: bool, json: bool) -> anyhow::Result<
                 already_applied: vec![],
             });
         } else {
-            eprintln!("  No migrations found in migrations/");
+            eprintln!("  No migrations found in {mig_dir}/");
         }
         return Ok(());
     }
 
-    let data = data_dir(project_dir);
+    let data = config.data_dir_path(project_dir);
     if !data.exists() {
         std::fs::create_dir_all(&data)
             .with_context(|| format!("failed to create {}", data.display()))?;
     }
-    let db_path = data.join("dev.db");
+    let db_path = data.join(config.db_name());
     let mut conn = Connection::open(&db_path)
         .with_context(|| format!("failed to open {}", db_path.display()))?;
 
@@ -317,6 +329,7 @@ fn apply_local(project_dir: &Path, dry_run: bool, json: bool) -> anyhow::Result<
 
 // ── Apply (remote) ──────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 async fn apply_remote(
     project_dir: &Path,
     dry_run: bool,
@@ -325,8 +338,10 @@ async fn apply_remote(
     token: Option<&str>,
     workspace: Option<&str>,
     env: Option<&str>,
+    config: &ProjectConfig,
 ) -> anyhow::Result<()> {
-    let all_migrations = migrations::scan_migrations_dir(project_dir)?;
+    let mig_dir = config.migrations_dir();
+    let all_migrations = migrations::scan_migrations_dir(project_dir, mig_dir)?;
     if all_migrations.is_empty() {
         if json {
             output::json_output(&ApplyOutput {
@@ -334,14 +349,14 @@ async fn apply_remote(
                 already_applied: vec![],
             });
         } else {
-            eprintln!("  No migrations found in migrations/");
+            eprintln!("  No migrations found in {mig_dir}/");
         }
         return Ok(());
     }
 
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
-    let pid = project_ref::resolve_project_id(project_id)?;
+    let pid = project_ref::resolve_project_id(project_id, config)?;
     let (eid, _) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     output::status(json, "~", "Applying migrations to remote database...");
@@ -382,11 +397,11 @@ async fn apply_remote(
 
 // ── Status (local) ──────────────────────────────────────────
 
-fn status_local(project_dir: &Path, json: bool) -> anyhow::Result<()> {
-    let all_migrations = migrations::scan_migrations_dir(project_dir)?;
+fn status_local(project_dir: &Path, json: bool, config: &ProjectConfig) -> anyhow::Result<()> {
+    let all_migrations = migrations::scan_migrations_dir(project_dir, config.migrations_dir())?;
 
-    let data = data_dir(project_dir);
-    let db_path = data.join("dev.db");
+    let data = config.data_dir_path(project_dir);
+    let db_path = data.join(config.db_name());
 
     let applied = if db_path.exists() {
         let conn = Connection::open(&db_path)?;
@@ -441,10 +456,11 @@ async fn status_remote(
     token: Option<&str>,
     workspace: Option<&str>,
     env: Option<&str>,
+    config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
-    let pid = project_ref::resolve_project_id(project_id)?;
+    let pid = project_ref::resolve_project_id(project_id, config)?;
     let (eid, _) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
     let remote_applied: Vec<RemoteMigrationEntry> = client
@@ -455,7 +471,13 @@ async fn status_remote(
         .context("failed to fetch remote migrations")?;
 
     // Compare with local migration files to find pending
-    let all_local = migrations::scan_migrations_dir(project_dir).unwrap_or_default();
+    let all_local = match migrations::scan_migrations_dir(project_dir, config.migrations_dir()) {
+        Ok(m) => m,
+        Err(e) => {
+            output::warn(json, format!("Failed to scan local migrations: {e:#}"));
+            vec![]
+        }
+    };
     let remote_names: std::collections::HashSet<_> =
         remote_applied.iter().map(|m| m.name.as_str()).collect();
     let pending: Vec<_> = all_local

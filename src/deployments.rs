@@ -6,6 +6,7 @@ use crate::auth;
 use crate::cli::DeploymentsArgs;
 use crate::link::project_ref;
 use crate::output;
+use nrz::config::ProjectConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,12 +72,13 @@ pub async fn run(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let tok = auth::resolve_token(token, workspace)?;
 
     let client = ApiClient::authenticated(&tok)?;
 
-    let project_id = project_ref::resolve_project_id(args.project_id.as_deref())?;
+    let project_id = project_ref::resolve_project_id(args.project_id.as_deref(), config)?;
 
     let resp: DeploymentsResponse = client
         .get(&format!(

@@ -22,6 +22,7 @@ use crate::cli::{BuildArgs, DeployArgs};
 use crate::link::{self, project_ref};
 use crate::migrations;
 use crate::output;
+use nrz::config::ProjectConfig;
 
 // ── Workspace / plan ─────────────────────────────────────────
 
@@ -143,6 +144,7 @@ pub async fn run(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
@@ -157,11 +159,17 @@ pub async fn run(
         .await
         .context("failed to fetch workspace info")?;
 
-    // Resolve project: --project-id > .onreza/project.json > interactive
+    // Resolve project: --project-id > onreza.toml > .onreza/project.json > interactive
     let project = if let Some(pid) = &args.project_id {
         project_ref::ProjectRef {
             project_id: pid.clone(),
             project_name: String::new(),
+            workspace_slug: None,
+        }
+    } else if let Some(id) = &config.project.id {
+        project_ref::ProjectRef {
+            project_id: id.clone(),
+            project_name: config.project.name.clone().unwrap_or_default(),
             workspace_slug: None,
         }
     } else {
@@ -169,7 +177,9 @@ pub async fn run(
             Some(p) => p,
             None => {
                 if json {
-                    bail!("no linked project. Use --project-id or run `nrz link` first.");
+                    bail!(
+                        "no linked project. Use --project-id, set [project] id in onreza.toml, or run `nrz link` first."
+                    );
                 }
                 output::warn(false, "No linked project. Select one:");
                 let pref = link::select_project_interactive(&client).await?;
@@ -191,11 +201,12 @@ pub async fn run(
             skip_validation: false,
         },
         json,
+        config,
     )
     .await?;
 
     // Read manifest as raw JSON
-    let output_dir = detect_output_dir(&project_dir)?;
+    let output_dir = detect_output_dir(&project_dir, &config.output_dirs())?;
     let manifest_path = output_dir.join(".onreza/manifest.json");
     let manifest_raw: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(&manifest_path)
@@ -242,7 +253,14 @@ pub async fn run(
     };
 
     // Detect migrations
-    let mig_entries = detect_migrations(&manifest_raw, &project_dir, json, args.skip_migrations);
+    let skip_mig = args.skip_migrations || config.skip_migrations();
+    let mig_entries = detect_migrations(
+        &manifest_raw,
+        &project_dir,
+        json,
+        skip_mig,
+        config.migrations_dir(),
+    );
 
     // Create deployment
     output::status(json, "~", "Creating deployment...");
@@ -433,6 +451,7 @@ fn detect_migrations(
     project_dir: &Path,
     json: bool,
     skip: bool,
+    migrations_subdir: &str,
 ) -> Option<Vec<migrations::Migration>> {
     if skip {
         return None;
@@ -447,12 +466,12 @@ fn detect_migrations(
         return None;
     }
 
-    let migrations_dir = project_dir.join("migrations");
+    let migrations_dir = project_dir.join(migrations_subdir);
     if !migrations_dir.is_dir() {
         return None;
     }
 
-    match migrations::scan_migrations_dir(project_dir) {
+    match migrations::scan_migrations_dir(project_dir, migrations_subdir) {
         Ok(migs) if migs.is_empty() => None,
         Ok(migs) => {
             output::status(
@@ -557,8 +576,11 @@ fn guess_content_type(path: &str) -> &'static str {
 
 // ── Helpers ──────────────────────────────────────────────────
 
-fn detect_output_dir(project_dir: &Path) -> anyhow::Result<std::path::PathBuf> {
-    for name in ["dist", ".output", "build"] {
+fn detect_output_dir(
+    project_dir: &Path,
+    output_dirs: &[&str],
+) -> anyhow::Result<std::path::PathBuf> {
+    for name in output_dirs {
         let candidate = project_dir.join(name);
         if candidate.is_dir() && candidate.join(".onreza").is_dir() {
             return Ok(candidate);

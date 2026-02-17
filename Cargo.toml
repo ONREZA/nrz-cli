@@ -57,6 +57,9 @@ sha2 = "0.10"
 # URL encoding
 percent-encoding = "2"
 
+# Config
+toml = "0.8"
+
 # Errors
 thiserror = "2"
 anyhow = "1"

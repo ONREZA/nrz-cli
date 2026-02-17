@@ -16,6 +16,7 @@ use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::LinkArgs;
 use crate::output;
+use nrz::config::ProjectConfig;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +46,7 @@ pub async fn run(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    _config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
@@ -70,6 +72,7 @@ pub async fn run(
         project.workspace_slug = Some(ctx.workspace_slug);
     }
     project_ref::save(&project_dir, &project)?;
+    nrz::config::save_or_update(&project_dir, &project.project_id)?;
 
     if json {
         output::json_output(&LinkOutput {

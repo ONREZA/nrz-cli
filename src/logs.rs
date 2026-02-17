@@ -7,6 +7,7 @@ use crate::auth;
 use crate::cli::LogsArgs;
 use crate::link::project_ref;
 use crate::output;
+use nrz::config::ProjectConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct LogsResponse {
@@ -26,12 +27,13 @@ pub async fn run(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let tok = auth::resolve_token(token, workspace)?;
 
     let client = ApiClient::authenticated(&tok)?;
 
-    let project_id = project_ref::resolve_project_id(args.project_id.as_deref())?;
+    let project_id = project_ref::resolve_project_id(args.project_id.as_deref(), config)?;
 
     let mut query = format!("limit={}", args.limit);
     if let Some(search) = &args.search {
