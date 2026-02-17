@@ -10,6 +10,38 @@ struct ApiError {
     message: Option<String>,
 }
 
+/// Standard API envelope: `{"success":bool,"result":T,"errors":[],"messages":[]}`
+#[derive(Debug, Deserialize)]
+struct ApiEnvelope<T> {
+    success: bool,
+    result: Option<T>,
+    #[serde(default)]
+    errors: Vec<ApiEnvelopeMessage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiEnvelopeMessage {
+    message: Option<String>,
+    code: Option<i64>,
+}
+
+fn format_envelope_errors(errors: &[ApiEnvelopeMessage]) -> String {
+    let msgs: Vec<String> = errors
+        .iter()
+        .filter_map(|e| match (&e.message, &e.code) {
+            (Some(msg), Some(code)) => Some(format!("{msg} (code {code})")),
+            (Some(msg), None) => Some(msg.clone()),
+            (None, Some(code)) => Some(format!("error code {code}")),
+            (None, None) => None,
+        })
+        .collect();
+    if msgs.is_empty() {
+        "unknown error".to_string()
+    } else {
+        msgs.join("; ")
+    }
+}
+
 pub struct ApiClient {
     client: reqwest::Client,
     /// Plain client without auth headers, reused for presigned S3 uploads.
@@ -150,14 +182,7 @@ impl ApiClient {
                 .text()
                 .await
                 .unwrap_or_else(|e| format!("<failed to read response: {e}>"));
-            if let Ok(api_err) = serde_json::from_str::<ApiError>(&body) {
-                let msg = api_err
-                    .message
-                    .or(api_err.error)
-                    .unwrap_or_else(|| format!("HTTP {status}"));
-                bail!("API error ({}): {}", status, msg);
-            }
-            bail!("API error ({}): {}", status, body);
+            return Err(extract_api_error(status, &body));
         }
 
         Ok(())
@@ -214,6 +239,25 @@ fn resolve_base_url() -> String {
     std::env::var("NRZ_API_URL").unwrap_or_else(|_| "https://api.onreza.ru".to_string())
 }
 
+fn extract_api_error(status: reqwest::StatusCode, body: &str) -> anyhow::Error {
+    if let Ok(envelope) = serde_json::from_str::<ApiEnvelope<serde_json::Value>>(body) {
+        if !envelope.errors.is_empty() {
+            return anyhow::anyhow!("API error ({}): {}", status, format_envelope_errors(&envelope.errors));
+        }
+        if !envelope.success {
+            return anyhow::anyhow!("API error ({}): request failed", status);
+        }
+    }
+    if let Ok(api_err) = serde_json::from_str::<ApiError>(body) {
+        let msg = api_err
+            .message
+            .or(api_err.error)
+            .unwrap_or_else(|| format!("HTTP {status}"));
+        return anyhow::anyhow!("API error ({}): {}", status, msg);
+    }
+    anyhow::anyhow!("API error ({}): {}", status, body)
+}
+
 async fn check_response<T: DeserializeOwned>(resp: reqwest::Response) -> anyhow::Result<T> {
     let status = resp.status();
     if !status.is_success() {
@@ -221,16 +265,27 @@ async fn check_response<T: DeserializeOwned>(resp: reqwest::Response) -> anyhow:
             .text()
             .await
             .unwrap_or_else(|e| format!("<failed to read response: {e}>"));
-        if let Ok(api_err) = serde_json::from_str::<ApiError>(&body) {
-            let msg = api_err
-                .message
-                .or(api_err.error)
-                .unwrap_or_else(|| format!("HTTP {status}"));
-            bail!("API error ({}): {}", status, msg);
-        }
-        bail!("API error ({}): {}", status, body);
+        return Err(extract_api_error(status, &body));
     }
 
     let body = resp.text().await.context("failed to read response body")?;
+
+    // Try API envelope format: {"success":true,"result":T,...}
+    // Use Value first to detect envelope structure without coupling to T
+    if let Ok(envelope) = serde_json::from_str::<ApiEnvelope<serde_json::Value>>(&body) {
+        if !envelope.success {
+            bail!(
+                "API returned success=false: {}",
+                format_envelope_errors(&envelope.errors)
+            );
+        }
+        let result_value = envelope
+            .result
+            .context("API returned success=true but result is null")?;
+        return serde_json::from_value(result_value)
+            .context("failed to deserialize API response result");
+    }
+
+    // Fallback: direct deserialization (for endpoints without envelope)
     serde_json::from_str(&body).with_context(|| format!("failed to parse response: {body}"))
 }
