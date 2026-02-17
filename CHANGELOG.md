@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2026-02-17
+
+### ♻️ Changed
+
+- **config:** remove project.json, make init local-first, add JSON Schema ([ac3ea67](https://github.com/ONREZA/nrz-cli/commit/ac3ea67ce339713c9921f19e3c34fec99fc70fae))
+
 ## [0.8.0] - 2026-02-17
 
 ### ✨ Features
