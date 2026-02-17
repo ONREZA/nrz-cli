@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-02-17
+
+### ✨ Features
+
+- **db:** add environment selection and remote db reset ([7f91a59](https://github.com/ONREZA/nrz-cli/commit/7f91a59a4865ab9d4c2cb1f713c1bfae0e65265f))
+- **db:** add D1 migration system and nrz init command ([3d34b4e](https://github.com/ONREZA/nrz-cli/commit/3d34b4ede7204aab646b30fe26533eb31e2d18bd))
+
+### 🔧 Changed
+
+- **ci:** pin Rust toolchain to 1.92.0 ([a358002](https://github.com/ONREZA/nrz-cli/commit/a3580025e5bff3eb7de6f57e34e7f565c10b9fc4))
+
 ## [0.6.0] - 2026-02-16
 
 ### ✨ Features
