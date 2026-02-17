@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-02-17
+
+### ✨ Features
+
+- **config:** add onreza.toml project configuration ([cf63448](https://github.com/ONREZA/nrz-cli/commit/cf634481aace38cf6b901489db874e5288b9013c))
+
+### 🐛 Bug Fixes
+
+- **ci:** add rustfmt and clippy components to pinned toolchain ([3c78804](https://github.com/ONREZA/nrz-cli/commit/3c78804d9f2d3eb26caec93f1f11bb06ed583155))
+
+### 🎨 Changed
+
+- **cli:** reformat for rustfmt 1.92 ([d8445d1](https://github.com/ONREZA/nrz-cli/commit/d8445d1bc32236458d4c91c38ad94c334c185e50))
+
 ## [0.7.0] - 2026-02-17
 
 ### ✨ Features
