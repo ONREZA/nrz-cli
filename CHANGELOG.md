@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.2] - 2026-02-17
+
+### 🐛 Bug Fixes
+
+- **cli:** unwrap API envelope in response parsing ([b92624f](https://github.com/ONREZA/nrz-cli/commit/b92624fa99f08466598a68c4119f44fa89c22afa))
+
 ## [0.8.1] - 2026-02-17
 
 ### ♻️ Changed
