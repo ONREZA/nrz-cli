@@ -55,6 +55,13 @@
           "type": "string",
           "description": "SQLite database filename for D1 emulation",
           "default": "dev.db"
+        },
+        "aliases": {
+          "type": "object",
+          "description": "Named command profiles for nrz dev --alias <name>",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     },
@@ -63,6 +70,10 @@
       "description": "Build output settings",
       "additionalProperties": true,
       "properties": {
+        "command": {
+          "type": "string",
+          "description": "Build command to run before deploy (e.g. \"npm run build\")"
+        },
         "output_dirs": {
           "type": "array",
           "description": "Directories to search for build output",

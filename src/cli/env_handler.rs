@@ -508,11 +508,7 @@ pub(crate) fn parse_dotenv_value(raw: &str) -> String {
     }
 
     // Unquoted: strip inline comment
-    raw.split(" #")
-        .next()
-        .unwrap_or(raw)
-        .trim_end()
-        .to_string()
+    raw.split(" #").next().unwrap_or(raw).trim_end().to_string()
 }
 
 pub(crate) fn is_secret_by_name(key: &str) -> bool {

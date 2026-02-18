@@ -242,7 +242,11 @@ fn resolve_base_url() -> String {
 fn extract_api_error(status: reqwest::StatusCode, body: &str) -> anyhow::Error {
     if let Ok(envelope) = serde_json::from_str::<ApiEnvelope<serde_json::Value>>(body) {
         if !envelope.errors.is_empty() {
-            return anyhow::anyhow!("API error ({}): {}", status, format_envelope_errors(&envelope.errors));
+            return anyhow::anyhow!(
+                "API error ({}): {}",
+                status,
+                format_envelope_errors(&envelope.errors)
+            );
         }
         if !envelope.success {
             return anyhow::anyhow!("API error ({}): request failed", status);
