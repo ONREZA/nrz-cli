@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-02-18
+
+### ✨ Features
+
+- **deploy:** add auto-build step with --skip-build flag ([e1711e0](https://github.com/ONREZA/nrz-cli/commit/e1711e08b406cc161e518b29365ce80991678862))
+- **dev:** add --alias, --inspect, --inspect-brk flags ([1599550](https://github.com/ONREZA/nrz-cli/commit/15995508719930fc660a75c55436cb99d4fbc0e2))
+- **config:** add build.command and dev.aliases to onreza.toml ([2598826](https://github.com/ONREZA/nrz-cli/commit/259882629b9ec2305c7ddaa87e26c7cff4ea3853))
+- **cli:** add `nrz env push` command ([a4c4c55](https://github.com/ONREZA/nrz-cli/commit/a4c4c55386e2edcdfcd878d2a9ab20b3222c0abe))
+
+### 🔧 Changed
+
+- **config:** update JSON schema with build.command and dev.aliases ([0752ad3](https://github.com/ONREZA/nrz-cli/commit/0752ad3ecfc83587b9ca74d93bb69a55b8dc562b))
+
 ## [0.8.2] - 2026-02-17
 
 ### 🐛 Bug Fixes
