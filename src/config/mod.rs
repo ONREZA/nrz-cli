@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod config_tests;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -37,12 +38,17 @@ pub struct DevSection {
 
     pub data_dir: Option<String>,
     pub db_name: Option<String>,
+
+    /// Named command profiles, defined as `[dev.aliases]` in onreza.toml.
+    /// Run with `nrz dev --alias <name>`.
+    pub aliases: HashMap<String, String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct BuildSection {
     pub output_dirs: Option<Vec<String>>,
+    pub command: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -66,6 +72,10 @@ pub struct DbSection {
 // ── Accessor methods with defaults ──────────────────────────
 
 impl ProjectConfig {
+    pub fn dev_alias_command(&self, name: &str) -> Option<&str> {
+        self.dev.aliases.get(name).map(|s| s.as_str())
+    }
+
     pub fn dev_port(&self) -> u16 {
         self.dev.port.unwrap_or(4321)
     }
@@ -91,6 +101,10 @@ impl ProjectConfig {
             Some(dirs) => dirs.iter().map(|s| s.as_str()).collect(),
             None => vec!["dist", ".output", "build"],
         }
+    }
+
+    pub fn build_command(&self) -> Option<&str> {
+        self.build.command.as_deref()
     }
 
     pub fn skip_migrations(&self) -> bool {
@@ -159,7 +173,12 @@ pub fn generate_template(
 # data_dir = ".onreza/data"
 # db_name = "dev.db"
 
+# [dev.aliases]
+# network = "npm run dev -- --host 0.0.0.0"
+# staging = "npm run dev -- --host 0.0.0.0 --port 3001"
+
 # [build]
+# command = "npm run build"
 # output_dirs = ["dist", ".output", "build"]
 
 # [deploy]

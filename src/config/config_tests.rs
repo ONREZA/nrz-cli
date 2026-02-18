@@ -46,6 +46,54 @@ default_env = "preview"
     assert!(config.skip_migrations());
     assert_eq!(config.migrations_dir(), "db/migrations");
     assert_eq!(config.db.default_env.as_deref(), Some("preview"));
+    assert!(config.build_command().is_none());
+    assert!(config.dev.aliases.is_empty());
+}
+
+#[test]
+fn load_config_with_build_command() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        "[build]\ncommand = \"pnpm build\"\n",
+    )
+    .unwrap();
+
+    let config = load(dir.path()).unwrap();
+    assert_eq!(config.build_command(), Some("pnpm build"));
+}
+
+#[test]
+fn load_config_with_dev_aliases() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        r#"
+[dev.aliases]
+network = "npm run dev -- --host 0.0.0.0"
+staging = "npm run dev -- --port 3001"
+"#,
+    )
+    .unwrap();
+
+    let config = load(dir.path()).unwrap();
+    assert_eq!(config.dev.aliases.len(), 2);
+    assert_eq!(
+        config.dev_alias_command("network"),
+        Some("npm run dev -- --host 0.0.0.0")
+    );
+    assert_eq!(
+        config.dev_alias_command("staging"),
+        Some("npm run dev -- --port 3001")
+    );
+    assert!(config.dev_alias_command("nonexistent").is_none());
+}
+
+#[test]
+fn default_config_has_empty_aliases_and_no_build_command() {
+    let config = ProjectConfig::default();
+    assert!(config.dev.aliases.is_empty());
+    assert!(config.build_command().is_none());
 }
 
 #[test]
