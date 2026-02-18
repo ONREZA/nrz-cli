@@ -150,8 +150,17 @@ pub async fn run(
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
 
+    // Verify auth early to avoid wasting time on build if token is invalid
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
+
+    // Run build step (default: enabled, skip with --skip-build)
+    if !args.skip_build
+        && let Some(cmd) =
+            resolve_build_command(args.build_command.as_deref(), &project_dir, config)
+    {
+        run_build_step(&cmd, &project_dir, json)?;
+    }
 
     // Fetch workspace info for plan-based limits
     let ws_info: WorkspaceInfo = client
@@ -250,13 +259,8 @@ pub async fn run(
 
     // Detect migrations
     let skip_mig = args.skip_migrations || config.skip_migrations();
-    let mig_entries = detect_migrations(
-        &manifest_raw,
-        &project_dir,
-        json,
-        skip_mig,
-        config.migrations_dir(),
-    );
+    let mig_entries = detect_migrations(&project_dir, json, skip_mig, config.migrations_dir())
+        .context("failed to scan migrations")?;
 
     // Create deployment
     output::status(json, "~", "Creating deployment...");
@@ -437,51 +441,100 @@ pub async fn run(
     }
 }
 
+// ── Build step ───────────────────────────────────────────────
+
+fn resolve_build_command(
+    explicit: Option<&str>,
+    project_dir: &Path,
+    config: &ProjectConfig,
+) -> Option<String> {
+    if let Some(cmd) = explicit {
+        return Some(cmd.to_string());
+    }
+    if let Some(cmd) = config.build_command() {
+        return Some(cmd.to_string());
+    }
+    // Only auto-detect if package.json exists
+    if !project_dir.join("package.json").exists() {
+        return None;
+    }
+    // Auto-detect package manager from lock files
+    let pm = if project_dir.join("bun.lock").exists() || project_dir.join("bun.lockb").exists() {
+        "bun"
+    } else if project_dir.join("pnpm-lock.yaml").exists() {
+        "pnpm"
+    } else if project_dir.join("yarn.lock").exists() {
+        "yarn"
+    } else {
+        "npm"
+    };
+    Some(format!("{pm} run build"))
+}
+
+fn run_build_step(cmd: &str, project_dir: &Path, json: bool) -> anyhow::Result<()> {
+    if cmd.trim().is_empty() {
+        anyhow::bail!("empty build command");
+    }
+
+    output::status(json, ">", format!("Building: {cmd}"));
+
+    // Run through shell to support env vars, pipes, and paths with spaces
+    #[cfg(unix)]
+    let status = std::process::Command::new("sh")
+        .args(["-c", cmd])
+        .current_dir(project_dir)
+        .status()
+        .with_context(|| format!("failed to start build command: {cmd}"))?;
+
+    #[cfg(windows)]
+    let status = std::process::Command::new("cmd")
+        .args(["/C", cmd])
+        .current_dir(project_dir)
+        .status()
+        .with_context(|| format!("failed to start build command: {cmd}"))?;
+
+    if !status.success() {
+        match status.code() {
+            Some(code) => anyhow::bail!("build failed with exit code {code}"),
+            None => anyhow::bail!("build process was killed by signal"),
+        }
+    }
+
+    output::success(json, "Build completed");
+    Ok(())
+}
+
 // ── Migration detection ──────────────────────────────────────
 
 fn detect_migrations(
-    manifest: &serde_json::Value,
     project_dir: &Path,
     json: bool,
     skip: bool,
     migrations_subdir: &str,
-) -> Option<Vec<migrations::Migration>> {
+) -> anyhow::Result<Option<Vec<migrations::Migration>>> {
     if skip {
-        return None;
-    }
-
-    // Check if manifest declares DB binding
-    let has_db = manifest
-        .pointer("/features/bindings/db")
-        .is_some_and(|v| !v.is_null());
-
-    if !has_db {
-        return None;
+        return Ok(None);
     }
 
     let migrations_dir = project_dir.join(migrations_subdir);
     if !migrations_dir.is_dir() {
-        return None;
+        return Ok(None);
     }
 
-    match migrations::scan_migrations_dir(project_dir, migrations_subdir) {
-        Ok(migs) if migs.is_empty() => None,
-        Ok(migs) => {
-            output::status(
-                json,
-                "~",
-                format!(
-                    "Detected {} migration(s), will apply during activation",
-                    migs.len()
-                ),
-            );
-            Some(migs)
-        }
-        Err(e) => {
-            output::warn(json, format!("Failed to scan migrations: {e:#}"));
-            None
-        }
+    let migs = migrations::scan_migrations_dir(project_dir, migrations_subdir)?;
+    if migs.is_empty() {
+        return Ok(None);
     }
+
+    output::status(
+        json,
+        "~",
+        format!(
+            "Detected {} migration(s), will apply during activation",
+            migs.len()
+        ),
+    );
+    Ok(Some(migs))
 }
 
 // ── File scanning ────────────────────────────────────────────

@@ -138,7 +138,6 @@ fn synthetic_sha_is_64_hex_chars() {
 
 #[test]
 fn detect_migrations_skip_flag() {
-    let manifest = serde_json::json!({ "features": { "bindings": { "db": true } } });
     let dir = tempdir().unwrap();
     fs::create_dir(dir.path().join("migrations")).unwrap();
     fs::write(
@@ -147,56 +146,29 @@ fn detect_migrations_skip_flag() {
     )
     .unwrap();
 
-    let result = detect_migrations(&manifest, dir.path(), true, true, "migrations");
-    assert!(result.is_none());
-}
-
-#[test]
-fn detect_migrations_no_db_binding() {
-    let manifest = serde_json::json!({ "features": { "bindings": {} } });
-    let dir = tempdir().unwrap();
-    fs::create_dir(dir.path().join("migrations")).unwrap();
-    fs::write(
-        dir.path().join("migrations/0001_init.sql"),
-        "CREATE TABLE t;",
-    )
-    .unwrap();
-
-    let result = detect_migrations(&manifest, dir.path(), true, false, "migrations");
-    assert!(result.is_none());
-}
-
-#[test]
-fn detect_migrations_db_null() {
-    let manifest = serde_json::json!({ "features": { "bindings": { "db": null } } });
-    let dir = tempdir().unwrap();
-
-    let result = detect_migrations(&manifest, dir.path(), true, false, "migrations");
+    let result = detect_migrations(dir.path(), true, true, "migrations").unwrap();
     assert!(result.is_none());
 }
 
 #[test]
 fn detect_migrations_no_migrations_dir() {
-    let manifest = serde_json::json!({ "features": { "bindings": { "db": true } } });
     let dir = tempdir().unwrap();
 
-    let result = detect_migrations(&manifest, dir.path(), true, false, "migrations");
+    let result = detect_migrations(dir.path(), true, false, "migrations").unwrap();
     assert!(result.is_none());
 }
 
 #[test]
 fn detect_migrations_empty_migrations_dir() {
-    let manifest = serde_json::json!({ "features": { "bindings": { "db": true } } });
     let dir = tempdir().unwrap();
     fs::create_dir(dir.path().join("migrations")).unwrap();
 
-    let result = detect_migrations(&manifest, dir.path(), true, false, "migrations");
+    let result = detect_migrations(dir.path(), true, false, "migrations").unwrap();
     assert!(result.is_none());
 }
 
 #[test]
 fn detect_migrations_returns_entries() {
-    let manifest = serde_json::json!({ "features": { "bindings": { "db": true } } });
     let dir = tempdir().unwrap();
     fs::create_dir(dir.path().join("migrations")).unwrap();
     fs::write(
@@ -210,8 +182,9 @@ fn detect_migrations_returns_entries() {
     )
     .unwrap();
 
-    let result = detect_migrations(&manifest, dir.path(), true, false, "migrations");
-    let entries = result.expect("should return migrations");
+    let entries = detect_migrations(dir.path(), true, false, "migrations")
+        .unwrap()
+        .expect("should return migrations");
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].name, "0001_init");
     assert_eq!(entries[1].name, "0002_users");
@@ -220,7 +193,6 @@ fn detect_migrations_returns_entries() {
 
 #[test]
 fn detect_migrations_custom_dir() {
-    let manifest = serde_json::json!({ "features": { "bindings": { "db": true } } });
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("db/migrations")).unwrap();
     fs::write(
@@ -229,10 +201,102 @@ fn detect_migrations_custom_dir() {
     )
     .unwrap();
 
-    let result = detect_migrations(&manifest, dir.path(), true, false, "db/migrations");
-    let entries = result.expect("should find migrations in custom dir");
+    let entries = detect_migrations(dir.path(), true, false, "db/migrations")
+        .unwrap()
+        .expect("should find migrations in custom dir");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, "0001_init");
+}
+
+// ── resolve_build_command tests ──────────────────────────────
+
+#[test]
+fn build_command_explicit_wins_over_config_and_auto() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(dir.path().join("yarn.lock"), "").unwrap();
+
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.command = Some("config cmd".into());
+
+    let result = resolve_build_command(Some("explicit cmd"), dir.path(), &config);
+    assert_eq!(result.unwrap(), "explicit cmd");
+}
+
+#[test]
+fn build_command_config_wins_over_auto() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(dir.path().join("yarn.lock"), "").unwrap();
+
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.command = Some("config cmd".into());
+
+    let result = resolve_build_command(None, dir.path(), &config);
+    assert_eq!(result.unwrap(), "config cmd");
+}
+
+#[test]
+fn build_command_auto_detect_bun_lock() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(dir.path().join("bun.lock"), "").unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(None, dir.path(), &config);
+    assert_eq!(result.unwrap(), "bun run build");
+}
+
+#[test]
+fn build_command_auto_detect_bun_lockb() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(dir.path().join("bun.lockb"), "").unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(None, dir.path(), &config);
+    assert_eq!(result.unwrap(), "bun run build");
+}
+
+#[test]
+fn build_command_auto_detect_pnpm() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(None, dir.path(), &config);
+    assert_eq!(result.unwrap(), "pnpm run build");
+}
+
+#[test]
+fn build_command_auto_detect_yarn() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(dir.path().join("yarn.lock"), "").unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(None, dir.path(), &config);
+    assert_eq!(result.unwrap(), "yarn run build");
+}
+
+#[test]
+fn build_command_auto_detect_npm_fallback() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(None, dir.path(), &config);
+    assert_eq!(result.unwrap(), "npm run build");
+}
+
+#[test]
+fn build_command_none_without_package_json() {
+    let dir = tempdir().unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(None, dir.path(), &config);
+    assert!(result.is_none());
 }
 
 // ── guess_content_type tests ────────────────────────────────
