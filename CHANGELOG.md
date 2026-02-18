@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-02-18
+
+### ✨ Features
+
+- **config:** add [env.declarations] for env var visibility and validation ([aa6464d](https://github.com/ONREZA/nrz-cli/commit/aa6464d9defb8402c91e3e28543abc4c7220d047))
+
 ## [0.9.0] - 2026-02-18
 
 ### ✨ Features
