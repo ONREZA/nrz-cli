@@ -13,24 +13,34 @@ use nrz::emulator::server::EmulatorServer;
 
 /// Start local dev server with platform emulation.
 ///
-/// 1. Resolve dev command (CLI flag or config)
-/// 2. Start emulator (KV, DB, Context)
-/// 3. Generate JS bootstrap that sets globalThis.ONREZA
-/// 4. Spawn dev command as child process
-/// 5. Forward signals, handle graceful shutdown
+/// 1. Resolve dev command (--alias > --command > config)
+/// 2. Ensure data directory exists
+/// 3. Generate JS bootstrap (globalThis.ONREZA)
+/// 4. Create KV store + emulator server
+/// 5. Start emulator in background, wait for readiness
+/// 6. Build NODE_OPTIONS (bootstrap + optional inspector)
+/// 7. Spawn dev command as child process
+/// 8. Cleanup on exit
 pub async fn run(args: DevArgs, config: &ProjectConfig) -> anyhow::Result<()> {
     let project_dir = std::path::Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
 
-    // 1. Resolve dev command
-    let dev_command = if let Some(ref cmd) = args.command {
+    // 1. Resolve dev command: --alias > --command > [dev] command
+    let dev_command = if let Some(ref name) = args.alias {
+        config
+            .dev_alias_command(name)
+            .with_context(|| {
+                format!("alias '{name}' not found — define it in [dev.aliases] in onreza.toml")
+            })?
+            .to_string()
+    } else if let Some(ref cmd) = args.command {
         cmd.clone()
     } else if let Some(ref cmd) = config.dev.command {
         cmd.clone()
     } else {
         anyhow::bail!(
-            "no dev command specified — set [dev] command in onreza.toml or use --command"
+            "no dev command specified — set [dev] command in onreza.toml, use --command, or define aliases in [dev.aliases]"
         );
     };
 
@@ -67,13 +77,24 @@ pub async fn run(args: DevArgs, config: &ProjectConfig) -> anyhow::Result<()> {
         "  {} emulator ready on port {emulator_port}",
         console::style("~").cyan().bold(),
     );
+
+    // 6. Build extra NODE_OPTIONS (--inspect / --inspect-brk)
+    let inspect_flag = if args.inspect_brk {
+        Some("--inspect-brk")
+    } else if args.inspect {
+        Some("--inspect")
+    } else {
+        None
+    };
+
     eprintln!(
         "  {} starting: {dev_command}",
         console::style(">").green().bold(),
     );
 
     // 7. Spawn dev server (blocks until exit or Ctrl+C)
-    let result = process::spawn_dev_server(&project_dir, &dev_command, &bootstrap_path).await;
+    let result =
+        process::spawn_dev_server(&project_dir, &dev_command, &bootstrap_path, inspect_flag).await;
 
     // 8. Cleanup
     server_handle.abort();

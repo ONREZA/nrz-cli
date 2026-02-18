@@ -10,10 +10,13 @@ use tokio::signal;
 /// Injects the ONREZA bootstrap script via `NODE_OPTIONS=--import`.
 /// Forwards stdout/stderr to the terminal.
 /// Handles SIGINT/SIGTERM for graceful shutdown.
+///
+/// `inspect_flag` — optional Node.js inspector flag (`--inspect` or `--inspect-brk`).
 pub async fn spawn_dev_server(
     project_dir: &Path,
     dev_command: &str,
     bootstrap_path: &Path,
+    inspect_flag: Option<&str>,
 ) -> anyhow::Result<()> {
     let parts: Vec<&str> = dev_command.split_whitespace().collect();
     let (bin, args) = parts.split_first().context("empty dev command")?;
@@ -22,11 +25,15 @@ pub async fn spawn_dev_server(
     let bootstrap_url = url::Url::from_file_path(bootstrap_path)
         .map_err(|_| anyhow::anyhow!("invalid bootstrap path: {}", bootstrap_path.display()))?;
     let existing = std::env::var("NODE_OPTIONS").unwrap_or_default();
-    let node_options = if existing.is_empty() {
+    let mut node_options = if existing.is_empty() {
         format!("--import {bootstrap_url}")
     } else {
         format!("{existing} --import {bootstrap_url}")
     };
+    if let Some(flag) = inspect_flag {
+        node_options.push(' ');
+        node_options.push_str(flag);
+    }
 
     let mut cmd = Command::new(bin);
     cmd.args(args)
