@@ -9,6 +9,8 @@ pub mod domains;
 pub mod domains_handler;
 pub mod env;
 pub mod env_handler;
+#[cfg(test)]
+mod env_handler_tests;
 pub mod kv;
 pub mod kv_handler;
 pub mod projects;
@@ -171,13 +173,25 @@ pub struct LinkArgs {
 
 #[derive(Parser)]
 pub struct DevArgs {
-    /// Framework command to run (default: auto-detect)
+    /// Run a named command profile from [dev.aliases] in onreza.toml
+    #[arg(short = 'a', long, conflicts_with = "command")]
+    pub alias: Option<String>,
+
+    /// Framework command to run (overrides [dev] command in onreza.toml)
     #[arg(long)]
     pub command: Option<String>,
 
     /// Port for the dev server (default: 4321, or from onreza.toml)
     #[arg(short, long)]
     pub port: Option<u16>,
+
+    /// Enable Node.js inspector (attach a debugger on port 9229)
+    #[arg(long)]
+    pub inspect: bool,
+
+    /// Enable Node.js inspector, breaking before user code starts
+    #[arg(long, conflicts_with = "inspect")]
+    pub inspect_brk: bool,
 
     /// Path to project directory
     #[arg(default_value = ".")]
@@ -212,6 +226,14 @@ pub struct DeployArgs {
     /// Skip database migrations during deploy
     #[arg(long)]
     pub skip_migrations: bool,
+
+    /// Skip build step before deploying
+    #[arg(long)]
+    pub skip_build: bool,
+
+    /// Custom build command (overrides [build] command in onreza.toml)
+    #[arg(long)]
+    pub build_command: Option<String>,
 }
 
 #[derive(Parser)]

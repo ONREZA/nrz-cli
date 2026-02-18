@@ -40,4 +40,23 @@ pub enum EnvCommand {
         #[arg(default_value = ".env.local")]
         file: String,
     },
+
+    /// Push environment variables from a local file to the platform
+    Push {
+        /// Input file path (dotenv format)
+        #[arg(default_value = ".env.local")]
+        file: String,
+
+        /// Overwrite existing variables (default: skip existing)
+        #[arg(long)]
+        overwrite: bool,
+
+        /// Show what would be uploaded without making any changes
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Mark all imported variables as secrets
+        #[arg(long)]
+        secret: bool,
+    },
 }
