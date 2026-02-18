@@ -119,6 +119,49 @@
           "enum": ["production", "preview", "development"]
         }
       }
+    },
+    "env": {
+      "type": "object",
+      "description": "Environment variable settings and declarations",
+      "additionalProperties": false,
+      "properties": {
+        "strict": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, nrz env push only uploads variables declared in [env.declarations]"
+        },
+        "declarations": {
+          "type": "object",
+          "description": "Environment variable declarations. Keys are variable names, values define visibility and requirements.",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": ["sensitive", "plain"],
+                "description": "Shorthand: variable is required with the given visibility"
+              },
+              {
+                "type": "object",
+                "description": "Full declaration with visibility and optional required flag",
+                "properties": {
+                  "visibility": {
+                    "type": "string",
+                    "enum": ["sensitive", "plain"],
+                    "description": "Whether the variable value should be encrypted on the platform"
+                  },
+                  "required": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Whether the variable must be set before deploy"
+                  }
+                },
+                "required": ["visibility"],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      }
     }
   }
 }

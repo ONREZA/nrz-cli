@@ -58,5 +58,12 @@ pub enum EnvCommand {
         /// Mark all imported variables as secrets
         #[arg(long)]
         secret: bool,
+
+        /// Only push variables declared in [env.declarations] (default when env.strict = true)
+        #[arg(long)]
+        declared_only: bool,
     },
+
+    /// Validate environment variables against [env] declarations in onreza.toml
+    Validate,
 }

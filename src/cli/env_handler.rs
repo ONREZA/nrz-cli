@@ -5,7 +5,7 @@ use crate::api::ApiClient;
 use crate::auth;
 use crate::output;
 use nrz::config;
-use nrz::config::ProjectConfig;
+use nrz::config::{EnvVisibility, ProjectConfig};
 
 use super::env::{EnvArgs, EnvCommand};
 
@@ -32,11 +32,30 @@ struct EnvListResponse {
 #[serde(rename_all = "camelCase")]
 struct EnvVar {
     key: String,
+    #[serde(default)]
     value: Option<String>,
     is_secret: bool,
-    /// "ALL" or ["PRODUCTION", "PREVIEW", ...]
-    target: serde_json::Value,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    scope_type: Option<String>,
+    #[serde(default)]
+    preview_branch: Option<String>,
+    #[serde(default)]
+    environments: Vec<EnvVarEnvironment>,
+    #[serde(default)]
+    created_at: Option<String>,
+    #[serde(default)]
     updated_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnvVarEnvironment {
+    id: String,
+    name: String,
+    #[serde(rename = "type")]
+    env_type: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -50,16 +69,23 @@ struct SetEnvBody<'a> {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SetEnvResponse {
+    id: String,
     key: String,
     created: bool,
+    #[serde(default)]
+    is_secret: Option<bool>,
+    #[serde(default)]
+    scope_type: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
     #[serde(default)]
     warnings: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct DeleteEnvResponse {
-    #[allow(dead_code)]
     deleted: bool,
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -80,12 +106,12 @@ struct BulkEnvBody<'a> {
 struct BulkVarResult {
     key: String,
     success: bool,
-    /// True when overwrite=false and the key already existed.
-    /// Skipped entries are excluded from both "uploaded" and "failed" counts.
     #[serde(default)]
     skipped: bool,
     #[serde(default)]
     error: Option<String>,
+    #[serde(default)]
+    warnings: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,6 +150,7 @@ pub async fn run(
             overwrite,
             dry_run,
             secret,
+            declared_only,
         } => {
             push(
                 &client,
@@ -132,10 +159,13 @@ pub async fn run(
                 overwrite,
                 dry_run,
                 secret,
+                declared_only,
                 json,
+                config,
             )
             .await
         }
+        EnvCommand::Validate => validate(&client, &project_id, json, config).await,
     }
 }
 
@@ -156,7 +186,7 @@ async fn list(client: &ApiClient, project_id: &str, json: bool) -> anyhow::Resul
             "  {:<30} {:<30} {}",
             console::style("Key").bold(),
             console::style("Value").bold(),
-            console::style("Target").bold(),
+            console::style("Scope").bold(),
         );
         eprintln!("  {}", "-".repeat(70));
 
@@ -166,8 +196,8 @@ async fn list(client: &ApiClient, project_id: &str, json: bool) -> anyhow::Resul
             } else {
                 v.value.as_deref().unwrap_or("-").to_string()
             };
-            let target = format_target(&v.target);
-            eprintln!("  {:<30} {:<30} {}", v.key, display_val, target);
+            let scope = format_scope(v);
+            eprintln!("  {:<30} {:<30} {}", v.key, display_val, scope);
         }
         eprintln!();
     }
@@ -175,15 +205,16 @@ async fn list(client: &ApiClient, project_id: &str, json: bool) -> anyhow::Resul
     Ok(())
 }
 
-fn format_target(target: &serde_json::Value) -> String {
-    match target {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Array(arr) => arr
+fn format_scope(v: &EnvVar) -> String {
+    match v.scope_type.as_deref() {
+        Some("ALL") | None => "ALL".to_string(),
+        Some("SELECTED") if !v.environments.is_empty() => v
+            .environments
             .iter()
-            .filter_map(|v| v.as_str())
+            .map(|e| e.name.as_str())
             .collect::<Vec<_>>()
             .join(", "),
-        _ => "ALL".to_string(),
+        Some(other) => other.to_string(),
     }
 }
 
@@ -209,14 +240,15 @@ async fn set(
     if json {
         output::json_output(&resp);
     } else {
-        output::success(false, format!("Set {}", console::style(key).bold()));
+        let action = if resp.created { "Created" } else { "Updated" };
+        output::success(false, format!("{action} {}", console::style(key).bold()));
     }
 
     Ok(())
 }
 
 async fn delete(client: &ApiClient, project_id: &str, key: &str, json: bool) -> anyhow::Result<()> {
-    let _resp: DeleteEnvResponse = client
+    let resp: DeleteEnvResponse = client
         .delete(&format!("/v1/projects/{}/env/{}", project_id, key))
         .await
         .context("failed to delete environment variable")?;
@@ -224,7 +256,7 @@ async fn delete(client: &ApiClient, project_id: &str, key: &str, json: bool) -> 
     if json {
         output::json_output(&serde_json::json!({
             "key": key,
-            "deleted": true,
+            "deleted": resp.deleted,
         }));
     } else {
         output::success(false, format!("Deleted {}", console::style(key).bold()));
@@ -253,6 +285,7 @@ async fn pull(client: &ApiClient, project_id: &str, file: &str, json: bool) -> a
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn push(
     client: &ApiClient,
     project_id: &str,
@@ -260,13 +293,35 @@ async fn push(
     overwrite: bool,
     dry_run: bool,
     force_secret: bool,
+    declared_only: bool,
     json: bool,
+    config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let content =
         std::fs::read_to_string(file).with_context(|| format!("failed to read {file}"))?;
 
     let result = parse_dotenv(&content);
-    let parsed = result.vars;
+    let mut parsed = result.vars;
+
+    // Filter to declared-only vars if requested (flag or config)
+    let strict = declared_only || config.env_strict();
+    if strict {
+        if config.env.declarations.is_empty() {
+            anyhow::bail!(
+                "strict mode is enabled but [env.declarations] is empty in onreza.toml. \
+                 Declare variables or disable strict mode."
+            );
+        }
+        let before = parsed.len();
+        parsed.retain(|v| config.env.declarations.contains_key(&v.key));
+        let filtered = before - parsed.len();
+        if filtered > 0 {
+            output::warn(
+                json,
+                format!("{filtered} variable(s) skipped (not declared in [env.declarations])"),
+            );
+        }
+    }
 
     if result.skipped_lines > 0 {
         output::warn(
@@ -314,7 +369,7 @@ async fn push(
             let preview: Vec<_> = vars_to_push
                 .iter()
                 .map(|v| {
-                    let is_secret = force_secret || is_secret_by_name(&v.key);
+                    let is_secret = resolve_sensitivity(&v.key, force_secret, config);
                     serde_json::json!({ "key": v.key, "isSecret": is_secret })
                 })
                 .collect();
@@ -334,7 +389,7 @@ async fn push(
                 skipped
             );
             for v in &vars_to_push {
-                let is_secret = force_secret || is_secret_by_name(&v.key);
+                let is_secret = resolve_sensitivity(&v.key, force_secret, config);
                 let tag = if is_secret { " (secret)" } else { "" };
                 eprintln!("    {} {}{}", console::style("+").green(), v.key, tag);
             }
@@ -349,7 +404,7 @@ async fn push(
         .map(|v| BulkEnvVar {
             key: &v.key,
             value: &v.value,
-            is_secret: force_secret || is_secret_by_name(&v.key),
+            is_secret: resolve_sensitivity(&v.key, force_secret, config),
         })
         .collect();
 
@@ -371,7 +426,16 @@ async fn push(
     let uploaded = resp.results.iter().filter(|r| r.success).count();
 
     if json {
-        output::json_output(&serde_json::json!({
+        let warnings: Vec<_> = resp
+            .results
+            .iter()
+            .filter_map(|r| {
+                r.warnings
+                    .as_ref()
+                    .map(|w| serde_json::json!({ "key": r.key, "warnings": w }))
+            })
+            .collect();
+        let mut obj = serde_json::json!({
             "file": file,
             "uploaded": uploaded,
             "skipped": skipped,
@@ -380,9 +444,13 @@ async fn push(
                 "key": r.key,
                 "error": r.error,
             })).collect::<Vec<_>>(),
-        }));
+        });
+        if !warnings.is_empty() {
+            obj["warnings"] = serde_json::json!(warnings);
+        }
+        output::json_output(&obj);
         if !failed.is_empty() {
-            anyhow::bail!("{} variable(s) failed to upload", failed.len());
+            std::process::exit(1);
         }
         return Ok(());
     }
@@ -399,6 +467,13 @@ async fn push(
             }
         ),
     );
+    for r in &resp.results {
+        if let Some(warnings) = &r.warnings {
+            for w in warnings {
+                output::warn(false, format!("{}: {w}", r.key));
+            }
+        }
+    }
     for r in &failed {
         output::warn(
             false,
@@ -514,4 +589,265 @@ pub(crate) fn parse_dotenv_value(raw: &str) -> String {
 pub(crate) fn is_secret_by_name(key: &str) -> bool {
     let key_upper = key.to_uppercase();
     SECRET_KEYWORDS.iter().any(|kw| key_upper.contains(kw))
+}
+
+/// Resolve whether a variable should be marked as secret.
+/// Priority: --secret flag > [env] config > heuristic by name.
+pub(crate) fn resolve_sensitivity(key: &str, force_secret: bool, config: &ProjectConfig) -> bool {
+    if force_secret {
+        return true;
+    }
+    if let Some(vis) = config.env_visibility(key) {
+        return vis == EnvVisibility::Sensitive;
+    }
+    is_secret_by_name(key)
+}
+
+// ── env validate ────────────────────────────────────────────
+
+async fn validate(
+    client: &ApiClient,
+    project_id: &str,
+    json: bool,
+    config: &ProjectConfig,
+) -> anyhow::Result<()> {
+    if config.env.declarations.is_empty() {
+        if json {
+            output::json_output(&serde_json::json!({
+                "valid": true,
+                "missing": [],
+                "present": [],
+                "undeclared": [],
+                "message": "No [env] declarations in onreza.toml"
+            }));
+        } else {
+            eprintln!("  No [env] declarations found in onreza.toml");
+        }
+        return Ok(());
+    }
+
+    let resp: EnvListResponse = client
+        .get(&format!("/v1/projects/{}/env", project_id))
+        .await
+        .context("failed to fetch environment variables")?;
+
+    let platform_keys: std::collections::HashSet<&str> =
+        resp.env_vars.iter().map(|v| v.key.as_str()).collect();
+
+    let mut missing = Vec::new();
+    let mut present = Vec::new();
+
+    for (key, decl) in &config.env.declarations {
+        if platform_keys.contains(key.as_str()) {
+            present.push(key.as_str());
+        } else if decl.required {
+            missing.push((key.as_str(), decl.visibility));
+        }
+    }
+
+    let declared_keys: std::collections::HashSet<&str> =
+        config.env.declarations.keys().map(|k| k.as_str()).collect();
+    let undeclared: Vec<&str> = resp
+        .env_vars
+        .iter()
+        .map(|v| v.key.as_str())
+        .filter(|k| !declared_keys.contains(k))
+        .collect();
+
+    missing.sort_by_key(|(k, _)| *k);
+    present.sort();
+
+    let valid = missing.is_empty();
+
+    if json {
+        let missing_json: Vec<_> = missing
+            .iter()
+            .map(|(key, vis)| {
+                serde_json::json!({
+                    "key": key,
+                    "visibility": vis.as_str()
+                })
+            })
+            .collect();
+
+        output::json_output(&serde_json::json!({
+            "valid": valid,
+            "missing": missing_json,
+            "present": present,
+            "undeclared": undeclared,
+        }));
+        if !valid {
+            std::process::exit(1);
+        }
+        return Ok(());
+    } else {
+        eprintln!();
+        if valid {
+            output::success(
+                false,
+                format!("All {} required variable(s) are set", present.len()),
+            );
+        } else {
+            eprintln!(
+                "  {} Missing required environment variables:\n",
+                console::style("✗").red().bold()
+            );
+            for (key, vis) in &missing {
+                let tag = if *vis == EnvVisibility::Sensitive {
+                    " (sensitive)"
+                } else {
+                    ""
+                };
+                eprintln!("    {} {}{}", console::style("-").red(), key, tag);
+            }
+            eprintln!();
+            eprintln!("  Set them with:");
+            for (key, vis) in &missing {
+                let flag = if *vis == EnvVisibility::Sensitive {
+                    " --secret"
+                } else {
+                    ""
+                };
+                eprintln!(
+                    "    {}",
+                    console::style(format!("nrz env set {key} <value>{flag}")).dim()
+                );
+            }
+            eprintln!();
+            eprintln!(
+                "  Or push from file: {}",
+                console::style("nrz env push .env.local").dim()
+            );
+        }
+
+        if !undeclared.is_empty() {
+            eprintln!();
+            output::warn(
+                false,
+                format!(
+                    "{} variable(s) on platform not declared in onreza.toml: {}",
+                    undeclared.len(),
+                    undeclared.join(", ")
+                ),
+            );
+        }
+        eprintln!();
+    }
+
+    if !valid {
+        anyhow::bail!("{} required environment variable(s) missing", missing.len());
+    }
+
+    Ok(())
+}
+
+/// Pre-flight check for deploy: verifies all required env vars are set on platform.
+/// Returns Ok(()) if no [env] declarations exist or all required vars are present.
+pub(crate) async fn validate_env_for_deploy(
+    client: &ApiClient,
+    project_id: &str,
+    json: bool,
+    config: &ProjectConfig,
+) -> anyhow::Result<()> {
+    if config.env.declarations.is_empty() {
+        return Ok(());
+    }
+
+    output::status(json, "~", "Checking environment variables...");
+
+    // Only fetch the keys we care about (declared required vars)
+    let required_keys: Vec<&str> = config
+        .env
+        .declarations
+        .iter()
+        .filter(|(_, decl)| decl.required)
+        .map(|(key, _)| key.as_str())
+        .collect();
+
+    if required_keys.is_empty() {
+        return Ok(());
+    }
+
+    let keys_param = required_keys.join(",");
+    let resp: EnvListResponse = client
+        .get(&format!(
+            "/v1/projects/{}/env?keys={}",
+            project_id, keys_param
+        ))
+        .await
+        .context("failed to fetch environment variables")?;
+
+    let platform_keys: std::collections::HashSet<&str> =
+        resp.env_vars.iter().map(|v| v.key.as_str()).collect();
+
+    let mut missing: Vec<(&str, EnvVisibility)> = config
+        .env
+        .declarations
+        .iter()
+        .filter(|(key, decl)| decl.required && !platform_keys.contains(key.as_str()))
+        .map(|(key, decl)| (key.as_str(), decl.visibility))
+        .collect();
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    missing.sort_by_key(|(k, _)| *k);
+
+    if json {
+        let missing_json: Vec<_> = missing
+            .iter()
+            .map(|(key, vis)| {
+                serde_json::json!({
+                    "key": key,
+                    "visibility": vis.as_str()
+                })
+            })
+            .collect();
+        output::json_output(&serde_json::json!({
+            "error": "missing_env_vars",
+            "missing": missing_json,
+        }));
+        std::process::exit(1);
+    } else {
+        eprintln!();
+        eprintln!(
+            "  {} Missing required environment variables:\n",
+            console::style("✗").red().bold()
+        );
+        for (key, vis) in &missing {
+            let tag = match vis {
+                EnvVisibility::Sensitive => " (sensitive)",
+                EnvVisibility::Plain => "",
+            };
+            eprintln!("    {} {}{}", console::style("-").red(), key, tag);
+        }
+        eprintln!();
+        eprintln!("  Set them with:");
+        for (key, vis) in &missing {
+            let flag = match vis {
+                EnvVisibility::Sensitive => " --secret",
+                EnvVisibility::Plain => "",
+            };
+            eprintln!(
+                "    {}",
+                console::style(format!("nrz env set {key} <value>{flag}")).dim()
+            );
+        }
+        eprintln!();
+        eprintln!(
+            "  Or push from file: {}",
+            console::style("nrz env push .env.local").dim()
+        );
+        eprintln!();
+        eprintln!(
+            "  Skip this check with: {}",
+            console::style("nrz deploy --skip-env-check").dim()
+        );
+    }
+
+    anyhow::bail!(
+        "{} required environment variable(s) missing. Set them or use --skip-env-check",
+        missing.len()
+    );
 }

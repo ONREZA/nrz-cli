@@ -234,6 +234,10 @@ pub struct DeployArgs {
     /// Custom build command (overrides [build] command in onreza.toml)
     #[arg(long)]
     pub build_command: Option<String>,
+
+    /// Skip environment variable validation against [env] declarations
+    #[arg(long)]
+    pub skip_env_check: bool,
 }
 
 #[derive(Parser)]

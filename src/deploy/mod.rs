@@ -257,6 +257,12 @@ pub async fn run(
         }
     };
 
+    // Validate required env vars from [env] declarations
+    if !args.skip_env_check {
+        crate::cli::env_handler::validate_env_for_deploy(&client, &project_id, json, config)
+            .await?;
+    }
+
     // Detect migrations
     let skip_mig = args.skip_migrations || config.skip_migrations();
     let mig_entries = detect_migrations(&project_dir, json, skip_mig, config.migrations_dir())

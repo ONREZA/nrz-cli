@@ -2,12 +2,16 @@
 
 #[cfg(test)]
 mod config_tests;
+#[cfg(test)]
+mod env_decl_tests;
 
 use std::collections::HashMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use serde::{Deserialize, Serialize};
+use serde::de::{self, MapAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// Top-level config loaded from `onreza.toml`.
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -19,6 +23,8 @@ pub struct ProjectConfig {
     pub deploy: DeploySection,
     pub migrations: MigrationsSection,
     pub db: DbSection,
+    /// Environment variable declarations: `[env]` section.
+    pub env: EnvSection,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -69,6 +75,115 @@ pub struct DbSection {
     pub default_env: Option<String>,
 }
 
+// ── Environment variable declarations ───────────────────────
+
+/// Visibility of an environment variable on the platform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EnvVisibility {
+    Plain,
+    Sensitive,
+}
+
+impl EnvVisibility {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Plain => "plain",
+            Self::Sensitive => "sensitive",
+        }
+    }
+}
+
+impl fmt::Display for EnvVisibility {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Declaration of a single environment variable in `[env]`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EnvVarDecl {
+    pub visibility: EnvVisibility,
+    pub required: bool,
+}
+
+impl<'de> Deserialize<'de> for EnvVarDecl {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct EnvVarDeclVisitor;
+
+        impl<'de> Visitor<'de> for EnvVarDeclVisitor {
+            type Value = EnvVarDecl;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str(r#""sensitive", "plain", or { visibility = "...", required = ... }"#)
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<EnvVarDecl, E> {
+                let visibility = EnvVisibility::deserialize(de::value::StrDeserializer::new(v))?;
+                Ok(EnvVarDecl {
+                    visibility,
+                    required: true,
+                })
+            }
+
+            fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<EnvVarDecl, M::Error> {
+                let mut visibility: Option<EnvVisibility> = None;
+                let mut required: Option<bool> = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "visibility" => {
+                            visibility = Some(map.next_value::<EnvVisibility>()?);
+                        }
+                        "required" => {
+                            required = Some(map.next_value()?);
+                        }
+                        other => {
+                            let _: toml::Value = map.next_value()?;
+                            return Err(de::Error::custom(format!(
+                                "unknown field \"{other}\" in env var declaration"
+                            )));
+                        }
+                    }
+                }
+
+                let visibility =
+                    visibility.ok_or_else(|| de::Error::missing_field("visibility"))?;
+
+                Ok(EnvVarDecl {
+                    visibility,
+                    required: required.unwrap_or(true),
+                })
+            }
+        }
+
+        deserializer.deserialize_any(EnvVarDeclVisitor)
+    }
+}
+
+/// The `[env]` section: options + variable declarations.
+///
+/// ```toml
+/// [env]
+/// strict = true                    # only push declared vars
+///
+/// [env.declarations]
+/// DATABASE_URL = "sensitive"
+/// PUBLIC_API_URL = "plain"
+/// OPTIONAL_VAR = { visibility = "plain", required = false }
+/// ```
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct EnvSection {
+    /// When true, `nrz env push` only uploads variables declared in `[env.declarations]`.
+    pub strict: bool,
+    /// Variable declarations keyed by name.
+    pub declarations: HashMap<String, EnvVarDecl>,
+}
+
 // ── Accessor methods with defaults ──────────────────────────
 
 impl ProjectConfig {
@@ -114,6 +229,26 @@ impl ProjectConfig {
     pub fn migrations_dir(&self) -> &str {
         self.migrations.dir.as_deref().unwrap_or("migrations")
     }
+
+    /// Returns keys of all required env vars declared in `[env]`.
+    pub fn required_env_vars(&self) -> Vec<&str> {
+        self.env
+            .declarations
+            .iter()
+            .filter(|(_, decl)| decl.required)
+            .map(|(key, _)| key.as_str())
+            .collect()
+    }
+
+    /// Returns the declared visibility for a key, if declared.
+    pub fn env_visibility(&self, key: &str) -> Option<EnvVisibility> {
+        self.env.declarations.get(key).map(|d| d.visibility)
+    }
+
+    /// Whether `env push` should only upload variables declared in `[env]`.
+    pub fn env_strict(&self) -> bool {
+        self.env.strict
+    }
 }
 
 // ── Load / Save ─────────────────────────────────────────────
@@ -127,6 +262,21 @@ pub fn load(project_dir: &Path) -> anyhow::Result<ProjectConfig> {
         Ok(content) => {
             let config: ProjectConfig = toml::from_str(&content)
                 .with_context(|| format!("failed to parse {}", path.display()))?;
+            // Validate env var names: must match ^[A-Z][A-Z0-9_]*$
+            for key in config.env.declarations.keys() {
+                let valid = !key.is_empty()
+                    && key.as_bytes()[0].is_ascii_uppercase()
+                    && key
+                        .bytes()
+                        .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_');
+                if !valid {
+                    anyhow::bail!(
+                        "invalid env var name \"{}\" in [env.declarations]: \
+                         must be UPPER_SNAKE_CASE (start with A-Z, contain only A-Z, 0-9, _)",
+                        key
+                    );
+                }
+            }
             Ok(config)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(ProjectConfig::default()),
@@ -189,6 +339,14 @@ pub fn generate_template(
 
 # [db]
 # default_env = "development"
+
+# [env]
+# strict = false
+
+# [env.declarations]
+# DATABASE_URL = "sensitive"
+# PUBLIC_API_URL = "plain"
+# OPTIONAL_VAR = {{ visibility = "plain", required = false }}
 "#
     )
 }

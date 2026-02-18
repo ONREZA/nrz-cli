@@ -20,8 +20,9 @@ src/
   lib.rs            — библиотечный интерфейс (для тестов)
   main.rs           — entrypoint, clap парсинг, загрузка конфига
   config/           — onreza.toml конфигурация проекта
-    mod.rs           — ProjectConfig, load/save/generate_template
+    mod.rs           — ProjectConfig, EnvVarDecl, EnvVisibility, load/save/generate_template
     config_tests.rs  — тесты конфига (11 тестов)
+    env_decl_tests.rs — тесты [env] деклараций (12 тестов)
   cli/              — CLI определения (clap derive)
     mod.rs           — Cli, Command enum
     db.rs            — DbArgs, DbCommand
@@ -118,6 +119,7 @@ CLI не зависит от адаптеров. Связь — через BUILD
 | `nrz env set <key> <val>` | Установить переменную окружения |
 | `nrz env delete <key>` | Удалить переменную окружения |
 | `nrz env pull` | Скачать переменные в .env.local |
+| `nrz env validate` | Валидация переменных по [env] декларации в onreza.toml |
 | `nrz domains list` | Список кастомных доменов |
 | `nrz domains add <domain>` | Добавить кастомный домен |
 | `nrz domains remove <id>` | Удалить кастомный домен |
@@ -184,6 +186,7 @@ cargo test                   # тесты
 src/
   config/
     config_tests.rs — unit-тесты (11 тестов)
+    env_decl_tests.rs — unit-тесты (12 тестов)
   emulator/
     kv.rs           — основной код
     kv_tests.rs     — unit-тесты (18 тестов)
@@ -262,7 +265,31 @@ id = "proj_abc123"      # ID проекта на платформе
 
 [db]
 # default_env = "development"
+
+[env]
+# strict = false
+
+[env.declarations]
+# DATABASE_URL = "sensitive"
+# PUBLIC_API_URL = "plain"
+# OPTIONAL_VAR = { visibility = "plain", required = false }
 ```
+
+### Секция `[env]` — декларация переменных окружения
+
+Объявляет какие env vars нужны проекту, их visibility (sensitive/plain) и обязательность.
+
+**`[env]`** — настройки:
+- `strict = true` — `nrz env push` загружает только переменные из `[env.declarations]` (также включается флагом `--declared-only`)
+
+**`[env.declarations]`** — переменные:
+- Строка `"sensitive"` / `"plain"` — shorthand, переменная обязательна
+- Table `{ visibility = "...", required = false }` — для необязательных переменных
+
+Используется в:
+- `nrz env push` — определяет `is_secret` для каждой переменной (вместо эвристики по имени); при `strict`/`--declared-only` фильтрует только объявленные
+- `nrz env validate` — проверяет что все required переменные заданы на платформе
+- `nrz deploy` — pre-flight проверка required переменных перед деплоем (skip: `--skip-env-check`)
 
 Приоритет: `CLI flag > env var (NRZ_*) > onreza.toml > hardcoded default`
 
