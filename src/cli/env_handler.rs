@@ -64,6 +64,8 @@ struct SetEnvBody<'a> {
     key: &'a str,
     value: &'a str,
     is_secret: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -94,6 +96,8 @@ struct BulkEnvVar<'a> {
     key: &'a str,
     value: &'a str,
     is_secret: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -131,17 +135,19 @@ pub async fn run(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    env: &[String],
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let tok = auth::resolve_token(token, workspace)?;
 
     let client = ApiClient::authenticated(&tok)?;
     let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
+    let targets = resolve_targets(env);
 
     match args.command {
-        EnvCommand::List => list(&client, &project_id, json).await,
+        EnvCommand::List => list(&client, &project_id, &targets, json).await,
         EnvCommand::Set { key, value, secret } => {
-            set(&client, &project_id, &key, &value, secret, json).await
+            set(&client, &project_id, &key, &value, secret, &targets, json).await
         }
         EnvCommand::Delete { key } => delete(&client, &project_id, &key, json).await,
         EnvCommand::Pull { file } => pull(&client, &project_id, &file, json).await,
@@ -160,6 +166,7 @@ pub async fn run(
                 dry_run,
                 secret,
                 declared_only,
+                &targets,
                 json,
                 config,
             )
@@ -169,9 +176,33 @@ pub async fn run(
     }
 }
 
-async fn list(client: &ApiClient, project_id: &str, json: bool) -> anyhow::Result<()> {
+/// Resolve `--env` values into normalized target environment types.
+/// Only known environment types are kept; UUIDs and custom names are ignored.
+fn resolve_targets(env: &[String]) -> Vec<String> {
+    env.iter()
+        .filter_map(|e| {
+            match e.to_uppercase().as_str() {
+                "PRODUCTION" | "PREVIEW" | "DEVELOPMENT" => Some(e.to_uppercase()),
+                _ => None, // ignore UUIDs, custom names
+            }
+        })
+        .collect()
+}
+
+async fn list(
+    client: &ApiClient,
+    project_id: &str,
+    targets: &[String],
+    json: bool,
+) -> anyhow::Result<()> {
+    let mut url = format!("/v1/projects/{}/env", project_id);
+    if !targets.is_empty() {
+        let params: Vec<String> = targets.iter().map(|t| format!("target={t}")).collect();
+        url = format!("{}?{}", url, params.join("&"));
+    }
+
     let resp: EnvListResponse = client
-        .get(&format!("/v1/projects/{}/env", project_id))
+        .get(&url)
         .await
         .context("failed to fetch environment variables")?;
 
@@ -224,12 +255,19 @@ async fn set(
     key: &str,
     value: &str,
     secret: bool,
+    targets: &[String],
     json: bool,
 ) -> anyhow::Result<()> {
+    let target = if targets.is_empty() {
+        None
+    } else {
+        Some(targets.to_vec())
+    };
     let body = SetEnvBody {
         key,
         value,
         is_secret: secret,
+        target,
     };
 
     let resp: SetEnvResponse = client
@@ -294,6 +332,7 @@ async fn push(
     dry_run: bool,
     force_secret: bool,
     declared_only: bool,
+    targets: &[String],
     json: bool,
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
@@ -399,12 +438,18 @@ async fn push(
     }
 
     // Actual push: send all vars with overwrite flag, server handles skip/upsert
+    let target = if targets.is_empty() {
+        None
+    } else {
+        Some(targets.to_vec())
+    };
     let variables: Vec<BulkEnvVar<'_>> = parsed
         .iter()
         .map(|v| BulkEnvVar {
             key: &v.key,
             value: &v.value,
             is_secret: resolve_sensitivity(&v.key, force_secret, config),
+            target: target.clone(),
         })
         .collect();
 

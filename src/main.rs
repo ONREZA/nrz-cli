@@ -30,7 +30,7 @@ async fn main() {
     let json = cli.json || !std::io::stdout().is_terminal();
     let token = cli.token.clone();
     let workspace = cli.workspace.clone();
-    let env = cli.env.clone();
+    let env = cli.env;
 
     let project_dir = std::env::current_dir().unwrap_or_default();
     let config = match nrz::config::load(&project_dir) {
@@ -50,7 +50,7 @@ async fn main() {
         json,
         token.as_deref(),
         workspace.as_deref(),
-        env.as_deref(),
+        &env,
         &config,
     )
     .await;
@@ -71,14 +71,19 @@ async fn run_command(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
-    env: Option<&str>,
+    env: &[String],
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
+    // For commands that expect a single env value, take the first element.
+    let env_single = env.first().map(|s| s.as_str());
+
     match command {
         Command::Dev(args) => dev::run(args, config).await,
         Command::Build(args) => build::run(args, json, config).await,
         Command::Deploy(args) => deploy::run(args, json, token, workspace, config).await,
-        Command::Db(args) => cli::db_handler::run(args, json, token, workspace, env, config).await,
+        Command::Db(args) => {
+            cli::db_handler::run(args, json, token, workspace, env_single, config).await
+        }
         Command::Kv(args) => cli::kv_handler::run(args, json).await,
         Command::Login => auth::login(json, token).await,
         Command::Whoami => auth::whoami(json, token, workspace).await,
@@ -88,7 +93,9 @@ async fn run_command(
         Command::Projects(args) => cli::projects_handler::run(args, json, token, workspace).await,
         Command::Deployments(args) => deployments::run(args, json, token, workspace, config).await,
         Command::Logs(args) => logs::run(args, json, token, workspace, config).await,
-        Command::Env(args) => cli::env_handler::run(args, json, token, workspace, config).await,
+        Command::Env(args) => {
+            cli::env_handler::run(args, json, token, workspace, env, config).await
+        }
         Command::Domains(args) => {
             cli::domains_handler::run(args, json, token, workspace, config).await
         }

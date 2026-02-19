@@ -50,9 +50,9 @@ pub struct Cli {
     #[arg(long, global = true, env = "NRZ_WORKSPACE")]
     pub workspace: Option<String>,
 
-    /// Environment type or ID (production, preview, development)
+    /// Environment type or ID (production, preview, development). Can be specified multiple times.
     #[arg(long, global = true, env = "NRZ_ENV")]
-    pub env: Option<String>,
+    pub env: Vec<String>,
 }
 
 #[derive(Subcommand)]
