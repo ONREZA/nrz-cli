@@ -210,7 +210,7 @@ pub fn get_static_html_preset() -> &'static FrameworkPreset {
 /// Check if a framework slug is an SSR-capable framework.
 #[allow(dead_code)]
 pub fn is_ssr_framework(slug: &str) -> bool {
-    matches!(slug, "nextjs" | "nuxt" | "sveltekit")
+    matches!(slug, "nextjs" | "nuxt" | "sveltekit" | "astro")
 }
 
 /// Get presets that have dependencies (used for detection), sorted by priority.

@@ -43,9 +43,9 @@ fn ssr_framework_explicit_static_export_no_adapter_is_static() {
 
 #[test]
 fn ssr_framework_clean_project_is_process() {
-    // No SSR features detected, but SSR framework defaults to PROCESS
+    // Next.js/Nuxt/SvelteKit analyzers set is_static_compatible = false by default
     let ssr = SsrAnalysis {
-        is_static_compatible: true,
+        is_static_compatible: false,
         ssr_features: vec![],
     };
     assert_eq!(
@@ -222,7 +222,32 @@ fn detect_astro_is_static() {
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "astro");
+    // Astro default (no output config) → SSR framework but static compatible → STATIC
     assert_eq!(result.suggested_compute, ComputeType::Static);
+}
+
+#[test]
+fn detect_astro_ssr_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"astro": "4.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("astro.config.mjs"),
+        "import { defineConfig } from 'astro/config';\nexport default defineConfig({ output: 'server' })",
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "astro");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn astro_is_ssr_framework() {
+    assert!(presets::is_ssr_framework("astro"));
 }
 
 #[test]
@@ -436,11 +461,7 @@ fn resolve_entry_point_project_dir_package_json() {
     // output_dir != project_dir, package.json in project_dir
     let project = tempfile::tempdir().unwrap();
     let output = tempfile::tempdir().unwrap();
-    std::fs::write(
-        project.path().join("package.json"),
-        r#"{"main": "app.js"}"#,
-    )
-    .unwrap();
+    std::fs::write(project.path().join("package.json"), r#"{"main": "app.js"}"#).unwrap();
     std::fs::write(output.path().join("app.js"), "").unwrap();
 
     let result = resolve_entry_point("other", output.path(), project.path());
@@ -498,11 +519,7 @@ fn resolve_entry_point_empty_dir_returns_none() {
 fn resolve_entry_point_framework_takes_priority_over_package_json() {
     // Next.js server.js should win over package.json "main"
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"main": "custom.js"}"#,
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("package.json"), r#"{"main": "custom.js"}"#).unwrap();
     std::fs::write(dir.path().join("server.js"), "").unwrap();
     std::fs::write(dir.path().join("custom.js"), "").unwrap();
 

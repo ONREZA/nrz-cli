@@ -281,14 +281,10 @@ pub fn load(project_dir: &Path) -> anyhow::Result<ProjectConfig> {
                     anyhow::bail!("[deploy] entry must not be empty");
                 }
                 if entry.starts_with('/') {
-                    anyhow::bail!(
-                        "[deploy] entry must be a relative path, got: \"{entry}\""
-                    );
+                    anyhow::bail!("[deploy] entry must be a relative path, got: \"{entry}\"");
                 }
                 if entry.contains("..") {
-                    anyhow::bail!(
-                        "[deploy] entry must not contain \"..\", got: \"{entry}\""
-                    );
+                    anyhow::bail!("[deploy] entry must not contain \"..\", got: \"{entry}\"");
                 }
             }
             // Validate env var names: must match ^[A-Z][A-Z0-9_]*$

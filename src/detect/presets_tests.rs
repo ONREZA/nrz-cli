@@ -50,7 +50,7 @@ fn ssr_frameworks_recognized() {
     assert!(is_ssr_framework("nextjs"));
     assert!(is_ssr_framework("nuxt"));
     assert!(is_ssr_framework("sveltekit"));
-    assert!(!is_ssr_framework("astro"));
+    assert!(is_ssr_framework("astro"));
     assert!(!is_ssr_framework("vite"));
 }
 

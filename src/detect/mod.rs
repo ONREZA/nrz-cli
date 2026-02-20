@@ -267,10 +267,15 @@ fn detect_structure(project_dir: &Path) -> Vec<String> {
 
 /// Infer suggested compute type from detection metadata.
 ///
-/// Rules:
-/// - STATIC: static runtime, or SSR framework with static export and no adapter
-/// - ISOLATE: SSR framework with @onreza adapter installed
-/// - PROCESS: SSR framework without adapter (standalone Next.js, full-runtime frameworks)
+/// Rules (in priority order):
+/// - STATIC: static runtime, non-SSR framework (CRA, Vite, Gatsby, etc.),
+///   or SSR framework with `is_static_compatible = true`
+/// - ISOLATE: @onreza adapter installed (any framework, takes priority)
+/// - PROCESS: SSR framework with `is_static_compatible = false` or no SSR analysis
+///
+/// Each framework analyzer sets `is_static_compatible` based on its own defaults:
+/// - Next.js/Nuxt/SvelteKit default to `false` (SSR by default, needs explicit static config)
+/// - Astro defaults to `true` (static by default, needs explicit SSR config)
 fn infer_compute_type(
     runtime: RuntimeType,
     framework: &str,
@@ -287,21 +292,15 @@ fn infer_compute_type(
         return ComputeType::Isolate;
     }
 
-    // Non-SSR frameworks (CRA, Vite, Gatsby, Astro default, etc.) → STATIC
+    // Non-SSR frameworks (CRA, Vite, Gatsby, etc.) → STATIC
     if !presets::is_ssr_framework(framework) {
         return ComputeType::Static;
     }
 
-    // SSR frameworks: check SSR analysis
+    // SSR frameworks: trust the analyzer's is_static_compatible flag
     match ssr {
-        Some(analysis) if analysis.is_static_compatible && analysis.has_ssr_features() => {
-            // Explicitly configured for static (e.g. output: 'export') → STATIC
-            ComputeType::Static
-        }
-        _ => {
-            // SSR framework default (clean project or has SSR features) → PROCESS
-            ComputeType::Process
-        }
+        Some(analysis) if analysis.is_static_compatible => ComputeType::Static,
+        _ => ComputeType::Process,
     }
 }
 
@@ -389,7 +388,11 @@ pub fn resolve_entry_point(
             "  {} multiple entry point candidates found: {}; using \"{}\".\n\
              \x20 Set [deploy] entry in onreza.toml to override.",
             console::style("warn").yellow(),
-            found.iter().map(|f| format!("\"{f}\"")).collect::<Vec<_>>().join(", "),
+            found
+                .iter()
+                .map(|f| format!("\"{f}\""))
+                .collect::<Vec<_>>()
+                .join(", "),
             found[0],
         );
     }

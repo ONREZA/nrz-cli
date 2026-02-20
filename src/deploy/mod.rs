@@ -777,21 +777,25 @@ fn ensure_process_entry(
         let mut pkg: serde_json::Value = serde_json::from_str(&content)
             .with_context(|| format!("failed to parse {}", pkg_path.display()))?;
 
-        let obj = pkg
-            .as_object_mut()
-            .with_context(|| format!("{} has invalid structure (expected JSON object)", pkg_path.display()))?;
+        let obj = pkg.as_object_mut().with_context(|| {
+            format!(
+                "{} has invalid structure (expected JSON object)",
+                pkg_path.display()
+            )
+        })?;
 
         let current_main = obj.get("main").and_then(|v| v.as_str()).map(String::from);
         if current_main.as_deref() != Some(&entry) {
-            obj.insert(
-                "main".to_string(),
-                serde_json::Value::String(entry.clone()),
-            );
-            let updated = serde_json::to_string_pretty(&pkg)
-                .context("failed to serialize package.json")?;
+            obj.insert("main".to_string(), serde_json::Value::String(entry.clone()));
+            let updated =
+                serde_json::to_string_pretty(&pkg).context("failed to serialize package.json")?;
             std::fs::write(&pkg_path, format!("{updated}\n"))
                 .with_context(|| format!("failed to write {}", pkg_path.display()))?;
-            output::status(json, "~", format!("Patched package.json: main = \"{entry}\""));
+            output::status(
+                json,
+                "~",
+                format!("Patched package.json: main = \"{entry}\""),
+            );
         }
     } else {
         let pkg = serde_json::json!({
