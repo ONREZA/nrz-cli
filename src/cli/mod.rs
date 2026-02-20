@@ -244,6 +244,10 @@ pub struct DeployArgs {
     /// Skip environment variable validation against [env] declarations
     #[arg(long)]
     pub skip_env_check: bool,
+
+    /// Resume an existing deployment (builder mode: skip project resolution and polling)
+    #[arg(long)]
+    pub resume_deployment: Option<String>,
 }
 
 #[derive(Parser)]

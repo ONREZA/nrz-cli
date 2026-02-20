@@ -97,7 +97,6 @@ struct CreateDeploymentResponse {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FileUploadUrl {
-    #[allow(dead_code)]
     path: String,
     url: String,
 }
@@ -130,7 +129,7 @@ struct UploadCompleteResponse {
     status: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct DeployOutput {
     deployment_id: String,
     url: String,
@@ -161,6 +160,57 @@ pub async fn run(
     {
         run_build_step(&cmd, &project_dir, json)?;
     }
+
+    // Validate build output
+    output::status(json, "~", "Validating build output...");
+    build::run(
+        BuildArgs {
+            dir: project_dir.to_string_lossy().into_owned(),
+            skip_validation: false,
+        },
+        json,
+        config,
+    )
+    .await?;
+
+    // Read manifest as raw JSON
+    let output_dir = detect_output_dir(&project_dir, &config.output_dirs())?;
+    let manifest_path = output_dir.join(".onreza/manifest.json");
+    let manifest_raw: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&manifest_path)
+            .with_context(|| format!("failed to read {}", manifest_path.display()))?,
+    )
+    .with_context(|| format!("failed to parse {} as JSON", manifest_path.display()))?;
+
+    // Scan output directory for flat file list
+    output::status(json, "~", "Scanning output directory...");
+    let files = scan_files(&output_dir)?;
+    if files.is_empty() {
+        bail!("output directory is empty: {}", output_dir.display());
+    }
+
+    // ── Resume mode: builder calls us with an existing deployment ID ──
+    // Skips project resolution, plan limits, env validation, migrations, and
+    // status polling — the builder is responsible for those concerns.
+    // The server also enforces plan limits at prepare-upload time.
+    if let Some(deployment_id) = &args.resume_deployment {
+        let deployment_id = deployment_id.trim();
+        if deployment_id.is_empty() {
+            bail!("--resume-deployment requires a non-empty deployment ID");
+        }
+        return resume_deploy(
+            &client,
+            deployment_id,
+            manifest_raw,
+            files,
+            &output_dir,
+            &project_dir,
+            json,
+        )
+        .await;
+    }
+
+    // ── Normal flow continues below ─────────────────────────────────
 
     // Fetch workspace info for plan-based limits
     let ws_info: WorkspaceInfo = client
@@ -197,33 +247,6 @@ pub async fn run(
         );
         selected.project_id
     };
-
-    // Validate build output
-    output::status(json, "~", "Validating build output...");
-    build::run(
-        BuildArgs {
-            dir: project_dir.to_string_lossy().into_owned(),
-            skip_validation: false,
-        },
-        json,
-        config,
-    )
-    .await?;
-
-    // Read manifest as raw JSON
-    let output_dir = detect_output_dir(&project_dir, &config.output_dirs())?;
-    let manifest_path = output_dir.join(".onreza/manifest.json");
-    let manifest_raw: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&manifest_path)
-            .with_context(|| format!("failed to read {}", manifest_path.display()))?,
-    )?;
-
-    // Scan output directory for flat file list
-    output::status(json, "~", "Scanning output directory...");
-    let files = scan_files(&output_dir)?;
-    if files.is_empty() {
-        bail!("output directory is empty: {}", output_dir.display());
-    }
 
     // Validate plan-based limits
     let (max_files, max_size) = plan_limits(&ws_info);
@@ -309,89 +332,15 @@ pub async fn run(
         );
     }
 
-    // Upload files in parallel (concurrency = 20)
-    let spinner = make_spinner(
+    upload_and_activate(
+        &client,
+        &deployment.id,
+        &deployment.upload_urls,
+        &output_dir,
+        total_size,
         json,
-        &format!(
-            "Uploading {file_count} files ({})...",
-            format_bytes(total_size as usize)
-        ),
-    );
-
-    let uploaded = AtomicUsize::new(0);
-    let upload_results: Vec<anyhow::Result<()>> =
-        stream::iter(deployment.upload_urls.iter().map(|file_url| {
-            let client = &client;
-            let output_dir = &output_dir;
-            let spinner = &spinner;
-            let uploaded = &uploaded;
-            async move {
-                let file_path = output_dir.join(&file_url.path);
-                let data = tokio::fs::read(&file_path)
-                    .await
-                    .with_context(|| format!("failed to read {}", file_path.display()))?;
-
-                let content_type = guess_content_type(&file_url.path);
-
-                client
-                    .put_bytes(&file_url.url, data, content_type)
-                    .await
-                    .with_context(|| format!("failed to upload {}", file_url.path))?;
-
-                let done = uploaded.fetch_add(1, Ordering::Relaxed) + 1;
-                if let Some(s) = spinner {
-                    s.set_message(format!("[{done}/{file_count}] {}", file_url.path));
-                }
-
-                Ok(())
-            }
-        }))
-        .buffer_unordered(20)
-        .collect()
-        .await;
-
-    // Check for upload errors
-    let errors: Vec<_> = upload_results.into_iter().filter_map(|r| r.err()).collect();
-    if !errors.is_empty() {
-        finish_spinner(spinner, "");
-        let error_details: Vec<String> = errors.iter().map(|e| format!("{e:#}")).collect();
-
-        if json {
-            output::json_output(&serde_json::json!({
-                "error": format!("{} of {file_count} file uploads failed", errors.len()),
-                "failedUploads": error_details,
-            }));
-            std::process::exit(1);
-        }
-
-        for detail in &error_details {
-            output::warn(false, format!("upload error: {detail}"));
-        }
-        bail!("{} of {file_count} file uploads failed", errors.len());
-    }
-
-    finish_spinner(
-        spinner,
-        &format!(
-            "Uploaded {file_count} files ({})",
-            format_bytes(total_size as usize)
-        ),
-    );
-
-    // Signal upload complete
-    let _: UploadCompleteResponse = client
-        .post_empty(&format!(
-            "/v1/deployments/{}/upload-complete",
-            deployment.id
-        ))
-        .await
-        .context("failed to signal upload complete")?;
-
-    // Activate deployment
-    let _: ActivateResponse = client
-        .post_empty(&format!("/v1/deployments/{}/activate", deployment.id))
-        .await
-        .context("failed to activate deployment")?;
+    )
+    .await?;
 
     // Poll for ready status
     let spinner = make_spinner(json, "Deploying...");
@@ -459,6 +408,209 @@ pub async fn run(
             }
         }
     }
+}
+
+// ── Shared upload + activate ─────────────────────────────────
+
+async fn upload_and_activate(
+    client: &ApiClient,
+    deployment_id: &str,
+    upload_urls: &[FileUploadUrl],
+    output_dir: &Path,
+    total_size: u64,
+    json: bool,
+) -> anyhow::Result<()> {
+    let file_count = upload_urls.len();
+
+    let spinner = make_spinner(
+        json,
+        &format!(
+            "Uploading {file_count} files ({})...",
+            format_bytes(total_size as usize)
+        ),
+    );
+
+    let uploaded = AtomicUsize::new(0);
+    let upload_results: Vec<anyhow::Result<()>> =
+        stream::iter(upload_urls.iter().map(|file_url| {
+            let spinner = &spinner;
+            let uploaded = &uploaded;
+            async move {
+                let file_path = output_dir.join(&file_url.path);
+                let data = tokio::fs::read(&file_path)
+                    .await
+                    .with_context(|| format!("failed to read {}", file_path.display()))?;
+
+                let content_type = guess_content_type(&file_url.path);
+
+                client
+                    .put_bytes(&file_url.url, data, content_type)
+                    .await
+                    .with_context(|| format!("failed to upload {}", file_url.path))?;
+
+                let done = uploaded.fetch_add(1, Ordering::Relaxed) + 1;
+                if let Some(s) = spinner {
+                    s.set_message(format!("[{done}/{file_count}] {}", file_url.path));
+                }
+
+                Ok(())
+            }
+        }))
+        .buffer_unordered(20)
+        .collect()
+        .await;
+
+    // Check for upload errors
+    let errors: Vec<_> = upload_results.into_iter().filter_map(|r| r.err()).collect();
+    if !errors.is_empty() {
+        finish_spinner(spinner, "");
+        let error_details: Vec<String> = errors.iter().map(|e| format!("{e:#}")).collect();
+
+        if json {
+            output::json_output(&serde_json::json!({
+                "error": format!("{} of {file_count} file uploads failed", errors.len()),
+                "failedUploads": error_details,
+            }));
+            std::process::exit(1);
+        }
+
+        for detail in &error_details {
+            output::warn(false, format!("upload error: {detail}"));
+        }
+        bail!("{} of {file_count} file uploads failed", errors.len());
+    }
+
+    finish_spinner(
+        spinner,
+        &format!(
+            "Uploaded {file_count} files ({})",
+            format_bytes(total_size as usize)
+        ),
+    );
+
+    // Signal upload complete
+    let _: UploadCompleteResponse = client
+        .post_empty(&format!(
+            "/v1/deployments/{deployment_id}/upload-complete"
+        ))
+        .await
+        .context("failed to signal upload complete")?;
+
+    // Activate deployment
+    let _: ActivateResponse = client
+        .post_empty(&format!("/v1/deployments/{deployment_id}/activate"))
+        .await
+        .context("failed to activate deployment")?;
+
+    Ok(())
+}
+
+// ── Resume deploy flow ───────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrepareUploadBody {
+    manifest: serde_json::Value,
+    files: Vec<FileEntry>,
+    compute_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bundle_sha256: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrepareUploadResponse {
+    upload_urls: Vec<FileUploadUrl>,
+    #[allow(dead_code)]
+    bundle_upload_url: Option<String>,
+    #[allow(dead_code)]
+    artifact_prefix: String,
+    #[allow(dead_code)]
+    expires_in: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct ResumeDeployOutput {
+    deployment_id: String,
+    status: String,
+}
+
+async fn resume_deploy(
+    client: &ApiClient,
+    deployment_id: &str,
+    manifest: serde_json::Value,
+    files: Vec<FileEntry>,
+    output_dir: &Path,
+    project_dir: &Path,
+    json: bool,
+) -> anyhow::Result<()> {
+    // Detect compute type from framework detection
+    let detection = crate::detect::detect(project_dir);
+    let compute_type = detection.suggested_compute.to_string();
+
+    output::status(
+        json,
+        "~",
+        format!(
+            "Resuming deployment {deployment_id} (compute: {compute_type}, reason: {})",
+            detection.reason
+        ),
+    );
+
+    // Prepare upload: server returns presigned URLs for this deployment
+    let file_count = files.len();
+    let total_size: u64 = files.iter().map(|f| f.size).sum();
+
+    let body = PrepareUploadBody {
+        manifest,
+        files,
+        compute_type,
+        bundle_sha256: None,
+    };
+
+    let prepared: PrepareUploadResponse = client
+        .post(
+            &format!("/v1/deployments/{deployment_id}/prepare-upload"),
+            &body,
+        )
+        .await
+        .context("failed to prepare upload")?;
+
+    if prepared.upload_urls.len() != file_count {
+        bail!(
+            "server returned {} upload URLs, but {} files were sent",
+            prepared.upload_urls.len(),
+            file_count
+        );
+    }
+
+    upload_and_activate(
+        client,
+        deployment_id,
+        &prepared.upload_urls,
+        output_dir,
+        total_size,
+        json,
+    )
+    .await?;
+
+    // Output result (no polling in resume mode — builder handles status)
+    if json {
+        output::json_output(&ResumeDeployOutput {
+            deployment_id: deployment_id.to_string(),
+            status: "activated".into(),
+        });
+    } else {
+        eprintln!();
+        eprintln!(
+            "  {} Deployment {} activated",
+            console::style("✓").green().bold(),
+            console::style(deployment_id).bold(),
+        );
+        eprintln!();
+    }
+
+    Ok(())
 }
 
 // ── Build step ───────────────────────────────────────────────
