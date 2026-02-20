@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.0] - 2026-02-20
+
+### ✨ Features
+
+- add install step to nrz deploy ([fe59ac7](https://github.com/ONREZA/nrz-cli/commit/fe59ac7e062d40f2b62acfc9a0296c921b74a7d4))
+
 ## [0.11.1] - 2026-02-20
 
 ### 🐛 Bug Fixes
