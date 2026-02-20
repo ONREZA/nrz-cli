@@ -9,7 +9,7 @@ pub static PRESETS: &[FrameworkPreset] = &[
         slug: "nextjs",
         name: "Next.js",
         dependencies: &["next"],
-        output_directory: "out",
+        output_directory: ".next",
         build_script: Some("build"),
         category: PresetCategory::React,
         priority: 1,
@@ -19,8 +19,8 @@ pub static PRESETS: &[FrameworkPreset] = &[
         slug: "nuxt",
         name: "Nuxt.js",
         dependencies: &["nuxt"],
-        output_directory: ".output/public",
-        build_script: Some("generate"),
+        output_directory: ".output",
+        build_script: Some("build"),
         category: PresetCategory::Vue,
         priority: 2,
         runtime: RuntimeType::Node,
@@ -157,17 +157,6 @@ pub static PRESETS: &[FrameworkPreset] = &[
         priority: 26,
         runtime: RuntimeType::Node,
     },
-    // Tier 3.6: Plain static HTML (no build)
-    FrameworkPreset {
-        slug: "static-html",
-        name: "Static HTML",
-        dependencies: &[],
-        output_directory: ".",
-        build_script: None,
-        category: PresetCategory::Static,
-        priority: 28,
-        runtime: RuntimeType::Static,
-    },
     // Tier 4: Generic catch-all
     FrameworkPreset {
         slug: "vite",
@@ -192,6 +181,20 @@ pub static PRESETS: &[FrameworkPreset] = &[
     },
 ];
 
+/// Static HTML preset — separate from detection presets since it has no
+/// dependency markers. Used directly by `detect()` when the static HTML
+/// fallback triggers (index.html found, no package.json).
+pub static STATIC_HTML_PRESET: FrameworkPreset = FrameworkPreset {
+    slug: "static-html",
+    name: "Static HTML",
+    dependencies: &[],
+    output_directory: ".",
+    build_script: None,
+    category: PresetCategory::Static,
+    priority: 28,
+    runtime: RuntimeType::Static,
+};
+
 /// Get a preset by slug, or `None`.
 pub fn get_preset_by_slug(slug: &str) -> Option<&'static FrameworkPreset> {
     PRESETS.iter().find(|p| p.slug == slug)
@@ -204,7 +207,34 @@ pub fn get_default_preset() -> &'static FrameworkPreset {
 
 /// Get the static-html preset.
 pub fn get_static_html_preset() -> &'static FrameworkPreset {
-    get_preset_by_slug("static-html").expect("'static-html' preset must exist")
+    &STATIC_HTML_PRESET
+}
+
+/// Additional output directories to search for a given framework slug,
+/// beyond the config defaults in `output_dirs()`.
+/// Used by `build::detect_output_dir` to search framework-specific paths
+/// in addition to config defaults.
+pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
+    match slug {
+        "nextjs" => &[".next", ".next/standalone", "out"],
+        "nuxt" => &[".output"],
+        "sveltekit" => &["build"],
+        "gatsby" => &["public"],
+        "cra" => &["build"],
+        "astro" => &["dist"],
+        "vite" => &["dist"],
+        "vue" => &["dist"],
+        "angular" => &["dist"],
+        "preact" => &["build"],
+        "docusaurus" => &["build"],
+        "vitepress" => &[".vitepress/dist"],
+        "eleventy" => &["_site"],
+        "hexo" => &["public"],
+        "parcel" => &["dist"],
+        "stencil" => &["www"],
+        "static-html" => &["."],
+        _ => &[],
+    }
 }
 
 /// Check if a framework slug is an SSR-capable framework.

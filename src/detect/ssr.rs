@@ -250,6 +250,9 @@ fn analyze_astro(project_dir: &Path) -> SsrAnalysis {
         }
 
         // output: 'hybrid' — hybrid rendering (some SSR, some static)
+        // Note: Astro 5 (Dec 2024) removed 'hybrid' in favor of per-page `export const prerender`.
+        // Kept for Astro 4 backward compatibility.
+        // See: https://docs.astro.build/en/guides/upgrade-to/v5/#removed-hybrid-rendering-mode
         if contains_value(&stripped, "output", "hybrid") {
             features.push("output: 'hybrid'".into());
             is_static_compatible = false;
@@ -347,15 +350,48 @@ fn dir_has_files(project_dir: &Path, subdir: &str) -> bool {
     }
 }
 
+/// Strip `//` inline comment from a line, respecting string literals.
+///
+/// Limitation: multi-line template literals (backticks spanning multiple lines)
+/// are not fully handled since this function operates on individual lines.
+/// Acceptable for framework config files which rarely use multi-line template literals.
+fn strip_inline_comment(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\'' || b == b'"' || b == b'`' {
+            let quote = b;
+            i += 1;
+            while i < bytes.len() && bytes[i] != quote {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 1;
+                }
+                i += 1;
+            }
+            if i < bytes.len() {
+                i += 1;
+            }
+        } else if i + 1 < bytes.len() && b == b'/' && bytes[i + 1] == b'/' {
+            return &line[..i];
+        } else {
+            i += 1;
+        }
+    }
+    line
+}
+
 /// Simple string check: does the content contain `key: value` (with or without quotes)
 /// anywhere in a non-comment line?
 fn contains_value(content: &str, key: &str, value: &str) -> bool {
     for line in content.lines() {
         let trimmed = line.trim_start();
-        // Skip comment lines
+        // Skip full-line comments
         if trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with('*') {
             continue;
         }
+        // Strip inline comments (// ...) respecting string literals
+        let line = strip_inline_comment(line);
         if let Some(idx) = line.find(key) {
             let after = &line[idx + key.len()..];
             let after = after.trim_start();
@@ -390,8 +426,9 @@ fn contains_any_pattern(content: &str, patterns: &[&str]) -> bool {
         if trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with('*') {
             continue;
         }
+        let effective = strip_inline_comment(trimmed);
         for &pattern in patterns {
-            if trimmed.contains(pattern) {
+            if effective.contains(pattern) {
                 return true;
             }
         }

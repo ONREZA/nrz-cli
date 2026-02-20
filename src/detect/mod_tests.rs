@@ -526,3 +526,289 @@ fn resolve_entry_point_framework_takes_priority_over_package_json() {
     let result = resolve_entry_point("nextjs", dir.path(), dir.path());
     assert_eq!(result, Some("server.js".into()));
 }
+
+// ── Dynamic output_dir (resolve_framework_output_dir) ────────
+
+#[test]
+fn nextjs_output_dir_default_ssr_is_dot_next() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nextjs");
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some(".next"));
+}
+
+#[test]
+fn nextjs_output_dir_export_is_out() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("next.config.js"),
+        "module.exports = { output: 'export' }",
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some("out"));
+}
+
+#[test]
+fn nextjs_output_dir_standalone() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("next.config.mjs"),
+        "export default { output: 'standalone' }",
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some(".next/standalone"));
+}
+
+#[test]
+fn nuxt_output_dir_default_ssr_is_dot_output() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"nuxt": "3.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nuxt");
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some(".output"));
+}
+
+#[test]
+fn nuxt_output_dir_static_is_output_public() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"nuxt": "3.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("nuxt.config.ts"),
+        "export default defineNuxtConfig({ ssr: false })",
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some(".output/public"));
+}
+
+#[test]
+fn vite_custom_outdir_detected() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"vite": "5.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        "export default defineConfig({ build: { outDir: 'custom-out' } })",
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some("custom-out"));
+}
+
+#[test]
+fn vue_cli_with_vite_config_respects_outdir() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@vue/cli-service": "5.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        "export default { build: { outDir: 'my-dist' } }",
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "vue");
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some("my-dist"));
+}
+
+#[test]
+fn nextjs_ignores_vite_config_outdir() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        "export default { build: { outDir: 'wrong-dir' } }",
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nextjs");
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some(".next")); // NOT "wrong-dir"
+}
+
+// ── Bun runtime detection (issue 8) ─────────────────────────
+
+#[test]
+fn bun_pm_sets_bun_runtime() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"packageManager": "bun@1.2.0", "dependencies": {"vite": "5.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(
+        result.metadata.runtime.runtime_type,
+        types::RuntimeType::Bun
+    );
+}
+
+#[test]
+fn npm_pm_keeps_node_runtime() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"vite": "5.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("package-lock.json"), "{}").unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(
+        result.metadata.runtime.runtime_type,
+        types::RuntimeType::Node
+    );
+}
+
+#[test]
+fn bun_pm_with_nextjs_sets_bun_runtime() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"packageManager": "bun@1.2.0", "dependencies": {"next": "14.0.0", "react": "18.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nextjs");
+    assert_eq!(
+        result.metadata.runtime.runtime_type,
+        types::RuntimeType::Bun
+    );
+    assert_eq!(result.suggested_compute, types::ComputeType::Process);
+}
+
+#[test]
+fn static_html_bun_keeps_static_runtime() {
+    let dir = tempfile::tempdir().unwrap();
+    // static-html project with bun.lockb — runtime should stay Static
+    std::fs::write(dir.path().join("index.html"), "<html></html>").unwrap();
+    std::fs::write(dir.path().join("bun.lockb"), "").unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "static-html");
+    assert_eq!(
+        result.metadata.runtime.runtime_type,
+        types::RuntimeType::Static
+    );
+}
+
+// ── Nuxt build_script fix ───────────────────────────────────
+
+#[test]
+fn nuxt_build_command_is_build_not_generate() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"nuxt": "3.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    let build_cmd = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .build_command
+        .as_deref();
+    assert_eq!(build_cmd, Some("npm run build"));
+}

@@ -90,7 +90,7 @@ pub fn detect(project_dir: &Path) -> DetectionResult {
             uses_typescript: detect_typescript(project_dir),
             config_files: Vec::new(),
             runtime: RuntimeInfo {
-                runtime_type: preset.runtime,
+                runtime_type: infer_runtime(preset.runtime, &pm_info),
                 version: None,
             },
             package_manager: pm_info,
@@ -129,16 +129,12 @@ fn detect_from_package_json(
                 .build_script
                 .map(|script| package_manager::build_command(pm_type, script));
 
-            // Output directory — check vite config override for vite-based frameworks
-            let output_dir = if preset.slug == "vite" {
-                vite_config::parse_vite_out_dir(project_dir)
-                    .unwrap_or_else(|| preset.output_directory.to_string())
-            } else {
-                preset.output_directory.to_string()
-            };
-
-            // SSR analysis for capable frameworks
+            // SSR analysis for capable frameworks (needed before output_dir resolution)
             let ssr_analysis = ssr::analyze_ssr(project_dir, preset.slug);
+
+            // Output directory — context-dependent based on framework + SSR analysis
+            let output_dir =
+                resolve_framework_output_dir(preset, ssr_analysis.as_ref(), project_dir);
 
             // Adapter detection
             let ssr_adapter = adapter::detect_adapter(pkg);
@@ -165,7 +161,7 @@ fn detect_from_package_json(
                     uses_typescript: detect_typescript(project_dir),
                     config_files,
                     runtime: RuntimeInfo {
-                        runtime_type: preset.runtime,
+                        runtime_type: infer_runtime(preset.runtime, pm_info),
                         version: None,
                     },
                     package_manager: pm_info.clone(),
@@ -263,6 +259,66 @@ fn detect_structure(project_dir: &Path) -> Vec<String> {
         .filter(|&&d| project_dir.join(d).is_dir())
         .map(|d| d.to_string())
         .collect()
+}
+
+/// Resolve the output directory dynamically based on framework + SSR analysis.
+///
+/// Overrides the preset default when the SSR analysis reveals a more specific path:
+/// - Next.js: `out` (export), `.next/standalone` (standalone), `.next` (default)
+/// - Nuxt: `.output/public` (static), `.output` (SSR)
+/// - Other frameworks: check vite config for custom outDir, then preset default
+fn resolve_framework_output_dir(
+    preset: &types::FrameworkPreset,
+    ssr: Option<&SsrAnalysis>,
+    project_dir: &Path,
+) -> String {
+    match preset.slug {
+        "nextjs" => {
+            if let Some(ssr) = ssr {
+                if ssr.is_static_compatible {
+                    return "out".to_string();
+                }
+                if ssr.ssr_features.iter().any(|f| f.contains("standalone")) {
+                    return ".next/standalone".to_string();
+                }
+            }
+            ".next".to_string()
+        }
+        "nuxt" => {
+            if let Some(ssr) = ssr
+                && ssr.is_static_compatible
+            {
+                return ".output/public".to_string();
+            }
+            ".output".to_string()
+        }
+        _ => {
+            // For non-SSR frameworks with a vite config, check outDir override
+            if !presets::is_ssr_framework(preset.slug)
+                && vite_config::has_vite_config(project_dir)
+                && let Some(out_dir) = vite_config::parse_vite_out_dir(project_dir)
+            {
+                return out_dir;
+            }
+            preset.output_directory.to_string()
+        }
+    }
+}
+
+/// Infer runtime type from package manager.
+/// If the project uses Bun as PM, override the runtime to Bun.
+/// Static runtime is never overridden.
+fn infer_runtime(preset_runtime: RuntimeType, pm_info: &Option<PackageManagerInfo>) -> RuntimeType {
+    if preset_runtime == RuntimeType::Static {
+        return RuntimeType::Static;
+    }
+    if pm_info
+        .as_ref()
+        .is_some_and(|pm| pm.pm_type == PackageManagerType::Bun)
+    {
+        return RuntimeType::Bun;
+    }
+    preset_runtime
 }
 
 /// Infer suggested compute type from detection metadata.

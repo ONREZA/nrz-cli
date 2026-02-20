@@ -177,15 +177,19 @@ pub async fn run(
         run_build_step(&cmd, &project_dir, json)?;
     }
 
+    // Detect framework once — shared by build (output dir search) and deploy (compute type)
+    let detection = crate::detect::detect(&project_dir);
+
     // Validate build output
     output::status(json, "~", "Validating build output...");
-    let build_result = build::run(
+    let build_result = build::run_with_hint(
         BuildArgs {
             dir: project_dir.to_string_lossy().into_owned(),
             skip_validation: false,
         },
         json,
         config,
+        Some(&detection.framework),
     )
     .await?;
 
@@ -212,7 +216,6 @@ pub async fn run(
     }
 
     // Resolve compute type: CLI flag > config > detect
-    let detection = crate::detect::detect(&project_dir);
     let compute =
         resolve_compute_type(args.compute.as_deref(), config.deploy_compute(), &detection)?;
     let mut warnings: Vec<String> = Vec::new();

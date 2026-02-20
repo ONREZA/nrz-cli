@@ -219,7 +219,15 @@ impl ProjectConfig {
     pub fn output_dirs(&self) -> Vec<&str> {
         match &self.build.output_dirs {
             Some(dirs) => dirs.iter().map(|s| s.as_str()).collect(),
-            None => vec!["dist", ".output", "build"],
+            None => vec![
+                "dist",
+                ".output",
+                "build",
+                "out",
+                "_site",
+                "www",
+                ".vitepress/dist",
+            ],
         }
     }
 
@@ -354,7 +362,7 @@ pub fn generate_template(
 
 # [build]
 # command = "npm run build"
-# output_dirs = ["dist", ".output", "build"]
+# output_dirs = ["dist", ".output", "build", "out", "_site", "www", ".vitepress/dist"]
 
 # [deploy]
 # skip_migrations = false

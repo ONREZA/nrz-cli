@@ -112,7 +112,18 @@ fn load_minimal_config() {
     assert_eq!(config.dev_host(), "127.0.0.1");
     assert_eq!(config.data_dir_relative(), ".onreza/data");
     assert_eq!(config.db_name(), "dev.db");
-    assert_eq!(config.output_dirs(), vec!["dist", ".output", "build"]);
+    assert_eq!(
+        config.output_dirs(),
+        vec![
+            "dist",
+            ".output",
+            "build",
+            "out",
+            "_site",
+            "www",
+            ".vitepress/dist"
+        ]
+    );
     assert!(!config.skip_migrations());
     assert_eq!(config.migrations_dir(), "migrations");
     assert!(config.db.default_env.is_none());

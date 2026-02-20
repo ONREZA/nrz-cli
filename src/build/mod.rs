@@ -3,6 +3,9 @@ mod manifest;
 #[cfg(test)]
 mod manifest_tests;
 
+#[cfg(test)]
+mod build_tests;
+
 use std::path::Path;
 
 use anyhow::Context;
@@ -33,11 +36,30 @@ pub async fn run(
     json: bool,
     config: &ProjectConfig,
 ) -> anyhow::Result<BuildResult> {
+    run_with_hint(args, json, config, None).await
+}
+
+pub async fn run_with_hint(
+    args: BuildArgs,
+    json: bool,
+    config: &ProjectConfig,
+    framework_hint: Option<&str>,
+) -> anyhow::Result<BuildResult> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
 
-    let (output_dir, has_manifest) = detect_output_dir(&project_dir, &config.output_dirs())?;
+    let detected_framework;
+    let framework = match framework_hint {
+        Some(fw) => fw,
+        None => {
+            detected_framework = crate::detect::detect(&project_dir).framework;
+            &detected_framework
+        }
+    };
+    let fw_dirs = crate::detect::presets::framework_output_dirs(framework);
+    let (output_dir, has_manifest) =
+        detect_output_dir(&project_dir, &config.output_dirs(), fw_dirs)?;
     tracing::info!(?output_dir, has_manifest, "found output directory");
 
     if has_manifest {
@@ -88,14 +110,26 @@ pub async fn run(
     })
 }
 
-/// Try common output directory names.
+/// Try framework-specific and configured output directory names.
 /// Returns `(path, has_manifest)` — first prefers dirs with `.onreza/`, then any existing dir.
+///
+/// `framework_dirs` are checked first (more specific), then `config_dirs` (defaults).
 fn detect_output_dir(
     project_dir: &Path,
-    output_dirs: &[&str],
+    config_dirs: &[&str],
+    framework_dirs: &[&str],
 ) -> anyhow::Result<(std::path::PathBuf, bool)> {
+    // Merge: framework-specific dirs first, then config defaults (dedup preserving order)
+    let mut seen = std::collections::HashSet::new();
+    let all_dirs: Vec<&str> = framework_dirs
+        .iter()
+        .chain(config_dirs.iter())
+        .copied()
+        .filter(|d| seen.insert(*d))
+        .collect();
+
     // Phase 1: prefer dir with .onreza/ (adapter-generated manifest)
-    for name in output_dirs {
+    for name in &all_dirs {
         let candidate = project_dir.join(name);
         if candidate.is_dir() && candidate.join(".onreza").is_dir() {
             return Ok((candidate, true));
@@ -103,14 +137,14 @@ fn detect_output_dir(
     }
 
     // Phase 2: any existing output dir (no adapter — static/process deploy)
-    for name in output_dirs {
+    for name in &all_dirs {
         let candidate = project_dir.join(name);
         if candidate.is_dir() {
             return Ok((candidate, false));
         }
     }
 
-    let dirs_display: Vec<_> = output_dirs.iter().map(|d| format!("{d}/")).collect();
+    let dirs_display: Vec<_> = all_dirs.iter().map(|d| format!("{d}/")).collect();
     anyhow::bail!(
         "no output directory found in {}. Expected one of: {}",
         project_dir.display(),

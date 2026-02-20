@@ -178,6 +178,40 @@ fn nextjs_block_comment_ignored() {
     assert!(!result.ssr_features.iter().any(|f| f.contains("standalone")));
 }
 
+#[test]
+fn nextjs_inline_comment_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("next.config.js"),
+        "module.exports = {\n  // output: 'standalone' // was active before\n  output: 'export', // deploy as static\n}",
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    // inline comment after value shouldn't interfere
+    assert!(result.is_static_compatible);
+    assert!(result.ssr_features.iter().any(|f| f.contains("export")));
+    // commented-out standalone should not be detected
+    assert!(!result.ssr_features.iter().any(|f| f.contains("standalone")));
+}
+
+#[test]
+fn inline_comment_respects_string_literals() {
+    let dir = tempfile::tempdir().unwrap();
+    // URL with // inside a string should NOT be treated as comment
+    std::fs::write(
+        dir.path().join("nuxt.config.ts"),
+        r#"export default defineNuxtConfig({
+  routeRules: {
+    '/api/**': { proxy: 'http://localhost:3001/**' },
+  }
+})"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
+    // The proxy rule should still be detected (// in URL is inside a string)
+    assert!(result.ssr_features.iter().any(|f| f.contains("routeRules")));
+}
+
 // ── Next.js conflict scenarios ──────────────────────────────
 
 #[test]
@@ -578,4 +612,47 @@ export default defineConfig({ output: 'server', adapter: node({ mode: 'standalon
             .iter()
             .any(|f| f.contains("SSR adapter"))
     );
+}
+
+// ── strip_inline_comment edge cases (tested via analyze_ssr) ──
+
+#[test]
+fn nextjs_inline_comment_with_escaped_quotes() {
+    let dir = tempfile::tempdir().unwrap();
+    // Escaped quote before // should not confuse the parser
+    std::fs::write(
+        dir.path().join("next.config.js"),
+        r#"module.exports = { output: "export" } // deploy as static"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    // Should detect "export" despite inline comment
+    assert!(result.is_static_compatible);
+}
+
+#[test]
+fn nuxt_backtick_string_with_slashes() {
+    let dir = tempfile::tempdir().unwrap();
+    // Template literal with // inside — should not be treated as comment
+    std::fs::write(
+        dir.path().join("nuxt.config.ts"),
+        "export default defineNuxtConfig({\n  devServer: { url: `http://localhost:3000` },\n  ssr: false\n})",
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
+    assert!(result.is_static_compatible);
+}
+
+#[test]
+fn nextjs_no_comment_line_unmodified() {
+    let dir = tempfile::tempdir().unwrap();
+    // No inline comments — output: 'standalone' should be detected cleanly
+    std::fs::write(
+        dir.path().join("next.config.mjs"),
+        "export default { output: 'standalone' }",
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(result.ssr_features.iter().any(|f| f.contains("standalone")));
 }
