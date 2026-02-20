@@ -1,3 +1,6 @@
+pub(crate) mod bundle;
+#[cfg(test)]
+mod bundle_tests;
 #[cfg(test)]
 mod deploy_tests;
 
@@ -78,6 +81,8 @@ struct CreateDeploymentBody {
     commit_sha: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     migrations: Option<Vec<migrations::Migration>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bundle_sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +95,7 @@ struct CreateDeploymentResponse {
     #[allow(dead_code)]
     artifact_prefix: String,
     upload_urls: Vec<FileUploadUrl>,
+    bundle_upload_url: Option<String>,
     #[allow(dead_code)]
     expires_in: u64,
 }
@@ -286,19 +292,19 @@ pub async fn run(
             .await?;
     }
 
+    // Detect compute type (used for bundle decision + API sync)
+    let detection = crate::detect::detect(&project_dir);
+    let is_process = detection.suggested_compute == crate::detect::types::ComputeType::Process;
+
     // Sync detection results to API (best-effort, non-blocking)
     let sync_client = client.clone();
     let sync_project_id = project_id.clone();
-    let sync_project_dir = project_dir.clone();
     let _sync_handle = tokio::spawn(async move {
-        let detection_result = crate::detect::detect(&sync_project_dir);
-        crate::detect_sync::sync_detection_to_api(
-            &sync_client,
-            &sync_project_id,
-            &detection_result,
-        )
-        .await;
+        crate::detect_sync::sync_detection_to_api(&sync_client, &sync_project_id, &detection).await;
     });
+
+    // Create bundle for PROCESS deployments
+    let bundle_data = maybe_create_bundle(&output_dir, is_process, json)?;
 
     // Detect migrations
     let skip_mig = args.skip_migrations || config.skip_migrations();
@@ -314,6 +320,7 @@ pub async fn run(
         branch,
         commit_sha,
         migrations: mig_entries,
+        bundle_sha256: bundle_data.as_ref().map(|(_, sha)| sha.clone()),
     };
     let file_count = body.files.len();
 
@@ -332,6 +339,9 @@ pub async fn run(
         );
     }
 
+    let bundle_upload =
+        resolve_bundle_upload(bundle_data, deployment.bundle_upload_url.as_deref())?;
+
     upload_and_activate(
         &client,
         &deployment.id,
@@ -339,6 +349,7 @@ pub async fn run(
         &output_dir,
         total_size,
         json,
+        bundle_upload,
     )
     .await?;
 
@@ -419,7 +430,26 @@ async fn upload_and_activate(
     output_dir: &Path,
     total_size: u64,
     json: bool,
+    bundle_upload: Option<(Vec<u8>, &str)>, // (bundle_bytes, presigned_url)
 ) -> anyhow::Result<()> {
+    // Upload bundle first if present
+    if let Some((bundle_bytes, bundle_url)) = bundle_upload {
+        let bundle_size = bundle_bytes.len();
+        output::status(
+            json,
+            "~",
+            format!("Uploading bundle ({})...", format_bytes(bundle_size)),
+        );
+        client
+            .put_bytes(bundle_url, bundle_bytes, "application/zstd")
+            .await
+            .context("failed to upload tar.zst bundle")?;
+        output::success(
+            json,
+            format!("Bundle uploaded ({})", format_bytes(bundle_size)),
+        );
+    }
+
     let file_count = upload_urls.len();
 
     let spinner = make_spinner(
@@ -490,9 +520,7 @@ async fn upload_and_activate(
 
     // Signal upload complete
     let _: UploadCompleteResponse = client
-        .post_empty(&format!(
-            "/v1/deployments/{deployment_id}/upload-complete"
-        ))
+        .post_empty(&format!("/v1/deployments/{deployment_id}/upload-complete"))
         .await
         .context("failed to signal upload complete")?;
 
@@ -521,7 +549,6 @@ struct PrepareUploadBody {
 #[serde(rename_all = "camelCase")]
 struct PrepareUploadResponse {
     upload_urls: Vec<FileUploadUrl>,
-    #[allow(dead_code)]
     bundle_upload_url: Option<String>,
     #[allow(dead_code)]
     artifact_prefix: String,
@@ -547,6 +574,7 @@ async fn resume_deploy(
     // Detect compute type from framework detection
     let detection = crate::detect::detect(project_dir);
     let compute_type = detection.suggested_compute.to_string();
+    let is_process = detection.suggested_compute == crate::detect::types::ComputeType::Process;
 
     output::status(
         json,
@@ -557,6 +585,9 @@ async fn resume_deploy(
         ),
     );
 
+    // Create bundle for PROCESS deployments
+    let bundle_data = maybe_create_bundle(output_dir, is_process, json)?;
+
     // Prepare upload: server returns presigned URLs for this deployment
     let file_count = files.len();
     let total_size: u64 = files.iter().map(|f| f.size).sum();
@@ -565,7 +596,7 @@ async fn resume_deploy(
         manifest,
         files,
         compute_type,
-        bundle_sha256: None,
+        bundle_sha256: bundle_data.as_ref().map(|(_, sha)| sha.clone()),
     };
 
     let prepared: PrepareUploadResponse = client
@@ -584,6 +615,8 @@ async fn resume_deploy(
         );
     }
 
+    let bundle_upload = resolve_bundle_upload(bundle_data, prepared.bundle_upload_url.as_deref())?;
+
     upload_and_activate(
         client,
         deployment_id,
@@ -591,6 +624,7 @@ async fn resume_deploy(
         output_dir,
         total_size,
         json,
+        bundle_upload,
     )
     .await?;
 
@@ -611,6 +645,46 @@ async fn resume_deploy(
     }
 
     Ok(())
+}
+
+// ── Bundle helpers ───────────────────────────────────────────
+
+fn maybe_create_bundle(
+    output_dir: &Path,
+    is_process: bool,
+    json: bool,
+) -> anyhow::Result<Option<(Vec<u8>, String)>> {
+    if !is_process {
+        return Ok(None);
+    }
+    output::status(json, "~", "Creating tar.zst bundle (PROCESS deployment)...");
+    let (bytes, sha) =
+        bundle::create_bundle(output_dir).context("failed to create tar.zst bundle")?;
+    output::success(
+        json,
+        format!(
+            "Bundle created ({}, sha256: {}…)",
+            format_bytes(bytes.len()),
+            &sha[..12]
+        ),
+    );
+    Ok(Some((bytes, sha)))
+}
+
+fn resolve_bundle_upload(
+    bundle_data: Option<(Vec<u8>, String)>,
+    upload_url: Option<&str>,
+) -> anyhow::Result<Option<(Vec<u8>, &str)>> {
+    match (bundle_data, upload_url) {
+        (Some((bytes, _)), Some(url)) => Ok(Some((bytes, url))),
+        (Some(_), None) => {
+            bail!(
+                "Server did not return a bundle upload URL for PROCESS deployment. \
+                 This may indicate an API version mismatch. Try upgrading: nrz upgrade"
+            );
+        }
+        _ => Ok(None),
+    }
 }
 
 // ── Build step ───────────────────────────────────────────────

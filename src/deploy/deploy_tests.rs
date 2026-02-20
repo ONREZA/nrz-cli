@@ -360,3 +360,36 @@ fn content_type_unknown_fallback() {
     assert_eq!(guess_content_type("file.xyz"), "application/octet-stream");
     assert_eq!(guess_content_type("noext"), "application/octet-stream");
 }
+
+// ── resolve_bundle_upload tests ──────────────────────────────
+
+#[test]
+fn resolve_bundle_upload_with_url() {
+    let data = Some((vec![1, 2, 3], "abc123".to_string()));
+    let result = resolve_bundle_upload(data, Some("https://s3.example.com/bundle")).unwrap();
+    assert!(result.is_some());
+    let (bytes, url) = result.unwrap();
+    assert_eq!(bytes, vec![1, 2, 3]);
+    assert_eq!(url, "https://s3.example.com/bundle");
+}
+
+#[test]
+fn resolve_bundle_upload_no_bundle_data() {
+    let result = resolve_bundle_upload(None, Some("https://s3.example.com/bundle")).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn resolve_bundle_upload_no_url_bails() {
+    let data = Some((vec![1, 2, 3], "abc123".to_string()));
+    let result = resolve_bundle_upload(data, None);
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("bundle upload URL"), "unexpected error: {msg}");
+}
+
+#[test]
+fn resolve_bundle_upload_both_none() {
+    let result = resolve_bundle_upload(None, None).unwrap();
+    assert!(result.is_none());
+}

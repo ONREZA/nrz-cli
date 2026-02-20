@@ -54,6 +54,9 @@ futures = "0.3"
 # Hashing (synthetic commit SHA)
 sha2 = "0.10"
 
+# Compression (tar.zst bundle for PROCESS deployments)
+zstd = "0.13"
+
 # URL encoding
 percent-encoding = "2"
 
