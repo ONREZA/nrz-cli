@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.0] - 2026-02-20
+
+### ✨ Features
+
+- **cli:** improve SSR detection for Next.js, Nuxt, SvelteKit and add Astro SSR ([923e854](https://github.com/ONREZA/nrz-cli/commit/923e85478507baef17b454ed8ba39319d3a19eb1))
+- **deploy:** resolve entry point for PROCESS deployments without adapter ([be15c42](https://github.com/ONREZA/nrz-cli/commit/be15c42da40677c1ab080dccf0a8873aba3cfa2f))
+- **deploy:** support STATIC/PROCESS deploy without adapter manifest ([a1b2ce7](https://github.com/ONREZA/nrz-cli/commit/a1b2ce7378b5cbd6ad54b7c24dc09e410f7fa4a3))
+
+### 🐛 Bug Fixes
+
+- **build:** improve framework detection accuracy and output dir resolution ([16b428e](https://github.com/ONREZA/nrz-cli/commit/16b428eae093cffac1ba958e69ac9d70dd853a01))
+
 ## [0.12.0] - 2026-02-20
 
 ### ✨ Features
