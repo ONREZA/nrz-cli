@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.1] - 2026-02-20
+
+### 🐛 Bug Fixes
+
+- **ci:** glibc -> musl ([6c83c85](https://github.com/ONREZA/nrz-cli/commit/6c83c8556c13c9d80d1a1c08f7fb20be96f56b34))
+
 ## [0.11.0] - 2026-02-20
 
 ### ✨ Features
