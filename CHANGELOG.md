@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2026-02-20
+
+### ✨ Features
+
+- **deploy:** add tar.zst bundle upload for PROCESS deployments ([464b121](https://github.com/ONREZA/nrz-cli/commit/464b1217202a31d1d4e042762920cbc3caebfb55))
+- **deploy:** add --resume-deployment flag for builder mode ([964b4f4](https://github.com/ONREZA/nrz-cli/commit/964b4f42bbc59aec3d8c5d03846e60af72cd209a))
+- **cli:** add framework detection module and `nrz detect` command ([1343967](https://github.com/ONREZA/nrz-cli/commit/1343967fe52ef3295befb3f5e7f534ab516ceffd))
+- **cli:** support multiple --env targets for env commands ([a96619c](https://github.com/ONREZA/nrz-cli/commit/a96619c34ed17508d5b9d0c52eaaf2ebab2423b3))
+
 ## [0.10.0] - 2026-02-18
 
 ### ✨ Features
