@@ -81,7 +81,7 @@ async fn run_command(
 
     match command {
         Command::Dev(args) => dev::run(args, config).await,
-        Command::Build(args) => build::run(args, json, config).await,
+        Command::Build(args) => build::run(args, json, config).await.map(|_| ()),
         Command::Deploy(args) => deploy::run(args, json, token, workspace, config).await,
         Command::Db(args) => {
             cli::db_handler::run(args, json, token, workspace, env_single, config).await

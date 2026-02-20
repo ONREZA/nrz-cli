@@ -252,6 +252,10 @@ pub struct DeployArgs {
     /// Resume an existing deployment (builder mode: skip project resolution and polling)
     #[arg(long)]
     pub resume_deployment: Option<String>,
+
+    /// Override compute type: static, isolate, process
+    #[arg(long)]
+    pub compute: Option<String>,
 }
 
 #[derive(Parser)]

@@ -62,6 +62,8 @@ pub struct BuildSection {
 #[serde(default)]
 pub struct DeploySection {
     pub skip_migrations: Option<bool>,
+    /// Compute type override: "static", "isolate", "process".
+    pub compute: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -231,6 +233,10 @@ impl ProjectConfig {
         self.migrations.dir.as_deref().unwrap_or("migrations")
     }
 
+    pub fn deploy_compute(&self) -> Option<&str> {
+        self.deploy.compute.as_deref()
+    }
+
     /// Returns keys of all required env vars declared in `[env]`.
     pub fn required_env_vars(&self) -> Vec<&str> {
         self.env
@@ -334,6 +340,7 @@ pub fn generate_template(
 
 # [deploy]
 # skip_migrations = false
+# compute = "static"    # "static", "isolate", or "process"
 
 # [migrations]
 # dir = "migrations"

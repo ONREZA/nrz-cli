@@ -22,6 +22,7 @@ use crate::api::ApiClient;
 use crate::auth;
 use crate::build;
 use crate::cli::{BuildArgs, DeployArgs};
+use crate::detect::types::ComputeType;
 use crate::link;
 use crate::migrations;
 use crate::output;
@@ -83,6 +84,8 @@ struct CreateDeploymentBody {
     migrations: Option<Vec<migrations::Migration>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bundle_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compute_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +143,8 @@ struct DeployOutput {
     deployment_id: String,
     url: String,
     status: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 // ── Main deploy flow ─────────────────────────────────────────
@@ -174,7 +179,7 @@ pub async fn run(
 
     // Validate build output
     output::status(json, "~", "Validating build output...");
-    build::run(
+    let build_result = build::run(
         BuildArgs {
             dir: project_dir.to_string_lossy().into_owned(),
             skip_validation: false,
@@ -184,14 +189,20 @@ pub async fn run(
     )
     .await?;
 
-    // Read manifest as raw JSON
-    let output_dir = detect_output_dir(&project_dir, &config.output_dirs())?;
-    let manifest_path = output_dir.join(".onreza/manifest.json");
-    let manifest_raw: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(&manifest_path)
-            .with_context(|| format!("failed to read {}", manifest_path.display()))?,
-    )
-    .with_context(|| format!("failed to parse {} as JSON", manifest_path.display()))?;
+    let output_dir = build_result.output_dir;
+    let has_manifest = build_result.has_manifest;
+
+    // Read manifest: real if adapter present, minimal otherwise
+    let manifest_raw: serde_json::Value = if has_manifest {
+        let manifest_path = output_dir.join(".onreza/manifest.json");
+        serde_json::from_str(
+            &std::fs::read_to_string(&manifest_path)
+                .with_context(|| format!("failed to read {}", manifest_path.display()))?,
+        )
+        .with_context(|| format!("failed to parse {} as JSON", manifest_path.display()))?
+    } else {
+        generate_minimal_manifest()
+    };
 
     // Scan output directory for flat file list
     output::status(json, "~", "Scanning output directory...");
@@ -200,10 +211,44 @@ pub async fn run(
         bail!("output directory is empty: {}", output_dir.display());
     }
 
+    // Resolve compute type: CLI flag > config > detect
+    let detection = crate::detect::detect(&project_dir);
+    let compute = resolve_compute_type(
+        args.compute.as_deref(),
+        config.deploy_compute(),
+        &detection,
+    )?;
+    let mut warnings: Vec<String> = Vec::new();
+
+    // Validate: ISOLATE without adapter is an error
+    if compute == ComputeType::Isolate && !has_manifest {
+        let framework = &detection.name;
+        bail!(
+            "{framework} project detected but no @onreza/* adapter found.\n\n\
+             ISOLATE compute requires an adapter that generates .onreza/manifest.json.\n\n\
+             Options:\n\
+             \x20 1. Install an adapter for your framework\n\
+             \x20 2. Use --compute static  if your build output is static files only\n\
+             \x20 3. Use --compute process for standalone server deployment"
+        );
+    }
+
+    // Warn about SSR framework without adapter if compute was auto-detected
+    if !has_manifest
+        && args.compute.is_none()
+        && config.deploy_compute().is_none()
+        && crate::detect::presets::is_ssr_framework(&detection.framework)
+    {
+        let msg = format!(
+            "{} detected as SSR framework but no @onreza/* adapter found. \
+             Deploying as {}. Use --compute to override.",
+            detection.name, compute
+        );
+        output::warn(json, &msg);
+        warnings.push(msg);
+    }
+
     // ── Resume mode: builder calls us with an existing deployment ID ──
-    // Skips project resolution, plan limits, env validation, migrations, and
-    // status polling — the builder is responsible for those concerns.
-    // The server also enforces plan limits at prepare-upload time.
     if let Some(deployment_id) = &args.resume_deployment {
         let deployment_id = deployment_id.trim();
         if deployment_id.is_empty() {
@@ -215,8 +260,9 @@ pub async fn run(
             manifest_raw,
             files,
             &output_dir,
-            &project_dir,
             json,
+            compute,
+            warnings,
         )
         .await;
     }
@@ -297,9 +343,7 @@ pub async fn run(
             .await?;
     }
 
-    // Detect compute type (used for bundle decision + API sync)
-    let detection = crate::detect::detect(&project_dir);
-    let is_process = detection.suggested_compute == crate::detect::types::ComputeType::Process;
+    let is_process = compute == ComputeType::Process;
 
     // Sync detection results to API (best-effort, non-blocking)
     let sync_client = client.clone();
@@ -326,6 +370,7 @@ pub async fn run(
         commit_sha,
         migrations: mig_entries,
         bundle_sha256: bundle_data.as_ref().map(|(_, sha)| sha.clone()),
+        compute_type: Some(compute.to_string()),
     };
     let file_count = body.files.len();
 
@@ -386,6 +431,7 @@ pub async fn run(
                         deployment_id: deployment.id,
                         url: url.to_string(),
                         status: "live".into(),
+                        warnings,
                     });
                 } else {
                     eprintln!();
@@ -565,28 +611,29 @@ struct PrepareUploadResponse {
 struct ResumeDeployOutput {
     deployment_id: String,
     status: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn resume_deploy(
     client: &ApiClient,
     deployment_id: &str,
     manifest: serde_json::Value,
     files: Vec<FileEntry>,
     output_dir: &Path,
-    project_dir: &Path,
     json: bool,
+    compute: ComputeType,
+    warnings: Vec<String>,
 ) -> anyhow::Result<()> {
-    // Detect compute type from framework detection
-    let detection = crate::detect::detect(project_dir);
-    let compute_type = detection.suggested_compute.to_string();
-    let is_process = detection.suggested_compute == crate::detect::types::ComputeType::Process;
+    let compute_type = compute.to_string();
+    let is_process = compute == ComputeType::Process;
 
     output::status(
         json,
         "~",
         format!(
-            "Resuming deployment {deployment_id} (compute: {compute_type}, reason: {})",
-            detection.reason
+            "Resuming deployment {deployment_id} (compute: {compute_type})"
         ),
     );
 
@@ -638,6 +685,7 @@ async fn resume_deploy(
         output::json_output(&ResumeDeployOutput {
             deployment_id: deployment_id.to_string(),
             status: "activated".into(),
+            warnings,
         });
     } else {
         eprintln!();
@@ -903,20 +951,33 @@ fn guess_content_type(path: &str) -> &'static str {
 
 // ── Helpers ──────────────────────────────────────────────────
 
-fn detect_output_dir(
-    project_dir: &Path,
-    output_dirs: &[&str],
-) -> anyhow::Result<std::path::PathBuf> {
-    for name in output_dirs {
-        let candidate = project_dir.join(name);
-        if candidate.is_dir() && candidate.join(".onreza").is_dir() {
-            return Ok(candidate);
-        }
+// ── Compute type resolution ──────────────────────────────────
+
+fn resolve_compute_type(
+    cli_flag: Option<&str>,
+    config_value: Option<&str>,
+    detection: &crate::detect::types::DetectionResult,
+) -> anyhow::Result<ComputeType> {
+    // Priority: CLI flag > config > detection
+    if let Some(val) = cli_flag.or(config_value) {
+        return parse_compute_type(val);
     }
-    bail!(
-        "no output directory found in {}. Run your build first.",
-        project_dir.display()
-    );
+    Ok(detection.suggested_compute)
+}
+
+fn parse_compute_type(s: &str) -> anyhow::Result<ComputeType> {
+    match s.to_lowercase().as_str() {
+        "static" => Ok(ComputeType::Static),
+        "isolate" => Ok(ComputeType::Isolate),
+        "process" => Ok(ComputeType::Process),
+        _ => bail!(
+            "invalid compute type: \"{s}\". Must be one of: static, isolate, process"
+        ),
+    }
+}
+
+fn generate_minimal_manifest() -> serde_json::Value {
+    serde_json::json!({"version": 1})
 }
 
 fn git_cmd(args: &[&str]) -> Option<String> {
