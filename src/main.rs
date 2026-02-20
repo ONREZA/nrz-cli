@@ -4,6 +4,8 @@ mod build;
 mod cli;
 mod deploy;
 mod deployments;
+mod detect;
+mod detect_sync;
 mod dev;
 mod init;
 mod link;
@@ -102,5 +104,6 @@ async fn run_command(
         Command::Rollback(args) => rollback::run(args, json, token, workspace, config).await,
         Command::Workspace(args) => cli::workspace_handler::run(args, json).await,
         Command::Init(args) => init::run(args, json, token, workspace, config).await,
+        Command::Detect(args) => Ok(cli::detect_handler::run(args, json)?),
     }
 }

@@ -42,6 +42,7 @@ fn format_envelope_errors(errors: &[ApiEnvelopeMessage]) -> String {
     }
 }
 
+#[derive(Clone)]
 pub struct ApiClient {
     client: reqwest::Client,
     /// Plain client without auth headers, reused for presigned S3 uploads.

@@ -412,3 +412,94 @@ fn toml_values_are_escaped() {
     let config: ProjectConfig = toml::from_str(&content).unwrap();
     assert_eq!(config.project.name.as_deref(), Some("my \"app\""));
 }
+
+// ── save_framework ────────────────────────────────────────────
+
+#[test]
+fn save_framework_adds_to_existing_config() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        "[project]\nid = \"proj_1\"\nname = \"my-app\"\n\n[dev]\nport = 3000\n",
+    )
+    .unwrap();
+
+    save_framework(dir.path(), "nextjs").unwrap();
+
+    let config = load(dir.path()).unwrap();
+    assert_eq!(config.project.framework.as_deref(), Some("nextjs"));
+    // Other fields preserved
+    assert_eq!(config.project.id.as_deref(), Some("proj_1"));
+    assert_eq!(config.dev.port, Some(3000));
+}
+
+#[test]
+fn save_framework_noop_when_same() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        "[project]\nid = \"proj_1\"\nframework = \"astro\"\n",
+    )
+    .unwrap();
+
+    save_framework(dir.path(), "astro").unwrap();
+
+    let content = std::fs::read_to_string(dir.path().join("onreza.toml")).unwrap();
+    // Should not duplicate
+    assert_eq!(
+        content.matches("framework").count(),
+        1,
+        "framework should appear once: {content}"
+    );
+}
+
+#[test]
+fn save_framework_replaces_existing() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        "[project]\nid = \"proj_1\"\nframework = \"vite\"\n",
+    )
+    .unwrap();
+
+    save_framework(dir.path(), "nextjs").unwrap();
+
+    let config = load(dir.path()).unwrap();
+    assert_eq!(config.project.framework.as_deref(), Some("nextjs"));
+}
+
+#[test]
+fn save_framework_noop_when_no_toml() {
+    let dir = tempfile::tempdir().unwrap();
+    // No onreza.toml exists — should do nothing
+    save_framework(dir.path(), "nextjs").unwrap();
+    assert!(!dir.path().join("onreza.toml").exists());
+}
+
+#[test]
+fn save_framework_handles_commented_field() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        "[project]\nid = \"proj_1\"\n# framework = \"\"\n",
+    )
+    .unwrap();
+
+    save_framework(dir.path(), "nuxt").unwrap();
+
+    let config = load(dir.path()).unwrap();
+    assert_eq!(config.project.framework.as_deref(), Some("nuxt"));
+}
+
+#[test]
+fn load_config_with_framework() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        "[project]\nid = \"proj_1\"\nname = \"app\"\nframework = \"astro\"\n",
+    )
+    .unwrap();
+
+    let config = load(dir.path()).unwrap();
+    assert_eq!(config.project.framework.as_deref(), Some("astro"));
+}

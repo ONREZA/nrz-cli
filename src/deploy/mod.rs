@@ -263,6 +263,20 @@ pub async fn run(
             .await?;
     }
 
+    // Sync detection results to API (best-effort, non-blocking)
+    let sync_client = client.clone();
+    let sync_project_id = project_id.clone();
+    let sync_project_dir = project_dir.clone();
+    let _sync_handle = tokio::spawn(async move {
+        let detection_result = crate::detect::detect(&sync_project_dir);
+        crate::detect_sync::sync_detection_to_api(
+            &sync_client,
+            &sync_project_id,
+            &detection_result,
+        )
+        .await;
+    });
+
     // Detect migrations
     let skip_mig = args.skip_migrations || config.skip_migrations();
     let mig_entries = detect_migrations(&project_dir, json, skip_mig, config.migrations_dir())
@@ -464,16 +478,7 @@ fn resolve_build_command(
     if !project_dir.join("package.json").exists() {
         return None;
     }
-    // Auto-detect package manager from lock files
-    let pm = if project_dir.join("bun.lock").exists() || project_dir.join("bun.lockb").exists() {
-        "bun"
-    } else if project_dir.join("pnpm-lock.yaml").exists() {
-        "pnpm"
-    } else if project_dir.join("yarn.lock").exists() {
-        "yarn"
-    } else {
-        "npm"
-    };
+    let pm = crate::detect::detect_package_manager_name(project_dir);
     Some(format!("{pm} run build"))
 }
 

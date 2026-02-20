@@ -50,6 +50,17 @@ src/
     mod.rs           — валидация output dir + manifest
     manifest.rs      — парсинг и валидация manifest.json
     manifest_tests.rs — тесты manifest
+  detect/           — детекция фреймворков, PM, SSR, адаптеров
+    mod.rs           — оркестратор: detect(), infer_compute_type()
+    types.rs         — все типы (DetectionResult, ComputeType, etc.)
+    presets.rs       — 18 пресетов фреймворков (compile-time data)
+    package_json.rs  — парсинг package.json
+    package_manager.rs — детекция PM (packageManager field + lockfiles)
+    ssr.rs           — SSR-анализ (Next.js, Nuxt, SvelteKit)
+    adapter.rs       — детекция @onreza/* адаптеров
+    vite_config.rs   — парсинг vite.config для outDir
+    static_html.rs   — fallback static HTML detector
+  detect_sync.rs    — best-effort sync detection results to API
   deploy/           — nrz deploy
     mod.rs           — upload + activate + migrations detection
   init/             — nrz init
@@ -94,6 +105,7 @@ CLI не зависит от адаптеров. Связь — через BUILD
 
 | Команда | Описание |
 |---------|----------|
+| `nrz detect` | Детекция фреймворка, PM, SSR, compute type (--json, --slug-only, --save) |
 | `nrz dev` | Запуск dev-сервера фреймворка + эмуляция ONREZA runtime |
 | `nrz build` | Валидация build output и manifest |
 | `nrz deploy` | Деплой на платформу |

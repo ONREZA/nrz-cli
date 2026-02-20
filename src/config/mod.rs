@@ -33,6 +33,7 @@ pub struct ProjectSection {
     pub id: Option<String>,
     pub name: Option<String>,
     pub workspace: Option<String>,
+    pub framework: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -391,6 +392,72 @@ pub fn save_or_update(
     }
 
     Ok(())
+}
+
+/// Save detected framework slug to `onreza.toml` `[project]` section.
+///
+/// If the file exists, updates `framework` field in-place.
+/// If not, does nothing (scaffold must exist first).
+pub fn save_framework(project_dir: &Path, framework: &str) -> anyhow::Result<()> {
+    let path = project_dir.join(CONFIG_FILENAME);
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+
+    let config: ProjectConfig =
+        toml::from_str(&content).with_context(|| format!("failed to parse {}", path.display()))?;
+
+    if config.project.framework.as_deref() == Some(framework) {
+        return Ok(());
+    }
+
+    let updated = update_single_field_in_toml(&content, "framework", framework);
+    std::fs::write(&path, updated)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+
+    Ok(())
+}
+
+/// Update a single field in the `[project]` section in-place.
+fn update_single_field_in_toml(content: &str, key: &str, value: &str) -> String {
+    let escaped = escape_toml_value(value);
+    let mut result = String::new();
+    let mut in_project_section = false;
+    let mut field_replaced = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with('[') && !trimmed.starts_with("[[") {
+            if in_project_section && !field_replaced {
+                result.push_str(&format!("{key} = \"{escaped}\"\n"));
+                field_replaced = true;
+            }
+            in_project_section = trimmed == "[project]";
+        }
+
+        if in_project_section
+            && !field_replaced
+            && let Some(replaced) = try_replace_field(trimmed, key, &escaped)
+        {
+            result.push_str(&replaced);
+            result.push('\n');
+            field_replaced = true;
+            continue;
+        }
+
+        result.push_str(line);
+        result.push('\n');
+    }
+
+    if in_project_section && !field_replaced {
+        result.push_str(&format!("{key} = \"{escaped}\"\n"));
+    }
+
+    result
 }
 
 /// Resolve project ID from explicit flag, config, or fail.

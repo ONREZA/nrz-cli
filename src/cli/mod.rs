@@ -5,6 +5,8 @@ mod db_handler_tests;
 pub mod db_migrate_handler;
 #[cfg(test)]
 mod db_migrate_handler_tests;
+pub mod detect;
+pub mod detect_handler;
 pub mod domains;
 pub mod domains_handler;
 pub mod env;
@@ -19,6 +21,7 @@ pub mod workspace;
 pub mod workspace_handler;
 
 pub use db::DbArgs;
+pub use detect::DetectArgs;
 pub use domains::DomainsArgs;
 pub use env::EnvArgs;
 pub use kv::KvArgs;
@@ -110,6 +113,9 @@ pub enum Command {
 
     /// Initialize project scaffold (optionally create/link on platform)
     Init(InitArgs),
+
+    /// Detect framework, package manager, and project features
+    Detect(DetectArgs),
 }
 
 #[derive(Parser)]

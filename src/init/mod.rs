@@ -62,26 +62,43 @@ pub async fn run(
     }
 
     // Phase 1: Detect framework and package manager
-    let framework = if args.skip_detection {
+    let detection_result = if args.skip_detection {
         None
     } else {
-        let detected = detect_framework(&project_dir);
-        if let Some(ref name) = detected
-            && !json
-        {
-            output::status(false, "~", format!("Detected framework: {name}"));
-        }
-        detected
+        Some(crate::detect::detect(&project_dir))
     };
 
-    let package_manager = if args.skip_detection {
-        None
-    } else {
-        Some(detect_package_manager(&project_dir))
-    };
+    let framework = detection_result.as_ref().and_then(|r| {
+        if r.framework == "other" {
+            None
+        } else {
+            Some(r.framework.clone())
+        }
+    });
+
+    if let Some(ref name) = framework
+        && !json
+    {
+        output::status(false, "~", format!("Detected framework: {name}"));
+    }
+
+    let package_manager = detection_result
+        .as_ref()
+        .and_then(|r| r.metadata.package_manager.as_ref())
+        .map(|pm| pm.pm_type.as_str().to_string());
 
     // Phase 2: Local scaffold — create onreza.toml template + .onreza/ + .gitignore
     scaffold_local(&project_dir, json)?;
+
+    // Save detected framework to onreza.toml (best-effort)
+    if let Some(ref fw) = framework
+        && let Err(e) = config::save_framework(&project_dir, fw)
+    {
+        output::warn(
+            json,
+            format!("could not save framework to onreza.toml: {e}"),
+        );
+    }
 
     // Phase 3: Optionally create or link project on platform
     let (project_id, project_name) = if args.create {
@@ -89,6 +106,15 @@ pub async fn run(
         let name = resolve_project_name(&args.name, &project_dir);
         let (id, name) = create_on_platform(token, workspace, &name, &framework, json).await?;
         config::save_or_update(&project_dir, &id, Some(&name), None)?;
+        // Sync detection to API (best-effort)
+        if let Some(ref result) = detection_result {
+            let tok = auth::resolve_token(token, workspace).ok();
+            if let Some(ref t) = tok
+                && let Ok(client) = ApiClient::authenticated(t)
+            {
+                crate::detect_sync::sync_detection_to_api(&client, &id, result).await;
+            }
+        }
         (Some(id), Some(name))
     } else if let Some(pid) = &args.project_id {
         // --project-id: link existing project
@@ -101,6 +127,10 @@ pub async fn run(
             Some(&selected.project_name),
             None,
         )?;
+        // Sync detection to API (best-effort)
+        if let Some(ref result) = detection_result {
+            crate::detect_sync::sync_detection_to_api(&client, &selected.project_id, result).await;
+        }
         if !json {
             output::success(
                 false,
@@ -113,7 +143,20 @@ pub async fn run(
         (Some(selected.project_id), Some(selected.project_name))
     } else if !json && std::io::stdin().is_terminal() {
         // Interactive wizard
-        interactive_bootstrap(token, workspace, &args.name, &project_dir, &framework).await?
+        let result_ids =
+            interactive_bootstrap(token, workspace, &args.name, &project_dir, &framework).await?;
+        // Sync detection to API (best-effort)
+        if let (Some(ref id), _) = result_ids
+            && let Some(ref det) = detection_result
+        {
+            let tok = auth::resolve_token(token, workspace).ok();
+            if let Some(ref t) = tok
+                && let Ok(client) = ApiClient::authenticated(t)
+            {
+                crate::detect_sync::sync_detection_to_api(&client, id, det).await;
+            }
+        }
+        result_ids
     } else {
         // JSON / non-interactive: local-only scaffold
         (None, None)
@@ -286,42 +329,5 @@ pub fn add_to_gitignore(project_dir: &Path) {
     let separator = if content.ends_with('\n') { "" } else { "\n" };
     if let Err(e) = std::fs::write(&gitignore, format!("{content}{separator}.onreza/\n")) {
         eprintln!("  Warning: could not update .gitignore: {e}");
-    }
-}
-
-pub(crate) fn detect_framework(project_dir: &Path) -> Option<String> {
-    let pkg_content = std::fs::read_to_string(project_dir.join("package.json")).ok()?;
-    let pkg: serde_json::Value = serde_json::from_str(&pkg_content).ok()?;
-
-    let has_dep = |name: &str| -> bool {
-        pkg.get("dependencies").and_then(|d| d.get(name)).is_some()
-            || pkg
-                .get("devDependencies")
-                .and_then(|d| d.get(name))
-                .is_some()
-    };
-
-    if has_dep("astro") {
-        Some("astro".into())
-    } else if has_dep("nuxt") {
-        Some("nuxt".into())
-    } else if has_dep("@sveltejs/kit") {
-        Some("sveltekit".into())
-    } else if has_dep("nitropack") {
-        Some("nitro".into())
-    } else {
-        None
-    }
-}
-
-pub(crate) fn detect_package_manager(project_dir: &Path) -> String {
-    if project_dir.join("bun.lockb").exists() || project_dir.join("bun.lock").exists() {
-        "bun".into()
-    } else if project_dir.join("pnpm-lock.yaml").exists() {
-        "pnpm".into()
-    } else if project_dir.join("yarn.lock").exists() {
-        "yarn".into()
-    } else {
-        "npm".into()
     }
 }
