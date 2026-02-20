@@ -5,7 +5,7 @@
 ## Принципы разработки
 
 **LLM-First CLI.** Все команды проектируются для автономного использования LLM-агентами:
-- `--json` глобальный флаг (`NRZ_JSON=1`) — машинный вывод в stdout
+- `--json` глобальный флаг (`NRZ_JSON=true`) — машинный вывод в stdout
 - `--token` глобальный флаг (`NRZ_TOKEN`) — аутентификация без device flow
 - `--env` глобальный флаг (`NRZ_ENV`) — выбор environment (production/preview/development или ID)
 - Интерактивные prompts имеют non-interactive альтернативу (`--project-id`, `--force`)

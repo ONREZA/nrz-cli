@@ -159,6 +159,11 @@ pub async fn run(
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
 
+    // Run install step (default: enabled, skip with --skip-install or --skip-build)
+    if !args.skip_build && !args.skip_install {
+        run_install_step(&project_dir, json)?;
+    }
+
     // Run build step (default: enabled, skip with --skip-build)
     if !args.skip_build
         && let Some(cmd) =
@@ -706,6 +711,45 @@ fn resolve_build_command(
     }
     let pm = crate::detect::detect_package_manager_name(project_dir);
     Some(format!("{pm} run build"))
+}
+
+fn run_install_step(project_dir: &Path, json: bool) -> anyhow::Result<()> {
+    if !project_dir.join("package.json").exists() {
+        return Ok(());
+    }
+
+    let pkg = crate::detect::package_json::PackageJson::load(project_dir);
+    let pm_info = crate::detect::package_manager::detect_package_manager(project_dir, pkg.as_ref());
+    let cmd = match pm_info {
+        Some(info) => crate::detect::package_manager::install_command(info.pm_type),
+        None => "npm install",
+    };
+
+    output::status(json, ">", format!("Installing dependencies: {cmd}"));
+
+    #[cfg(unix)]
+    let status = std::process::Command::new("sh")
+        .args(["-c", cmd])
+        .current_dir(project_dir)
+        .status()
+        .with_context(|| format!("failed to start install command: {cmd}"))?;
+
+    #[cfg(windows)]
+    let status = std::process::Command::new("cmd")
+        .args(["/C", cmd])
+        .current_dir(project_dir)
+        .status()
+        .with_context(|| format!("failed to start install command: {cmd}"))?;
+
+    if !status.success() {
+        match status.code() {
+            Some(code) => anyhow::bail!("dependency installation failed with exit code {code}"),
+            None => anyhow::bail!("install process was killed by signal"),
+        }
+    }
+
+    output::success(json, "Dependencies installed");
+    Ok(())
 }
 
 fn run_build_step(cmd: &str, project_dir: &Path, json: bool) -> anyhow::Result<()> {

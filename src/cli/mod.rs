@@ -237,6 +237,10 @@ pub struct DeployArgs {
     #[arg(long)]
     pub skip_build: bool,
 
+    /// Skip dependency installation before build
+    #[arg(long)]
+    pub skip_install: bool,
+
     /// Custom build command (overrides [build] command in onreza.toml)
     #[arg(long)]
     pub build_command: Option<String>,
