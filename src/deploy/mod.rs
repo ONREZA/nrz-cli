@@ -213,11 +213,8 @@ pub async fn run(
 
     // Resolve compute type: CLI flag > config > detect
     let detection = crate::detect::detect(&project_dir);
-    let compute = resolve_compute_type(
-        args.compute.as_deref(),
-        config.deploy_compute(),
-        &detection,
-    )?;
+    let compute =
+        resolve_compute_type(args.compute.as_deref(), config.deploy_compute(), &detection)?;
     let mut warnings: Vec<String> = Vec::new();
 
     // Validate: ISOLATE without adapter is an error
@@ -344,6 +341,17 @@ pub async fn run(
     }
 
     let is_process = compute == ComputeType::Process;
+
+    // Ensure entry point for PROCESS deployments (before bundle creation)
+    if is_process && !has_manifest {
+        ensure_process_entry(
+            &output_dir,
+            &project_dir,
+            config.deploy_entry(),
+            &detection,
+            json,
+        )?;
+    }
 
     // Sync detection results to API (best-effort, non-blocking)
     let sync_client = client.clone();
@@ -632,9 +640,7 @@ async fn resume_deploy(
     output::status(
         json,
         "~",
-        format!(
-            "Resuming deployment {deployment_id} (compute: {compute_type})"
-        ),
+        format!("Resuming deployment {deployment_id} (compute: {compute_type})"),
     );
 
     // Create bundle for PROCESS deployments
@@ -695,6 +701,112 @@ async fn resume_deploy(
             console::style(deployment_id).bold(),
         );
         eprintln!();
+    }
+
+    Ok(())
+}
+
+// ── PROCESS entry point ──────────────────────────────────────
+
+/// Resolve and ensure entry point for PROCESS deployments.
+///
+/// 1. Resolve entry: config `[deploy] entry` > framework auto-detect > error
+/// 2. Validate the file exists in output_dir
+/// 3. Ensure `package.json` in output_dir has `"main"` pointing to entry
+fn ensure_process_entry(
+    output_dir: &Path,
+    project_dir: &Path,
+    config_entry: Option<&str>,
+    detection: &crate::detect::types::DetectionResult,
+    json: bool,
+) -> anyhow::Result<()> {
+    // 1. Resolve entry point
+    let entry = if let Some(e) = config_entry {
+        let e = e.to_string();
+        if e.is_empty() {
+            bail!("[deploy] entry in onreza.toml must not be empty");
+        }
+        if e.starts_with('/') || e.contains("..") {
+            bail!(
+                "[deploy] entry must be a relative path within the output directory, got: \"{e}\""
+            );
+        }
+        e
+    } else if let Some(e) =
+        crate::detect::resolve_entry_point(&detection.framework, output_dir, project_dir)
+    {
+        e
+    } else {
+        bail!(
+            "Cannot determine entry point for PROCESS deployment.\n\n\
+             No entry point found in output directory: {}\n\n\
+             Options:\n\
+             \x20 1. Set [deploy] entry = \"server.ts\" in onreza.toml\n\
+             \x20 2. Add \"main\" field to package.json\n\
+             \x20 3. Create index.ts or server.ts in your build output",
+            output_dir.display()
+        );
+    };
+
+    // 2. Validate file exists and is within output_dir
+    let entry_path = output_dir.join(&entry);
+    if !entry_path.is_file() {
+        bail!(
+            "Entry point \"{entry}\" not found in output directory: {}\n\n\
+             Make sure the file exists after running your build command.",
+            output_dir.display()
+        );
+    }
+    let canonical_entry = entry_path
+        .canonicalize()
+        .with_context(|| format!("failed to resolve entry point path: {entry}"))?;
+    let canonical_output = output_dir
+        .canonicalize()
+        .context("failed to resolve output directory path")?;
+    if !canonical_entry.starts_with(&canonical_output) {
+        bail!("entry point must be inside the output directory, got: \"{entry}\"");
+    }
+
+    output::status(json, "~", format!("Entry point: {entry}"));
+
+    // 3. Ensure package.json has "main" pointing to entry
+    let pkg_path = output_dir.join("package.json");
+    if pkg_path.is_file() {
+        let content = std::fs::read_to_string(&pkg_path)
+            .with_context(|| format!("failed to read {}", pkg_path.display()))?;
+        let mut pkg: serde_json::Value = serde_json::from_str(&content)
+            .with_context(|| format!("failed to parse {}", pkg_path.display()))?;
+
+        let obj = pkg
+            .as_object_mut()
+            .with_context(|| format!("{} has invalid structure (expected JSON object)", pkg_path.display()))?;
+
+        let current_main = obj.get("main").and_then(|v| v.as_str()).map(String::from);
+        if current_main.as_deref() != Some(&entry) {
+            obj.insert(
+                "main".to_string(),
+                serde_json::Value::String(entry.clone()),
+            );
+            let updated = serde_json::to_string_pretty(&pkg)
+                .context("failed to serialize package.json")?;
+            std::fs::write(&pkg_path, format!("{updated}\n"))
+                .with_context(|| format!("failed to write {}", pkg_path.display()))?;
+            output::status(json, "~", format!("Patched package.json: main = \"{entry}\""));
+        }
+    } else {
+        let pkg = serde_json::json!({
+            "name": "app",
+            "main": entry,
+        });
+        let content =
+            serde_json::to_string_pretty(&pkg).context("failed to serialize package.json")?;
+        std::fs::write(&pkg_path, format!("{content}\n"))
+            .with_context(|| format!("failed to write {}", pkg_path.display()))?;
+        output::status(
+            json,
+            "~",
+            format!("Created package.json with main = \"{entry}\""),
+        );
     }
 
     Ok(())
@@ -970,9 +1082,7 @@ fn parse_compute_type(s: &str) -> anyhow::Result<ComputeType> {
         "static" => Ok(ComputeType::Static),
         "isolate" => Ok(ComputeType::Isolate),
         "process" => Ok(ComputeType::Process),
-        _ => bail!(
-            "invalid compute type: \"{s}\". Must be one of: static, isolate, process"
-        ),
+        _ => bail!("invalid compute type: \"{s}\". Must be one of: static, isolate, process"),
     }
 }
 

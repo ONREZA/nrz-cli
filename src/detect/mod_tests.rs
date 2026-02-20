@@ -339,3 +339,173 @@ fn nuxt_wins_over_vue_cli() {
     let result = detect(dir.path());
     assert_eq!(result.framework, "nuxt");
 }
+
+// ── framework_entry_point ────────────────────────────────────
+
+#[test]
+fn framework_entry_point_nextjs() {
+    assert_eq!(framework_entry_point("nextjs"), Some("server.js".into()));
+}
+
+#[test]
+fn framework_entry_point_nuxt() {
+    assert_eq!(
+        framework_entry_point("nuxt"),
+        Some("server/index.mjs".into())
+    );
+}
+
+#[test]
+fn framework_entry_point_sveltekit() {
+    assert_eq!(framework_entry_point("sveltekit"), Some("index.js".into()));
+}
+
+#[test]
+fn framework_entry_point_unknown_returns_none() {
+    assert_eq!(framework_entry_point("vite"), None);
+    assert_eq!(framework_entry_point("astro"), None);
+    assert_eq!(framework_entry_point("other"), None);
+}
+
+// ── resolve_entry_point ──────────────────────────────────────
+
+#[test]
+fn resolve_entry_point_framework_specific() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("server.js"), "module.exports = {}").unwrap();
+
+    let result = resolve_entry_point("nextjs", dir.path(), dir.path());
+    assert_eq!(result, Some("server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_framework_file_missing_falls_through() {
+    // Next.js detected but server.js doesn't exist → fallback
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("index.js"), "").unwrap();
+
+    let result = resolve_entry_point("nextjs", dir.path(), dir.path());
+    assert_eq!(result, Some("index.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_package_json_main() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"main": "dist/app.js"}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
+    std::fs::write(dir.path().join("dist/app.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("dist/app.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_package_json_main_with_dot_slash() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"main": "./server.js"}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("server.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_package_json_main_path_traversal_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"main": "../../etc/passwd"}"#,
+    )
+    .unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    // Should not return the traversal path, falls through to fallback
+    assert_ne!(result, Some("../../etc/passwd".into()));
+}
+
+#[test]
+fn resolve_entry_point_project_dir_package_json() {
+    // output_dir != project_dir, package.json in project_dir
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"main": "app.js"}"#,
+    )
+    .unwrap();
+    std::fs::write(output.path().join("app.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", output.path(), project.path());
+    assert_eq!(result, Some("app.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_fallback_index_ts() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("index.ts"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("index.ts".into()));
+}
+
+#[test]
+fn resolve_entry_point_fallback_server_js() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("server.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_fallback_src_index() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/index.ts"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("src/index.ts".into()));
+}
+
+#[test]
+fn resolve_entry_point_fallback_priority_order() {
+    // index.ts should win over server.js
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("index.ts"), "").unwrap();
+    std::fs::write(dir.path().join("server.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("index.ts".into()));
+}
+
+#[test]
+fn resolve_entry_point_empty_dir_returns_none() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, None);
+}
+
+#[test]
+fn resolve_entry_point_framework_takes_priority_over_package_json() {
+    // Next.js server.js should win over package.json "main"
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"main": "custom.js"}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("server.js"), "").unwrap();
+    std::fs::write(dir.path().join("custom.js"), "").unwrap();
+
+    let result = resolve_entry_point("nextjs", dir.path(), dir.path());
+    assert_eq!(result, Some("server.js".into()));
+}

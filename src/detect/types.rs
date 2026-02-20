@@ -115,6 +115,8 @@ pub struct BuildInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub install_command: Option<String>,
     pub output_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_point: Option<String>,
 }
 
 /// Monorepo information.

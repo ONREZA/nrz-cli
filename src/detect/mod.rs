@@ -68,6 +68,7 @@ pub fn detect(project_dir: &Path) -> DetectionResult {
                     build_command: None,
                     install_command: None,
                     output_dir: Some(".".to_string()),
+                    entry_point: None,
                 }),
                 monorepo: None,
                 ssr_analysis: None,
@@ -153,6 +154,8 @@ fn detect_from_package_json(
                 ssr_adapter.as_ref(),
             );
 
+            let entry_point = framework_entry_point(preset.slug);
+
             return Some(DetectionResult {
                 framework: preset.slug.to_string(),
                 name: preset.name.to_string(),
@@ -172,6 +175,7 @@ fn detect_from_package_json(
                             package_manager::install_command(pm_type).to_string(),
                         ),
                         output_dir: Some(output_dir),
+                        entry_point,
                     }),
                     monorepo: detect_monorepo(Some(pkg)),
                     ssr_analysis,
@@ -312,6 +316,85 @@ pub fn detect_framework_slug(project_dir: &Path) -> Option<String> {
     } else {
         Some(result.framework)
     }
+}
+
+/// Known entry point for a framework's build output (relative to output dir).
+fn framework_entry_point(slug: &str) -> Option<String> {
+    match slug {
+        "nextjs" => Some("server.js".into()),
+        "nuxt" => Some("server/index.mjs".into()),
+        "sveltekit" => Some("index.js".into()),
+        _ => None,
+    }
+}
+
+/// Resolve entry point for a PROCESS deployment.
+///
+/// Priority:
+/// 1. Framework-known entry point (if file exists in output_dir)
+/// 2. `package.json "main"` field in output_dir
+/// 3. `package.json "main"` field in project_dir (when output_dir != project_dir)
+/// 4. Common fallback files: index.ts, index.js, index.mjs, server.ts, server.js, src/index.ts, src/index.js
+pub fn resolve_entry_point(
+    framework: &str,
+    output_dir: &Path,
+    project_dir: &Path,
+) -> Option<String> {
+    // 1. Framework-specific entry
+    if let Some(entry) = framework_entry_point(framework)
+        && output_dir.join(&entry).is_file()
+    {
+        return Some(entry);
+    }
+
+    // 2. package.json "main" in output_dir
+    if let Some(pkg) = package_json::PackageJson::load(output_dir)
+        && let Some(ref main) = pkg.main
+    {
+        let main = main.trim_start_matches("./");
+        if !main.contains("..") && output_dir.join(main).is_file() {
+            return Some(main.to_string());
+        }
+    }
+
+    // 3. package.json "main" in project_dir (for projects where output_dir != project_dir)
+    if output_dir != project_dir
+        && let Some(pkg) = package_json::PackageJson::load(project_dir)
+        && let Some(ref main) = pkg.main
+    {
+        let main = main.trim_start_matches("./");
+        if !main.contains("..") && output_dir.join(main).is_file() {
+            return Some(main.to_string());
+        }
+    }
+
+    // 4. Common fallback files
+    let candidates = [
+        "index.ts",
+        "index.js",
+        "index.mjs",
+        "server.ts",
+        "server.js",
+        "src/index.ts",
+        "src/index.js",
+    ];
+    let found: Vec<&str> = candidates
+        .iter()
+        .filter(|c| output_dir.join(c).is_file())
+        .copied()
+        .collect();
+
+    if found.len() > 1 {
+        eprintln!(
+            "  {} multiple entry point candidates found: {}; using \"{}\".\n\
+             \x20 Set [deploy] entry in onreza.toml to override.",
+            console::style("warn").yellow(),
+            found.iter().map(|f| format!("\"{f}\"")).collect::<Vec<_>>().join(", "),
+            found[0],
+        );
+    }
+
+    found.first().map(|f| f.to_string())
 }
 
 /// Detect package manager name (backward-compatible wrapper for init/deploy).

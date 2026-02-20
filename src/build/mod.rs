@@ -28,7 +28,11 @@ pub struct BuildResult {
     pub has_manifest: bool,
 }
 
-pub async fn run(args: BuildArgs, json: bool, config: &ProjectConfig) -> anyhow::Result<BuildResult> {
+pub async fn run(
+    args: BuildArgs,
+    json: bool,
+    config: &ProjectConfig,
+) -> anyhow::Result<BuildResult> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
@@ -78,7 +82,10 @@ pub async fn run(args: BuildArgs, json: bool, config: &ProjectConfig) -> anyhow:
         output::status(false, "~", "No .onreza/manifest.json found (no adapter)");
     }
 
-    Ok(BuildResult { output_dir, has_manifest })
+    Ok(BuildResult {
+        output_dir,
+        has_manifest,
+    })
 }
 
 /// Try common output directory names.

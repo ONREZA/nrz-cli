@@ -11,6 +11,7 @@ use serde::Deserialize;
 #[allow(dead_code)]
 pub struct PackageJson {
     pub name: Option<String>,
+    pub main: Option<String>,
 
     #[serde(default)]
     pub dependencies: HashMap<String, String>,

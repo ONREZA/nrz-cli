@@ -64,6 +64,8 @@ pub struct DeploySection {
     pub skip_migrations: Option<bool>,
     /// Compute type override: "static", "isolate", "process".
     pub compute: Option<String>,
+    /// Explicit entry point for PROCESS deployments (e.g. "server.ts").
+    pub entry: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -237,6 +239,10 @@ impl ProjectConfig {
         self.deploy.compute.as_deref()
     }
 
+    pub fn deploy_entry(&self) -> Option<&str> {
+        self.deploy.entry.as_deref()
+    }
+
     /// Returns keys of all required env vars declared in `[env]`.
     pub fn required_env_vars(&self) -> Vec<&str> {
         self.env
@@ -269,6 +275,22 @@ pub fn load(project_dir: &Path) -> anyhow::Result<ProjectConfig> {
         Ok(content) => {
             let config: ProjectConfig = toml::from_str(&content)
                 .with_context(|| format!("failed to parse {}", path.display()))?;
+            // Validate [deploy] entry: must be non-empty relative path
+            if let Some(ref entry) = config.deploy.entry {
+                if entry.is_empty() {
+                    anyhow::bail!("[deploy] entry must not be empty");
+                }
+                if entry.starts_with('/') {
+                    anyhow::bail!(
+                        "[deploy] entry must be a relative path, got: \"{entry}\""
+                    );
+                }
+                if entry.contains("..") {
+                    anyhow::bail!(
+                        "[deploy] entry must not contain \"..\", got: \"{entry}\""
+                    );
+                }
+            }
             // Validate env var names: must match ^[A-Z][A-Z0-9_]*$
             for key in config.env.declarations.keys() {
                 let valid = !key.is_empty()
@@ -341,6 +363,7 @@ pub fn generate_template(
 # [deploy]
 # skip_migrations = false
 # compute = "static"    # "static", "isolate", or "process"
+# entry = "server.ts"   # entry point for PROCESS deployments
 
 # [migrations]
 # dir = "migrations"
