@@ -22,6 +22,10 @@
         "workspace": {
           "type": "string",
           "description": "Workspace slug"
+        },
+        "framework": {
+          "type": "string",
+          "description": "Detected framework slug (auto-saved by nrz detect --save). Examples: next, nuxt, sveltekit, astro, vite, remix"
         }
       }
     },
@@ -80,7 +84,7 @@
           "items": {
             "type": "string"
           },
-          "default": ["dist", ".output", "build"]
+          "default": ["dist", ".output", "build", "out", "_site", "www", ".vitepress/dist"]
         }
       }
     },
@@ -93,6 +97,15 @@
           "type": "boolean",
           "description": "Skip database migrations during deploy",
           "default": false
+        },
+        "compute": {
+          "type": "string",
+          "description": "Compute type override. If not set, inferred automatically from framework detection. Use when auto-detection is incorrect.",
+          "enum": ["static", "isolate", "process"]
+        },
+        "entry": {
+          "type": "string",
+          "description": "Explicit entry point for PROCESS deployments (e.g. \"server.ts\", \"dist/index.js\"). Must be a relative path without '..'. If not set, resolved automatically: framework defaults > package.json 'main' > common fallbacks."
         }
       }
     },
