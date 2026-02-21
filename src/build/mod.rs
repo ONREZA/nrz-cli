@@ -43,23 +43,23 @@ pub async fn run_with_hint(
     args: BuildArgs,
     json: bool,
     config: &ProjectConfig,
-    framework_hint: Option<&str>,
+    detection: Option<&crate::detect::types::DetectionResult>,
 ) -> anyhow::Result<BuildResult> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
 
-    let detected_framework;
-    let framework = match framework_hint {
-        Some(fw) => fw,
+    let internal_detection;
+    let detection = match detection {
+        Some(d) => d,
         None => {
-            detected_framework = crate::detect::detect(&project_dir).framework;
-            &detected_framework
+            internal_detection = crate::detect::detect(&project_dir);
+            &internal_detection
         }
     };
-    let fw_dirs = crate::detect::presets::framework_output_dirs(framework);
+    let fw_dirs = compute_aware_output_dirs(detection);
     let (output_dir, has_manifest) =
-        detect_output_dir(&project_dir, &config.output_dirs(), fw_dirs)?;
+        detect_output_dir(&project_dir, &config.output_dirs(), &fw_dirs)?;
     tracing::info!(?output_dir, has_manifest, "found output directory");
 
     if has_manifest {
@@ -108,6 +108,31 @@ pub async fn run_with_hint(
         output_dir,
         has_manifest,
     })
+}
+
+/// Use SSR analysis from detection to refine the output directory list.
+///
+/// For Next.js, the correct output dir depends on the mode:
+/// - `output: 'export'` → `out/` (static HTML)
+/// - `output: 'standalone'` → `.next/standalone/` (self-contained server)
+/// - default SSR → `.next/` (requires `next start`)
+fn compute_aware_output_dirs(
+    detection: &crate::detect::types::DetectionResult,
+) -> Vec<&'static str> {
+    match detection.framework.as_str() {
+        "nextjs" => {
+            if let Some(ref ssr) = detection.metadata.ssr_analysis {
+                if ssr.is_static_compatible {
+                    return vec!["out"];
+                }
+                if ssr.has_standalone_output() {
+                    return vec![".next/standalone", ".next"];
+                }
+            }
+            vec![".next"]
+        }
+        slug => crate::detect::presets::framework_output_dirs(slug).to_vec(),
+    }
 }
 
 /// Try framework-specific and configured output directory names.

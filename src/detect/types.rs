@@ -87,6 +87,11 @@ impl SsrAnalysis {
     pub fn has_ssr_features(&self) -> bool {
         !self.ssr_features.is_empty()
     }
+
+    /// Whether SSR analysis detected `output: 'standalone'` (Next.js).
+    pub fn has_standalone_output(&self) -> bool {
+        self.ssr_features.iter().any(|f| f.contains("standalone"))
+    }
 }
 
 /// Information about a detected @onreza/* adapter.

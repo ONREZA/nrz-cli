@@ -1,4 +1,4 @@
-use super::detect_output_dir;
+use super::{compute_aware_output_dirs, detect_output_dir};
 
 #[test]
 fn framework_dirs_checked_before_config_dirs() {
@@ -64,4 +64,88 @@ fn framework_manifest_dir_wins_over_config_manifest_dir() {
     let (found, has_manifest) = detect_output_dir(dir.path(), &["dist"], &[".next"]).unwrap();
     assert_eq!(found.file_name().unwrap(), ".next");
     assert!(has_manifest);
+}
+
+// ── compute_aware_output_dirs ────────────────────────────────
+
+fn make_detection(
+    framework: &str,
+    ssr: Option<crate::detect::types::SsrAnalysis>,
+) -> crate::detect::types::DetectionResult {
+    crate::detect::types::DetectionResult {
+        framework: framework.to_string(),
+        name: framework.to_string(),
+        version: None,
+        suggested_compute: crate::detect::types::ComputeType::Process,
+        reason: String::new(),
+        metadata: crate::detect::types::DetectionMetadata {
+            uses_typescript: None,
+            config_files: vec![],
+            runtime: crate::detect::types::RuntimeInfo {
+                runtime_type: crate::detect::types::RuntimeType::Node,
+                version: None,
+            },
+            package_manager: None,
+            build_info: None,
+            monorepo: None,
+            ssr_analysis: ssr,
+            ssr_adapter: None,
+            structure: vec![],
+        },
+    }
+}
+
+#[test]
+fn nextjs_default_ssr_returns_dot_next() {
+    let detection = make_detection("nextjs", None);
+    let dirs = compute_aware_output_dirs(&detection);
+    assert_eq!(dirs, vec![".next"]);
+}
+
+#[test]
+fn nextjs_standalone_returns_standalone_first() {
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["output: 'standalone'".into()],
+    };
+    let detection = make_detection("nextjs", Some(ssr));
+    let dirs = compute_aware_output_dirs(&detection);
+    assert_eq!(dirs, vec![".next/standalone", ".next"]);
+}
+
+#[test]
+fn nextjs_export_returns_out() {
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: true,
+        ssr_features: vec!["output: 'export' (static)".into()],
+    };
+    let detection = make_detection("nextjs", Some(ssr));
+    let dirs = compute_aware_output_dirs(&detection);
+    assert_eq!(dirs, vec!["out"]);
+}
+
+#[test]
+fn vite_delegates_to_presets() {
+    let detection = make_detection("vite", None);
+    let dirs = compute_aware_output_dirs(&detection);
+    assert_eq!(dirs, vec!["dist"]);
+}
+
+#[test]
+fn nextjs_standalone_found_before_dot_next() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/standalone")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/server")).unwrap();
+
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["dist", ".output", "build"],
+        &[".next/standalone", ".next"],
+    )
+    .unwrap();
+    assert!(
+        found.ends_with(".next/standalone"),
+        "should find standalone first, got: {}",
+        found.display()
+    );
 }

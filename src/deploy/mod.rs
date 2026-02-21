@@ -189,7 +189,7 @@ pub async fn run(
         },
         json,
         config,
-        Some(&detection.framework),
+        Some(&detection),
     )
     .await?;
 
@@ -233,17 +233,30 @@ pub async fn run(
         );
     }
 
-    // Warn about SSR framework without adapter if compute was auto-detected
+    // Inform about SSR framework compute mode when auto-detected
     if !has_manifest
         && args.compute.is_none()
         && config.deploy_compute().is_none()
         && crate::detect::presets::is_ssr_framework(&detection.framework)
     {
-        let msg = format!(
-            "{} detected as SSR framework but no @onreza/* adapter found. \
-             Deploying as {}. Use --compute to override.",
-            detection.name, compute
-        );
+        let msg = match compute {
+            ComputeType::Process => {
+                let mut m = format!("{} deploying as PROCESS (server runtime).", detection.name);
+                let hint = framework_static_hint(&detection.framework);
+                if !hint.is_empty() {
+                    m.push_str(&format!(
+                        " For a fully static export, {hint} and redeploy with --compute static."
+                    ));
+                }
+                m
+            }
+            ComputeType::Static => format!(
+                "{} deploying as STATIC. \
+                 For edge/serverless deployment, install an @onreza/* adapter.",
+                detection.name
+            ),
+            _ => format!("{} deploying as {}.", detection.name, compute),
+        };
         output::warn(json, &msg);
         warnings.push(msg);
     }
@@ -344,6 +357,11 @@ pub async fn run(
     }
 
     let is_process = compute == ComputeType::Process;
+
+    // Pre-flight validation for PROCESS deployments
+    if is_process && !has_manifest {
+        validate_process_output(&output_dir, &project_dir, &detection)?;
+    }
 
     // Ensure entry point for PROCESS deployments (before bundle creation)
     if is_process && !has_manifest {
@@ -709,6 +727,125 @@ async fn resume_deploy(
     Ok(())
 }
 
+// ── PROCESS validation ───────────────────────────────────────
+
+/// Framework-specific hint about switching to static export.
+fn framework_static_hint(framework: &str) -> &'static str {
+    match framework {
+        "nextjs" => "add `output: 'export'` to next.config",
+        "nuxt" => "set `ssr: false` in nuxt.config",
+        "sveltekit" => "use `adapter-static` in svelte.config.js",
+        "astro" => "remove `output: 'server'` from astro.config",
+        _ => "",
+    }
+}
+
+/// Pre-flight validation for PROCESS deployments.
+///
+/// Checks that the output directory is compatible with PROCESS before
+/// expensive operations (entry resolution, bundling, upload).
+fn validate_process_output(
+    output_dir: &Path,
+    _project_dir: &Path,
+    detection: &crate::detect::types::DetectionResult,
+) -> anyhow::Result<()> {
+    match detection.framework.as_str() {
+        "nextjs" => {
+            let has_standalone = detection
+                .metadata
+                .ssr_analysis
+                .as_ref()
+                .is_some_and(|ssr| ssr.has_standalone_output());
+
+            let dir_name = output_dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+
+            // .next/ without standalone → can't run as standalone server
+            if dir_name == ".next" && !has_standalone {
+                bail!(
+                    "Next.js PROCESS deployment requires `output: 'standalone'` \
+                     in next.config.\n\n\
+                     Without standalone mode, .next/ needs `next start` to run and \
+                     cannot be launched as a standalone server.\n\n\
+                     Add to your next.config.{{js,mjs,ts}}:\n\
+                     \x20 module.exports = {{ output: 'standalone' }}\n\n\
+                     Then rebuild and redeploy. For a static site, use --compute static \
+                     with `output: 'export'`."
+                );
+            }
+        }
+        "nuxt" => {
+            let server_entry = output_dir.join("server/index.mjs");
+            if !server_entry.is_file() {
+                bail!(
+                    "Nuxt PROCESS deployment expects server/index.mjs in {}.\n\n\
+                     This file is created by `npx nuxi build`. If you used \
+                     `nuxi generate`, the output is static-only and should be \
+                     deployed with --compute static.",
+                    output_dir.display()
+                );
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Framework-specific diagnostic when entry point resolution fails.
+fn framework_process_diagnostic(
+    framework: &str,
+    detection: &crate::detect::types::DetectionResult,
+    output_dir: &Path,
+) -> Option<String> {
+    match framework {
+        "nextjs" => {
+            let has_standalone = detection
+                .metadata
+                .ssr_analysis
+                .as_ref()
+                .is_some_and(|ssr| ssr.has_standalone_output());
+
+            if has_standalone {
+                Some(format!(
+                    "Next.js `output: 'standalone'` is configured, but server.js not found \
+                     in {}.\n\n\
+                     Make sure `next build` completed successfully.\n\
+                     Expected: .next/standalone/server.js",
+                    output_dir.display()
+                ))
+            } else {
+                Some(
+                    "Next.js PROCESS deployment requires `output: 'standalone'` \
+                     in next.config.\n\n\
+                     Add to your next.config.{js,mjs,ts}:\n\
+                     \x20 module.exports = { output: 'standalone' }\n\n\
+                     Then rebuild and redeploy. This creates a self-contained \
+                     server at .next/standalone/server.js."
+                        .to_string(),
+                )
+            }
+        }
+        "nuxt" => Some(
+            "Nuxt PROCESS deployment expects server/index.mjs in the .output/ directory.\n\n\
+             Make sure you ran `npx nuxi build` (not `nuxi generate`).\n\
+             The build should create .output/server/index.mjs."
+                .to_string(),
+        ),
+        "sveltekit" => Some(
+            "SvelteKit PROCESS deployment requires adapter-node.\n\n\
+             Install it:\n\
+             \x20 npm install -D @sveltejs/adapter-node\n\n\
+             Update svelte.config.js:\n\
+             \x20 import adapter from '@sveltejs/adapter-node';\n\n\
+             Rebuild and redeploy."
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
 // ── PROCESS entry point ──────────────────────────────────────
 
 /// Resolve and ensure entry point for PROCESS deployments.
@@ -739,6 +876,10 @@ fn ensure_process_entry(
         crate::detect::resolve_entry_point(&detection.framework, output_dir, project_dir)
     {
         e
+    } else if let Some(diagnostic) =
+        framework_process_diagnostic(&detection.framework, detection, output_dir)
+    {
+        bail!("{diagnostic}");
     } else {
         bail!(
             "Cannot determine entry point for PROCESS deployment.\n\n\

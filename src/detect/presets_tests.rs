@@ -101,6 +101,17 @@ fn framework_output_dirs_nextjs() {
 }
 
 #[test]
+fn framework_output_dirs_nextjs_standalone_before_dot_next() {
+    let dirs = framework_output_dirs("nextjs");
+    let standalone_pos = dirs.iter().position(|d| *d == ".next/standalone").unwrap();
+    let dot_next_pos = dirs.iter().position(|d| *d == ".next").unwrap();
+    assert!(
+        standalone_pos < dot_next_pos,
+        ".next/standalone should come before .next (standalone_pos={standalone_pos}, dot_next_pos={dot_next_pos})"
+    );
+}
+
+#[test]
 fn framework_output_dirs_nuxt() {
     let dirs = framework_output_dirs("nuxt");
     assert!(dirs.contains(&".output"));

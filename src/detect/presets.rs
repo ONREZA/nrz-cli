@@ -216,7 +216,7 @@ pub fn get_static_html_preset() -> &'static FrameworkPreset {
 /// in addition to config defaults.
 pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
     match slug {
-        "nextjs" => &[".next", ".next/standalone", "out"],
+        "nextjs" => &[".next/standalone", ".next", "out"],
         "nuxt" => &[".output"],
         "sveltekit" => &["build"],
         "gatsby" => &["public"],

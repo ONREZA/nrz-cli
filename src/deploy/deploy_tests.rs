@@ -361,6 +361,186 @@ fn content_type_unknown_fallback() {
     assert_eq!(guess_content_type("noext"), "application/octet-stream");
 }
 
+// ── framework_static_hint tests ──────────────────────────────
+
+#[test]
+fn static_hint_known_frameworks_non_empty() {
+    assert!(!framework_static_hint("nextjs").is_empty());
+    assert!(!framework_static_hint("nuxt").is_empty());
+    assert!(!framework_static_hint("sveltekit").is_empty());
+    assert!(!framework_static_hint("astro").is_empty());
+    assert!(framework_static_hint("nextjs").contains("export"));
+}
+
+#[test]
+fn static_hint_unknown_returns_empty() {
+    assert!(framework_static_hint("vite").is_empty());
+    assert!(framework_static_hint("unknown").is_empty());
+}
+
+// ── validate_process_output tests ────────────────────────────
+
+fn make_detection(
+    framework: &str,
+    ssr: Option<crate::detect::types::SsrAnalysis>,
+) -> crate::detect::types::DetectionResult {
+    crate::detect::types::DetectionResult {
+        framework: framework.to_string(),
+        name: framework.to_string(),
+        version: None,
+        suggested_compute: crate::detect::types::ComputeType::Process,
+        reason: String::new(),
+        metadata: crate::detect::types::DetectionMetadata {
+            uses_typescript: None,
+            config_files: vec![],
+            runtime: crate::detect::types::RuntimeInfo {
+                runtime_type: crate::detect::types::RuntimeType::Node,
+                version: None,
+            },
+            package_manager: None,
+            build_info: None,
+            monorepo: None,
+            ssr_analysis: ssr,
+            ssr_adapter: None,
+            structure: vec![],
+        },
+    }
+}
+
+#[test]
+fn validate_nextjs_dot_next_without_standalone_bails() {
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join(".next");
+    fs::create_dir(&output_dir).unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("output: 'standalone'"),
+        "should mention standalone: {msg}"
+    );
+}
+
+#[test]
+fn validate_nextjs_dot_next_with_standalone_ok() {
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join(".next");
+    fs::create_dir(&output_dir).unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["output: 'standalone'".into()],
+    };
+    let detection = make_detection("nextjs", Some(ssr));
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn validate_nextjs_standalone_dir_ok() {
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join(".next/standalone");
+    fs::create_dir_all(&output_dir).unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_ok()); // dir_name == "standalone", not ".next"
+}
+
+#[test]
+fn validate_nuxt_without_server_entry_bails() {
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join(".output");
+    fs::create_dir(&output_dir).unwrap();
+
+    let detection = make_detection("nuxt", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("nuxi build"),
+        "should mention nuxi build: {msg}"
+    );
+}
+
+#[test]
+fn validate_nuxt_with_server_entry_ok() {
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join(".output");
+    fs::create_dir_all(output_dir.join("server")).unwrap();
+    fs::write(output_dir.join("server/index.mjs"), "export default {}").unwrap();
+
+    let detection = make_detection("nuxt", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn validate_unknown_framework_ok() {
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join("dist");
+    fs::create_dir(&output_dir).unwrap();
+
+    let detection = make_detection("vite", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_ok());
+}
+
+// ── framework_process_diagnostic tests ───────────────────────
+
+#[test]
+fn diagnostic_nextjs_no_standalone_suggests_config() {
+    let dir = tempdir().unwrap();
+    let detection = make_detection("nextjs", None);
+    let msg = framework_process_diagnostic("nextjs", &detection, dir.path());
+    assert!(msg.is_some());
+    assert!(msg.as_ref().unwrap().contains("output: 'standalone'"));
+}
+
+#[test]
+fn diagnostic_nextjs_standalone_mentions_server_js() {
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join(".next/standalone");
+    fs::create_dir_all(&output_dir).unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["output: 'standalone'".into()],
+    };
+    let detection = make_detection("nextjs", Some(ssr));
+    let msg = framework_process_diagnostic("nextjs", &detection, &output_dir);
+    assert!(msg.is_some());
+    assert!(msg.as_ref().unwrap().contains("server.js"));
+}
+
+#[test]
+fn diagnostic_nuxt_mentions_nuxi_build() {
+    let dir = tempdir().unwrap();
+    let detection = make_detection("nuxt", None);
+    let msg = framework_process_diagnostic("nuxt", &detection, dir.path());
+    assert!(msg.is_some());
+    assert!(msg.as_ref().unwrap().contains("nuxi build"));
+}
+
+#[test]
+fn diagnostic_sveltekit_mentions_adapter_node() {
+    let dir = tempdir().unwrap();
+    let detection = make_detection("sveltekit", None);
+    let msg = framework_process_diagnostic("sveltekit", &detection, dir.path());
+    assert!(msg.is_some());
+    assert!(msg.as_ref().unwrap().contains("adapter-node"));
+}
+
+#[test]
+fn diagnostic_unknown_framework_returns_none() {
+    let dir = tempdir().unwrap();
+    let detection = make_detection("vite", None);
+    let msg = framework_process_diagnostic("vite", &detection, dir.path());
+    assert!(msg.is_none());
+}
+
 // ── resolve_bundle_upload tests ──────────────────────────────
 
 #[test]
