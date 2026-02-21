@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.2] - 2026-02-21
+
+### 🐛 Bug Fixes
+
+- error messages while uploading bundle ([9e2c457](https://github.com/ONREZA/nrz-cli/commit/9e2c4576f3eca7f2f9a7797c4624ad49ed2bfc90))
+
 ## [0.13.1] - 2026-02-21
 
 ### 🐛 Bug Fixes
