@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.3] - 2026-02-21
+
+### 🐛 Bug Fixes
+
+- upload urls validation while bundleUploadUrl is set ([f7978de](https://github.com/ONREZA/nrz-cli/commit/f7978de85043a2aeb3025707585c79f9ce5852e3))
+
 ## [0.13.2] - 2026-02-21
 
 ### 🐛 Bug Fixes
