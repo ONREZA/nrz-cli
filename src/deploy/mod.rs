@@ -530,73 +530,75 @@ async fn upload_and_activate(
         );
     }
 
-    let file_count = upload_urls.len();
+    if !upload_urls.is_empty() {
+        let file_count = upload_urls.len();
 
-    let spinner = make_spinner(
-        json,
-        &format!(
-            "Uploading {file_count} files ({})...",
-            format_bytes(total_size as usize)
-        ),
-    );
+        let spinner = make_spinner(
+            json,
+            &format!(
+                "Uploading {file_count} files ({})...",
+                format_bytes(total_size as usize)
+            ),
+        );
 
-    let uploaded = AtomicUsize::new(0);
-    let upload_results: Vec<anyhow::Result<()>> =
-        stream::iter(upload_urls.iter().map(|file_url| {
-            let spinner = &spinner;
-            let uploaded = &uploaded;
-            async move {
-                let file_path = output_dir.join(&file_url.path);
-                let data = tokio::fs::read(&file_path)
-                    .await
-                    .with_context(|| format!("failed to read {}", file_path.display()))?;
+        let uploaded = AtomicUsize::new(0);
+        let upload_results: Vec<anyhow::Result<()>> =
+            stream::iter(upload_urls.iter().map(|file_url| {
+                let spinner = &spinner;
+                let uploaded = &uploaded;
+                async move {
+                    let file_path = output_dir.join(&file_url.path);
+                    let data = tokio::fs::read(&file_path)
+                        .await
+                        .with_context(|| format!("failed to read {}", file_path.display()))?;
 
-                let content_type = guess_content_type(&file_url.path);
+                    let content_type = guess_content_type(&file_url.path);
 
-                client
-                    .put_bytes(&file_url.url, data, content_type)
-                    .await
-                    .with_context(|| format!("failed to upload {}", file_url.path))?;
+                    client
+                        .put_bytes(&file_url.url, data, content_type)
+                        .await
+                        .with_context(|| format!("failed to upload {}", file_url.path))?;
 
-                let done = uploaded.fetch_add(1, Ordering::Relaxed) + 1;
-                if let Some(s) = spinner {
-                    s.set_message(format!("[{done}/{file_count}] {}", file_url.path));
+                    let done = uploaded.fetch_add(1, Ordering::Relaxed) + 1;
+                    if let Some(s) = spinner {
+                        s.set_message(format!("[{done}/{file_count}] {}", file_url.path));
+                    }
+
+                    Ok(())
                 }
+            }))
+            .buffer_unordered(20)
+            .collect()
+            .await;
 
-                Ok(())
+        // Check for upload errors
+        let errors: Vec<_> = upload_results.into_iter().filter_map(|r| r.err()).collect();
+        if !errors.is_empty() {
+            finish_spinner(spinner, "");
+            let error_details: Vec<String> = errors.iter().map(|e| format!("{e:#}")).collect();
+
+            if json {
+                output::json_output(&serde_json::json!({
+                    "error": format!("{} of {file_count} file uploads failed", errors.len()),
+                    "failedUploads": error_details,
+                }));
+                std::process::exit(1);
             }
-        }))
-        .buffer_unordered(20)
-        .collect()
-        .await;
 
-    // Check for upload errors
-    let errors: Vec<_> = upload_results.into_iter().filter_map(|r| r.err()).collect();
-    if !errors.is_empty() {
-        finish_spinner(spinner, "");
-        let error_details: Vec<String> = errors.iter().map(|e| format!("{e:#}")).collect();
-
-        if json {
-            output::json_output(&serde_json::json!({
-                "error": format!("{} of {file_count} file uploads failed", errors.len()),
-                "failedUploads": error_details,
-            }));
-            std::process::exit(1);
+            for detail in &error_details {
+                output::warn(false, format!("upload error: {detail}"));
+            }
+            bail!("{} of {file_count} file uploads failed", errors.len());
         }
 
-        for detail in &error_details {
-            output::warn(false, format!("upload error: {detail}"));
-        }
-        bail!("{} of {file_count} file uploads failed", errors.len());
+        finish_spinner(
+            spinner,
+            &format!(
+                "Uploaded {file_count} files ({})",
+                format_bytes(total_size as usize)
+            ),
+        );
     }
-
-    finish_spinner(
-        spinner,
-        &format!(
-            "Uploaded {file_count} files ({})",
-            format_bytes(total_size as usize)
-        ),
-    );
 
     // Signal upload complete
     let _: UploadCompleteResponse = client
