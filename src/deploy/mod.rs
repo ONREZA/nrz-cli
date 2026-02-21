@@ -408,8 +408,8 @@ pub async fn run(
         .await
         .context("failed to create deployment")?;
 
-    // Validate server returned correct number of upload URLs
-    if deployment.upload_urls.len() != file_count {
+    // Validate server returned correct number of upload URLs (PROCESS skips individual files)
+    if deployment.bundle_upload_url.is_none() && deployment.upload_urls.len() != file_count {
         bail!(
             "server returned {} upload URLs, but {} files were sent. \
              This may indicate an API version mismatch.",
@@ -688,7 +688,8 @@ async fn resume_deploy(
         .await
         .context("failed to prepare upload")?;
 
-    if prepared.upload_urls.len() != file_count {
+    // PROCESS skips individual file uploads — only bundle.tar.zst is uploaded
+    if prepared.bundle_upload_url.is_none() && prepared.upload_urls.len() != file_count {
         bail!(
             "server returned {} upload URLs, but {} files were sent",
             prepared.upload_urls.len(),
