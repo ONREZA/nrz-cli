@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.1] - 2026-02-21
+
+### 🐛 Bug Fixes
+
+- **deploy:** improve PROCESS deploy reliability and error messages ([07f7449](https://github.com/ONREZA/nrz-cli/commit/07f7449bdb81e7bddc03a375846868c91d711faa))
+
+### 📚 Documentation
+
+- **config:** update JSON schema and add onreza.toml field reference ([588dd34](https://github.com/ONREZA/nrz-cli/commit/588dd341b88d281383305345ef9db83ae9ef8a26))
+
 ## [0.13.0] - 2026-02-20
 
 ### ✨ Features
