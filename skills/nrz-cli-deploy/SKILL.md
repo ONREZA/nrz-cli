@@ -1,0 +1,54 @@
+---
+name: nrz-cli-deploy
+description: Use when users need to deploy ONREZA projects with nrz, troubleshoot failed deployments, or choose correct compute mode and entrypoint settings.
+---
+
+# nrz CLI Deploy
+
+## When to use
+- First deployment of a project
+- Failed `nrz deploy` in local or CI
+- Compute mismatch (`static`, `isolate`, `process`)
+
+## Standard workflow
+1. Detect framework and persist it:
+```bash
+nrz detect --save
+```
+2. Validate build output:
+```bash
+nrz build
+```
+3. Deploy:
+```bash
+# local
+nrz deploy
+
+# CI/non-interactive
+nrz deploy --prod --project-id <project_id> --json --token "$NRZ_TOKEN" --workspace <workspace_slug> --env production
+```
+
+## Troubleshooting map
+- Build output or manifest issue:
+  - For isolate deployments, ensure adapter-generated `.onreza/manifest.json` exists in output.
+  - For static/process deployments, set `[deploy].compute` in `onreza.toml`.
+- Process entrypoint error (common for Next.js/Nuxt):
+  - Set `[deploy].entry` in `onreza.toml`.
+  - Retry with `nrz deploy --compute process`.
+- Environment validation error:
+```bash
+nrz env validate --project-id <project_id>
+nrz env push .env.local --declared-only --project-id <project_id>
+```
+- Migration error:
+```bash
+nrz db migrate status --remote --project-id <project_id>
+nrz db migrate apply --remote --project-id <project_id>
+```
+
+## Post-deploy checks
+```bash
+nrz deployments --project-id <project_id> --limit 5
+nrz logs --project-id <project_id> --limit 200
+nrz rollback --project-id <project_id> --deployment-id <deployment_id>
+```

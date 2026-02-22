@@ -1,0 +1,45 @@
+---
+name: nrz-cli-ci-automation
+description: Use when users build CI pipelines around nrz and need fully non-interactive, JSON-first automation for detect, build, env checks, and deploy.
+---
+
+# nrz CLI CI Automation
+
+## Goal
+Produce deterministic CI steps for `nrz` with machine-readable output and no interactive prompts.
+
+## Non-interactive rules
+- Prefer `--json` for command output.
+- Pass auth/context explicitly via flags or env:
+  - `NRZ_TOKEN`
+  - `NRZ_WORKSPACE`
+  - `NRZ_ENV`
+- Pass `--project-id` when available to skip project selection prompts.
+
+## Recommended CI sequence
+```bash
+set -euo pipefail
+
+nrz detect --save --json
+nrz build --json
+nrz env validate --project-id "$NRZ_PROJECT_ID" --json
+nrz deploy \
+  --prod \
+  --project-id "$NRZ_PROJECT_ID" \
+  --json \
+  --token "$NRZ_TOKEN" \
+  --workspace "$NRZ_WORKSPACE" \
+  --env production
+```
+
+## CI diagnostics
+On failures, fetch deployment and logs:
+```bash
+nrz deployments --project-id "$NRZ_PROJECT_ID" --limit 10 --json
+nrz logs --project-id "$NRZ_PROJECT_ID" --limit 200 --json
+```
+
+## Guardrails
+- Do not use `nrz login` in CI.
+- Avoid interactive operations without `--force` (for example `nrz db reset --remote`).
+- Keep `onreza.toml` as the source of truth for `build`, `deploy`, `env` declarations.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "NRZ Deploy"
+  short_description: "Deploy and troubleshoot ONREZA projects"
+  default_prompt: "Use $nrz-cli-deploy to deploy this project and resolve deploy errors."

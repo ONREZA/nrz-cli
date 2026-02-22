@@ -1,0 +1,4 @@
+interface:
+  display_name: "NRZ CI Automation"
+  short_description: "Build non-interactive JSON-first CI flows"
+  default_prompt: "Use $nrz-cli-ci-automation to create or fix this nrz CI pipeline."

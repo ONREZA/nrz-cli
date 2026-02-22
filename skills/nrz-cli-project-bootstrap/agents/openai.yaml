@@ -1,0 +1,4 @@
+interface:
+  display_name: "NRZ Bootstrap"
+  short_description: "Initialize, link, and configure projects"
+  default_prompt: "Use $nrz-cli-project-bootstrap to onboard this project to ONREZA."
