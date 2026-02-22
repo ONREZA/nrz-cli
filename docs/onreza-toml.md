@@ -114,7 +114,15 @@ output_dirs = ["dist"]
 **Приоритет entry point для PROCESS:**
 `[deploy] entry` > авто-определение по фреймворку > `package.json "main"/"module"` > `scripts.start/serve/...` > `index.*` (Bun default) > heuristic scan по build output
 
-Если найдено несколько одинаково подходящих кандидатов, деплой завершится ошибкой и попросит явно задать `[deploy] entry`.
+Если entry не удалось определить однозначно:
+- для strict-фреймворков (`nextjs`, `nuxt`) деплой завершается ошибкой с actionable подсказкой
+- для остальных CLI отправляет `processEntry = null` и рантайм делает fallback на `bun <output_dir>` (best-effort), плюс выводится warning с рекомендацией явно задать `[deploy] entry`
+
+CLI не патчит `package.json` в build output для PROCESS. Резолвленный entry передаётся в deployment metadata (`processEntry`) как явная команда запуска. Если entry не найден для non-strict фреймворка, поле `processEntry` не отправляется и используется runtime fallback.
+
+Для `Next.js` в `compute = "process"` требуется runnable standalone output:
+- должен существовать `server.js` в корне выбранного output dir (обычно `.next/standalone/server.js`)
+- если standalone output невалиден/отсутствует, деплой завершается ошибкой (без fallback в `.next`)
 
 **Пример:**
 ```toml

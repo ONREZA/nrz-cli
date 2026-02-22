@@ -422,6 +422,99 @@ fn process_without_manifest_is_ok() {
     assert!(validate_compute_manifest_contract(ComputeType::Process, false, &detection).is_ok());
 }
 
+#[test]
+fn create_deployment_body_process_serializes_process_entry_without_manifest() {
+    let body = CreateDeploymentBody {
+        manifest: None,
+        files: vec![],
+        production: false,
+        branch: None,
+        commit_sha: None,
+        migrations: None,
+        bundle_sha256: None,
+        compute_type: "process".to_string(),
+        process_entry: Some("server.js".to_string()),
+    };
+
+    let value = serde_json::to_value(&body).unwrap();
+    assert!(value.get("manifest").is_none());
+    assert_eq!(
+        value.get("computeType").and_then(|v| v.as_str()),
+        Some("process")
+    );
+    assert_eq!(
+        value.get("processEntry").and_then(|v| v.as_str()),
+        Some("server.js")
+    );
+}
+
+#[test]
+fn create_deployment_body_isolate_serializes_manifest_without_process_entry() {
+    let body = CreateDeploymentBody {
+        manifest: Some(serde_json::json!({ "version": 1 })),
+        files: vec![],
+        production: false,
+        branch: None,
+        commit_sha: None,
+        migrations: None,
+        bundle_sha256: None,
+        compute_type: "isolate".to_string(),
+        process_entry: None,
+    };
+
+    let value = serde_json::to_value(&body).unwrap();
+    assert!(value.get("manifest").is_some());
+    assert_eq!(
+        value.get("computeType").and_then(|v| v.as_str()),
+        Some("isolate")
+    );
+    assert!(value.get("processEntry").is_none());
+}
+
+#[test]
+fn prepare_upload_body_process_serializes_process_entry() {
+    let body = PrepareUploadBody {
+        manifest: None,
+        files: vec![],
+        compute_type: "process".to_string(),
+        bundle_sha256: Some("abc123".to_string()),
+        process_entry: Some("server.js".to_string()),
+    };
+
+    let value = serde_json::to_value(&body).unwrap();
+    assert!(value.get("manifest").is_none());
+    assert_eq!(
+        value.get("computeType").and_then(|v| v.as_str()),
+        Some("process")
+    );
+    assert_eq!(
+        value.get("processEntry").and_then(|v| v.as_str()),
+        Some("server.js")
+    );
+}
+
+#[test]
+fn create_deployment_body_process_without_entry_skips_process_entry() {
+    let body = CreateDeploymentBody {
+        manifest: None,
+        files: vec![],
+        production: false,
+        branch: None,
+        commit_sha: None,
+        migrations: None,
+        bundle_sha256: None,
+        compute_type: "process".to_string(),
+        process_entry: None,
+    };
+
+    let value = serde_json::to_value(&body).unwrap();
+    assert_eq!(
+        value.get("computeType").and_then(|v| v.as_str()),
+        Some("process")
+    );
+    assert!(value.get("processEntry").is_none());
+}
+
 // ── validate_process_output tests ────────────────────────────
 
 fn make_detection(
@@ -468,7 +561,7 @@ fn validate_nextjs_dot_next_without_standalone_bails() {
 }
 
 #[test]
-fn validate_nextjs_dot_next_with_standalone_ok() {
+fn validate_nextjs_dot_next_with_standalone_but_missing_server_bails() {
     let dir = tempdir().unwrap();
     let output_dir = dir.path().join(".next");
     fs::create_dir(&output_dir).unwrap();
@@ -479,18 +572,40 @@ fn validate_nextjs_dot_next_with_standalone_ok() {
     };
     let detection = make_detection("nextjs", Some(ssr));
     let result = validate_process_output(&output_dir, dir.path(), &detection);
-    assert!(result.is_ok());
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("Missing file"),
+        "should mention missing file: {msg}"
+    );
 }
 
 #[test]
-fn validate_nextjs_standalone_dir_ok() {
+fn validate_nextjs_standalone_dir_without_server_bails() {
     let dir = tempdir().unwrap();
     let output_dir = dir.path().join(".next/standalone");
     fs::create_dir_all(&output_dir).unwrap();
 
     let detection = make_detection("nextjs", None);
     let result = validate_process_output(&output_dir, dir.path(), &detection);
-    assert!(result.is_ok()); // dir_name == "standalone", not ".next"
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("server.js is missing"),
+        "should mention missing server.js: {msg}"
+    );
+}
+
+#[test]
+fn validate_nextjs_standalone_dir_with_server_ok() {
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join(".next/standalone");
+    fs::create_dir_all(&output_dir).unwrap();
+    fs::write(output_dir.join("server.js"), "console.log('ok')").unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_ok());
 }
 
 #[test]
@@ -535,7 +650,7 @@ fn validate_unknown_framework_ok() {
 // ── ensure_process_entry tests ───────────────────────────────
 
 #[test]
-fn ensure_process_entry_uses_module_field_and_patches_main() {
+fn ensure_process_entry_resolves_module_field() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("package.json"),
@@ -545,25 +660,26 @@ fn ensure_process_entry_uses_module_field_and_patches_main() {
     fs::write(dir.path().join("server.mjs"), "export default {}").unwrap();
 
     let detection = make_detection("other", None);
-    ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
-
-    let pkg: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(dir.path().join("package.json")).unwrap())
-            .unwrap();
-    assert_eq!(pkg["main"].as_str(), Some("server.mjs"));
+    let (entry, warning) =
+        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
+    assert_eq!(entry, Some("server.mjs".to_string()));
+    assert!(warning.is_none());
 }
 
 #[test]
-fn ensure_process_entry_ambiguous_candidates_returns_error() {
+fn ensure_process_entry_ambiguous_candidates_falls_back_for_non_strict_framework() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("runtime")).unwrap();
     fs::write(dir.path().join("runtime/foo.mjs"), "console.log('foo')").unwrap();
     fs::write(dir.path().join("runtime/bar.mjs"), "console.log('bar')").unwrap();
 
     let detection = make_detection("other", None);
-    let err = ensure_process_entry(dir.path(), dir.path(), None, &detection, true)
-        .expect_err("expected ambiguity error");
-    assert!(err.to_string().contains("multiple candidates"));
+    let (entry, warning) =
+        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
+    assert!(entry.is_none());
+    let warning = warning.expect("expected fallback warning");
+    assert!(warning.contains("ambiguous"));
+    assert!(warning.contains("Falling back to runtime default"));
 }
 
 #[test]
@@ -573,12 +689,10 @@ fn ensure_process_entry_root_prefers_server_over_main() {
     fs::write(dir.path().join("main.js"), "console.log('main')").unwrap();
 
     let detection = make_detection("other", None);
-    ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
-
-    let pkg: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(dir.path().join("package.json")).unwrap())
-            .unwrap();
-    assert_eq!(pkg["main"].as_str(), Some("server.js"));
+    let (entry, warning) =
+        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
+    assert_eq!(entry, Some("server.js".to_string()));
+    assert!(warning.is_none());
 }
 
 #[test]
@@ -587,12 +701,11 @@ fn ensure_process_entry_config_entry_allows_double_dot_in_filename() {
     fs::write(dir.path().join("foo..js"), "console.log('ok')").unwrap();
 
     let detection = make_detection("other", None);
-    ensure_process_entry(dir.path(), dir.path(), Some("foo..js"), &detection, true).unwrap();
-
-    let pkg: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(dir.path().join("package.json")).unwrap())
-            .unwrap();
-    assert_eq!(pkg["main"].as_str(), Some("foo..js"));
+    let (entry, warning) =
+        ensure_process_entry(dir.path(), dir.path(), Some("foo..js"), &detection, true).unwrap();
+    assert_eq!(entry, Some("foo..js".to_string()));
+    assert!(warning.is_none());
+    assert!(!dir.path().join("package.json").exists());
 }
 
 #[test]
@@ -612,6 +725,33 @@ fn ensure_process_entry_config_entry_rejects_parent_traversal() {
     assert!(
         err.to_string()
             .contains("relative path within the output directory")
+    );
+}
+
+#[test]
+fn ensure_process_entry_not_found_falls_back_for_non_strict_framework() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("assets")).unwrap();
+    fs::write(dir.path().join("assets/app.css"), "body{}").unwrap();
+
+    let detection = make_detection("other", None);
+    let (entry, warning) =
+        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
+    assert!(entry.is_none());
+    let warning = warning.expect("expected fallback warning");
+    assert!(warning.contains("did not find a runnable file"));
+    assert!(warning.contains("bun"));
+}
+
+#[test]
+fn ensure_process_entry_not_found_is_error_for_strict_framework() {
+    let dir = tempdir().unwrap();
+    let detection = make_detection("nuxt", None);
+    let err =
+        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).expect_err("error");
+    assert!(
+        err.to_string().contains("Nuxt PROCESS deployment expects"),
+        "unexpected error: {err:#}"
     );
 }
 

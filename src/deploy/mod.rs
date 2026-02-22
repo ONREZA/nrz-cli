@@ -73,7 +73,8 @@ struct FileEntry {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateDeploymentBody {
-    manifest: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    manifest: Option<serde_json::Value>,
     files: Vec<FileEntry>,
     production: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -84,8 +85,9 @@ struct CreateDeploymentBody {
     migrations: Option<Vec<migrations::Migration>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bundle_sha256: Option<String>,
+    compute_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    compute_type: Option<String>,
+    process_entry: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -196,18 +198,6 @@ pub async fn run(
     let output_dir = build_result.output_dir;
     let has_manifest = build_result.has_manifest;
 
-    // Read manifest: real if adapter present, minimal otherwise
-    let manifest_raw: serde_json::Value = if has_manifest {
-        let manifest_path = output_dir.join(".onreza/manifest.json");
-        serde_json::from_str(
-            &std::fs::read_to_string(&manifest_path)
-                .with_context(|| format!("failed to read {}", manifest_path.display()))?,
-        )
-        .with_context(|| format!("failed to parse {} as JSON", manifest_path.display()))?
-    } else {
-        generate_minimal_manifest()
-    };
-
     // Scan output directory for flat file list
     output::status(json, "~", "Scanning output directory...");
     let files = scan_files(&output_dir)?;
@@ -221,6 +211,20 @@ pub async fn run(
     let mut warnings: Vec<String> = Vec::new();
 
     validate_compute_manifest_contract(compute, has_manifest, &detection)?;
+
+    // Read adapter manifest only for ISOLATE deployments.
+    let manifest_raw: Option<serde_json::Value> = if has_manifest {
+        let manifest_path = output_dir.join(".onreza/manifest.json");
+        Some(
+            serde_json::from_str(
+                &std::fs::read_to_string(&manifest_path)
+                    .with_context(|| format!("failed to read {}", manifest_path.display()))?,
+            )
+            .with_context(|| format!("failed to parse {} as JSON", manifest_path.display()))?,
+        )
+    } else {
+        None
+    };
 
     // Inform about SSR framework compute mode when auto-detected
     if !has_manifest
@@ -250,6 +254,26 @@ pub async fn run(
         warnings.push(msg);
     }
 
+    let is_process = compute == ComputeType::Process;
+    let process_entry = if is_process {
+        // Pre-flight validation and entry resolution for PROCESS deployments.
+        validate_process_output(&output_dir, &project_dir, &detection)?;
+        let (entry, warning) = ensure_process_entry(
+            &output_dir,
+            &project_dir,
+            config.deploy_entry(),
+            &detection,
+            json,
+        )?;
+        if let Some(warning) = warning {
+            output::warn(json, &warning);
+            warnings.push(warning);
+        }
+        entry
+    } else {
+        None
+    };
+
     // ── Resume mode: builder calls us with an existing deployment ID ──
     if let Some(deployment_id) = &args.resume_deployment {
         let deployment_id = deployment_id.trim();
@@ -264,6 +288,7 @@ pub async fn run(
             &output_dir,
             json,
             compute,
+            process_entry,
             warnings,
         )
         .await;
@@ -345,24 +370,6 @@ pub async fn run(
             .await?;
     }
 
-    let is_process = compute == ComputeType::Process;
-
-    // Pre-flight validation for PROCESS deployments
-    if is_process {
-        validate_process_output(&output_dir, &project_dir, &detection)?;
-    }
-
-    // Ensure entry point for PROCESS deployments (before bundle creation)
-    if is_process {
-        ensure_process_entry(
-            &output_dir,
-            &project_dir,
-            config.deploy_entry(),
-            &detection,
-            json,
-        )?;
-    }
-
     // Sync detection results to API (best-effort, non-blocking)
     let sync_client = client.clone();
     let sync_project_id = project_id.clone();
@@ -388,7 +395,8 @@ pub async fn run(
         commit_sha,
         migrations: mig_entries,
         bundle_sha256: bundle_data.as_ref().map(|(_, sha)| sha.clone()),
-        compute_type: Some(compute.to_string()),
+        compute_type: compute.to_string(),
+        process_entry: process_entry.clone(),
     };
     let file_count = body.files.len();
 
@@ -609,11 +617,14 @@ async fn upload_and_activate(
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PrepareUploadBody {
-    manifest: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    manifest: Option<serde_json::Value>,
     files: Vec<FileEntry>,
     compute_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     bundle_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    process_entry: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -639,11 +650,12 @@ struct ResumeDeployOutput {
 async fn resume_deploy(
     client: &ApiClient,
     deployment_id: &str,
-    manifest: serde_json::Value,
+    manifest: Option<serde_json::Value>,
     files: Vec<FileEntry>,
     output_dir: &Path,
     json: bool,
     compute: ComputeType,
+    process_entry: Option<String>,
     warnings: Vec<String>,
 ) -> anyhow::Result<()> {
     let compute_type = compute.to_string();
@@ -667,6 +679,7 @@ async fn resume_deploy(
         files,
         compute_type,
         bundle_sha256: bundle_data.as_ref().map(|(_, sha)| sha.clone()),
+        process_entry,
     };
 
     let prepared: PrepareUploadResponse = client
@@ -778,23 +791,43 @@ fn validate_process_output(
                 .ssr_analysis
                 .as_ref()
                 .is_some_and(|ssr| ssr.has_standalone_output());
+            let standalone_server = output_dir.join("server.js");
 
-            let dir_name = output_dir
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            if !standalone_server.is_file() {
+                if has_standalone {
+                    bail!(
+                        "Next.js `output: 'standalone'` is configured, but PROCESS output is invalid.\n\n\
+                         Missing file: {}/server.js\n\n\
+                         Make sure build output points to `.next/standalone` and `next build` completed successfully.",
+                        output_dir.display()
+                    );
+                }
 
-            // .next/ without standalone → can't run as standalone server
-            if dir_name == ".next" && !has_standalone {
+                let dir_name = output_dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+
+                if dir_name == "standalone" {
+                    bail!(
+                        "Next.js standalone output directory found, but server.js is missing.\n\n\
+                         Expected: {}/server.js\n\n\
+                         Make sure `next build` completed successfully and the standalone \
+                         output contains server.js.",
+                        output_dir.display()
+                    );
+                }
+
                 bail!(
                     "Next.js PROCESS deployment requires `output: 'standalone'` \
                      in next.config.\n\n\
-                     Without standalone mode, .next/ needs `next start` to run and \
-                     cannot be launched as a standalone server.\n\n\
+                     Current output is not a runnable standalone server directory \
+                     (missing `{}/server.js`).\n\n\
                      Add to your next.config.{{js,mjs,ts}}:\n\
                      \x20 module.exports = {{ output: 'standalone' }}\n\n\
-                     Then rebuild and redeploy. For a static site, use --compute static \
-                     with `output: 'export'`."
+                     Then rebuild and redeploy. For static export, use --compute static \
+                     with `output: 'export'`.",
+                    output_dir.display()
                 );
             }
         }
@@ -868,6 +901,11 @@ fn framework_process_diagnostic(
     }
 }
 
+/// Frameworks where PROCESS output must be explicit and validated.
+fn is_strict_process_framework(framework: &str) -> bool {
+    matches!(framework, "nextjs" | "nuxt")
+}
+
 // ── PROCESS entry point ──────────────────────────────────────
 
 fn is_windows_drive_absolute(path: &str) -> bool {
@@ -916,19 +954,19 @@ fn sanitize_config_entry(entry: &str) -> anyhow::Result<String> {
 
 /// Resolve and ensure entry point for PROCESS deployments.
 ///
-/// 1. Resolve entry: config `[deploy] entry` > framework auto-detect > error
-/// 2. Validate the file exists in output_dir
-/// 3. Ensure `package.json` in output_dir has `"main"` pointing to entry
+/// 1. Resolve entry: config `[deploy] entry` > framework auto-detect
+/// 2. Validate file existence when entry is resolved
+/// 3. If unresolved for non-strict frameworks, fallback to runtime default (`bun <output_dir>`)
 fn ensure_process_entry(
     output_dir: &Path,
     project_dir: &Path,
     config_entry: Option<&str>,
     detection: &crate::detect::types::DetectionResult,
     json: bool,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<(Option<String>, Option<String>)> {
     // 1. Resolve entry point
     let entry = if let Some(e) = config_entry {
-        sanitize_config_entry(e)?
+        Some(sanitize_config_entry(e)?)
     } else {
         match crate::detect::resolve_entry_point_detailed(
             &detection.framework,
@@ -944,23 +982,44 @@ fn ensure_process_entry(
                         resolved.source, resolved.path
                     ),
                 );
-                resolved.path
+                Some(resolved.path)
             }
             crate::detect::EntryPointResolution::Ambiguous(candidates) => {
-                bail!(
-                    "Cannot determine entry point for PROCESS deployment: multiple candidates found.\n\n\
-                     Candidates in {}:\n\
-                     {}\n\n\
-                     Set [deploy] entry in onreza.toml to pick one explicitly.",
-                    output_dir.display(),
-                    candidates
-                        .iter()
-                        .map(|c| format!("  - {c}"))
-                        .collect::<Vec<_>>()
-                        .join("\n")
+                if is_strict_process_framework(&detection.framework) {
+                    bail!(
+                        "Cannot determine entry point for PROCESS deployment: multiple candidates found.\n\n\
+                         Candidates in {}:\n\
+                         {}\n\n\
+                         Set [deploy] entry in onreza.toml to pick one explicitly.",
+                        output_dir.display(),
+                        candidates
+                            .iter()
+                            .map(|c| format!("  - {c}"))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    );
+                }
+
+                let warning = format!(
+                    "Entry point auto-detection is ambiguous for PROCESS deployment ({} candidates in {}).\n\
+                     Falling back to runtime default (`bun` in output directory).\n\
+                     Set [deploy] entry in onreza.toml to make startup explicit.",
+                    candidates.len(),
+                    output_dir.display()
                 );
+                return Ok((None, Some(warning)));
             }
             crate::detect::EntryPointResolution::NotFound => {
+                if !is_strict_process_framework(&detection.framework) {
+                    let warning = format!(
+                        "Entry point auto-detection did not find a runnable file in {}.\n\
+                         Falling back to runtime default (`bun` in output directory).\n\
+                         Set [deploy] entry in onreza.toml to avoid runtime guesswork.",
+                        output_dir.display()
+                    );
+                    return Ok((None, Some(warning)));
+                }
+
                 if let Some(diagnostic) =
                     framework_process_diagnostic(&detection.framework, detection, output_dir)
                 {
@@ -987,71 +1046,38 @@ fn ensure_process_entry(
     };
 
     // 2. Validate file exists and is within output_dir
-    let entry_path = output_dir.join(&entry);
-    if !entry_path.is_file() {
-        bail!(
-            "Entry point \"{entry}\" not found in output directory: {}\n\n\
-             Make sure the file exists after running your build command.",
-            output_dir.display()
-        );
-    }
-    let canonical_entry = entry_path
-        .canonicalize()
-        .with_context(|| format!("failed to resolve entry point path: {entry}"))?;
-    let canonical_output = output_dir
-        .canonicalize()
-        .context("failed to resolve output directory path")?;
-    if !canonical_entry.starts_with(&canonical_output) {
-        bail!("entry point must be inside the output directory, got: \"{entry}\"");
-    }
-
-    output::status(json, "~", format!("Entry point: {entry}"));
-
-    // 3. Ensure package.json has "main" pointing to entry
-    let pkg_path = output_dir.join("package.json");
-    if pkg_path.is_file() {
-        let content = std::fs::read_to_string(&pkg_path)
-            .with_context(|| format!("failed to read {}", pkg_path.display()))?;
-        let mut pkg: serde_json::Value = serde_json::from_str(&content)
-            .with_context(|| format!("failed to parse {}", pkg_path.display()))?;
-
-        let obj = pkg.as_object_mut().with_context(|| {
-            format!(
-                "{} has invalid structure (expected JSON object)",
-                pkg_path.display()
-            )
-        })?;
-
-        let current_main = obj.get("main").and_then(|v| v.as_str()).map(String::from);
-        if current_main.as_deref() != Some(&entry) {
-            obj.insert("main".to_string(), serde_json::Value::String(entry.clone()));
-            let updated =
-                serde_json::to_string_pretty(&pkg).context("failed to serialize package.json")?;
-            std::fs::write(&pkg_path, format!("{updated}\n"))
-                .with_context(|| format!("failed to write {}", pkg_path.display()))?;
-            output::status(
-                json,
-                "~",
-                format!("Patched package.json: main = \"{entry}\""),
+    if let Some(ref entry) = entry {
+        let entry_path = output_dir.join(entry);
+        if !entry_path.is_file() {
+            bail!(
+                "Entry point \"{entry}\" not found in output directory: {}\n\n\
+                 Make sure the file exists after running your build command.",
+                output_dir.display()
             );
         }
+        let canonical_entry = entry_path
+            .canonicalize()
+            .with_context(|| format!("failed to resolve entry point path: {entry}"))?;
+        let canonical_output = output_dir
+            .canonicalize()
+            .context("failed to resolve output directory path")?;
+        if !canonical_entry.starts_with(&canonical_output) {
+            bail!("entry point must be inside the output directory, got: \"{entry}\"");
+        }
+
+        output::status(json, "~", format!("Entry point: {entry}"));
     } else {
-        let pkg = serde_json::json!({
-            "name": "app",
-            "main": entry,
-        });
-        let content =
-            serde_json::to_string_pretty(&pkg).context("failed to serialize package.json")?;
-        std::fs::write(&pkg_path, format!("{content}\n"))
-            .with_context(|| format!("failed to write {}", pkg_path.display()))?;
         output::status(
             json,
             "~",
-            format!("Created package.json with main = \"{entry}\""),
+            format!(
+                "Entry point: <runtime default bun {}>",
+                output_dir.display()
+            ),
         );
     }
 
-    Ok(())
+    Ok((entry, None))
 }
 
 // ── Bundle helpers ───────────────────────────────────────────
@@ -1326,10 +1352,6 @@ fn parse_compute_type(s: &str) -> anyhow::Result<ComputeType> {
         "process" => Ok(ComputeType::Process),
         _ => bail!("invalid compute type: \"{s}\". Must be one of: static, isolate, process"),
     }
-}
-
-fn generate_minimal_manifest() -> serde_json::Value {
-    serde_json::json!({"version": 1})
 }
 
 fn git_cmd(args: &[&str]) -> Option<String> {

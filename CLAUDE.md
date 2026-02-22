@@ -103,6 +103,9 @@ CLI не зависит от адаптеров. Связь — через BUILD
 - `.onreza/manifest.json` используется только для `ISOLATE` деплоев
 - `PROCESS` и `STATIC` деплой не используют manifest
 - Если в output есть manifest, compute должен быть `isolate`
+- Для `PROCESS` CLI пытается резолвить entrypoint и передаёт его в deployment metadata (`processEntry`)
+- Для non-strict фреймворков `processEntry` может отсутствовать: рантайм выполняет fallback `bun <output_dir>` (best-effort)
+- Для strict фреймворков (`nextjs`, `nuxt`) отсутствие валидного entry — ошибка деплоя
 
 Спецификация: `../deployment/docs/architecture/BUILD_OUTPUT_SPEC.md`
 

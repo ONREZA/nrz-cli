@@ -273,6 +273,50 @@ fn detect_unknown_is_static() {
 }
 
 #[test]
+fn detect_unknown_with_runtime_start_script_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"start":"bun run src/server.ts"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "other");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_unknown_with_main_field_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"main":"dist/server.js"}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("dist/server.js"), "console.log('ok')").unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "other");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_unknown_with_only_test_script_stays_static() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"test":"vitest run"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "other");
+    assert_eq!(result.suggested_compute, ComputeType::Static);
+}
+
+#[test]
 fn detect_nuxt_with_server_api_is_process() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(

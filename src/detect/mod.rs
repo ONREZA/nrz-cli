@@ -83,11 +83,19 @@ pub fn detect(project_dir: &Path) -> DetectionResult {
 
     // 4. Unknown project
     let preset = presets::get_default_preset();
+    let suggested_compute = infer_unknown_compute_type(project_dir, pkg.as_ref());
+    let reason = if suggested_compute == ComputeType::Process {
+        "No known framework detected, but runtime entry signals found (scripts/main/module)"
+            .to_string()
+    } else {
+        "No known framework detected".to_string()
+    };
+
     DetectionResult {
         framework: preset.slug.to_string(),
         name: preset.name.to_string(),
         version: None,
-        suggested_compute: ComputeType::Static,
+        suggested_compute,
         metadata: DetectionMetadata {
             uses_typescript: detect_typescript(project_dir),
             config_files: Vec::new(),
@@ -102,7 +110,7 @@ pub fn detect(project_dir: &Path) -> DetectionResult {
             ssr_adapter: None,
             structure: detect_structure(project_dir),
         },
-        reason: "No known framework detected".into(),
+        reason,
     }
 }
 
@@ -360,6 +368,45 @@ fn infer_compute_type(
         Some(analysis) if analysis.is_static_compatible => ComputeType::Static,
         _ => ComputeType::Process,
     }
+}
+
+/// Infer compute type for unknown (`other`) frameworks.
+///
+/// We avoid framework hardcoding and use generic runtime signals:
+/// - runtime-like scripts (`start`, `serve`, `prod`, ...)
+/// - resolvable `main`/`module` path in package.json
+fn infer_unknown_compute_type(project_dir: &Path, pkg: Option<&PackageJson>) -> ComputeType {
+    let Some(pkg) = pkg else {
+        return ComputeType::Static;
+    };
+
+    let has_runtime_script = pkg
+        .scripts
+        .iter()
+        .any(|(name, _)| is_runtime_script_name(name));
+    if has_runtime_script {
+        return ComputeType::Process;
+    }
+
+    let has_main_entry = pkg
+        .main
+        .as_deref()
+        .and_then(|raw| resolve_candidate_path(raw, project_dir, project_dir))
+        .is_some();
+    if has_main_entry {
+        return ComputeType::Process;
+    }
+
+    let has_module_entry = pkg
+        .module
+        .as_deref()
+        .and_then(|raw| resolve_candidate_path(raw, project_dir, project_dir))
+        .is_some();
+    if has_module_entry {
+        return ComputeType::Process;
+    }
+
+    ComputeType::Static
 }
 
 // ── Public convenience wrappers (for init/deploy) ────────────
