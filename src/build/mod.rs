@@ -129,7 +129,9 @@ fn compute_aware_output_dirs(
                     return vec![".next/standalone", ".next"];
                 }
             }
-            vec![".next"]
+            // Be optimistic and try standalone first even when SSR analysis
+            // misses `output: 'standalone'` in a complex config file.
+            vec![".next/standalone", ".next"]
         }
         slug => crate::detect::presets::framework_output_dirs(slug).to_vec(),
     }

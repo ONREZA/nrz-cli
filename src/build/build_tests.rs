@@ -96,10 +96,10 @@ fn make_detection(
 }
 
 #[test]
-fn nextjs_default_ssr_returns_dot_next() {
+fn nextjs_default_ssr_includes_standalone_probe() {
     let detection = make_detection("nextjs", None);
     let dirs = compute_aware_output_dirs(&detection);
-    assert_eq!(dirs, vec![".next"]);
+    assert_eq!(dirs, vec![".next/standalone", ".next"]);
 }
 
 #[test]

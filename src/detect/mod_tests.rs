@@ -498,13 +498,13 @@ fn resolve_entry_point_fallback_src_index() {
 
 #[test]
 fn resolve_entry_point_fallback_priority_order() {
-    // index.ts should win over server.js
+    // Root ranking should prefer server.js over index.ts
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("index.ts"), "").unwrap();
     std::fs::write(dir.path().join("server.js"), "").unwrap();
 
     let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("index.ts".into()));
+    assert_eq!(result, Some("server.js".into()));
 }
 
 #[test]
@@ -525,6 +525,242 @@ fn resolve_entry_point_framework_takes_priority_over_package_json() {
 
     let result = resolve_entry_point("nextjs", dir.path(), dir.path());
     assert_eq!(result, Some("server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_package_json_module() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"module": "./dist/server.mjs"}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
+    std::fs::write(dir.path().join("dist/server.mjs"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("dist/server.mjs".into()));
+}
+
+#[test]
+fn resolve_entry_point_package_json_main_without_extension() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("package.json"), r#"{"main":"server"}"#).unwrap();
+    std::fs::write(dir.path().join("server.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_from_start_script() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"start":"node ./server/app.mjs"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("server")).unwrap();
+    std::fs::write(dir.path().join("server/app.mjs"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("server/app.mjs".into()));
+}
+
+#[test]
+fn resolve_entry_point_from_project_start_script_when_output_differs() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"scripts":{"start":"node dist/server.js"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(output.path().join("dist")).unwrap();
+    std::fs::write(output.path().join("dist/server.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", output.path(), project.path());
+    assert_eq!(result, Some("dist/server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_from_project_start_script_when_output_is_nested() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"scripts":{"start":"node dist/server.js"}}"#,
+    )
+    .unwrap();
+
+    let output_dir = project.path().join("dist");
+    std::fs::create_dir_all(&output_dir).unwrap();
+    std::fs::write(output_dir.join("server.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", &output_dir, project.path());
+    assert_eq!(result, Some("server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_root_prefers_server_over_main() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("server.js"), "").unwrap();
+    std::fs::write(dir.path().join("main.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_detailed_reports_ambiguity() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("runtime")).unwrap();
+    std::fs::write(dir.path().join("runtime/foo.mjs"), "").unwrap();
+    std::fs::write(dir.path().join("runtime/bar.mjs"), "").unwrap();
+
+    let result = resolve_entry_point_detailed("other", dir.path(), dir.path());
+    assert!(matches!(result, EntryPointResolution::Ambiguous(_)));
+}
+
+#[test]
+fn resolve_entry_point_heuristic_ambiguity_returns_none() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("runtime")).unwrap();
+    std::fs::write(dir.path().join("runtime/foo.mjs"), "").unwrap();
+    std::fs::write(dir.path().join("runtime/bar.mjs"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, None);
+}
+
+#[test]
+fn resolve_entry_point_heuristic_finds_nested_server_file() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("runtime")).unwrap();
+    std::fs::write(dir.path().join("runtime/bootstrap.mjs"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("runtime/bootstrap.mjs".into()));
+}
+
+#[test]
+fn resolve_entry_point_from_cross_env_start_script() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"start":"cross-env NODE_ENV=production node ./server.js"}}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("server.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_from_chained_start_script_uses_first_file() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"start":"node ./server.js && node ./fallback.js"}}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("server.js"), "").unwrap();
+    std::fs::write(dir.path().join("fallback.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_from_windows_style_start_script_path() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"start":"node dist\\server.js"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
+    std::fs::write(dir.path().join("dist/server.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("dist/server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_from_start_script_path_with_env_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"start":"node env/server.js"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("env")).unwrap();
+    std::fs::write(dir.path().join("env/server.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("env/server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_from_start_script_with_dotenv_require() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"start":"node -r dotenv/config ./server.js"}}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("server.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("server.js".into()));
+}
+
+#[test]
+fn resolve_entry_point_ignores_non_runtime_scripts() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"test":"node ./src/test-runner.js"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/test-runner.js"), "").unwrap();
+    std::fs::write(dir.path().join("server.js"), "").unwrap();
+
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(result, Some("server.js".into()));
+}
+
+#[test]
+fn sanitize_relative_path_rejects_unsafe_paths() {
+    assert_eq!(sanitize_relative_path("../server.js"), None);
+    assert_eq!(sanitize_relative_path("/abs/server.js"), None);
+    assert_eq!(sanitize_relative_path("file:///tmp/server.js"), None);
+    assert_eq!(sanitize_relative_path("FILE:///tmp/server.js"), None);
+    assert_eq!(sanitize_relative_path("C:/srv/server.js"), None);
+    assert_eq!(sanitize_relative_path(r"C:\srv\server.js"), None);
+}
+
+#[test]
+fn sanitize_relative_path_normalizes_backslashes() {
+    assert_eq!(
+        sanitize_relative_path(r".\dist\server.js"),
+        Some(std::path::PathBuf::from("dist/server.js"))
+    );
+}
+
+#[test]
+fn score_candidate_prefers_server_over_index() {
+    let server = score_candidate(std::path::Path::new("server.js"));
+    let index = score_candidate(std::path::Path::new("index.js"));
+    assert!(server > index);
+}
+
+#[test]
+fn score_candidate_penalizes_chunks_paths() {
+    let dist_server = score_candidate(std::path::Path::new("dist/server.js"));
+    let chunk_server = score_candidate(std::path::Path::new("dist/chunks/server.js"));
+    assert!(dist_server > chunk_server);
 }
 
 // ── Dynamic output_dir (resolve_framework_output_dir) ────────

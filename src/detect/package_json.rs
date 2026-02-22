@@ -12,6 +12,7 @@ use serde::Deserialize;
 pub struct PackageJson {
     pub name: Option<String>,
     pub main: Option<String>,
+    pub module: Option<String>,
 
     #[serde(default)]
     pub dependencies: HashMap<String, String>,

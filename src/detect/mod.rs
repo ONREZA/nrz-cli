@@ -27,8 +27,10 @@ mod static_html_tests;
 #[cfg(test)]
 mod vite_config_tests;
 
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Component, Path, PathBuf};
 
+use anyhow::Context;
 use package_json::PackageJson;
 use types::*;
 
@@ -383,77 +385,683 @@ fn framework_entry_point(slug: &str) -> Option<String> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryPointSource {
+    FrameworkHint,
+    PackageMainOutput,
+    PackageModuleOutput,
+    PackageMainProject,
+    PackageModuleProject,
+    ScriptHintOutput,
+    ScriptHintProject,
+    BunIndexDefault,
+    RootPattern,
+    HeuristicScan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedEntryPoint {
+    pub path: String,
+    pub source: EntryPointSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntryPointResolution {
+    Found(ResolvedEntryPoint),
+    Ambiguous(Vec<String>),
+    NotFound,
+    Error(String),
+}
+
+const RUNNABLE_EXTENSIONS: &[&str] = &["js", "mjs", "cjs", "ts", "mts", "cts", "jsx", "tsx"];
+const ROOT_ENTRY_BASENAMES: &[&str] = &["server", "main", "app", "start", "entry", "index"];
+const SCRIPT_HINT_PRIORITY: &[&str] = &["start", "serve", "preview", "prod", "production"];
+const SCRIPT_RUNTIME_NAME_HINTS: &[&str] = &[
+    "start",
+    "serve",
+    "preview",
+    "prod",
+    "production",
+    "runtime",
+    "server",
+    "launch",
+];
+const SCRIPT_NON_RUNTIME_NAME_HINTS: &[&str] = &[
+    "test",
+    "lint",
+    "format",
+    "fmt",
+    "build",
+    "typecheck",
+    "check",
+    "verify",
+    "ci",
+    "prepare",
+    "prepublish",
+    "postinstall",
+    "install",
+    "coverage",
+    "bench",
+    "docs",
+    "storybook",
+    "e2e",
+    "unit",
+    "integration",
+];
+const SCRIPT_EXECUTORS: &[&str] = &[
+    "node",
+    "bun",
+    "tsx",
+    "ts-node",
+    "deno",
+    "npx",
+    "npm",
+    "pnpm",
+    "yarn",
+    "cross-env",
+    "env",
+    "dotenv",
+    "dotenvx",
+    "concurrently",
+    "nodemon",
+    "pm2",
+    "forever",
+];
+const SCRIPT_EXECUTOR_MODULE_TOKENS: &[&str] = &[
+    "dotenv/config",
+    "dotenvx/config",
+    "ts-node/register",
+    "tsx/register",
+];
+const ENTRY_SCAN_SKIP_DIRS: &[&str] = &["node_modules", ".git", ".onreza"];
+const ENTRY_SCAN_LIMIT: usize = 4096;
+
+fn stringify_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn is_windows_drive_absolute(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\')
+}
+
+fn sanitize_relative_path(raw: &str) -> Option<PathBuf> {
+    let trimmed = raw.trim().trim_matches('"').trim_matches('\'').trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let normalized = trimmed.replace('\\', "/");
+    let lowered = normalized.to_ascii_lowercase();
+    let path = Path::new(&normalized);
+    if path.is_absolute() || lowered.starts_with("file:") || is_windows_drive_absolute(&normalized)
+    {
+        return None;
+    }
+
+    let mut out = PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::Normal(seg) => out.push(seg),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+
+    if out.as_os_str().is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn dedup_push(vec: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, path: PathBuf) {
+    if seen.insert(path.clone()) {
+        vec.push(path);
+    }
+}
+
+fn map_candidate_to_output(
+    candidate: &Path,
+    output_dir: &Path,
+    package_dir: &Path,
+) -> Option<PathBuf> {
+    if output_dir.join(candidate).is_file() {
+        return Some(candidate.to_path_buf());
+    }
+
+    if package_dir != output_dir {
+        if let Ok(output_rel_to_package) = output_dir.strip_prefix(package_dir)
+            && !output_rel_to_package.as_os_str().is_empty()
+            && candidate.starts_with(output_rel_to_package)
+            && let Ok(stripped) = candidate.strip_prefix(output_rel_to_package)
+            && !stripped.as_os_str().is_empty()
+            && output_dir.join(stripped).is_file()
+        {
+            return Some(stripped.to_path_buf());
+        }
+
+        let package_candidate = package_dir.join(candidate);
+        if package_candidate.is_file()
+            && let Ok(stripped) = package_candidate.strip_prefix(output_dir)
+            && !stripped.as_os_str().is_empty()
+        {
+            return Some(stripped.to_path_buf());
+        }
+    }
+
+    None
+}
+
+fn resolve_candidate_path(raw: &str, output_dir: &Path, package_dir: &Path) -> Option<String> {
+    let rel = sanitize_relative_path(raw)?;
+
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+
+    dedup_push(&mut candidates, &mut seen, rel.clone());
+
+    if rel.extension().is_none() {
+        for ext in RUNNABLE_EXTENSIONS {
+            dedup_push(
+                &mut candidates,
+                &mut seen,
+                rel.with_extension(ext.trim_start_matches('.')),
+            );
+        }
+    } else if let Some(stem) = rel.file_stem().and_then(|s| s.to_str()) {
+        let parent = rel.parent().unwrap_or_else(|| Path::new(""));
+        for ext in RUNNABLE_EXTENSIONS {
+            let mut p = parent.to_path_buf();
+            p.push(format!("{stem}.{ext}"));
+            dedup_push(&mut candidates, &mut seen, p);
+        }
+    }
+
+    for ext in RUNNABLE_EXTENSIONS {
+        let mut p = rel.clone();
+        p.push(format!("index.{ext}"));
+        dedup_push(&mut candidates, &mut seen, p);
+    }
+
+    candidates
+        .into_iter()
+        .find_map(|candidate| map_candidate_to_output(&candidate, output_dir, package_dir))
+        .map(|p| stringify_path(&p))
+}
+
+fn resolve_package_field(
+    package_dir: &Path,
+    output_dir: &Path,
+    source_main: EntryPointSource,
+    source_module: EntryPointSource,
+) -> Option<ResolvedEntryPoint> {
+    let pkg = package_json::PackageJson::load(package_dir)?;
+
+    if let Some(ref main) = pkg.main
+        && let Some(path) = resolve_candidate_path(main, output_dir, package_dir)
+    {
+        return Some(ResolvedEntryPoint {
+            path,
+            source: source_main,
+        });
+    }
+    if let Some(ref module) = pkg.module
+        && let Some(path) = resolve_candidate_path(module, output_dir, package_dir)
+    {
+        return Some(ResolvedEntryPoint {
+            path,
+            source: source_module,
+        });
+    }
+    None
+}
+
+fn looks_like_script_path_token(token: &str) -> bool {
+    if token.contains('/') || token.contains('\\') {
+        return true;
+    }
+    if let Some(ext) = Path::new(token).extension().and_then(|e| e.to_str()) {
+        return RUNNABLE_EXTENSIONS.contains(&ext);
+    }
+    ROOT_ENTRY_BASENAMES.contains(&token)
+}
+
+fn script_name_has_token(name: &str, wanted: &str) -> bool {
+    name.split([':', '-', '_', '.'])
+        .any(|part| part.eq_ignore_ascii_case(wanted))
+}
+
+fn is_runtime_script_name(name: &str) -> bool {
+    if SCRIPT_HINT_PRIORITY.contains(&name) {
+        return true;
+    }
+
+    if SCRIPT_NON_RUNTIME_NAME_HINTS
+        .iter()
+        .any(|token| script_name_has_token(name, token))
+    {
+        return false;
+    }
+
+    SCRIPT_RUNTIME_NAME_HINTS
+        .iter()
+        .any(|token| script_name_has_token(name, token))
+}
+
+fn is_known_executor_token(part: &str) -> bool {
+    let lower = part.to_ascii_lowercase();
+    if SCRIPT_EXECUTORS.contains(&lower.as_str()) {
+        return true;
+    }
+    SCRIPT_EXECUTOR_MODULE_TOKENS.contains(&lower.as_str())
+}
+
+fn extract_script_path_tokens(script: &str) -> Vec<String> {
+    script
+        .split(|c: char| c.is_whitespace() || matches!(c, '|' | '&' | ';' | '(' | ')'))
+        .map(|part| part.trim_matches('"').trim_matches('\'').trim_matches('`'))
+        .filter(|part| !part.is_empty())
+        .filter(|part| !part.starts_with('-'))
+        .filter(|part| !part.starts_with('$'))
+        .filter(|part| !is_known_executor_token(part))
+        .filter(|part| {
+            if !part.contains('=') {
+                return true;
+            }
+            looks_like_script_path_token(part)
+        })
+        .filter(|part| looks_like_script_path_token(part))
+        .map(String::from)
+        .collect()
+}
+
+fn resolve_from_scripts(
+    package_dir: &Path,
+    output_dir: &Path,
+    source: EntryPointSource,
+) -> Option<ResolvedEntryPoint> {
+    let pkg = package_json::PackageJson::load(package_dir)?;
+
+    for name in SCRIPT_HINT_PRIORITY {
+        if let Some(script) = pkg.scripts.get(*name) {
+            for token in extract_script_path_tokens(script) {
+                if let Some(path) = resolve_candidate_path(&token, output_dir, package_dir) {
+                    return Some(ResolvedEntryPoint { path, source });
+                }
+            }
+        }
+    }
+
+    let mut rest: Vec<_> = pkg
+        .scripts
+        .iter()
+        .filter(|(name, _)| !SCRIPT_HINT_PRIORITY.contains(&name.as_str()))
+        .filter(|(name, _)| is_runtime_script_name(name))
+        .collect();
+    rest.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+    for (_, script) in rest {
+        for token in extract_script_path_tokens(script) {
+            if let Some(path) = resolve_candidate_path(&token, output_dir, package_dir) {
+                return Some(ResolvedEntryPoint { path, source });
+            }
+        }
+    }
+
+    None
+}
+
+fn resolve_bun_default_index(output_dir: &Path) -> Option<ResolvedEntryPoint> {
+    for ext in RUNNABLE_EXTENSIONS {
+        let candidate = format!("index.{ext}");
+        if output_dir.join(&candidate).is_file() {
+            return Some(ResolvedEntryPoint {
+                path: candidate,
+                source: EntryPointSource::BunIndexDefault,
+            });
+        }
+    }
+    None
+}
+
+fn resolve_root_patterns(output_dir: &Path) -> EntryPointResolution {
+    let mut candidates = Vec::new();
+    for base in ROOT_ENTRY_BASENAMES {
+        for ext in RUNNABLE_EXTENSIONS {
+            let candidate = format!("{base}.{ext}");
+            if output_dir.join(&candidate).is_file() {
+                candidates.push(candidate);
+            }
+        }
+    }
+
+    match candidates.len() {
+        0 => EntryPointResolution::NotFound,
+        1 => EntryPointResolution::Found(ResolvedEntryPoint {
+            path: candidates[0].clone(),
+            source: EntryPointSource::RootPattern,
+        }),
+        _ => {
+            let mut ranked: Vec<((i32, i32), String)> = candidates
+                .iter()
+                .map(|path| (root_candidate_rank(path), path.clone()))
+                .collect();
+            ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+
+            if ranked.len() == 1 || ranked[0].0 > ranked[1].0 {
+                return EntryPointResolution::Found(ResolvedEntryPoint {
+                    path: ranked[0].1.clone(),
+                    source: EntryPointSource::RootPattern,
+                });
+            }
+
+            let top_rank = ranked[0].0;
+            let tied: Vec<String> = ranked
+                .into_iter()
+                .take_while(|(rank, _)| *rank == top_rank)
+                .map(|(_, path)| path)
+                .collect();
+            EntryPointResolution::Ambiguous(tied)
+        }
+    }
+}
+
+fn should_skip_scan_dir(name: &str) -> bool {
+    ENTRY_SCAN_SKIP_DIRS.contains(&name)
+}
+
+fn root_base_rank(stem: &str) -> i32 {
+    match stem {
+        "server" => 6,
+        "main" => 5,
+        "app" => 4,
+        "start" => 3,
+        "entry" => 2,
+        "index" => 1,
+        _ => 0,
+    }
+}
+
+fn root_ext_rank(ext: &str) -> i32 {
+    match ext {
+        "js" => 8,
+        "mjs" => 7,
+        "cjs" => 6,
+        "ts" => 5,
+        "mts" => 4,
+        "cts" => 3,
+        "jsx" => 2,
+        "tsx" => 1,
+        _ => 0,
+    }
+}
+
+fn root_candidate_rank(path: &str) -> (i32, i32) {
+    let p = Path::new(path);
+    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or_default();
+    (root_base_rank(stem), root_ext_rank(ext))
+}
+
+fn is_runnable_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| RUNNABLE_EXTENSIONS.contains(&ext))
+}
+
+fn collect_runnable_files_recursive(
+    base: &Path,
+    current: &Path,
+    out: &mut Vec<PathBuf>,
+    limit: usize,
+) -> anyhow::Result<()> {
+    if out.len() >= limit {
+        return Ok(());
+    }
+
+    let entries = std::fs::read_dir(current)
+        .with_context(|| format!("failed to read directory {}", current.display()))?;
+    for entry in entries {
+        if out.len() >= limit {
+            return Ok(());
+        }
+
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to read directory entry while scanning {}",
+                current.display()
+            )
+        })?;
+
+        let ft = entry
+            .file_type()
+            .with_context(|| format!("failed to read file type: {}", entry.path().display()))?;
+
+        if ft.is_symlink() {
+            continue;
+        }
+
+        let path = entry.path();
+        if ft.is_file() {
+            if is_runnable_file(&path)
+                && let Ok(rel) = path.strip_prefix(base)
+            {
+                out.push(rel.to_path_buf());
+            }
+            continue;
+        }
+
+        if ft.is_dir()
+            && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && !should_skip_scan_dir(name)
+        {
+            collect_runnable_files_recursive(base, &path, out, limit)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn path_depth(path: &Path) -> i32 {
+    path.components().count().saturating_sub(1) as i32
+}
+
+fn looks_hashed_name(stem: &str) -> bool {
+    if stem.len() < 8 {
+        return false;
+    }
+    let has_digit = stem.chars().any(|c| c.is_ascii_digit());
+    let has_dash = stem.contains('-') || stem.contains('_') || stem.contains('.');
+    has_digit && has_dash
+}
+
+fn score_candidate(path: &Path) -> i32 {
+    let mut score = 0;
+    let rel = stringify_path(path);
+    let rel_l = rel.to_ascii_lowercase();
+
+    score += 120 - path_depth(path) * 12;
+
+    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+        match stem {
+            "server" => score += 240,
+            "main" => score += 210,
+            "app" => score += 200,
+            "start" => score += 190,
+            "entry" => score += 180,
+            "index" => score += 170,
+            _ => {}
+        }
+
+        if looks_hashed_name(stem) {
+            score -= 60;
+        }
+    }
+
+    if rel_l.contains("/server/") || rel_l.starts_with("server/") {
+        score += 60;
+    }
+    if rel_l.contains("standalone") {
+        score += 50;
+    }
+    if rel_l.contains("/.output/") || rel_l.starts_with(".output/") {
+        score += 40;
+    }
+    if rel_l.contains("/dist/") || rel_l.starts_with("dist/") {
+        score += 25;
+    }
+    if rel_l.contains("/build/") || rel_l.starts_with("build/") {
+        score += 20;
+    }
+    if rel_l.contains("/chunks/")
+        || rel_l.contains("/assets/")
+        || rel_l.contains("/static/")
+        || rel_l.contains("/client/")
+    {
+        score -= 80;
+    }
+    if rel_l.contains("/node_modules/") {
+        score -= 100;
+    }
+
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        score += match ext {
+            "js" => 25,
+            "mjs" | "cjs" => 24,
+            "ts" | "mts" | "cts" => 20,
+            "jsx" | "tsx" => 12,
+            _ => 0,
+        };
+    }
+
+    score
+}
+
+fn resolve_by_heuristic_scan(output_dir: &Path) -> EntryPointResolution {
+    let mut candidates = Vec::new();
+    if let Err(err) =
+        collect_runnable_files_recursive(output_dir, output_dir, &mut candidates, ENTRY_SCAN_LIMIT)
+    {
+        return EntryPointResolution::Error(format!(
+            "failed to scan output directory {}: {err:#}",
+            output_dir.display()
+        ));
+    }
+    if candidates.is_empty() {
+        return EntryPointResolution::NotFound;
+    }
+
+    let mut scored: Vec<(i32, String)> = candidates
+        .into_iter()
+        .map(|p| {
+            let score = score_candidate(&p);
+            (score, stringify_path(&p))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+
+    let best_score = scored[0].0;
+    let best: Vec<String> = scored
+        .iter()
+        .take_while(|(score, _)| *score == best_score)
+        .map(|(_, path)| path.clone())
+        .collect();
+
+    if best.len() > 1 {
+        return EntryPointResolution::Ambiguous(best);
+    }
+
+    EntryPointResolution::Found(ResolvedEntryPoint {
+        path: scored[0].1.clone(),
+        source: EntryPointSource::HeuristicScan,
+    })
+}
+
+/// Resolve entry point for a PROCESS deployment with diagnostics.
+pub fn resolve_entry_point_detailed(
+    framework: &str,
+    output_dir: &Path,
+    project_dir: &Path,
+) -> EntryPointResolution {
+    // 1. Framework-specific hint
+    if let Some(entry) = framework_entry_point(framework)
+        && output_dir.join(&entry).is_file()
+    {
+        return EntryPointResolution::Found(ResolvedEntryPoint {
+            path: entry,
+            source: EntryPointSource::FrameworkHint,
+        });
+    }
+
+    // 2. package.json fields in output_dir (main/module)
+    if let Some(resolved) = resolve_package_field(
+        output_dir,
+        output_dir,
+        EntryPointSource::PackageMainOutput,
+        EntryPointSource::PackageModuleOutput,
+    ) {
+        return EntryPointResolution::Found(resolved);
+    }
+
+    // 3. package.json fields in project_dir when output_dir != project_dir
+    if output_dir != project_dir
+        && let Some(resolved) = resolve_package_field(
+            project_dir,
+            output_dir,
+            EntryPointSource::PackageMainProject,
+            EntryPointSource::PackageModuleProject,
+        )
+    {
+        return EntryPointResolution::Found(resolved);
+    }
+
+    // 4. script hints (`start`, `serve`, ...)
+    if let Some(resolved) =
+        resolve_from_scripts(output_dir, output_dir, EntryPointSource::ScriptHintOutput)
+    {
+        return EntryPointResolution::Found(resolved);
+    }
+    if output_dir != project_dir
+        && let Some(resolved) =
+            resolve_from_scripts(project_dir, output_dir, EntryPointSource::ScriptHintProject)
+    {
+        return EntryPointResolution::Found(resolved);
+    }
+
+    // 5. Common root entry names (includes index.*; fail fast on ambiguity)
+    match resolve_root_patterns(output_dir) {
+        EntryPointResolution::NotFound => {}
+        other => return other,
+    }
+
+    // 6. Bun default index.* in output root (defensive fallback)
+    if let Some(resolved) = resolve_bun_default_index(output_dir) {
+        return EntryPointResolution::Found(resolved);
+    }
+
+    // 7. Heuristic recursive scan (last resort)
+    resolve_by_heuristic_scan(output_dir)
+}
+
 /// Resolve entry point for a PROCESS deployment.
 ///
-/// Priority:
-/// 1. Framework-known entry point (if file exists in output_dir)
-/// 2. `package.json "main"` field in output_dir
-/// 3. `package.json "main"` field in project_dir (when output_dir != project_dir)
-/// 4. Common fallback files: index.ts, index.js, index.mjs, server.ts, server.js, src/index.ts, src/index.js
+/// Returns `Some(path)` only when resolution is unambiguous.
+#[allow(dead_code)]
 pub fn resolve_entry_point(
     framework: &str,
     output_dir: &Path,
     project_dir: &Path,
 ) -> Option<String> {
-    // 1. Framework-specific entry
-    if let Some(entry) = framework_entry_point(framework)
-        && output_dir.join(&entry).is_file()
-    {
-        return Some(entry);
+    match resolve_entry_point_detailed(framework, output_dir, project_dir) {
+        EntryPointResolution::Found(resolved) => Some(resolved.path),
+        EntryPointResolution::Ambiguous(_)
+        | EntryPointResolution::NotFound
+        | EntryPointResolution::Error(_) => None,
     }
-
-    // 2. package.json "main" in output_dir
-    if let Some(pkg) = package_json::PackageJson::load(output_dir)
-        && let Some(ref main) = pkg.main
-    {
-        let main = main.trim_start_matches("./");
-        if !main.contains("..") && output_dir.join(main).is_file() {
-            return Some(main.to_string());
-        }
-    }
-
-    // 3. package.json "main" in project_dir (for projects where output_dir != project_dir)
-    if output_dir != project_dir
-        && let Some(pkg) = package_json::PackageJson::load(project_dir)
-        && let Some(ref main) = pkg.main
-    {
-        let main = main.trim_start_matches("./");
-        if !main.contains("..") && output_dir.join(main).is_file() {
-            return Some(main.to_string());
-        }
-    }
-
-    // 4. Common fallback files
-    let candidates = [
-        "index.ts",
-        "index.js",
-        "index.mjs",
-        "server.ts",
-        "server.js",
-        "src/index.ts",
-        "src/index.js",
-    ];
-    let found: Vec<&str> = candidates
-        .iter()
-        .filter(|c| output_dir.join(c).is_file())
-        .copied()
-        .collect();
-
-    if found.len() > 1 {
-        eprintln!(
-            "  {} multiple entry point candidates found: {}; using \"{}\".\n\
-             \x20 Set [deploy] entry in onreza.toml to override.",
-            console::style("warn").yellow(),
-            found
-                .iter()
-                .map(|f| format!("\"{f}\""))
-                .collect::<Vec<_>>()
-                .join(", "),
-            found[0],
-        );
-    }
-
-    found.first().map(|f| f.to_string())
 }
 
 /// Detect package manager name (backward-compatible wrapper for init/deploy).

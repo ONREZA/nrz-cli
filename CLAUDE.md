@@ -99,6 +99,11 @@ CLI не зависит от адаптеров. Связь — через BUILD
 - CLI читает и валидирует этот манифест
 - CLI загружает артефакты на платформу
 
+Важно по compute-контракту:
+- `.onreza/manifest.json` используется только для `ISOLATE` деплоев
+- `PROCESS` и `STATIC` деплой не используют manifest
+- Если в output есть manifest, compute должен быть `isolate`
+
 Спецификация: `../deployment/docs/architecture/BUILD_OUTPUT_SPEC.md`
 
 ## Команды

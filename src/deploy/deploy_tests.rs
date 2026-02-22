@@ -378,6 +378,50 @@ fn static_hint_unknown_returns_empty() {
     assert!(framework_static_hint("unknown").is_empty());
 }
 
+// ── compute/manifest contract tests ─────────────────────────
+
+#[test]
+fn isolate_without_manifest_is_error() {
+    let detection = make_detection("nextjs", None);
+    let err = validate_compute_manifest_contract(ComputeType::Isolate, false, &detection)
+        .expect_err("ISOLATE without manifest should fail");
+    assert!(err.to_string().contains("ISOLATE"));
+}
+
+#[test]
+fn process_with_manifest_is_error() {
+    let detection = make_detection("nextjs", None);
+    let err = validate_compute_manifest_contract(ComputeType::Process, true, &detection)
+        .expect_err("PROCESS with manifest should fail");
+    assert!(err.to_string().contains("manifest"));
+}
+
+#[test]
+fn isolate_with_manifest_is_ok() {
+    let detection = make_detection("nextjs", None);
+    assert!(validate_compute_manifest_contract(ComputeType::Isolate, true, &detection).is_ok());
+}
+
+#[test]
+fn static_without_manifest_is_ok() {
+    let detection = make_detection("vite", None);
+    assert!(validate_compute_manifest_contract(ComputeType::Static, false, &detection).is_ok());
+}
+
+#[test]
+fn static_with_manifest_is_error() {
+    let detection = make_detection("vite", None);
+    let err = validate_compute_manifest_contract(ComputeType::Static, true, &detection)
+        .expect_err("STATIC with manifest should fail");
+    assert!(err.to_string().contains("manifest"));
+}
+
+#[test]
+fn process_without_manifest_is_ok() {
+    let detection = make_detection("nextjs", None);
+    assert!(validate_compute_manifest_contract(ComputeType::Process, false, &detection).is_ok());
+}
+
 // ── validate_process_output tests ────────────────────────────
 
 fn make_detection(
@@ -486,6 +530,89 @@ fn validate_unknown_framework_ok() {
     let detection = make_detection("vite", None);
     let result = validate_process_output(&output_dir, dir.path(), &detection);
     assert!(result.is_ok());
+}
+
+// ── ensure_process_entry tests ───────────────────────────────
+
+#[test]
+fn ensure_process_entry_uses_module_field_and_patches_main() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"app","module":"./server.mjs"}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("server.mjs"), "export default {}").unwrap();
+
+    let detection = make_detection("other", None);
+    ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
+
+    let pkg: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.path().join("package.json")).unwrap())
+            .unwrap();
+    assert_eq!(pkg["main"].as_str(), Some("server.mjs"));
+}
+
+#[test]
+fn ensure_process_entry_ambiguous_candidates_returns_error() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("runtime")).unwrap();
+    fs::write(dir.path().join("runtime/foo.mjs"), "console.log('foo')").unwrap();
+    fs::write(dir.path().join("runtime/bar.mjs"), "console.log('bar')").unwrap();
+
+    let detection = make_detection("other", None);
+    let err = ensure_process_entry(dir.path(), dir.path(), None, &detection, true)
+        .expect_err("expected ambiguity error");
+    assert!(err.to_string().contains("multiple candidates"));
+}
+
+#[test]
+fn ensure_process_entry_root_prefers_server_over_main() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("server.js"), "console.log('server')").unwrap();
+    fs::write(dir.path().join("main.js"), "console.log('main')").unwrap();
+
+    let detection = make_detection("other", None);
+    ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
+
+    let pkg: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.path().join("package.json")).unwrap())
+            .unwrap();
+    assert_eq!(pkg["main"].as_str(), Some("server.js"));
+}
+
+#[test]
+fn ensure_process_entry_config_entry_allows_double_dot_in_filename() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("foo..js"), "console.log('ok')").unwrap();
+
+    let detection = make_detection("other", None);
+    ensure_process_entry(dir.path(), dir.path(), Some("foo..js"), &detection, true).unwrap();
+
+    let pkg: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.path().join("package.json")).unwrap())
+            .unwrap();
+    assert_eq!(pkg["main"].as_str(), Some("foo..js"));
+}
+
+#[test]
+fn ensure_process_entry_config_entry_rejects_parent_traversal() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("server.js"), "console.log('ok')").unwrap();
+
+    let detection = make_detection("other", None);
+    let err = ensure_process_entry(
+        dir.path(),
+        dir.path(),
+        Some("../server.js"),
+        &detection,
+        true,
+    )
+    .expect_err("parent traversal should fail");
+    assert!(
+        err.to_string()
+            .contains("relative path within the output directory")
+    );
 }
 
 // ── framework_process_diagnostic tests ───────────────────────

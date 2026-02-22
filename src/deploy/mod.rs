@@ -4,7 +4,7 @@ mod bundle_tests;
 #[cfg(test)]
 mod deploy_tests;
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, bail};
@@ -220,18 +220,7 @@ pub async fn run(
         resolve_compute_type(args.compute.as_deref(), config.deploy_compute(), &detection)?;
     let mut warnings: Vec<String> = Vec::new();
 
-    // Validate: ISOLATE without adapter is an error
-    if compute == ComputeType::Isolate && !has_manifest {
-        let framework = &detection.name;
-        bail!(
-            "{framework} project detected but no @onreza/* adapter found.\n\n\
-             ISOLATE compute requires an adapter that generates .onreza/manifest.json.\n\n\
-             Options:\n\
-             \x20 1. Install an adapter for your framework\n\
-             \x20 2. Use --compute static  if your build output is static files only\n\
-             \x20 3. Use --compute process for standalone server deployment"
-        );
-    }
+    validate_compute_manifest_contract(compute, has_manifest, &detection)?;
 
     // Inform about SSR framework compute mode when auto-detected
     if !has_manifest
@@ -359,12 +348,12 @@ pub async fn run(
     let is_process = compute == ComputeType::Process;
 
     // Pre-flight validation for PROCESS deployments
-    if is_process && !has_manifest {
+    if is_process {
         validate_process_output(&output_dir, &project_dir, &detection)?;
     }
 
     // Ensure entry point for PROCESS deployments (before bundle creation)
-    if is_process && !has_manifest {
+    if is_process {
         ensure_process_entry(
             &output_dir,
             &project_dir,
@@ -732,6 +721,36 @@ async fn resume_deploy(
 
 // ── PROCESS validation ───────────────────────────────────────
 
+fn validate_compute_manifest_contract(
+    compute: ComputeType,
+    has_manifest: bool,
+    detection: &crate::detect::types::DetectionResult,
+) -> anyhow::Result<()> {
+    if compute == ComputeType::Isolate && !has_manifest {
+        let framework = &detection.name;
+        bail!(
+            "{framework} project detected but no @onreza/* adapter found.\n\n\
+             ISOLATE compute requires an adapter that generates .onreza/manifest.json.\n\n\
+             Options:\n\
+             \x20 1. Install an adapter for your framework\n\
+             \x20 2. Use --compute static if your build output is static files only\n\
+             \x20 3. Use --compute process for standalone server deployment"
+        );
+    }
+
+    if has_manifest && compute != ComputeType::Isolate {
+        bail!(
+            "Build output contains .onreza/manifest.json, but compute mode is {compute}.\n\n\
+             Adapter manifests are supported only with ISOLATE compute.\n\n\
+             Options:\n\
+             \x20 1. Redeploy with --compute isolate\n\
+             \x20 2. Remove adapter output and deploy as --compute static or --compute process"
+        );
+    }
+
+    Ok(())
+}
+
 /// Framework-specific hint about switching to static export.
 fn framework_static_hint(framework: &str) -> &'static str {
     match framework {
@@ -851,6 +870,50 @@ fn framework_process_diagnostic(
 
 // ── PROCESS entry point ──────────────────────────────────────
 
+fn is_windows_drive_absolute(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\')
+}
+
+fn sanitize_config_entry(entry: &str) -> anyhow::Result<String> {
+    let trimmed = entry.trim();
+    if trimmed.is_empty() {
+        bail!("[deploy] entry in onreza.toml must not be empty");
+    }
+
+    let normalized = trimmed.replace('\\', "/");
+    let lowered = normalized.to_ascii_lowercase();
+    let path = Path::new(&normalized);
+    if path.is_absolute() || lowered.starts_with("file:") || is_windows_drive_absolute(&normalized)
+    {
+        bail!(
+            "[deploy] entry must be a relative path within the output directory, got: \"{entry}\""
+        );
+    }
+
+    let mut cleaned = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(seg) => cleaned.push(seg),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                bail!(
+                    "[deploy] entry must be a relative path within the output directory, got: \"{entry}\""
+                );
+            }
+        }
+    }
+
+    if cleaned.as_os_str().is_empty() {
+        bail!("[deploy] entry in onreza.toml must not be empty");
+    }
+
+    Ok(cleaned.to_string_lossy().replace('\\', "/"))
+}
+
 /// Resolve and ensure entry point for PROCESS deployments.
 ///
 /// 1. Resolve entry: config `[deploy] entry` > framework auto-detect > error
@@ -865,34 +928,62 @@ fn ensure_process_entry(
 ) -> anyhow::Result<()> {
     // 1. Resolve entry point
     let entry = if let Some(e) = config_entry {
-        let e = e.to_string();
-        if e.is_empty() {
-            bail!("[deploy] entry in onreza.toml must not be empty");
-        }
-        if e.starts_with('/') || e.contains("..") {
-            bail!(
-                "[deploy] entry must be a relative path within the output directory, got: \"{e}\""
-            );
-        }
-        e
-    } else if let Some(e) =
-        crate::detect::resolve_entry_point(&detection.framework, output_dir, project_dir)
-    {
-        e
-    } else if let Some(diagnostic) =
-        framework_process_diagnostic(&detection.framework, detection, output_dir)
-    {
-        bail!("{diagnostic}");
+        sanitize_config_entry(e)?
     } else {
-        bail!(
-            "Cannot determine entry point for PROCESS deployment.\n\n\
-             No entry point found in output directory: {}\n\n\
-             Options:\n\
-             \x20 1. Set [deploy] entry = \"server.ts\" in onreza.toml\n\
-             \x20 2. Add \"main\" field to package.json\n\
-             \x20 3. Create index.ts or server.ts in your build output",
-            output_dir.display()
-        );
+        match crate::detect::resolve_entry_point_detailed(
+            &detection.framework,
+            output_dir,
+            project_dir,
+        ) {
+            crate::detect::EntryPointResolution::Found(resolved) => {
+                output::status(
+                    json,
+                    "~",
+                    format!(
+                        "Entry point resolved from {:?}: {}",
+                        resolved.source, resolved.path
+                    ),
+                );
+                resolved.path
+            }
+            crate::detect::EntryPointResolution::Ambiguous(candidates) => {
+                bail!(
+                    "Cannot determine entry point for PROCESS deployment: multiple candidates found.\n\n\
+                     Candidates in {}:\n\
+                     {}\n\n\
+                     Set [deploy] entry in onreza.toml to pick one explicitly.",
+                    output_dir.display(),
+                    candidates
+                        .iter()
+                        .map(|c| format!("  - {c}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+            }
+            crate::detect::EntryPointResolution::NotFound => {
+                if let Some(diagnostic) =
+                    framework_process_diagnostic(&detection.framework, detection, output_dir)
+                {
+                    bail!("{diagnostic}");
+                }
+                bail!(
+                    "Cannot determine entry point for PROCESS deployment.\n\n\
+                     No entry point found in output directory: {}\n\n\
+                     Options:\n\
+                     \x20 1. Set [deploy] entry = \"server.ts\" in onreza.toml\n\
+                     \x20 2. Add \"main\" or \"module\" field to package.json\n\
+                     \x20 3. Add a start/serve script with an explicit file path",
+                    output_dir.display()
+                );
+            }
+            crate::detect::EntryPointResolution::Error(err) => {
+                bail!(
+                    "Cannot determine entry point for PROCESS deployment.\n\n\
+                     {err}\n\n\
+                     Set [deploy] entry in onreza.toml to override auto-detection."
+                );
+            }
+        }
     };
 
     // 2. Validate file exists and is within output_dir

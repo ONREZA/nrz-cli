@@ -107,8 +107,14 @@ output_dirs = ["dist"]
 | `isolate` | Edge-функции через @onreza адаптер (Next.js Edge, Nuxt с адаптером) |
 | `process` | Полноценный Node.js/Bun сервер (Next.js standalone, Hono, Elysia, кастомный сервер) |
 
+`.onreza/manifest.json` поддерживается только для `isolate`:
+- `compute = "isolate"` требует manifest в build output
+- `compute = "process"` и `compute = "static"` выполняются без manifest
+
 **Приоритет entry point для PROCESS:**
-`[deploy] entry` > авто-определение по фреймворку > `package.json "main"` > fallbacks (`index.ts`, `index.js`, `server.js`)
+`[deploy] entry` > авто-определение по фреймворку > `package.json "main"/"module"` > `scripts.start/serve/...` > `index.*` (Bun default) > heuristic scan по build output
+
+Если найдено несколько одинаково подходящих кандидатов, деплой завершится ошибкой и попросит явно задать `[deploy] entry`.
 
 **Пример:**
 ```toml

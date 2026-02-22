@@ -10,11 +10,12 @@ pre-commit:
   parallel: false
   commands:
     fmt:
-      run: cargo fmt
-      glob: "*.rs"
+      run: cargo fmt -- {staged_files}
+      glob: "**/*.rs"
+      stage_fixed: true
     clippy:
       run: cargo clippy -- -D warnings
-      glob: "*.rs"
+      glob: "**/*.rs"
 
 pre-push:
   parallel: false

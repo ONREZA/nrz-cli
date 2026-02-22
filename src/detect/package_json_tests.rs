@@ -43,6 +43,13 @@ fn parse_package_manager_field() {
 }
 
 #[test]
+fn parse_module_field() {
+    let json = r#"{"module": "./dist/server.mjs"}"#;
+    let pkg: PackageJson = serde_json::from_str(json).unwrap();
+    assert_eq!(pkg.module.as_deref(), Some("./dist/server.mjs"));
+}
+
+#[test]
 fn parse_workspaces_array() {
     let json = r#"{"workspaces": ["packages/*", "apps/*"]}"#;
     let pkg: PackageJson = serde_json::from_str(json).unwrap();
