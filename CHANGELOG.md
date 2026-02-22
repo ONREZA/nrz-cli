@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.14.0] - 2026-02-22
+
+### ✨ Features
+
+- **cli:** harden process fallback and runtime detect for unknown frameworks ([563a526](https://github.com/ONREZA/nrz-cli/commit/563a5267a432c1604b85e23d0cfc71387ec9df31))
+
 ## [0.13.4] - 2026-02-22
 
 ### 🐛 Bug Fixes
