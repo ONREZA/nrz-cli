@@ -3,6 +3,9 @@ pub(crate) mod bundle;
 mod bundle_tests;
 #[cfg(test)]
 mod deploy_tests;
+pub(crate) mod health_check;
+#[cfg(test)]
+mod health_check_tests;
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -26,7 +29,7 @@ use crate::detect::types::ComputeType;
 use crate::link;
 use crate::migrations;
 use crate::output;
-use nrz::config::ProjectConfig;
+use nrz::config::{HealthCheckPathConfig, ProjectConfig};
 
 // ── Workspace / plan ─────────────────────────────────────────
 
@@ -147,6 +150,75 @@ struct DeployOutput {
     status: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    health_check: Option<HealthCheckInfo>,
+}
+
+/// JSON output for health check configuration.
+///
+/// Serializes as `{"mode":"http","path":"/health","source":"config"}`
+/// or `{"mode":"tcp","source":"default"}` (no `path` field for TCP).
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "mode", rename_all = "lowercase")]
+enum HealthCheckInfo {
+    Http {
+        path: String,
+        source: HealthCheckSourceTag,
+    },
+    Tcp {
+        source: HealthCheckSourceTag,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum HealthCheckSourceTag {
+    Flag,
+    Config,
+    Detected,
+    Default,
+}
+
+/// Resolved health check configuration for a PROCESS deployment.
+#[derive(Debug, Clone)]
+struct ResolvedHealthCheck {
+    /// The HTTP path (e.g. `/health`), or `None` for TCP-only.
+    path: Option<String>,
+    /// Where the value came from.
+    source: HealthCheckSource,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum HealthCheckSource {
+    Flag,
+    Config,
+    Detected,
+    Default,
+}
+
+impl HealthCheckSource {
+    fn to_tag(self) -> HealthCheckSourceTag {
+        match self {
+            Self::Flag => HealthCheckSourceTag::Flag,
+            Self::Config => HealthCheckSourceTag::Config,
+            Self::Detected => HealthCheckSourceTag::Detected,
+            Self::Default => HealthCheckSourceTag::Default,
+        }
+    }
+}
+
+impl ResolvedHealthCheck {
+    fn to_info(&self) -> HealthCheckInfo {
+        match &self.path {
+            Some(path) => HealthCheckInfo::Http {
+                path: path.clone(),
+                source: self.source.to_tag(),
+            },
+            None => HealthCheckInfo::Tcp {
+                source: self.source.to_tag(),
+            },
+        }
+    }
 }
 
 // ── Main deploy flow ─────────────────────────────────────────
@@ -274,6 +346,20 @@ pub async fn run(
         None
     };
 
+    // Resolve health check path (PROCESS only)
+    let health_check = if is_process {
+        Some(resolve_health_check(
+            args.health_check_path.as_deref(),
+            config,
+            &project_dir,
+            &detection,
+            &output_dir,
+            json,
+        )?)
+    } else {
+        None
+    };
+
     // ── Resume mode: builder calls us with an existing deployment ID ──
     if let Some(deployment_id) = &args.resume_deployment {
         let deployment_id = deployment_id.trim();
@@ -377,6 +463,16 @@ pub async fn run(
         crate::detect_sync::sync_detection_to_api(&sync_client, &sync_project_id, &detection).await;
     });
 
+    // Sync compute config (health check path) for PROCESS deployments
+    if let Some(ref hc) = health_check {
+        let hc_client = client.clone();
+        let hc_project_id = project_id.clone();
+        let hc_clone = hc.clone();
+        let _hc_handle = tokio::spawn(async move {
+            sync_compute_config(&hc_client, &hc_project_id, &hc_clone, json).await;
+        });
+    }
+
     // Create bundle for PROCESS deployments
     let bundle_data = maybe_create_bundle(&output_dir, is_process, json)?;
 
@@ -458,6 +554,7 @@ pub async fn run(
                         url: url.to_string(),
                         status: "live".into(),
                         warnings,
+                        health_check: health_check.as_ref().map(|hc| hc.to_info()),
                     });
                 } else {
                     eprintln!();
@@ -495,6 +592,134 @@ pub async fn run(
                 continue;
             }
         }
+    }
+}
+
+// ── Health check resolution ──────────────────────────────────
+
+/// Resolve health check path for PROCESS deployments.
+///
+/// Priority: CLI flag > config > autodetect > TCP default.
+fn resolve_health_check(
+    cli_flag: Option<&str>,
+    config: &ProjectConfig,
+    project_dir: &Path,
+    detection: &crate::detect::types::DetectionResult,
+    output_dir: &Path,
+    json: bool,
+) -> anyhow::Result<ResolvedHealthCheck> {
+    // 1. CLI flag
+    if let Some(flag) = cli_flag {
+        if flag.eq_ignore_ascii_case("none")
+            || flag.eq_ignore_ascii_case("false")
+            || flag.eq_ignore_ascii_case("tcp")
+        {
+            output::success(json, "Health check: TCP (from --health-check-path)");
+            return Ok(ResolvedHealthCheck {
+                path: None,
+                source: HealthCheckSource::Flag,
+            });
+        }
+        validate_health_path(flag, "--health-check-path")?;
+        output::success(
+            json,
+            format!("Health check: HTTP {flag} (from --health-check-path)"),
+        );
+        return Ok(ResolvedHealthCheck {
+            path: Some(flag.to_string()),
+            source: HealthCheckSource::Flag,
+        });
+    }
+
+    // 2. Config
+    if let Some(hc) = config.health_check_path() {
+        match hc {
+            HealthCheckPathConfig::Tcp => {
+                output::success(json, "Health check: TCP (configured)");
+                return Ok(ResolvedHealthCheck {
+                    path: None,
+                    source: HealthCheckSource::Config,
+                });
+            }
+            HealthCheckPathConfig::Http(path) => {
+                output::success(json, format!("Health check: HTTP {path} (from config)"));
+                return Ok(ResolvedHealthCheck {
+                    path: Some(path.clone()),
+                    source: HealthCheckSource::Config,
+                });
+            }
+        }
+    }
+
+    // 3. Autodetect
+    if let Some(det) =
+        health_check::detect_health_path(project_dir, &detection.framework, output_dir)
+    {
+        output::success(
+            json,
+            format!(
+                "Found health endpoint: {} (source: {})",
+                det.path, det.source_description
+            ),
+        );
+        return Ok(ResolvedHealthCheck {
+            path: Some(det.path),
+            source: HealthCheckSource::Detected,
+        });
+    }
+
+    // 4. Default: TCP
+    output::status(
+        json,
+        "ℹ",
+        "No health check endpoint detected. Using TCP readiness check.\n    \
+         To add HTTP health check, create a /health endpoint or set\n    \
+         deploy.health_check_path in onreza.toml",
+    );
+    Ok(ResolvedHealthCheck {
+        path: None,
+        source: HealthCheckSource::Default,
+    })
+}
+
+/// Validate an HTTP health check path.
+fn validate_health_path(path: &str, source: &str) -> anyhow::Result<()> {
+    if !path.starts_with('/') {
+        bail!("{source} must start with '/', got: \"{path}\"");
+    }
+    if path.contains("..") {
+        bail!("{source} must not contain '..', got: \"{path}\"");
+    }
+    if path.contains('?') || path.contains('#') {
+        bail!("{source} must not contain query or fragment, got: \"{path}\"");
+    }
+    Ok(())
+}
+
+// ── Compute config sync ──────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ComputeConfigBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    health_check_path: Option<String>,
+}
+
+/// Best-effort sync of compute config (health check path) to the platform.
+async fn sync_compute_config(
+    client: &ApiClient,
+    project_id: &str,
+    health_check: &ResolvedHealthCheck,
+    json: bool,
+) {
+    let body = ComputeConfigBody {
+        health_check_path: health_check.path.clone(),
+    };
+
+    let path = format!("/v1/projects/{project_id}/compute-config");
+    let resp: Result<serde_json::Value, _> = client.patch(&path, &body).await;
+    if let Err(e) = resp {
+        output::warn(json, format!("failed to sync compute config: {e}"));
     }
 }
 

@@ -13,6 +13,62 @@ use anyhow::Context;
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 
+// ── Health check path configuration ─────────────────────────
+
+/// Health check path configuration for PROCESS deployments.
+///
+/// - `Http(path)` — HTTP GET check at the given path (e.g. `/health`)
+/// - `Tcp` — explicit opt-out from HTTP health checks (TCP port check only)
+#[derive(Debug, Clone, PartialEq)]
+pub enum HealthCheckPathConfig {
+    /// HTTP health check at the given path.
+    Http(String),
+    /// Explicit TCP-only mode (user set `false` in config).
+    Tcp,
+}
+
+impl Serialize for HealthCheckPathConfig {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Http(path) => serializer.serialize_str(path),
+            Self::Tcp => serializer.serialize_bool(false),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for HealthCheckPathConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct HcVisitor;
+
+        impl<'de> Visitor<'de> for HcVisitor {
+            type Value = HealthCheckPathConfig;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str(r#"a string path like "/health" or false for TCP-only"#)
+            }
+
+            fn visit_bool<E: de::Error>(self, v: bool) -> Result<HealthCheckPathConfig, E> {
+                if v {
+                    Err(de::Error::custom(
+                        "health_check_path: true is not valid, use a path string or false",
+                    ))
+                } else {
+                    Ok(HealthCheckPathConfig::Tcp)
+                }
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<HealthCheckPathConfig, E> {
+                Ok(HealthCheckPathConfig::Http(v.to_string()))
+            }
+        }
+
+        deserializer.deserialize_any(HcVisitor)
+    }
+}
+
 /// Top-level config loaded from `onreza.toml`.
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
@@ -66,6 +122,9 @@ pub struct DeploySection {
     pub compute: Option<String>,
     /// Explicit entry point for PROCESS deployments (e.g. "server.ts").
     pub entry: Option<String>,
+    /// Health check path for PROCESS deployments.
+    /// String → HTTP check at that path; `false` → TCP only; absent → autodetect.
+    pub health_check_path: Option<HealthCheckPathConfig>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -251,6 +310,10 @@ impl ProjectConfig {
         self.deploy.entry.as_deref()
     }
 
+    pub fn health_check_path(&self) -> Option<&HealthCheckPathConfig> {
+        self.deploy.health_check_path.as_ref()
+    }
+
     /// Returns keys of all required env vars declared in `[env]`.
     pub fn required_env_vars(&self) -> Vec<&str> {
         self.env
@@ -293,6 +356,24 @@ pub fn load(project_dir: &Path) -> anyhow::Result<ProjectConfig> {
                 }
                 if entry.contains("..") {
                     anyhow::bail!("[deploy] entry must not contain \"..\", got: \"{entry}\"");
+                }
+            }
+            // Validate [deploy] health_check_path
+            if let Some(HealthCheckPathConfig::Http(ref path)) = config.deploy.health_check_path {
+                if !path.starts_with('/') {
+                    anyhow::bail!(
+                        "[deploy] health_check_path must start with '/', got: \"{path}\""
+                    );
+                }
+                if path.contains("..") {
+                    anyhow::bail!(
+                        "[deploy] health_check_path must not contain '..', got: \"{path}\""
+                    );
+                }
+                if path.contains('?') || path.contains('#') {
+                    anyhow::bail!(
+                        "[deploy] health_check_path must not contain query or fragment, got: \"{path}\""
+                    );
                 }
             }
             // Validate env var names: must match ^[A-Z][A-Z0-9_]*$
@@ -368,6 +449,7 @@ pub fn generate_template(
 # skip_migrations = false
 # compute = "static"    # "static", "isolate", or "process"
 # entry = "server.ts"   # entry point for PROCESS deployments
+# health_check_path = "/health"  # HTTP health check path, or false for TCP only
 
 # [migrations]
 # dir = "migrations"

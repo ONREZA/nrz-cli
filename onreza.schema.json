@@ -106,6 +106,21 @@
         "entry": {
           "type": "string",
           "description": "Explicit entry point for PROCESS deployments (e.g. \"server.ts\", \"dist/index.js\"). Must be a relative path without '..'. If not set, resolved automatically: framework defaults > package.json 'main' > common fallbacks."
+        },
+        "health_check_path": {
+          "description": "Health check endpoint for PROCESS deployments. A string path enables HTTP health check at that path (e.g. \"/health\"). Set to false to explicitly use TCP-only readiness check. If omitted, CLI will attempt to auto-detect from project source.",
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^/",
+              "description": "HTTP health check path (must start with /)"
+            },
+            {
+              "type": "boolean",
+              "const": false,
+              "description": "Disable HTTP health check, use TCP port check only"
+            }
+          ]
         }
       }
     },

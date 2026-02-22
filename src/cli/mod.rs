@@ -256,6 +256,10 @@ pub struct DeployArgs {
     /// Override compute type: static, isolate, process
     #[arg(long)]
     pub compute: Option<String>,
+
+    /// Health check path for PROCESS deployments (e.g. "/health"). Use "none" for TCP only.
+    #[arg(long)]
+    pub health_check_path: Option<String>,
 }
 
 #[derive(Parser)]

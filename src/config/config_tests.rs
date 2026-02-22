@@ -514,3 +514,104 @@ fn load_config_with_framework() {
     let config = load(dir.path()).unwrap();
     assert_eq!(config.project.framework.as_deref(), Some("astro"));
 }
+
+// ── health_check_path ────────────────────────────────────────
+
+#[test]
+fn health_check_path_http_string() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        "[deploy]\nhealth_check_path = \"/health\"\n",
+    )
+    .unwrap();
+
+    let config = load(dir.path()).unwrap();
+    assert_eq!(
+        config.health_check_path(),
+        Some(&HealthCheckPathConfig::Http("/health".to_string()))
+    );
+}
+
+#[test]
+fn health_check_path_tcp_false() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        "[deploy]\nhealth_check_path = false\n",
+    )
+    .unwrap();
+
+    let config = load(dir.path()).unwrap();
+    assert_eq!(
+        config.health_check_path(),
+        Some(&HealthCheckPathConfig::Tcp)
+    );
+}
+
+#[test]
+fn health_check_path_absent() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("onreza.toml"), "[deploy]\n").unwrap();
+
+    let config = load(dir.path()).unwrap();
+    assert_eq!(config.health_check_path(), None);
+}
+
+#[test]
+fn health_check_path_must_start_with_slash() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        "[deploy]\nhealth_check_path = \"health\"\n",
+    )
+    .unwrap();
+
+    let result = load(dir.path());
+    assert!(result.is_err());
+    let msg = format!("{}", result.unwrap_err());
+    assert!(msg.contains("must start with '/'"), "got: {msg}");
+}
+
+#[test]
+fn health_check_path_rejects_query_string() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        "[deploy]\nhealth_check_path = \"/health?verbose=true\"\n",
+    )
+    .unwrap();
+
+    let result = load(dir.path());
+    assert!(result.is_err());
+    let msg = format!("{}", result.unwrap_err());
+    assert!(msg.contains("query or fragment"), "got: {msg}");
+}
+
+#[test]
+fn health_check_path_rejects_parent_traversal() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        "[deploy]\nhealth_check_path = \"/../../etc/passwd\"\n",
+    )
+    .unwrap();
+
+    let result = load(dir.path());
+    assert!(result.is_err());
+    let msg = format!("{}", result.unwrap_err());
+    assert!(msg.contains("must not contain '..'"), "got: {msg}");
+}
+
+#[test]
+fn health_check_path_true_is_invalid() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        "[deploy]\nhealth_check_path = true\n",
+    )
+    .unwrap();
+
+    let result = load(dir.path());
+    assert!(result.is_err());
+}
