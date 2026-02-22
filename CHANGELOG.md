@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.15.0] - 2026-02-22
+
+### ✨ Features
+
+- **deploy:** add health check path detection and configuration ([82dbd7b](https://github.com/ONREZA/nrz-cli/commit/82dbd7b47cb862b1cb12c618e6209a936e85ac03))
+- **cli:** add user-facing skills and refresh repository docs ([62bc18e](https://github.com/ONREZA/nrz-cli/commit/62bc18e91ed9bd0af6338d847512a97fb4e0cc56))
+
 ## [0.14.0] - 2026-02-22
 
 ### ✨ Features
