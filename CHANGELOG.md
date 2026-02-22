@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.13.4] - 2026-02-22
+
+### 🐛 Bug Fixes
+
+- harden process entrypoint detection and restage fmt fixes ([74106de](https://github.com/ONREZA/nrz-cli/commit/74106defeae65c93233dda44c020c96a06006f42))
+
 ## [0.13.3] - 2026-02-21
 
 ### 🐛 Bug Fixes
