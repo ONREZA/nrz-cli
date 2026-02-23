@@ -45,6 +45,10 @@ pub struct Cli {
     #[arg(long, global = true, env = "NRZ_JSON")]
     pub json: bool,
 
+    /// Force human-readable output; suppresses --json/NRZ_JSON and auto-JSON in non-TTY environments
+    #[arg(long, global = true, env = "NRZ_HUMAN")]
+    pub human: bool,
+
     /// API token for authentication
     #[arg(long, global = true, env = "NRZ_TOKEN")]
     pub token: Option<String>,

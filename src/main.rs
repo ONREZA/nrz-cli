@@ -29,7 +29,7 @@ async fn main() {
         .init();
 
     let cli = Cli::parse();
-    let json = cli.json || !std::io::stdout().is_terminal();
+    let json = !cli.human && (cli.json || !std::io::stdout().is_terminal());
     let token = cli.token.clone();
     let workspace = cli.workspace.clone();
     let env = cli.env;
