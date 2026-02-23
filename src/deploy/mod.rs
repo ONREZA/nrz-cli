@@ -24,6 +24,7 @@ const MAX_SIZE_PAID: u64 = 1024 * 1024 * 1024; // 1 GB
 use crate::api::ApiClient;
 use crate::auth;
 use crate::build;
+use crate::build::manifest as build_manifest;
 use crate::cli::{BuildArgs, DeployArgs};
 use crate::detect::types::ComputeType;
 use crate::link;
@@ -268,7 +269,8 @@ pub async fn run(
     .await?;
 
     let output_dir = build_result.output_dir;
-    let has_manifest = build_result.has_manifest;
+    let loaded_manifest = build_result.manifest;
+    let has_manifest = loaded_manifest.is_some();
 
     // Scan output directory for flat file list
     output::status(json, "~", "Scanning output directory...");
@@ -277,26 +279,29 @@ pub async fn run(
         bail!("output directory is empty: {}", output_dir.display());
     }
 
-    // Resolve compute type: CLI flag > config > detect
-    let compute =
-        resolve_compute_type(args.compute.as_deref(), config.deploy_compute(), &detection)?;
+    // Resolve compute type: CLI flag > config > manifest layers > detect
+    let compute = if let Some(ref m) = loaded_manifest {
+        if args.compute.is_none() && config.deploy_compute().is_none() {
+            match build_manifest::primary_compute_target(m) {
+                build_manifest::LayerTarget::Compute => ComputeType::Process,
+                build_manifest::LayerTarget::Isolate => ComputeType::Isolate,
+                build_manifest::LayerTarget::Static => ComputeType::Static,
+            }
+        } else {
+            resolve_compute_type(args.compute.as_deref(), config.deploy_compute(), &detection)?
+        }
+    } else {
+        resolve_compute_type(args.compute.as_deref(), config.deploy_compute(), &detection)?
+    };
     let mut warnings: Vec<String> = Vec::new();
 
     validate_compute_manifest_contract(compute, has_manifest, &detection)?;
 
-    // Read adapter manifest only for ISOLATE deployments.
-    let manifest_raw: Option<serde_json::Value> = if has_manifest {
-        let manifest_path = output_dir.join(".onreza/manifest.json");
-        Some(
-            serde_json::from_str(
-                &std::fs::read_to_string(&manifest_path)
-                    .with_context(|| format!("failed to read {}", manifest_path.display()))?,
-            )
-            .with_context(|| format!("failed to parse {} as JSON", manifest_path.display()))?,
-        )
-    } else {
-        None
-    };
+    let manifest_raw: Option<serde_json::Value> = loaded_manifest
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()
+        .context("failed to serialize manifest")?;
 
     // Inform about SSR framework compute mode when auto-detected
     if !has_manifest
@@ -327,8 +332,9 @@ pub async fn run(
     }
 
     let is_process = compute == ComputeType::Process;
-    let process_entry = if is_process {
-        // Pre-flight validation and entry resolution for PROCESS deployments.
+    // When a manifest is present, process entry comes from the manifest's COMPUTE layer —
+    // skip pre-flight validation and auto-detection.
+    let process_entry = if is_process && !has_manifest {
         validate_process_output(&output_dir, &project_dir, &detection)?;
         let (entry, warning) = ensure_process_entry(
             &output_dir,
@@ -459,7 +465,7 @@ pub async fn run(
     // Sync detection results to API (best-effort, non-blocking)
     let sync_client = client.clone();
     let sync_project_id = project_id.clone();
-    let _sync_handle = tokio::spawn(async move {
+    let _sync = tokio::spawn(async move {
         crate::detect_sync::sync_detection_to_api(&sync_client, &sync_project_id, &detection).await;
     });
 
@@ -468,7 +474,7 @@ pub async fn run(
         let hc_client = client.clone();
         let hc_project_id = project_id.clone();
         let hc_clone = hc.clone();
-        let _hc_handle = tokio::spawn(async move {
+        let _hc = tokio::spawn(async move {
             sync_compute_config(&hc_client, &hc_project_id, &hc_clone, json).await;
         });
     }
@@ -964,6 +970,7 @@ fn validate_compute_manifest_contract(
     has_manifest: bool,
     detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<()> {
+    // ISOLATE without a manifest is always an error — it requires an adapter.
     if compute == ComputeType::Isolate && !has_manifest {
         let framework = &detection.name;
         bail!(
@@ -976,15 +983,8 @@ fn validate_compute_manifest_contract(
         );
     }
 
-    if has_manifest && compute != ComputeType::Isolate {
-        bail!(
-            "Build output contains .onreza/manifest.json, but compute mode is {compute}.\n\n\
-             Adapter manifests are supported only with ISOLATE compute.\n\n\
-             Options:\n\
-             \x20 1. Redeploy with --compute isolate\n\
-             \x20 2. Remove adapter output and deploy as --compute static or --compute process"
-        );
-    }
+    // When a manifest is present, its layers define the compute targets —
+    // any compute type derived from the manifest is valid.
 
     Ok(())
 }

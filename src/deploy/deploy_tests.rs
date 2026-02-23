@@ -389,11 +389,10 @@ fn isolate_without_manifest_is_error() {
 }
 
 #[test]
-fn process_with_manifest_is_error() {
+fn process_with_manifest_is_ok() {
+    // Manifest can declare COMPUTE layers — PROCESS + manifest is valid.
     let detection = make_detection("nextjs", None);
-    let err = validate_compute_manifest_contract(ComputeType::Process, true, &detection)
-        .expect_err("PROCESS with manifest should fail");
-    assert!(err.to_string().contains("manifest"));
+    assert!(validate_compute_manifest_contract(ComputeType::Process, true, &detection).is_ok());
 }
 
 #[test]
@@ -409,11 +408,10 @@ fn static_without_manifest_is_ok() {
 }
 
 #[test]
-fn static_with_manifest_is_error() {
+fn static_with_manifest_is_ok() {
+    // Manifest can declare only STATIC layers — STATIC + manifest is valid.
     let detection = make_detection("vite", None);
-    let err = validate_compute_manifest_contract(ComputeType::Static, true, &detection)
-        .expect_err("STATIC with manifest should fail");
-    assert!(err.to_string().contains("manifest"));
+    assert!(validate_compute_manifest_contract(ComputeType::Static, true, &detection).is_ok());
 }
 
 #[test]
@@ -513,6 +511,78 @@ fn create_deployment_body_process_without_entry_skips_process_entry() {
         Some("process")
     );
     assert!(value.get("processEntry").is_none());
+}
+
+// ── manifest → compute type mapping tests ────────────────────
+//
+// Verifies the contract: primary_compute_target(manifest) → LayerTarget,
+// which deploy maps as: Compute→Process, Isolate→Isolate, Static→Static.
+
+#[test]
+fn manifest_compute_layer_maps_to_process() {
+    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
+        r#"{
+        "version": 1,
+        "layers": [
+            {"name": "assets", "target": "STATIC", "directory": "static"},
+            {"name": "server", "target": "COMPUTE", "directory": "standalone", "entry": "server.js"}
+        ],
+        "routes": [{"pattern": "^/.*$", "layer": "server"}]
+    }"#,
+    )
+    .unwrap();
+
+    let target = crate::build::manifest::primary_compute_target(&manifest);
+    let compute = match target {
+        crate::build::manifest::LayerTarget::Compute => ComputeType::Process,
+        crate::build::manifest::LayerTarget::Isolate => ComputeType::Isolate,
+        crate::build::manifest::LayerTarget::Static => ComputeType::Static,
+    };
+    assert_eq!(compute, ComputeType::Process);
+}
+
+#[test]
+fn manifest_isolate_layer_maps_to_isolate() {
+    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
+        r#"{
+        "version": 1,
+        "layers": [
+            {"name": "assets", "target": "STATIC", "directory": "client"},
+            {"name": "server", "target": "ISOLATE", "directory": "server",
+             "entry": "entry.mjs", "export": "fetch"}
+        ],
+        "routes": [{"pattern": "^/.*$", "layer": "server"}]
+    }"#,
+    )
+    .unwrap();
+
+    let target = crate::build::manifest::primary_compute_target(&manifest);
+    let compute = match target {
+        crate::build::manifest::LayerTarget::Compute => ComputeType::Process,
+        crate::build::manifest::LayerTarget::Isolate => ComputeType::Isolate,
+        crate::build::manifest::LayerTarget::Static => ComputeType::Static,
+    };
+    assert_eq!(compute, ComputeType::Isolate);
+}
+
+#[test]
+fn manifest_static_only_maps_to_static() {
+    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
+        r#"{
+        "version": 1,
+        "layers": [{"name": "site", "target": "STATIC", "directory": "."}],
+        "routes": [{"pattern": "^/.*$", "layer": "site"}]
+    }"#,
+    )
+    .unwrap();
+
+    let target = crate::build::manifest::primary_compute_target(&manifest);
+    let compute = match target {
+        crate::build::manifest::LayerTarget::Compute => ComputeType::Process,
+        crate::build::manifest::LayerTarget::Isolate => ComputeType::Isolate,
+        crate::build::manifest::LayerTarget::Static => ComputeType::Static,
+    };
+    assert_eq!(compute, ComputeType::Static);
 }
 
 // ── validate_process_output tests ────────────────────────────
@@ -985,6 +1055,18 @@ fn validate_health_path_rejects_parent_traversal() {
 #[test]
 fn validate_health_path_rejects_query() {
     let result = validate_health_path("/health?v=1", "--health-check-path");
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("query or fragment")
+    );
+}
+
+#[test]
+fn validate_health_path_rejects_fragment() {
+    let result = validate_health_path("/health#section", "--health-check-path");
     assert!(result.is_err());
     assert!(
         result

@@ -42,9 +42,6 @@ pub async fn sync_detection_to_api(client: &ApiClient, project_id: &str, result:
     // Best-effort: log warning on failure, don't fail the overall command
     let resp: Result<serde_json::Value, _> = client.post(&path, &body).await;
     if let Err(e) = resp {
-        eprintln!(
-            "  {} failed to sync detection to API: {e}",
-            console::style("warn").yellow()
-        );
+        tracing::warn!("failed to sync detection to API: {e}");
     }
 }

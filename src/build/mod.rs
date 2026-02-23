@@ -1,4 +1,4 @@
-mod manifest;
+pub(crate) mod manifest;
 
 #[cfg(test)]
 mod manifest_tests;
@@ -16,19 +16,29 @@ use crate::output;
 use nrz::config::ProjectConfig;
 
 #[derive(Serialize)]
-struct BuildOutput {
-    adapter: String,
-    adapter_version: String,
-    framework: String,
-    framework_version: String,
-    routes: usize,
-    output_dir: String,
+struct LayerInfo {
+    name: String,
+    target: String,
+    directory: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entry: Option<String>,
 }
 
-/// Result of build validation — tells deploy whether a manifest was found.
+#[derive(Serialize)]
+struct BuildOutput {
+    layers: Vec<LayerInfo>,
+    routes: usize,
+    output_dir: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    framework: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    framework_version: Option<String>,
+}
+
+/// Result of build validation — carries the parsed manifest so deploy avoids re-reading it.
 pub struct BuildResult {
     pub output_dir: std::path::PathBuf,
-    pub has_manifest: bool,
+    pub manifest: Option<manifest::Manifest>,
 }
 
 pub async fn run(
@@ -62,7 +72,7 @@ pub async fn run_with_hint(
         detect_output_dir(&project_dir, &config.output_dirs(), &fw_dirs)?;
     tracing::info!(?output_dir, has_manifest, "found output directory");
 
-    if has_manifest {
+    let loaded_manifest = if has_manifest {
         let manifest_path = output_dir.join(".onreza/manifest.json");
         let manifest = manifest::load_and_validate(&manifest_path)?;
 
@@ -70,43 +80,75 @@ pub async fn run_with_hint(
             manifest::verify_files(&output_dir, &manifest)?;
         }
 
+        let framework = manifest
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("framework"))
+            .and_then(|f| f.get("name"))
+            .and_then(|n| n.as_str())
+            .map(String::from);
+        let framework_version = manifest
+            .meta
+            .as_ref()
+            .and_then(|m| m.get("framework"))
+            .and_then(|f| f.get("version"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
         if json {
             output::json_output(&BuildOutput {
-                adapter: manifest.adapter.name.clone(),
-                adapter_version: manifest.adapter.version.clone(),
-                framework: manifest.framework.name.clone(),
-                framework_version: manifest.framework.version.clone(),
+                layers: manifest
+                    .layers
+                    .iter()
+                    .map(|l| LayerInfo {
+                        name: l.name.clone(),
+                        target: l.target.to_string(),
+                        directory: l.directory.clone(),
+                        entry: l.entry.clone(),
+                    })
+                    .collect(),
                 routes: manifest.routes.len(),
                 output_dir: output_dir.to_string_lossy().into_owned(),
+                framework,
+                framework_version,
             });
         } else {
+            let layers_display: Vec<String> = manifest
+                .layers
+                .iter()
+                .map(|l| match &l.entry {
+                    Some(e) => format!("{}({}:{})", l.target, l.directory, e),
+                    None => format!("{}({})", l.target, l.directory),
+                })
+                .collect();
             eprintln!(
-                "  {} {} v{} ({} v{})",
+                "  {} {} layer(s): {}",
                 console::style("✓").green().bold(),
-                manifest.adapter.name,
-                manifest.adapter.version,
-                manifest.framework.name,
-                manifest.framework.version,
+                manifest.layers.len(),
+                layers_display.join(", "),
             );
             eprintln!(
-                "  {} {} routes, server entry: {}",
+                "  {} {} route(s)",
                 console::style("✓").green().bold(),
                 manifest.routes.len(),
-                manifest.server.entry,
             );
         }
-    } else if json {
-        output::json_output(&serde_json::json!({
-            "has_manifest": false,
-            "output_dir": output_dir.to_string_lossy(),
-        }));
+        Some(manifest)
     } else {
-        output::status(false, "~", "No .onreza/manifest.json found (no adapter)");
-    }
+        if json {
+            output::json_output(&serde_json::json!({
+                "has_manifest": false,
+                "output_dir": output_dir.to_string_lossy(),
+            }));
+        } else {
+            output::status(false, "~", "No .onreza/manifest.json found (no adapter)");
+        }
+        None
+    };
 
     Ok(BuildResult {
         output_dir,
-        has_manifest,
+        manifest: loaded_manifest,
     })
 }
 

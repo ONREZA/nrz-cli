@@ -1195,6 +1195,7 @@ dependencies = [
  "open",
  "percent-encoding",
  "predicates",
+ "regex",
  "reqwest",
  "rusqlite",
  "serde",
