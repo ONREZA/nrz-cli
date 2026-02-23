@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.1] - 2026-02-23
+
+### 🐛 Bug Fixes
+
+- **deploy:** exclude COMPUTE files from file count limit for bundle deployments ([6e97eed](https://github.com/ONREZA/nrz-cli/commit/6e97eedd175f3f3c3a66c6c56230d87bc26a6c5b))
+
 ## [0.17.0] - 2026-02-23
 
 ### ✨ Features
