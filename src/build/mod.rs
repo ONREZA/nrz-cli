@@ -134,13 +134,16 @@ pub async fn run_with_hint(
             );
         }
         Some(manifest)
+    } else if detection.suggested_compute == crate::detect::types::ComputeType::Static {
+        let auto = manifest::generate_static_manifest();
+        output::status(
+            json,
+            "~",
+            "Auto-generated STATIC manifest (no adapter found)",
+        );
+        Some(auto)
     } else {
-        if json {
-            output::json_output(&serde_json::json!({
-                "has_manifest": false,
-                "output_dir": output_dir.to_string_lossy(),
-            }));
-        } else {
+        if !json {
             output::status(false, "~", "No .onreza/manifest.json found (no adapter)");
         }
         None

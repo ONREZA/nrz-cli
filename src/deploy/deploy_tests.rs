@@ -415,39 +415,21 @@ fn static_with_manifest_is_ok() {
 }
 
 #[test]
-fn process_without_manifest_is_ok() {
+fn process_without_manifest_is_error() {
+    // Safety net: PROCESS auto-generation should always produce a manifest before
+    // validate_compute_manifest_contract is called, so reaching here with has_manifest=false
+    // is an unexpected state.
     let detection = make_detection("nextjs", None);
-    assert!(validate_compute_manifest_contract(ComputeType::Process, false, &detection).is_ok());
-}
-
-#[test]
-fn create_deployment_body_process_serializes_process_entry_without_manifest() {
-    let body = CreateDeploymentBody {
-        manifest: None,
-        files: vec![],
-        production: false,
-        branch: None,
-        commit_sha: None,
-        migrations: None,
-        bundle_sha256: None,
-        compute_type: "process".to_string(),
-        process_entry: Some("server.js".to_string()),
-    };
-
-    let value = serde_json::to_value(&body).unwrap();
-    assert!(value.get("manifest").is_none());
-    assert_eq!(
-        value.get("computeType").and_then(|v| v.as_str()),
-        Some("process")
-    );
-    assert_eq!(
-        value.get("processEntry").and_then(|v| v.as_str()),
-        Some("server.js")
+    let err = validate_compute_manifest_contract(ComputeType::Process, false, &detection)
+        .expect_err("PROCESS without manifest should fail");
+    assert!(
+        err.to_string().contains("Internal error"),
+        "unexpected error: {err}"
     );
 }
 
 #[test]
-fn create_deployment_body_isolate_serializes_manifest_without_process_entry() {
+fn create_deployment_body_with_manifest_serializes_correctly() {
     let body = CreateDeploymentBody {
         manifest: Some(serde_json::json!({ "version": 1 })),
         files: vec![],
@@ -456,43 +438,16 @@ fn create_deployment_body_isolate_serializes_manifest_without_process_entry() {
         commit_sha: None,
         migrations: None,
         bundle_sha256: None,
-        compute_type: "isolate".to_string(),
-        process_entry: None,
     };
 
     let value = serde_json::to_value(&body).unwrap();
     assert!(value.get("manifest").is_some());
-    assert_eq!(
-        value.get("computeType").and_then(|v| v.as_str()),
-        Some("isolate")
-    );
+    assert!(value.get("computeType").is_none());
     assert!(value.get("processEntry").is_none());
 }
 
 #[test]
-fn prepare_upload_body_process_serializes_process_entry() {
-    let body = PrepareUploadBody {
-        manifest: None,
-        files: vec![],
-        compute_type: "process".to_string(),
-        bundle_sha256: Some("abc123".to_string()),
-        process_entry: Some("server.js".to_string()),
-    };
-
-    let value = serde_json::to_value(&body).unwrap();
-    assert!(value.get("manifest").is_none());
-    assert_eq!(
-        value.get("computeType").and_then(|v| v.as_str()),
-        Some("process")
-    );
-    assert_eq!(
-        value.get("processEntry").and_then(|v| v.as_str()),
-        Some("server.js")
-    );
-}
-
-#[test]
-fn create_deployment_body_process_without_entry_skips_process_entry() {
+fn create_deployment_body_without_manifest_omits_manifest_field() {
     let body = CreateDeploymentBody {
         manifest: None,
         files: vec![],
@@ -501,16 +456,30 @@ fn create_deployment_body_process_without_entry_skips_process_entry() {
         commit_sha: None,
         migrations: None,
         bundle_sha256: None,
-        compute_type: "process".to_string(),
-        process_entry: None,
     };
 
     let value = serde_json::to_value(&body).unwrap();
-    assert_eq!(
-        value.get("computeType").and_then(|v| v.as_str()),
-        Some("process")
-    );
+    assert!(value.get("manifest").is_none());
+    assert!(value.get("computeType").is_none());
     assert!(value.get("processEntry").is_none());
+}
+
+#[test]
+fn prepare_upload_body_serializes_without_deprecated_fields() {
+    let body = PrepareUploadBody {
+        manifest: None,
+        files: vec![],
+        bundle_sha256: Some("abc123".to_string()),
+    };
+
+    let value = serde_json::to_value(&body).unwrap();
+    assert!(value.get("manifest").is_none());
+    assert!(value.get("computeType").is_none());
+    assert!(value.get("processEntry").is_none());
+    assert_eq!(
+        value.get("bundleSha256").and_then(|v| v.as_str()),
+        Some("abc123")
+    );
 }
 
 // ── manifest → compute type mapping tests ────────────────────
@@ -825,6 +794,27 @@ fn ensure_process_entry_not_found_is_error_for_strict_framework() {
     );
 }
 
+// ── COMPUTE auto-gen bail: entry not found ────────────────────
+
+#[test]
+fn ensure_process_entry_none_is_the_bail_precondition() {
+    // Verify that ensure_process_entry returns None for a project with no runnable files —
+    // this is the exact state that triggers "Cannot auto-generate COMPUTE manifest" in
+    // the deploy run() flow when is_process && !has_manifest.
+    let dir = tempdir().unwrap();
+    // Create a "dist" output dir with no .js/.mjs/.cjs files
+    fs::create_dir(dir.path().join("dist")).unwrap();
+    fs::write(dir.path().join("dist/style.css"), "body{}").unwrap();
+
+    let detection = make_detection("other", None);
+    let (entry, _warning) =
+        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
+    assert!(
+        entry.is_none(),
+        "entry should be None when no runnable file exists (triggering COMPUTE bail)"
+    );
+}
+
 // ── framework_process_diagnostic tests ───────────────────────
 
 #[test]
@@ -1081,4 +1071,28 @@ fn validate_health_path_accepts_valid_path() {
     assert!(validate_health_path("/health", "--health-check-path").is_ok());
     assert!(validate_health_path("/api/health", "--health-check-path").is_ok());
     assert!(validate_health_path("/v1/healthz", "--health-check-path").is_ok());
+}
+
+// ── ComputeConfigBody serialization ─────────────────────────
+
+#[test]
+fn compute_config_body_with_health_check_path_serializes_camel_case() {
+    let body = ComputeConfigBody {
+        health_check_path: Some("/api/health".to_string()),
+    };
+    let value = serde_json::to_value(&body).unwrap();
+    assert_eq!(
+        value.get("healthCheckPath").and_then(|v| v.as_str()),
+        Some("/api/health")
+    );
+    assert!(value.get("health_check_path").is_none());
+}
+
+#[test]
+fn compute_config_body_without_path_omits_field() {
+    let body = ComputeConfigBody {
+        health_check_path: None,
+    };
+    let value = serde_json::to_value(&body).unwrap();
+    assert!(value.get("healthCheckPath").is_none());
 }

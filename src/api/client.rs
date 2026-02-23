@@ -206,6 +206,23 @@ impl ApiClient {
         check_response(resp).await
     }
 
+    pub async fn put<B: Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> anyhow::Result<T> {
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .client
+            .put(&url)
+            .json(body)
+            .send()
+            .await
+            .with_context(|| format!("request failed: PUT {path}"))?;
+
+        check_response(resp).await
+    }
+
     /// PUT raw bytes to an absolute URL (for presigned S3 uploads).
     /// Uses a separate client without auth headers to avoid leaking credentials.
     pub async fn put_bytes(

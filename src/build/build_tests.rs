@@ -1,4 +1,5 @@
-use super::{compute_aware_output_dirs, detect_output_dir};
+use super::{compute_aware_output_dirs, detect_output_dir, run_with_hint};
+use crate::cli::BuildArgs;
 
 #[test]
 fn framework_dirs_checked_before_config_dirs() {
@@ -148,4 +149,82 @@ fn nextjs_standalone_found_before_dot_next() {
         "should find standalone first, got: {}",
         found.display()
     );
+}
+
+// ── STATIC auto-gen in run_with_hint ─────────────────────────
+
+fn make_static_detection(framework: &str) -> crate::detect::types::DetectionResult {
+    crate::detect::types::DetectionResult {
+        framework: framework.to_string(),
+        name: framework.to_string(),
+        version: None,
+        suggested_compute: crate::detect::types::ComputeType::Static,
+        reason: String::new(),
+        metadata: crate::detect::types::DetectionMetadata {
+            uses_typescript: None,
+            config_files: vec![],
+            runtime: crate::detect::types::RuntimeInfo {
+                runtime_type: crate::detect::types::RuntimeType::Node,
+                version: None,
+            },
+            package_manager: None,
+            build_info: None,
+            monorepo: None,
+            ssr_analysis: None,
+            ssr_adapter: None,
+            structure: vec![],
+        },
+    }
+}
+
+#[tokio::test]
+async fn static_project_without_adapter_auto_generates_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    // Create a "dist" output dir with a file but no .onreza/ subdir
+    std::fs::create_dir(dir.path().join("dist")).unwrap();
+    std::fs::write(dir.path().join("dist/index.html"), "<h1>hi</h1>").unwrap();
+
+    let detection = make_static_detection("vite");
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: true,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection))
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("STATIC auto-gen should produce a manifest");
+    assert_eq!(manifest.layers.len(), 1);
+    assert_eq!(
+        manifest.layers[0].target,
+        super::manifest::LayerTarget::Static
+    );
+    assert_eq!(manifest.routes.len(), 1);
+    assert_eq!(manifest.routes[0].pattern, "^/.*$");
+}
+
+#[tokio::test]
+async fn process_project_without_adapter_returns_no_manifest_from_build() {
+    let dir = tempfile::tempdir().unwrap();
+    // Create a "dist" output dir — no .onreza/ subdir, non-static detection
+    std::fs::create_dir(dir.path().join("dist")).unwrap();
+    std::fs::write(dir.path().join("dist/server.js"), "console.log('ok')").unwrap();
+
+    let detection = make_detection("other", None); // suggested_compute == Process
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: true,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection))
+        .await
+        .unwrap();
+
+    // PROCESS without adapter: build returns None, deploy step will auto-gen manifest later
+    assert!(result.manifest.is_none());
 }

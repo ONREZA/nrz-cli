@@ -555,6 +555,59 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Auto-generate a minimal STATIC manifest for plain static deploys (no adapter).
+pub fn generate_static_manifest() -> Manifest {
+    Manifest {
+        version: 1,
+        layers: vec![Layer {
+            name: "site".to_string(),
+            target: LayerTarget::Static,
+            directory: ".".to_string(),
+            entry: None,
+            export_format: None,
+            runtime: None,
+        }],
+        routes: vec![Route {
+            pattern: "^/.*$".to_string(),
+            layer: "site".to_string(),
+            priority: Some(0),
+            revalidate: None,
+            methods: None,
+            headers: None,
+        }],
+        prerender: None,
+        middleware: None,
+        meta: None,
+    }
+}
+
+/// Auto-generate a minimal COMPUTE manifest for PROCESS deploys without adapter.
+/// `entry` — resolved entry point relative to output dir (e.g. "server.js").
+pub fn generate_compute_manifest(entry: &str) -> Manifest {
+    Manifest {
+        version: 1,
+        layers: vec![Layer {
+            name: "server".to_string(),
+            target: LayerTarget::Compute,
+            directory: ".".to_string(),
+            entry: Some(entry.to_string()),
+            export_format: None,
+            runtime: None,
+        }],
+        routes: vec![Route {
+            pattern: "^/.*$".to_string(),
+            layer: "server".to_string(),
+            priority: Some(0),
+            revalidate: None,
+            methods: None,
+            headers: None,
+        }],
+        prerender: None,
+        middleware: None,
+        meta: None,
+    }
+}
+
 pub fn verify_files(output_dir: &Path, manifest: &Manifest) -> anyhow::Result<()> {
     for layer in &manifest.layers {
         let layer_dir = output_dir.join(&layer.directory);

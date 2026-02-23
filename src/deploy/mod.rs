@@ -89,9 +89,6 @@ struct CreateDeploymentBody {
     migrations: Option<Vec<migrations::Migration>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bundle_sha256: Option<String>,
-    compute_type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    process_entry: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -295,14 +292,6 @@ pub async fn run(
     };
     let mut warnings: Vec<String> = Vec::new();
 
-    validate_compute_manifest_contract(compute, has_manifest, &detection)?;
-
-    let manifest_raw: Option<serde_json::Value> = loaded_manifest
-        .as_ref()
-        .map(serde_json::to_value)
-        .transpose()
-        .context("failed to serialize manifest")?;
-
     // Inform about SSR framework compute mode when auto-detected
     if !has_manifest
         && args.compute.is_none()
@@ -332,9 +321,18 @@ pub async fn run(
     }
 
     let is_process = compute == ComputeType::Process;
+
+    // manifest_raw starts from build result (may already be Some for STATIC auto-gen)
+    let mut manifest_raw: Option<serde_json::Value> = loaded_manifest
+        .as_ref()
+        .map(serde_json::to_value)
+        .transpose()
+        .context("failed to serialize manifest")?;
+
     // When a manifest is present, process entry comes from the manifest's COMPUTE layer —
     // skip pre-flight validation and auto-detection.
-    let process_entry = if is_process && !has_manifest {
+    // When no manifest: find entry and auto-generate COMPUTE manifest.
+    if is_process && !has_manifest {
         validate_process_output(&output_dir, &project_dir, &detection)?;
         let (entry, warning) = ensure_process_entry(
             &output_dir,
@@ -343,14 +341,35 @@ pub async fn run(
             &detection,
             json,
         )?;
-        if let Some(warning) = warning {
-            output::warn(json, &warning);
-            warnings.push(warning);
+        if let Some(ref w) = warning {
+            output::warn(json, w);
+            warnings.push(w.clone());
         }
-        entry
-    } else {
-        None
-    };
+        match entry {
+            Some(ref e) => {
+                let auto = build_manifest::generate_compute_manifest(e);
+                output::status(
+                    json,
+                    "~",
+                    format!("Auto-generated COMPUTE manifest (entry: {e})"),
+                );
+                manifest_raw = Some(
+                    serde_json::to_value(&auto)
+                        .context("failed to serialize auto-generated manifest")?,
+                );
+            }
+            None => {
+                bail!(
+                    "Cannot auto-generate COMPUTE manifest: entry point not detected in {}.\n\n\
+                     Create .onreza/manifest.json manually or install an @onreza/* adapter.\n\
+                     See: docs.onreza.ru/manifest",
+                    output_dir.display()
+                );
+            }
+        }
+    }
+
+    validate_compute_manifest_contract(compute, manifest_raw.is_some(), &detection)?;
 
     // Resolve health check path (PROCESS only)
     let health_check = if is_process {
@@ -380,7 +399,6 @@ pub async fn run(
             &output_dir,
             json,
             compute,
-            process_entry,
             warnings,
         )
         .await;
@@ -497,8 +515,6 @@ pub async fn run(
         commit_sha,
         migrations: mig_entries,
         bundle_sha256: bundle_data.as_ref().map(|(_, sha)| sha.clone()),
-        compute_type: compute.to_string(),
-        process_entry: process_entry.clone(),
     };
     let file_count = body.files.len();
 
@@ -722,8 +738,8 @@ async fn sync_compute_config(
         health_check_path: health_check.path.clone(),
     };
 
-    let path = format!("/v1/projects/{project_id}/compute-config");
-    let resp: Result<serde_json::Value, _> = client.patch(&path, &body).await;
+    let path = format!("/v1/compute-config/{project_id}");
+    let resp: Result<serde_json::Value, _> = client.put(&path, &body).await;
     if let Err(e) = resp {
         output::warn(json, format!("failed to sync compute config: {e}"));
     }
@@ -851,11 +867,8 @@ struct PrepareUploadBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     manifest: Option<serde_json::Value>,
     files: Vec<FileEntry>,
-    compute_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     bundle_sha256: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    process_entry: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -886,16 +899,14 @@ async fn resume_deploy(
     output_dir: &Path,
     json: bool,
     compute: ComputeType,
-    process_entry: Option<String>,
     warnings: Vec<String>,
 ) -> anyhow::Result<()> {
-    let compute_type = compute.to_string();
     let is_process = compute == ComputeType::Process;
 
     output::status(
         json,
         "~",
-        format!("Resuming deployment {deployment_id} (compute: {compute_type})"),
+        format!("Resuming deployment {deployment_id} (compute: {compute})"),
     );
 
     // Create bundle for PROCESS deployments
@@ -908,9 +919,7 @@ async fn resume_deploy(
     let body = PrepareUploadBody {
         manifest,
         files,
-        compute_type,
         bundle_sha256: bundle_data.as_ref().map(|(_, sha)| sha.clone()),
-        process_entry,
     };
 
     let prepared: PrepareUploadResponse = client
@@ -980,6 +989,17 @@ fn validate_compute_manifest_contract(
              \x20 1. Install an adapter for your framework\n\
              \x20 2. Use --compute static if your build output is static files only\n\
              \x20 3. Use --compute process for standalone server deployment"
+        );
+    }
+
+    // Safety net: PROCESS auto-generation (or an adapter) should have produced a manifest
+    // before this point. Reaching here without one is an unexpected internal state.
+    if compute == ComputeType::Process && !has_manifest {
+        bail!(
+            "Internal error: PROCESS deploy reached validation without a manifest.\n\
+             This is unexpected — please report this at github.com/onreza/nrz-cli/issues.\n\n\
+             If you see this consistently, work around it by creating .onreza/manifest.json\n\
+             manually or installing an @onreza/* adapter."
         );
     }
 

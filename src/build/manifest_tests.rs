@@ -2,7 +2,10 @@
 
 use std::path::Path;
 
-use super::manifest::{LayerTarget, load_and_validate, primary_compute_target, verify_files};
+use super::manifest::{
+    LayerTarget, generate_compute_manifest, generate_static_manifest, load_and_validate,
+    primary_compute_target, validate, verify_files,
+};
 
 // ── Fixtures ─────────────────────────────────────────────────
 
@@ -1597,5 +1600,44 @@ fn runtime_negative_memory_is_error() {
         err.to_string().contains("non-negative integer")
             || err.to_string().contains("failed to parse"),
         "{err}"
+    );
+}
+
+// ── Auto-generation ────────────────────────────────────────────
+
+#[test]
+fn generate_static_manifest_is_valid() {
+    let m = generate_static_manifest();
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 1);
+    assert_eq!(m.layers[0].target, LayerTarget::Static);
+    assert_eq!(m.layers[0].directory, ".");
+    assert!(m.layers[0].entry.is_none());
+    assert_eq!(m.routes.len(), 1);
+    assert_eq!(m.routes[0].pattern, "^/.*$");
+    assert_eq!(m.routes[0].layer, "site");
+}
+
+#[test]
+fn generate_compute_manifest_is_valid() {
+    let m = generate_compute_manifest("server.js");
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 1);
+    assert_eq!(m.layers[0].target, LayerTarget::Compute);
+    assert_eq!(m.layers[0].entry.as_deref(), Some("server.js"));
+    assert_eq!(m.layers[0].directory, ".");
+    assert_eq!(m.routes.len(), 1);
+    assert_eq!(m.routes[0].pattern, "^/.*$");
+    assert_eq!(m.routes[0].layer, "server");
+}
+
+#[test]
+fn generate_compute_manifest_empty_entry_fails_validation() {
+    // Auto-gen with empty entry string must fail validate() — callers must pass a non-empty entry.
+    let m = generate_compute_manifest("");
+    let err = validate(&m).expect_err("empty entry should fail validation");
+    assert!(
+        err.to_string().contains("entry must not be empty"),
+        "unexpected error: {err}"
     );
 }
