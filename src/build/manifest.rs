@@ -68,6 +68,8 @@ pub struct Layer {
     pub export_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeConfig>,
+    #[serde(rename = "isPrecompressed", skip_serializing_if = "Option::is_none")]
+    pub is_precompressed: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
@@ -275,6 +277,12 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                 }
             }
             LayerTarget::Isolate => {
+                if layer.is_precompressed.is_some() {
+                    anyhow::bail!(
+                        "ISOLATE layer '{}' must not have 'isPrecompressed'",
+                        layer.name
+                    );
+                }
                 let entry = layer.entry.as_deref().ok_or_else(|| {
                     anyhow::anyhow!("layer '{}' (target=ISOLATE) requires 'entry'", layer.name)
                 })?;
@@ -308,6 +316,12 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                 }
             }
             LayerTarget::Compute => {
+                if layer.is_precompressed.is_some() {
+                    anyhow::bail!(
+                        "COMPUTE layer '{}' must not have 'isPrecompressed'",
+                        layer.name
+                    );
+                }
                 let entry = layer.entry.as_deref().ok_or_else(|| {
                     anyhow::anyhow!("layer '{}' (target=COMPUTE) requires 'entry'", layer.name)
                 })?;
@@ -366,8 +380,8 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
 
     let layer_names: HashSet<&str> = manifest.layers.iter().map(|l| l.name.as_str()).collect();
 
-    let mut route_patterns: HashSet<&str> = HashSet::new();
-    for route in &manifest.routes {
+    let mut route_pattern_priorities: HashSet<(&str, i32)> = HashSet::new();
+    for (route_idx, route) in manifest.routes.iter().enumerate() {
         if !route.pattern.starts_with("^/") {
             anyhow::bail!("route pattern must start with '^/': '{}'", route.pattern);
         }
@@ -385,8 +399,35 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
         if let Err(e) = Regex::new(&route.pattern) {
             anyhow::bail!("invalid regex in route pattern '{}': {}", route.pattern, e);
         }
-        if !route_patterns.insert(route.pattern.as_str()) {
-            anyhow::bail!("duplicate route pattern: '{}'", route.pattern);
+        let priority = route.priority.unwrap_or(0);
+        if !route_pattern_priorities.insert((route.pattern.as_str(), priority)) {
+            anyhow::bail!(
+                "duplicate route pattern with same priority: '{}' (priority {}{})",
+                route.pattern,
+                priority,
+                if route.priority.is_none() {
+                    ", implicit default"
+                } else {
+                    ""
+                }
+            );
+        }
+        // Same pattern + same layer at different priorities is unreachable:
+        // only one priority is evaluated per (pattern, layer) pair, making the other dead code.
+        for other in &manifest.routes[..route_idx] {
+            if other.pattern == route.pattern
+                && other.layer == route.layer
+                && other.priority.unwrap_or(0) != priority
+            {
+                anyhow::bail!(
+                    "route pattern '{}' maps to the same layer '{}' at different priorities ({} and {}), \
+                     which makes the lower-priority route unreachable",
+                    route.pattern,
+                    route.layer,
+                    other.priority.unwrap_or(0),
+                    priority
+                );
+            }
         }
         if !layer_names.contains(route.layer.as_str()) {
             anyhow::bail!("route references unknown layer: '{}'", route.layer);
@@ -566,6 +607,7 @@ pub fn generate_static_manifest() -> Manifest {
             entry: None,
             export_format: None,
             runtime: None,
+            is_precompressed: None,
         }],
         routes: vec![Route {
             pattern: "^/.*$".to_string(),
@@ -593,6 +635,7 @@ pub fn generate_compute_manifest(entry: &str) -> Manifest {
             entry: Some(entry.to_string()),
             export_format: None,
             runtime: None,
+            is_precompressed: None,
         }],
         routes: vec![Route {
             pattern: "^/.*$".to_string(),
@@ -602,6 +645,85 @@ pub fn generate_compute_manifest(entry: &str) -> Manifest {
             methods: None,
             headers: None,
         }],
+        prerender: None,
+        middleware: None,
+        meta: None,
+    }
+}
+
+/// Auto-generate a Next.js standalone manifest with STATIC + COMPUTE layers.
+///
+/// - `_static/` layer serves `/_next/static/*` via CDN with correct URL nesting
+/// - `public/` layer (optional) serves root-level assets; lower-priority server route handles misses
+/// - COMPUTE layer runs `server.js`
+///
+/// Routes use priority-based routing: static(100) > public(50) > server(0).
+pub fn generate_nextjs_standalone_manifest(has_public: bool) -> Manifest {
+    let mut layers = vec![Layer {
+        name: "static-assets".to_string(),
+        target: LayerTarget::Static,
+        directory: "_static".to_string(),
+        entry: None,
+        export_format: None,
+        runtime: None,
+        is_precompressed: None,
+    }];
+
+    if has_public {
+        layers.push(Layer {
+            name: "public-assets".to_string(),
+            target: LayerTarget::Static,
+            directory: "public".to_string(),
+            entry: None,
+            export_format: None,
+            runtime: None,
+            is_precompressed: None,
+        });
+    }
+
+    layers.push(Layer {
+        name: "server".to_string(),
+        target: LayerTarget::Compute,
+        directory: ".".to_string(),
+        entry: Some("server.js".to_string()),
+        export_format: None,
+        runtime: None,
+        is_precompressed: None,
+    });
+
+    let mut routes = vec![Route {
+        pattern: "^/_next/static/.*$".to_string(),
+        layer: "static-assets".to_string(),
+        priority: Some(100),
+        revalidate: None,
+        methods: None,
+        headers: None,
+    }];
+
+    if has_public {
+        routes.push(Route {
+            pattern: "^/.*$".to_string(),
+            layer: "public-assets".to_string(),
+            priority: Some(50),
+            revalidate: None,
+            methods: None,
+            headers: None,
+        });
+    }
+
+    routes.push(Route {
+        pattern: "^/.*$".to_string(),
+        layer: "server".to_string(),
+        priority: Some(0),
+        revalidate: None,
+        methods: None,
+        headers: None,
+    });
+
+    Manifest {
+        version: 1,
+        layers,
+        routes,
         prerender: None,
         middleware: None,
         meta: None,

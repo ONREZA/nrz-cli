@@ -59,6 +59,9 @@ sha2 = "0.10"
 # Compression (tar.zst bundle for PROCESS deployments)
 zstd = "0.13"
 
+# Compression (brotli pre-compression for STATIC layers)
+brotli = "8.0.2"
+
 # URL encoding
 percent-encoding = "2"
 

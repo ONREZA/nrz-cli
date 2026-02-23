@@ -269,11 +269,29 @@ pub async fn run(
     let loaded_manifest = build_result.manifest;
     let has_manifest = loaded_manifest.is_some();
 
-    // Scan output directory for flat file list
+    // Scan output directory recursively into a flat file list, pre-compressing files
+    // in STATIC layers marked isPrecompressed.
+    // Run in a blocking task: combines filesystem I/O and CPU-bound brotli compression.
     output::status(json, "~", "Scanning output directory...");
-    let files = scan_files(&output_dir)?;
+    let pc_dirs = precompressed_dirs(loaded_manifest.as_ref());
+    let output_dir_for_scan = output_dir.clone();
+    let (files, compressed_map) = tokio::task::spawn_blocking(move || {
+        scan_and_maybe_compress(&output_dir_for_scan, &pc_dirs)
+    })
+    .await
+    .context("file scan task failed (panic or runtime shutdown)")??;
     if files.is_empty() {
         bail!("output directory is empty: {}", output_dir.display());
+    }
+    if !compressed_map.is_empty() {
+        output::status(
+            json,
+            "~",
+            format!(
+                "Pre-compressed {} file(s) with brotli",
+                compressed_map.len()
+            ),
+        );
     }
 
     // Resolve compute type: CLI flag > config > manifest layers > detect
@@ -400,6 +418,7 @@ pub async fn run(
             json,
             compute,
             warnings,
+            compressed_map,
         )
         .await;
     }
@@ -544,6 +563,7 @@ pub async fn run(
         total_size,
         json,
         bundle_upload,
+        &compressed_map,
     )
     .await?;
 
@@ -747,6 +767,7 @@ async fn sync_compute_config(
 
 // ── Shared upload + activate ─────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 async fn upload_and_activate(
     client: &ApiClient,
     deployment_id: &str,
@@ -755,6 +776,7 @@ async fn upload_and_activate(
     total_size: u64,
     json: bool,
     bundle_upload: Option<(Vec<u8>, &str)>, // (bundle_bytes, presigned_url)
+    compressed_data: &CompressedMap,
 ) -> anyhow::Result<()> {
     // Upload bundle first if present
     if let Some((bundle_bytes, bundle_url)) = bundle_upload {
@@ -791,10 +813,14 @@ async fn upload_and_activate(
                 let spinner = &spinner;
                 let uploaded = &uploaded;
                 async move {
-                    let file_path = output_dir.join(&file_url.path);
-                    let data = tokio::fs::read(&file_path)
-                        .await
-                        .with_context(|| format!("failed to read {}", file_path.display()))?;
+                    let data = if let Some(br_bytes) = compressed_data.get(&file_url.path) {
+                        br_bytes.clone()
+                    } else {
+                        let file_path = output_dir.join(&file_url.path);
+                        tokio::fs::read(&file_path)
+                            .await
+                            .with_context(|| format!("failed to read {}", file_path.display()))?
+                    };
 
                     let content_type = guess_content_type(&file_url.path);
 
@@ -900,6 +926,7 @@ async fn resume_deploy(
     json: bool,
     compute: ComputeType,
     warnings: Vec<String>,
+    compressed_map: CompressedMap,
 ) -> anyhow::Result<()> {
     let is_process = compute == ComputeType::Process;
 
@@ -949,6 +976,7 @@ async fn resume_deploy(
         total_size,
         json,
         bundle_upload,
+        &compressed_map,
     )
     .await?;
 
@@ -1493,17 +1521,83 @@ fn detect_migrations(
 
 // ── File scanning ────────────────────────────────────────────
 
-fn scan_files(dir: &Path) -> anyhow::Result<Vec<FileEntry>> {
-    let mut files = Vec::new();
-    scan_dir_recursive(dir, dir, &mut files)?;
-    files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
-    Ok(files)
+/// Returns the set of layer directories (relative to output_dir, normalised with trailing `/`
+/// or `"."` for root) that have `isPrecompressed: true`.
+///
+/// Files whose relative path starts with one of these prefixes will be brotli-compressed
+/// before upload, and their compressed size will be reported to the server.
+fn precompressed_dirs(manifest: Option<&build_manifest::Manifest>) -> Vec<String> {
+    let Some(m) = manifest else {
+        return Vec::new();
+    };
+    m.layers
+        .iter()
+        .filter(|l| {
+            l.target == build_manifest::LayerTarget::Static && l.is_precompressed == Some(true)
+        })
+        .map(|l| {
+            if l.directory == "." {
+                ".".to_string()
+            } else {
+                // Normalise so we can use starts_with on relative file paths
+                format!("{}/", l.directory.trim_end_matches('/'))
+            }
+        })
+        .collect()
 }
 
-fn scan_dir_recursive(
+/// Returns `true` if the file at `rel_path` belongs to one of the precompressed layer dirs.
+fn is_precompressed_path(rel_path: &str, dirs: &[String]) -> bool {
+    dirs.iter().any(|d| {
+        if d == "." {
+            true
+        } else {
+            rel_path.starts_with(d.as_str())
+        }
+    })
+}
+
+/// Compress `data` with brotli at quality 6 (balances ratio and speed for deploy-time).
+///
+/// Uses `BrotliCompress` (not `CompressorWriter`) so that finalization errors
+/// are surfaced as a `Result` rather than silently dropped on `Drop`.
+/// `lgwin=22` (4 MB window) is the brotli default.
+fn brotli_compress(data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let mut out = Vec::with_capacity(data.len() / 2 + 64);
+    let params = brotli::enc::BrotliEncoderParams {
+        quality: 6,
+        lgwin: 22,
+        ..Default::default()
+    };
+    brotli::BrotliCompress(&mut std::io::Cursor::new(data), &mut out, &params)
+        .map_err(|e| anyhow::anyhow!("brotli compression failed: {e}"))?;
+    Ok(out)
+}
+
+/// Maps relative file path → brotli-compressed bytes for files in precompressed STATIC layers.
+type CompressedMap = std::collections::HashMap<String, Vec<u8>>;
+
+/// Scans `dir` for files. For files matching a precompressed layer dir, compresses with brotli
+/// and records the compressed size. Returns `(entries, compressed_data)` where
+/// `compressed_data` maps relative path → brotli bytes for files that were compressed.
+fn scan_and_maybe_compress(
+    dir: &Path,
+    precompressed: &[String],
+) -> anyhow::Result<(Vec<FileEntry>, CompressedMap)> {
+    let mut files = Vec::new();
+    let mut compressed_data: CompressedMap = CompressedMap::new();
+
+    scan_dir_recursive_compress(dir, dir, precompressed, &mut files, &mut compressed_data)?;
+    files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    Ok((files, compressed_data))
+}
+
+fn scan_dir_recursive_compress(
     base: &Path,
     current: &Path,
+    precompressed: &[String],
     files: &mut Vec<FileEntry>,
+    compressed_data: &mut CompressedMap,
 ) -> anyhow::Result<()> {
     let entries = std::fs::read_dir(current)
         .with_context(|| format!("failed to read directory {}", current.display()))?;
@@ -1519,17 +1613,46 @@ fn scan_dir_recursive(
         }
 
         if ft.is_dir() {
-            scan_dir_recursive(base, &path, files)?;
+            scan_dir_recursive_compress(base, &path, precompressed, files, compressed_data)?;
         } else if ft.is_file() {
             let rel = path
                 .strip_prefix(base)
                 .context("failed to compute relative path")?;
             let rel_str = rel.to_string_lossy().replace('\\', "/");
 
-            files.push(FileEntry {
-                path: rel_str,
-                size: entry.metadata()?.len(),
-            });
+            if !precompressed.is_empty() && is_precompressed_path(&rel_str, precompressed) {
+                let raw = std::fs::read(&path)
+                    .with_context(|| format!("failed to read {}", path.display()))?;
+                let compressed = brotli_compress(&raw)
+                    .with_context(|| format!("failed to compress {}", rel_str))?;
+                if compressed.len() < raw.len() {
+                    let compressed_size = compressed.len() as u64;
+                    compressed_data.insert(rel_str.clone(), compressed);
+                    files.push(FileEntry {
+                        path: rel_str,
+                        size: compressed_size,
+                    });
+                } else {
+                    // Brotli expanded the file — upload raw bytes instead.
+                    // The layer's isPrecompressed flag stays true; the server
+                    // handles mixed raw/compressed files within the same layer.
+                    tracing::warn!(
+                        path = %rel_str,
+                        raw_bytes = raw.len(),
+                        compressed_bytes = compressed.len(),
+                        "brotli expanded file, uploading raw bytes for precompressed layer"
+                    );
+                    files.push(FileEntry {
+                        path: rel_str,
+                        size: raw.len() as u64,
+                    });
+                }
+            } else {
+                files.push(FileEntry {
+                    path: rel_str,
+                    size: entry.metadata()?.len(),
+                });
+            }
         }
     }
 

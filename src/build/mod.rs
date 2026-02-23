@@ -35,7 +35,8 @@ struct BuildOutput {
     framework_version: Option<String>,
 }
 
-/// Result of build validation — carries the parsed manifest so deploy avoids re-reading it.
+/// Result of the build step — carries the output directory and parsed manifest so deploy avoids re-reading them.
+#[derive(Debug)]
 pub struct BuildResult {
     pub output_dir: std::path::PathBuf,
     pub manifest: Option<manifest::Manifest>,
@@ -134,6 +135,34 @@ pub async fn run_with_hint(
             );
         }
         Some(manifest)
+    } else if detection.framework == "nextjs"
+        && detection
+            .metadata
+            .ssr_analysis
+            .as_ref()
+            .is_some_and(|ssr| ssr.has_standalone_output())
+    {
+        if !output_dir.join("server.js").is_file() {
+            anyhow::bail!(
+                "server.js not found in standalone output {}. \
+                 Ensure `output: 'standalone'` is set in next.config.js \
+                 and `next build` completed successfully.",
+                output_dir.display()
+            );
+        }
+        prepare_nextjs_standalone(&project_dir, &output_dir, json)?;
+        let has_public = output_dir.join("public").is_dir();
+        let auto = manifest::generate_nextjs_standalone_manifest(has_public);
+        output::status(
+            json,
+            "~",
+            "Auto-generated Next.js standalone manifest (STATIC + COMPUTE)",
+        );
+        if !args.skip_validation {
+            manifest::verify_files(&output_dir, &auto)?;
+        }
+        emit_build_output(json, &auto, &output_dir, Some(detection));
+        Some(auto)
     } else if detection.suggested_compute == crate::detect::types::ComputeType::Static {
         let auto = manifest::generate_static_manifest();
         output::status(
@@ -141,6 +170,7 @@ pub async fn run_with_hint(
             "~",
             "Auto-generated STATIC manifest (no adapter found)",
         );
+        emit_build_output(json, &auto, &output_dir, Some(detection));
         Some(auto)
     } else {
         if !json {
@@ -153,6 +183,55 @@ pub async fn run_with_hint(
         output_dir,
         manifest: loaded_manifest,
     })
+}
+
+fn emit_build_output(
+    json: bool,
+    manifest: &manifest::Manifest,
+    output_dir: &Path,
+    detection: Option<&crate::detect::types::DetectionResult>,
+) {
+    let framework = detection.map(|d| d.framework.clone());
+    let framework_version = detection.and_then(|d| d.version.clone());
+
+    if json {
+        output::json_output(&BuildOutput {
+            layers: manifest
+                .layers
+                .iter()
+                .map(|l| LayerInfo {
+                    name: l.name.clone(),
+                    target: l.target.to_string(),
+                    directory: l.directory.clone(),
+                    entry: l.entry.clone(),
+                })
+                .collect(),
+            routes: manifest.routes.len(),
+            output_dir: output_dir.to_string_lossy().into_owned(),
+            framework,
+            framework_version,
+        });
+    } else {
+        let layers_display: Vec<String> = manifest
+            .layers
+            .iter()
+            .map(|l| match &l.entry {
+                Some(e) => format!("{}({}:{})", l.target, l.directory, e),
+                None => format!("{}({})", l.target, l.directory),
+            })
+            .collect();
+        eprintln!(
+            "  {} {} layer(s): {}",
+            console::style("✓").green().bold(),
+            manifest.layers.len(),
+            layers_display.join(", "),
+        );
+        eprintln!(
+            "  {} {} route(s)",
+            console::style("✓").green().bold(),
+            manifest.routes.len(),
+        );
+    }
 }
 
 /// Use SSR analysis from detection to refine the output directory list.
@@ -222,4 +301,94 @@ fn detect_output_dir(
         project_dir.display(),
         dirs_display.join(", ")
     );
+}
+
+/// Prepare Next.js standalone output by copying static assets and public files
+/// into the correct directory structure for STATIC + COMPUTE layers.
+///
+/// Safe to call after a partial run: skips copy steps when the destination directory already exists.
+fn prepare_nextjs_standalone(
+    project_dir: &Path,
+    output_dir: &Path,
+    json: bool,
+) -> anyhow::Result<()> {
+    let next_static_src = project_dir.join(".next/static");
+
+    if !next_static_src.is_dir() {
+        output::status(
+            json,
+            "~",
+            "No .next/static/ found — standalone output will have no static assets",
+        );
+    } else {
+        // 1. Copy .next/static/ → {output}/.next/static/ (for server.js)
+        let server_static_dst = output_dir.join(".next/static");
+        if !server_static_dst.is_dir() {
+            output::status(json, "+", "Copying .next/static/ for server.js");
+            copy_dir_recursive(&next_static_src, &server_static_dst)?;
+        } else {
+            output::status(json, "~", ".next/static/ already present, skipping copy");
+        }
+
+        // 2. Copy .next/static/ → {output}/_static/_next/static/ (for CDN STATIC layer)
+        let cdn_static_dst = output_dir.join("_static/_next/static");
+        if !cdn_static_dst.is_dir() {
+            output::status(json, "+", "Copying static assets to _static/ for CDN");
+            copy_dir_recursive(&next_static_src, &cdn_static_dst)?;
+        } else {
+            output::status(json, "~", "_static/ already present, skipping copy");
+        }
+    }
+
+    // 3. Copy public/ → {output}/public/ (STATIC layer for root-level assets)
+    let public_src = project_dir.join("public");
+    if public_src.is_dir() {
+        let public_dst = output_dir.join("public");
+        if !public_dst.is_dir() {
+            output::status(json, "+", "Copying public/ assets");
+            copy_dir_recursive(&public_src, &public_dst)?;
+        } else {
+            output::status(json, "~", "public/ already present, skipping copy");
+        }
+    }
+
+    Ok(())
+}
+
+/// Recursively copy a directory tree. Skips symlinks (consistent with deploy/bundle.rs).
+fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dst)
+        .with_context(|| format!("failed to create directory: {}", dst.display()))?;
+
+    for entry in std::fs::read_dir(src)
+        .with_context(|| format!("failed to read directory: {}", src.display()))?
+    {
+        let entry = entry?;
+        let ft = entry.file_type()?;
+
+        // Skip symlinks — consistent with deploy/bundle.rs
+        if ft.is_symlink() {
+            tracing::debug!(path = %entry.path().display(), "skipping symlink in copy");
+            continue;
+        }
+
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if ft.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else if ft.is_file() {
+            std::fs::copy(&src_path, &dst_path).with_context(|| {
+                format!(
+                    "failed to copy {} → {}",
+                    src_path.display(),
+                    dst_path.display()
+                )
+            })?;
+        } else {
+            tracing::warn!(path = %src_path.display(), "skipping non-regular file");
+        }
+    }
+
+    Ok(())
 }

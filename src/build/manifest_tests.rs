@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use super::manifest::{
-    LayerTarget, generate_compute_manifest, generate_static_manifest, load_and_validate,
-    primary_compute_target, validate, verify_files,
+    LayerTarget, generate_compute_manifest, generate_nextjs_standalone_manifest,
+    generate_static_manifest, load_and_validate, primary_compute_target, validate, verify_files,
 };
 
 // ── Fixtures ─────────────────────────────────────────────────
@@ -1117,7 +1117,7 @@ fn directory_path_traversal_single_encoded_dot() {
 // ── Duplicate route patterns ───────────────────────────────────
 
 #[test]
-fn duplicate_route_patterns_is_error() {
+fn duplicate_route_patterns_same_priority_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
         "version": 1,
@@ -1129,7 +1129,54 @@ fn duplicate_route_patterns_is_error() {
     }"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
-    assert!(err.to_string().contains("duplicate route pattern"), "{err}");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("duplicate route pattern with same priority"),
+        "{msg}"
+    );
+    assert!(
+        msg.contains("implicit default"),
+        "error should mention implicit default priority: {msg}"
+    );
+}
+
+#[test]
+fn duplicate_route_patterns_different_priority_is_allowed() {
+    let dir = tempfile::tempdir().unwrap();
+    let json = r#"{
+        "version": 1,
+        "layers": [
+            { "name": "pub", "target": "STATIC", "directory": "public" },
+            { "name": "srv", "target": "COMPUTE", "directory": ".", "entry": "server.js" }
+        ],
+        "routes": [
+            { "pattern": "^/.*$", "layer": "pub", "priority": 50 },
+            { "pattern": "^/.*$", "layer": "srv", "priority": 0 }
+        ]
+    }"#;
+    let path = write_manifest(dir.path(), json);
+    load_and_validate(&path).unwrap();
+}
+
+#[test]
+fn duplicate_pattern_same_layer_different_priority_is_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let json = r#"{
+        "version": 1,
+        "layers": [
+            { "name": "srv", "target": "COMPUTE", "directory": ".", "entry": "server.js" }
+        ],
+        "routes": [
+            { "pattern": "^/.*$", "layer": "srv", "priority": 50 },
+            { "pattern": "^/.*$", "layer": "srv", "priority": 0 }
+        ]
+    }"#;
+    let path = write_manifest(dir.path(), json);
+    let err = load_and_validate(&path).unwrap_err();
+    assert!(
+        err.to_string().contains("unreachable"),
+        "expected unreachable route error, got: {err}"
+    );
 }
 
 // ── Meta size limit ────────────────────────────────────────────
@@ -1640,4 +1687,154 @@ fn generate_compute_manifest_empty_entry_fails_validation() {
         err.to_string().contains("entry must not be empty"),
         "unexpected error: {err}"
     );
+}
+
+// ── isPrecompressed ────────────────────────────────────────────
+
+#[test]
+fn static_layer_is_precompressed_true_parses() {
+    let dir = tempfile::tempdir().unwrap();
+    let json = r#"{
+        "version": 1,
+        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist",
+                     "isPrecompressed": true }],
+        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
+    }"#;
+    let path = write_manifest(dir.path(), json);
+    let m = load_and_validate(&path).unwrap();
+    assert_eq!(m.layers[0].is_precompressed, Some(true));
+}
+
+#[test]
+fn static_layer_is_precompressed_false_parses() {
+    let dir = tempfile::tempdir().unwrap();
+    let json = r#"{
+        "version": 1,
+        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist",
+                     "isPrecompressed": false }],
+        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
+    }"#;
+    let path = write_manifest(dir.path(), json);
+    let m = load_and_validate(&path).unwrap();
+    assert_eq!(m.layers[0].is_precompressed, Some(false));
+}
+
+#[test]
+fn static_layer_is_precompressed_absent_is_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_manifest(dir.path(), STATIC_MANIFEST);
+    let m = load_and_validate(&path).unwrap();
+    assert!(m.layers[0].is_precompressed.is_none());
+}
+
+#[test]
+fn isolate_layer_is_precompressed_is_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let json = r#"{
+        "version": 1,
+        "layers": [{ "name": "s", "target": "ISOLATE", "directory": "server",
+                     "entry": "e.mjs", "export": "fetch", "isPrecompressed": true }],
+        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
+    }"#;
+    let path = write_manifest(dir.path(), json);
+    let err = load_and_validate(&path).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("ISOLATE layer 's' must not have 'isPrecompressed'"),
+        "{err}"
+    );
+}
+
+#[test]
+fn compute_layer_is_precompressed_is_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let json = r#"{
+        "version": 1,
+        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "dist",
+                     "entry": "server.js", "isPrecompressed": true }],
+        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
+    }"#;
+    let path = write_manifest(dir.path(), json);
+    let err = load_and_validate(&path).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("COMPUTE layer 's' must not have 'isPrecompressed'"),
+        "{err}"
+    );
+}
+
+#[test]
+fn is_precompressed_serializes_as_camel_case() {
+    let dir = tempfile::tempdir().unwrap();
+    let json = r#"{
+        "version": 1,
+        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist",
+                     "isPrecompressed": true }],
+        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
+    }"#;
+    let path = write_manifest(dir.path(), json);
+    let m = load_and_validate(&path).unwrap();
+    let serialized = serde_json::to_value(&m).unwrap();
+    let layer = &serialized["layers"][0];
+    assert_eq!(layer["isPrecompressed"], serde_json::json!(true));
+    assert!(layer.get("is_precompressed").is_none());
+}
+
+#[test]
+fn is_precompressed_none_omitted_from_serialization() {
+    let m = generate_static_manifest();
+    let serialized = serde_json::to_value(&m).unwrap();
+    let layer = &serialized["layers"][0];
+    assert!(
+        layer.get("isPrecompressed").is_none(),
+        "isPrecompressed should be omitted when None"
+    );
+}
+
+// ── Next.js standalone manifest generation ─────────────────────
+
+#[test]
+fn nextjs_standalone_manifest_with_public_is_valid() {
+    let m = generate_nextjs_standalone_manifest(true);
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 3);
+    assert_eq!(m.routes.len(), 3);
+    assert_eq!(m.layers[0].name, "static-assets");
+    assert_eq!(m.layers[0].target, LayerTarget::Static);
+    assert_eq!(m.layers[1].name, "public-assets");
+    assert_eq!(m.layers[1].target, LayerTarget::Static);
+    assert_eq!(m.layers[2].name, "server");
+    assert_eq!(m.layers[2].target, LayerTarget::Compute);
+}
+
+#[test]
+fn nextjs_standalone_manifest_without_public_is_valid() {
+    let m = generate_nextjs_standalone_manifest(false);
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 2);
+    assert_eq!(m.routes.len(), 2);
+    assert_eq!(m.layers[0].name, "static-assets");
+    assert_eq!(m.layers[1].name, "server");
+}
+
+#[test]
+fn nextjs_standalone_manifest_directories() {
+    let m = generate_nextjs_standalone_manifest(true);
+    assert_eq!(m.layers[0].directory, "_static");
+    assert_eq!(m.layers[1].directory, "public");
+    assert_eq!(m.layers[2].directory, ".");
+    assert_eq!(m.layers[2].entry.as_deref(), Some("server.js"));
+    // Generated layers must not set is_precompressed (deploy handles compression separately)
+    assert!(m.layers.iter().all(|l| l.is_precompressed.is_none()));
+}
+
+#[test]
+fn nextjs_standalone_manifest_route_priorities() {
+    let m = generate_nextjs_standalone_manifest(true);
+    assert_eq!(m.routes[0].priority, Some(100));
+    assert_eq!(m.routes[0].pattern, "^/_next/static/.*$");
+    assert_eq!(m.routes[1].priority, Some(50));
+    assert_eq!(m.routes[1].pattern, "^/.*$");
+    assert_eq!(m.routes[2].priority, Some(0));
+    assert_eq!(m.routes[2].pattern, "^/.*$");
 }

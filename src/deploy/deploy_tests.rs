@@ -10,7 +10,7 @@ fn scan_files_flat_directory() {
     fs::write(dir.path().join("index.html"), "<h1>hi</h1>").unwrap();
     fs::write(dir.path().join("style.css"), "body{}").unwrap();
 
-    let files = scan_files(dir.path()).unwrap();
+    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
 
     assert_eq!(files.len(), 2);
     assert_eq!(files[0].path, "index.html");
@@ -25,7 +25,7 @@ fn scan_files_nested_directory() {
     fs::write(dir.path().join("assets/app.js"), "js").unwrap();
     fs::write(dir.path().join("assets/images/logo.png"), "png").unwrap();
 
-    let files = scan_files(dir.path()).unwrap();
+    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
 
     assert_eq!(files.len(), 3);
     let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
@@ -40,7 +40,7 @@ fn scan_files_records_correct_sizes() {
     let content = "hello world";
     fs::write(dir.path().join("file.txt"), content).unwrap();
 
-    let files = scan_files(dir.path()).unwrap();
+    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
 
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].size, content.len() as u64);
@@ -49,7 +49,7 @@ fn scan_files_records_correct_sizes() {
 #[test]
 fn scan_files_empty_directory() {
     let dir = tempdir().unwrap();
-    let files = scan_files(dir.path()).unwrap();
+    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
     assert!(files.is_empty());
 }
 
@@ -60,7 +60,7 @@ fn scan_files_sorted_alphabetically() {
     fs::write(dir.path().join("a.txt"), "a").unwrap();
     fs::write(dir.path().join("m.txt"), "m").unwrap();
 
-    let files = scan_files(dir.path()).unwrap();
+    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
 
     assert_eq!(files[0].path, "a.txt");
     assert_eq!(files[1].path, "m.txt");
@@ -72,7 +72,7 @@ fn scan_files_allows_double_dots_in_filename() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("file..backup.js"), "x").unwrap();
 
-    let files = scan_files(dir.path()).unwrap();
+    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].path, "file..backup.js");
 }
@@ -84,7 +84,7 @@ fn scan_files_skips_symlinks() {
     fs::write(dir.path().join("real.txt"), "real").unwrap();
     std::os::unix::fs::symlink(dir.path().join("real.txt"), dir.path().join("link.txt")).unwrap();
 
-    let files = scan_files(dir.path()).unwrap();
+    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].path, "real.txt");
 }
@@ -1095,4 +1095,274 @@ fn compute_config_body_without_path_omits_field() {
     };
     let value = serde_json::to_value(&body).unwrap();
     assert!(value.get("healthCheckPath").is_none());
+}
+
+// ── precompressed_dirs / scan_and_maybe_compress ─────────────
+
+#[test]
+fn precompressed_dirs_empty_when_no_manifest() {
+    let dirs = precompressed_dirs(None);
+    assert!(dirs.is_empty());
+}
+
+#[test]
+fn precompressed_dirs_empty_when_no_static_precompressed() {
+    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
+        r#"{
+        "version": 1,
+        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist" }],
+        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
+    }"#,
+    )
+    .unwrap();
+    let dirs = precompressed_dirs(Some(&manifest));
+    assert!(dirs.is_empty());
+}
+
+#[test]
+fn precompressed_dirs_includes_precompressed_static() {
+    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
+        r#"{
+        "version": 1,
+        "layers": [
+            { "name": "assets", "target": "STATIC", "directory": "client",
+              "isPrecompressed": true },
+            { "name": "server", "target": "ISOLATE", "directory": "server",
+              "entry": "e.mjs", "export": "fetch" }
+        ],
+        "routes": [{ "pattern": "^/.*$", "layer": "server" }]
+    }"#,
+    )
+    .unwrap();
+    let dirs = precompressed_dirs(Some(&manifest));
+    assert_eq!(dirs, vec!["client/"]);
+}
+
+#[test]
+fn precompressed_dirs_root_dot_gives_dot() {
+    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
+        r#"{
+        "version": 1,
+        "layers": [{ "name": "s", "target": "STATIC", "directory": ".",
+                     "isPrecompressed": true }],
+        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
+    }"#,
+    )
+    .unwrap();
+    let dirs = precompressed_dirs(Some(&manifest));
+    assert_eq!(dirs, vec!["."]);
+}
+
+#[test]
+fn scan_and_compress_compresses_precompressed_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let content = "Hello, world! This is a test file with some content to compress.";
+    fs::write(dir.path().join("index.html"), content).unwrap();
+
+    let pc_dirs = vec![".".to_string()];
+    let (entries, compressed) = scan_and_maybe_compress(dir.path(), &pc_dirs).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert!(compressed.contains_key("index.html"));
+
+    let br_bytes = compressed.get("index.html").unwrap();
+    // Compressed size is reported in the entry
+    assert_eq!(entries[0].size, br_bytes.len() as u64);
+    // Compressed bytes differ from original
+    assert_ne!(br_bytes.as_slice(), content.as_bytes());
+    // Verify output differs from raw input (brotli has no magic bytes, but the stream is structurally different)
+    assert_ne!(&br_bytes[..4], &content.as_bytes()[..4]);
+}
+
+#[test]
+fn scan_and_compress_leaves_other_dirs_uncompressed() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("client")).unwrap();
+    fs::create_dir_all(dir.path().join("server")).unwrap();
+    // Use repetitive content that brotli will reliably compress
+    let content = "function hello(){return 42;} ".repeat(20);
+    let content = content.as_str();
+    fs::write(dir.path().join("client/app.js"), content).unwrap();
+    fs::write(dir.path().join("server/entry.mjs"), content).unwrap();
+
+    // Only "client/" is precompressed
+    let pc_dirs = vec!["client/".to_string()];
+    let (entries, compressed) = scan_and_maybe_compress(dir.path(), &pc_dirs).unwrap();
+
+    assert_eq!(entries.len(), 2);
+    assert!(
+        compressed.contains_key("client/app.js"),
+        "client/app.js should be compressed"
+    );
+    assert!(
+        !compressed.contains_key("server/entry.mjs"),
+        "server/entry.mjs should not be compressed"
+    );
+
+    // server file size matches original raw bytes (not compressed)
+    let server_entry = entries
+        .iter()
+        .find(|e| e.path == "server/entry.mjs")
+        .unwrap();
+    assert_eq!(
+        server_entry.size,
+        content.len() as u64,
+        "server file should report raw size"
+    );
+}
+
+#[test]
+fn scan_and_compress_empty_precompressed_list_behaves_like_scan_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let content = "body { color: red; }";
+    fs::write(dir.path().join("style.css"), content).unwrap();
+
+    let (entries, compressed) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert!(compressed.is_empty());
+    assert_eq!(entries[0].size, content.len() as u64);
+}
+
+#[test]
+fn is_precompressed_path_root_dot_matches_all() {
+    assert!(is_precompressed_path("index.html", &[".".to_string()]));
+    assert!(is_precompressed_path("assets/app.js", &[".".to_string()]));
+    assert!(is_precompressed_path(
+        "deep/nested/file.css",
+        &[".".to_string()]
+    ));
+}
+
+#[test]
+fn is_precompressed_path_prefix_matches_only_subtree() {
+    let dirs = vec!["client/".to_string()];
+    assert!(is_precompressed_path("client/app.js", &dirs));
+    assert!(is_precompressed_path("client/sub/deep.css", &dirs));
+    assert!(!is_precompressed_path("server/entry.mjs", &dirs));
+    assert!(!is_precompressed_path("index.html", &dirs));
+}
+
+#[test]
+fn is_precompressed_path_false_prefix_not_matched() {
+    let dirs = vec!["client/".to_string()];
+    // "clientsecrets/" shares the "client" prefix but must NOT match "client/"
+    assert!(!is_precompressed_path("clientsecrets/key.pem", &dirs));
+    assert!(!is_precompressed_path("client-extra/file.js", &dirs));
+    assert!(!is_precompressed_path("clientx", &dirs));
+}
+
+#[test]
+fn precompressed_dirs_only_precompressed_layers_included() {
+    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
+        r#"{
+        "version": 1,
+        "layers": [
+            { "name": "assets", "target": "STATIC", "directory": "client",
+              "isPrecompressed": true },
+            { "name": "public", "target": "STATIC", "directory": "public" }
+        ],
+        "routes": [{ "pattern": "^/.*$", "layer": "assets" }]
+    }"#,
+    )
+    .unwrap();
+    let dirs = precompressed_dirs(Some(&manifest));
+    assert_eq!(dirs, vec!["client/"]);
+    assert!(
+        !dirs.iter().any(|d| d == "public/"),
+        "public/ should not appear"
+    );
+}
+
+#[test]
+fn precompressed_dirs_excludes_explicit_false() {
+    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
+        r#"{
+        "version": 1,
+        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist",
+                     "isPrecompressed": false }],
+        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
+    }"#,
+    )
+    .unwrap();
+    let dirs = precompressed_dirs(Some(&manifest));
+    assert!(dirs.is_empty());
+}
+
+#[test]
+fn precompressed_dirs_trailing_slash_not_doubled() {
+    // directory value already has trailing slash in manifest — must not produce "client//"
+    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
+        r#"{
+        "version": 1,
+        "layers": [{ "name": "s", "target": "STATIC", "directory": "client/",
+                     "isPrecompressed": true }],
+        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
+    }"#,
+    )
+    .unwrap();
+    let dirs = precompressed_dirs(Some(&manifest));
+    assert_eq!(dirs, vec!["client/"]);
+}
+
+fn decompress_brotli(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    brotli::BrotliDecompress(&mut std::io::Cursor::new(data), &mut out)
+        .expect("brotli decompression failed");
+    out
+}
+
+#[test]
+fn brotli_compress_roundtrip() {
+    let original = b"Hello, world! This is test data for brotli roundtrip verification.";
+    let compressed = brotli_compress(original).unwrap();
+    let decompressed = decompress_brotli(&compressed);
+    assert_eq!(decompressed, original);
+}
+
+#[test]
+fn brotli_compress_empty_roundtrip() {
+    let original: &[u8] = &[];
+    let compressed = brotli_compress(original).unwrap();
+    let decompressed = decompress_brotli(&compressed);
+    assert_eq!(decompressed, original);
+}
+
+#[test]
+fn scan_and_compress_skips_brotli_when_expansion() {
+    let dir = tempfile::tempdir().unwrap();
+    // 1 byte: brotli stream overhead always exceeds 1 byte, so expansion is guaranteed
+    let content = b"x";
+    fs::write(dir.path().join("tiny.js"), content).unwrap();
+
+    let pc_dirs = vec![".".to_string()];
+    let (entries, compressed) = scan_and_maybe_compress(dir.path(), &pc_dirs).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert!(
+        !compressed.contains_key("tiny.js"),
+        "tiny file must not be pre-compressed when brotli expands it"
+    );
+    assert_eq!(
+        entries[0].size,
+        content.len() as u64,
+        "raw size must be reported"
+    );
+}
+
+#[test]
+fn scan_and_compress_empty_file_not_compressed() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("empty.html"), b"").unwrap();
+
+    let pc_dirs = vec![".".to_string()];
+    let (entries, compressed) = scan_and_maybe_compress(dir.path(), &pc_dirs).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    // Empty file: any brotli stream is larger than 0 bytes, so falls back to raw
+    assert!(
+        !compressed.contains_key("empty.html"),
+        "empty file should not be in compressed_map"
+    );
+    assert_eq!(entries[0].size, 0, "empty file size must be 0");
 }

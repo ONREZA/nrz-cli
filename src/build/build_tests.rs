@@ -1,4 +1,7 @@
-use super::{compute_aware_output_dirs, detect_output_dir, run_with_hint};
+use super::{
+    compute_aware_output_dirs, copy_dir_recursive, detect_output_dir, prepare_nextjs_standalone,
+    run_with_hint,
+};
 use crate::cli::BuildArgs;
 
 #[test]
@@ -227,4 +230,338 @@ async fn process_project_without_adapter_returns_no_manifest_from_build() {
 
     // PROCESS without adapter: build returns None, deploy step will auto-gen manifest later
     assert!(result.manifest.is_none());
+}
+
+// ── prepare_nextjs_standalone ────────────────────────────────
+
+#[test]
+fn nextjs_standalone_prepares_static_with_correct_nesting() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    // Create .next/static/chunks/main.js in project dir
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+
+    // Create server.js in output dir
+    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+
+    prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
+
+    // CDN static: _static/_next/static/chunks/main.js
+    assert!(
+        output
+            .path()
+            .join("_static/_next/static/chunks/main.js")
+            .is_file()
+    );
+}
+
+#[test]
+fn nextjs_standalone_copies_static_for_server() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    std::fs::create_dir_all(project.path().join(".next/static/css")).unwrap();
+    std::fs::write(project.path().join(".next/static/css/style.css"), "body{}").unwrap();
+    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+
+    prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
+
+    // Server-side: .next/static/css/style.css
+    assert!(output.path().join(".next/static/css/style.css").is_file());
+}
+
+#[test]
+fn nextjs_standalone_copies_public() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    std::fs::create_dir_all(project.path().join("public")).unwrap();
+    std::fs::write(project.path().join("public/favicon.ico"), "icon").unwrap();
+    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+
+    prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
+
+    assert!(output.path().join("public/favicon.ico").is_file());
+}
+
+#[test]
+fn nextjs_standalone_without_public_dir() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    // No public/ dir in project
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+
+    prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
+
+    // public/ should not exist in output
+    assert!(!output.path().join("public").is_dir());
+    // _static/ should still be created
+    assert!(
+        output
+            .path()
+            .join("_static/_next/static/chunks/main.js")
+            .is_file()
+    );
+}
+
+#[test]
+fn nextjs_standalone_does_not_overwrite_existing() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// original",
+    )
+    .unwrap();
+
+    // Pre-create destination with different content — simulates a previous build
+    // or an adapter that already prepared the output. prepare_nextjs_standalone
+    // must not overwrite to avoid clobbering adapter-generated files.
+    std::fs::create_dir_all(output.path().join("_static/_next/static/chunks")).unwrap();
+    std::fs::write(
+        output.path().join("_static/_next/static/chunks/main.js"),
+        "// existing",
+    )
+    .unwrap();
+    std::fs::create_dir_all(output.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        output.path().join(".next/static/chunks/main.js"),
+        "// existing-server",
+    )
+    .unwrap();
+
+    prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
+
+    // Existing content should not be overwritten
+    let cdn_content =
+        std::fs::read_to_string(output.path().join("_static/_next/static/chunks/main.js")).unwrap();
+    assert_eq!(cdn_content, "// existing");
+    let server_content =
+        std::fs::read_to_string(output.path().join(".next/static/chunks/main.js")).unwrap();
+    assert_eq!(server_content, "// existing-server");
+}
+
+#[tokio::test]
+async fn nextjs_standalone_run_with_hint_generates_manifest() {
+    let project = tempfile::tempdir().unwrap();
+
+    // Create Next.js standalone output structure
+    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
+    std::fs::write(
+        project.path().join(".next/standalone/server.js"),
+        "// server",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join("public")).unwrap();
+    std::fs::write(project.path().join("public/favicon.ico"), "icon").unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["output: 'standalone'".into()],
+    };
+    let detection = make_detection("nextjs", Some(ssr));
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection))
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("Next.js standalone should produce a manifest");
+    assert_eq!(manifest.layers.len(), 3);
+    assert_eq!(
+        manifest.layers[0].target,
+        super::manifest::LayerTarget::Static
+    );
+    assert_eq!(manifest.layers[0].directory, "_static");
+    assert_eq!(
+        manifest.layers[1].target,
+        super::manifest::LayerTarget::Static
+    );
+    assert_eq!(manifest.layers[1].directory, "public");
+    assert_eq!(
+        manifest.layers[2].target,
+        super::manifest::LayerTarget::Compute
+    );
+    assert_eq!(manifest.layers[2].entry.as_deref(), Some("server.js"));
+    assert_eq!(manifest.routes.len(), 3);
+
+    // Verify files were copied correctly
+    let output = &result.output_dir;
+    assert!(output.join("_static/_next/static/chunks/main.js").is_file());
+    assert!(output.join(".next/static/chunks/main.js").is_file());
+    assert!(output.join("public/favicon.ico").is_file());
+}
+
+#[tokio::test]
+async fn nextjs_standalone_run_with_hint_without_public_generates_2_layer_manifest() {
+    let project = tempfile::tempdir().unwrap();
+
+    // Create Next.js standalone without public/
+    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
+    std::fs::write(
+        project.path().join(".next/standalone/server.js"),
+        "// server",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["output: 'standalone'".into()],
+    };
+    let detection = make_detection("nextjs", Some(ssr));
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection))
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("Next.js standalone should produce a manifest");
+    assert_eq!(manifest.layers.len(), 2, "no public/ → 2 layers");
+    assert_eq!(manifest.routes.len(), 2, "no public/ → 2 routes");
+    assert_eq!(manifest.layers[0].directory, "_static");
+    assert_eq!(manifest.layers[1].directory, ".");
+}
+
+#[test]
+fn nextjs_standalone_without_next_static_dir() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    // No .next/static/ at all — prepare should succeed but not create _static/
+    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+
+    prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
+
+    assert!(!output.path().join("_static").exists());
+    assert!(!output.path().join(".next/static").exists());
+}
+
+#[tokio::test]
+async fn nextjs_standalone_missing_server_js_is_error() {
+    let project = tempfile::tempdir().unwrap();
+
+    // Create standalone dir WITHOUT server.js
+    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["output: 'standalone'".into()],
+    };
+    let detection = make_detection("nextjs", Some(ssr));
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let err = run_with_hint(args, true, &config, Some(&detection))
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("server.js not found"),
+        "expected server.js error, got: {err}"
+    );
+}
+
+#[test]
+fn copy_dir_recursive_skips_symlinks() {
+    let src = tempfile::tempdir().unwrap();
+    std::fs::write(src.path().join("real.txt"), "real content").unwrap();
+    std::os::unix::fs::symlink(src.path().join("real.txt"), src.path().join("link.txt")).unwrap();
+
+    let dst = tempfile::tempdir().unwrap();
+    let dst_sub = dst.path().join("out");
+    copy_dir_recursive(src.path(), &dst_sub).unwrap();
+
+    assert!(dst_sub.join("real.txt").is_file());
+    assert!(
+        !dst_sub.join("link.txt").exists(),
+        "symlinks should be skipped"
+    );
+}
+
+#[test]
+fn copy_dir_recursive_empty_src_creates_dst() {
+    let src = tempfile::tempdir().unwrap();
+    // src is empty — no files at all
+    let dst = tempfile::tempdir().unwrap();
+    let dst_sub = dst.path().join("out");
+
+    copy_dir_recursive(src.path(), &dst_sub).unwrap();
+
+    assert!(dst_sub.is_dir(), "empty src should still create dst");
+    assert_eq!(
+        std::fs::read_dir(&dst_sub).unwrap().count(),
+        0,
+        "dst should be empty"
+    );
+}
+
+#[test]
+fn copy_dir_recursive_nested_directories() {
+    let src = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(src.path().join("a/b/c")).unwrap();
+    std::fs::write(src.path().join("root.txt"), "root").unwrap();
+    std::fs::write(src.path().join("a/level1.txt"), "l1").unwrap();
+    std::fs::write(src.path().join("a/b/level2.txt"), "l2").unwrap();
+    std::fs::write(src.path().join("a/b/c/level3.txt"), "l3").unwrap();
+
+    let dst = tempfile::tempdir().unwrap();
+    let dst_sub = dst.path().join("out");
+    copy_dir_recursive(src.path(), &dst_sub).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(dst_sub.join("root.txt")).unwrap(),
+        "root"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dst_sub.join("a/level1.txt")).unwrap(),
+        "l1"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dst_sub.join("a/b/level2.txt")).unwrap(),
+        "l2"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dst_sub.join("a/b/c/level3.txt")).unwrap(),
+        "l3"
+    );
 }
