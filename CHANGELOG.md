@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.0] - 2026-02-23
+
+### ✨ Features
+
+- **build:** add Next.js standalone support with STATIC + COMPUTE layers ([bc89f7e](https://github.com/ONREZA/nrz-cli/commit/bc89f7e2a19db8cc039c42aa4c785a594edd4f3c))
+
 ## [0.16.0] - 2026-02-23
 
 ### ✨ Features
