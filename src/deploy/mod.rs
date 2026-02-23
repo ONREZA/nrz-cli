@@ -275,7 +275,7 @@ pub async fn run(
     output::status(json, "~", "Scanning output directory...");
     let pc_dirs = precompressed_dirs(loaded_manifest.as_ref());
     let output_dir_for_scan = output_dir.clone();
-    let (files, compressed_map) = tokio::task::spawn_blocking(move || {
+    let (mut files, compressed_map) = tokio::task::spawn_blocking(move || {
         scan_and_maybe_compress(&output_dir_for_scan, &pc_dirs)
     })
     .await
@@ -339,6 +339,25 @@ pub async fn run(
     }
 
     let is_process = compute == ComputeType::Process;
+
+    // For PROCESS deployments with a manifest, only STATIC-layer files need individual
+    // presigned URL uploads. COMPUTE/ISOLATE files are delivered via tar.zst bundle,
+    // so they don't count against the per-file upload limit.
+    if is_process && loaded_manifest.is_some() {
+        let sd = static_layer_dirs(loaded_manifest.as_ref());
+        if !sd.is_empty() {
+            let before = files.len();
+            files.retain(|f| is_in_layer_dirs(&f.path, &sd));
+            let after = files.len();
+            if before != after {
+                tracing::info!(
+                    before,
+                    after,
+                    "filtered file list to STATIC layers only (COMPUTE files go via bundle)"
+                );
+            }
+        }
+    }
 
     // manifest_raw starts from build result (may already be Some for STATIC auto-gen)
     let mut manifest_raw: Option<serde_json::Value> = loaded_manifest
@@ -1526,6 +1545,38 @@ fn detect_migrations(
 ///
 /// Files whose relative path starts with one of these prefixes will be brotli-compressed
 /// before upload, and their compressed size will be reported to the server.
+/// Returns normalised directory prefixes for all STATIC layers in the manifest.
+///
+/// Used to filter the file list for bundle deployments: only STATIC-layer files
+/// need individual presigned URL uploads; COMPUTE/ISOLATE files go via tar.zst bundle.
+fn static_layer_dirs(manifest: Option<&build_manifest::Manifest>) -> Vec<String> {
+    let Some(m) = manifest else {
+        return Vec::new();
+    };
+    m.layers
+        .iter()
+        .filter(|l| l.target == build_manifest::LayerTarget::Static)
+        .map(|l| {
+            if l.directory == "." {
+                ".".to_string()
+            } else {
+                format!("{}/", l.directory.trim_end_matches('/'))
+            }
+        })
+        .collect()
+}
+
+/// Returns `true` if the file belongs to one of the given layer directories.
+fn is_in_layer_dirs(rel_path: &str, dirs: &[String]) -> bool {
+    dirs.iter().any(|d| {
+        if d == "." {
+            true
+        } else {
+            rel_path.starts_with(d.as_str())
+        }
+    })
+}
+
 fn precompressed_dirs(manifest: Option<&build_manifest::Manifest>) -> Vec<String> {
     let Some(m) = manifest else {
         return Vec::new();

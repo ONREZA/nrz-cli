@@ -1366,3 +1366,88 @@ fn scan_and_compress_empty_file_not_compressed() {
     );
     assert_eq!(entries[0].size, 0, "empty file size must be 0");
 }
+
+// ── static_layer_dirs / is_in_layer_dirs ────────────────────
+
+#[test]
+fn static_layer_dirs_returns_only_static_layers() {
+    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
+        r#"{
+        "version": 1,
+        "layers": [
+            { "name": "cdn", "target": "STATIC", "directory": "_static" },
+            { "name": "pub", "target": "STATIC", "directory": "public" },
+            { "name": "srv", "target": "COMPUTE", "directory": ".", "entry": "server.js" }
+        ],
+        "routes": [
+            { "pattern": "^/_next/.*$", "layer": "cdn", "priority": 100 },
+            { "pattern": "^/.*$", "layer": "pub", "priority": 50 },
+            { "pattern": "^/.*$", "layer": "srv", "priority": 0 }
+        ]
+    }"#,
+    )
+    .unwrap();
+    let dirs = static_layer_dirs(Some(&manifest));
+    assert_eq!(dirs, vec!["_static/", "public/"]);
+}
+
+#[test]
+fn static_layer_dirs_none_manifest_returns_empty() {
+    assert!(static_layer_dirs(None).is_empty());
+}
+
+#[test]
+fn is_in_layer_dirs_matches_prefix() {
+    let dirs = vec!["_static/".to_string(), "public/".to_string()];
+    assert!(is_in_layer_dirs(
+        "_static/_next/static/chunks/main.js",
+        &dirs
+    ));
+    assert!(is_in_layer_dirs("public/favicon.ico", &dirs));
+    assert!(!is_in_layer_dirs("node_modules/react/index.js", &dirs));
+    assert!(!is_in_layer_dirs("server.js", &dirs));
+    assert!(!is_in_layer_dirs(".next/server/app/page.js", &dirs));
+}
+
+#[test]
+fn is_in_layer_dirs_root_dir_matches_all() {
+    let dirs = vec![".".to_string()];
+    assert!(is_in_layer_dirs("anything.js", &dirs));
+    assert!(is_in_layer_dirs("deep/nested/file.txt", &dirs));
+}
+
+#[test]
+fn file_list_filtered_for_process_with_manifest() {
+    // Simulate what happens in run(): scan produces all files, then STATIC filter
+    // keeps only files belonging to STATIC layer directories.
+    let all_files = vec![
+        FileEntry {
+            path: "_static/_next/static/chunks/main.js".into(),
+            size: 100,
+        },
+        FileEntry {
+            path: "public/favicon.ico".into(),
+            size: 50,
+        },
+        FileEntry {
+            path: "server.js".into(),
+            size: 200,
+        },
+        FileEntry {
+            path: "node_modules/react/index.js".into(),
+            size: 300,
+        },
+        FileEntry {
+            path: ".next/server/app/page.js".into(),
+            size: 400,
+        },
+    ];
+    let sd = vec!["_static/".to_string(), "public/".to_string()];
+    let filtered: Vec<_> = all_files
+        .into_iter()
+        .filter(|f| is_in_layer_dirs(&f.path, &sd))
+        .collect();
+    assert_eq!(filtered.len(), 2);
+    assert_eq!(filtered[0].path, "_static/_next/static/chunks/main.js");
+    assert_eq!(filtered[1].path, "public/favicon.ico");
+}
