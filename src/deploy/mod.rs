@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 const MAX_FILES_HOBBY: usize = 500;
-const MAX_FILES_PAID: usize = 5_000;
+const MAX_FILES_PAID: usize = 2_000;
 const MAX_SIZE_HOBBY: u64 = 100 * 1024 * 1024; // 100 MB
 const MAX_SIZE_PAID: u64 = 1024 * 1024 * 1024; // 1 GB
 
