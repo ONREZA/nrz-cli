@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.16.0] - 2026-02-23
+
+### ✨ Features
+
+- **cli:** add --human/NRZ_HUMAN flag to force human-readable output in non-TTY ([c0b2dbb](https://github.com/ONREZA/nrz-cli/commit/c0b2dbb517d7c8b7143821736a3f5b1e84ee7dae))
+- **build:** implement BUILD_OUTPUT_SPEC v1 manifest validation ([cbb0e25](https://github.com/ONREZA/nrz-cli/commit/cbb0e25d5f79c597a948f88f0ed6555db9629f43))
+
+### 🐛 Bug Fixes
+
+- **deploy:** sync MAX_FILES_PAID limit with server (2_000) ([cf3b67e](https://github.com/ONREZA/nrz-cli/commit/cf3b67e174cf6130dcad343808fb80f9ca7e5349))
+- **deploy:** sync CLI with server manifest contract ([1561201](https://github.com/ONREZA/nrz-cli/commit/1561201b0aacf5626839e37f08f2c0d0f8ef3d74))
+
 ## [0.15.0] - 2026-02-22
 
 ### ✨ Features
