@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.17.2] - 2026-02-24
+
+### 🐛 Bug Fixes
+
+- **build:** copy Next.js metadata route .body files to public/ for CDN delivery ([1df86c0](https://github.com/ONREZA/nrz-cli/commit/1df86c0555745e846916ff1b8c6d669aec8933c0))
+
 ## [0.17.1] - 2026-02-23
 
 ### 🐛 Bug Fixes
