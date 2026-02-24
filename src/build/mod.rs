@@ -352,6 +352,106 @@ fn prepare_nextjs_standalone(
         }
     }
 
+    // 4. Copy metadata route .body files → {output}/public/<name>
+    //
+    // Next.js App Router compiles static metadata files (favicon.ico, robots.txt,
+    // opengraph-image.png, etc.) into .next/server/app/**/*.body. In standalone mode,
+    // server.js may return 404 for these routes because it expects a reverse proxy to
+    // serve them. Copying the .body files into the STATIC public/ layer ensures they
+    // are served from CDN without hitting the COMPUTE layer.
+    copy_metadata_routes(output_dir, json)?;
+
+    Ok(())
+}
+
+/// Copy compiled Next.js metadata route `.body` files into `public/` for CDN delivery.
+///
+/// Next.js App Router compiles `app/favicon.ico`, `app/robots.txt`, etc. into
+/// `.next/server/app/**/*.body` files. These are served as metadata routes by server.js,
+/// but standalone server.js may not handle them reliably. Copying them to `public/`
+/// (dropping the `.body` extension) lets the STATIC layer serve them directly.
+///
+/// Only files whose path maps cleanly to a URL-safe public path are copied.
+/// Dynamically-generated metadata routes (those without a `.body` counterpart) are unaffected.
+fn copy_metadata_routes(output_dir: &Path, json: bool) -> anyhow::Result<()> {
+    let app_server_dir = output_dir.join(".next/server/app");
+    if !app_server_dir.is_dir() {
+        return Ok(());
+    }
+
+    let public_dst = output_dir.join("public");
+    let mut copied = 0usize;
+
+    collect_body_files(&app_server_dir, &app_server_dir, &public_dst, &mut copied)?;
+
+    if copied > 0 {
+        output::status(
+            json,
+            "+",
+            format!("Copied {copied} metadata route(s) to public/ (favicon.ico, etc.)"),
+        );
+    }
+
+    Ok(())
+}
+
+fn collect_body_files(
+    base: &Path,
+    current: &Path,
+    public_dst: &Path,
+    copied: &mut usize,
+) -> anyhow::Result<()> {
+    for entry in std::fs::read_dir(current)
+        .with_context(|| format!("failed to read {}", current.display()))?
+    {
+        let entry = entry?;
+        let ft = entry.file_type()?;
+        let path = entry.path();
+
+        if ft.is_symlink() {
+            continue;
+        }
+
+        if ft.is_dir() {
+            collect_body_files(base, &path, public_dst, copied)?;
+        } else if ft.is_file() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+
+            // Only process .body files
+            if !name_str.ends_with(".body") {
+                continue;
+            }
+
+            // Strip .body to get the public filename (e.g. "favicon.ico.body" → "favicon.ico")
+            let public_name = &name_str[..name_str.len() - ".body".len()];
+
+            // Compute relative path from app server dir for nested metadata routes
+            // (e.g. .next/server/app/og/opengraph-image.body → og/opengraph-image.png)
+            let rel = path
+                .strip_prefix(base)
+                .context("failed to compute relative path")?
+                .with_file_name(public_name);
+
+            let dst = public_dst.join(&rel);
+
+            // Skip if already present (idempotent)
+            if dst.exists() {
+                continue;
+            }
+
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+
+            std::fs::copy(&path, &dst).with_context(|| {
+                format!("failed to copy {} → {}", path.display(), dst.display())
+            })?;
+
+            *copied += 1;
+        }
+    }
     Ok(())
 }
 

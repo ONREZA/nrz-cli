@@ -1,6 +1,6 @@
 use super::{
-    compute_aware_output_dirs, copy_dir_recursive, detect_output_dir, prepare_nextjs_standalone,
-    run_with_hint,
+    collect_body_files, compute_aware_output_dirs, copy_dir_recursive, detect_output_dir,
+    prepare_nextjs_standalone, run_with_hint,
 };
 use crate::cli::BuildArgs;
 
@@ -564,4 +564,86 @@ fn copy_dir_recursive_nested_directories() {
         std::fs::read_to_string(dst_sub.join("a/b/c/level3.txt")).unwrap(),
         "l3"
     );
+}
+
+// ── collect_body_files (metadata routes) ────────────────────
+
+#[test]
+fn metadata_routes_favicon_copied_to_public() {
+    let output = tempfile::tempdir().unwrap();
+    let app_dir = output.path().join(".next/server/app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    std::fs::write(app_dir.join("favicon.ico.body"), b"\x00\x00\x01\x00").unwrap();
+    std::fs::write(app_dir.join("favicon.ico.meta"), r#"{"status":200}"#).unwrap();
+
+    let public_dst = output.path().join("public");
+    std::fs::create_dir_all(&public_dst).unwrap();
+
+    let mut copied = 0usize;
+    collect_body_files(&app_dir, &app_dir, &public_dst, &mut copied).unwrap();
+
+    assert_eq!(copied, 1);
+    assert!(public_dst.join("favicon.ico").is_file());
+    assert_eq!(
+        std::fs::read(public_dst.join("favicon.ico")).unwrap(),
+        b"\x00\x00\x01\x00"
+    );
+}
+
+#[test]
+fn metadata_routes_nested_copied_to_public() {
+    let output = tempfile::tempdir().unwrap();
+    let app_dir = output.path().join(".next/server/app");
+    let og_dir = app_dir.join("og");
+    std::fs::create_dir_all(&og_dir).unwrap();
+    std::fs::write(og_dir.join("opengraph-image.png.body"), b"PNG").unwrap();
+
+    let public_dst = output.path().join("public");
+    std::fs::create_dir_all(&public_dst).unwrap();
+
+    let mut copied = 0usize;
+    collect_body_files(&app_dir, &app_dir, &public_dst, &mut copied).unwrap();
+
+    assert_eq!(copied, 1);
+    assert!(public_dst.join("og/opengraph-image.png").is_file());
+}
+
+#[test]
+fn metadata_routes_skips_existing() {
+    let output = tempfile::tempdir().unwrap();
+    let app_dir = output.path().join(".next/server/app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    std::fs::write(app_dir.join("favicon.ico.body"), b"new").unwrap();
+
+    let public_dst = output.path().join("public");
+    std::fs::create_dir_all(&public_dst).unwrap();
+    // Pre-existing file — should not be overwritten
+    std::fs::write(public_dst.join("favicon.ico"), b"existing").unwrap();
+
+    let mut copied = 0usize;
+    collect_body_files(&app_dir, &app_dir, &public_dst, &mut copied).unwrap();
+
+    assert_eq!(copied, 0, "should skip existing file");
+    assert_eq!(
+        std::fs::read(public_dst.join("favicon.ico")).unwrap(),
+        b"existing"
+    );
+}
+
+#[test]
+fn metadata_routes_ignores_meta_files() {
+    let output = tempfile::tempdir().unwrap();
+    let app_dir = output.path().join(".next/server/app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    // Only .meta, no .body — nothing should be copied
+    std::fs::write(app_dir.join("favicon.ico.meta"), r#"{"status":200}"#).unwrap();
+
+    let public_dst = output.path().join("public");
+    std::fs::create_dir_all(&public_dst).unwrap();
+
+    let mut copied = 0usize;
+    collect_body_files(&app_dir, &app_dir, &public_dst, &mut copied).unwrap();
+
+    assert_eq!(copied, 0);
+    assert!(!public_dst.join("favicon.ico").exists());
 }
