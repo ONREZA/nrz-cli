@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.18.0] - 2026-02-27
+
+### ✨ Features
+
+- **deploy:** fetch project settings from server as fallback for build/install/output ([f893806](https://github.com/ONREZA/nrz-cli/commit/f893806d717103acb6093aabd0cc5648564a5085))
+
 ## [0.17.2] - 2026-02-24
 
 ### 🐛 Bug Fixes
