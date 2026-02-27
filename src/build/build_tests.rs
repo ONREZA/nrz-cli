@@ -11,7 +11,7 @@ fn framework_dirs_checked_before_config_dirs() {
     std::fs::create_dir(dir.path().join("dist")).unwrap();
     std::fs::create_dir_all(dir.path().join(".next")).unwrap();
 
-    let (found, _) = detect_output_dir(dir.path(), &["dist"], &[".next"]).unwrap();
+    let (found, _) = detect_output_dir(dir.path(), &["dist"], &[".next"], None).unwrap();
     assert_eq!(found.file_name().unwrap(), ".next");
 }
 
@@ -22,7 +22,8 @@ fn manifest_dir_wins_over_plain_dir() {
     std::fs::create_dir(dir.path().join("dist")).unwrap();
     std::fs::create_dir_all(dir.path().join(".output/.onreza")).unwrap();
 
-    let (found, has_manifest) = detect_output_dir(dir.path(), &["dist", ".output"], &[]).unwrap();
+    let (found, has_manifest) =
+        detect_output_dir(dir.path(), &["dist", ".output"], &[], None).unwrap();
     assert_eq!(found.file_name().unwrap(), ".output");
     assert!(has_manifest);
 }
@@ -33,7 +34,7 @@ fn dedup_preserves_order() {
     // "dist" is in both framework_dirs and config_dirs
     std::fs::create_dir(dir.path().join("dist")).unwrap();
 
-    let (found, _) = detect_output_dir(dir.path(), &["dist"], &["dist", "build"]).unwrap();
+    let (found, _) = detect_output_dir(dir.path(), &["dist"], &["dist", "build"], None).unwrap();
     assert_eq!(found.file_name().unwrap(), "dist");
 }
 
@@ -41,7 +42,7 @@ fn dedup_preserves_order() {
 fn error_lists_all_checked_dirs() {
     let dir = tempfile::tempdir().unwrap();
     // No dirs exist
-    let err = detect_output_dir(dir.path(), &["build"], &[".next", "out"]).unwrap_err();
+    let err = detect_output_dir(dir.path(), &["build"], &[".next", "out"], None).unwrap_err();
     let msg = err.to_string();
     // framework dirs + config dirs should all appear in error
     assert!(msg.contains(".next/"), "error should list .next: {msg}");
@@ -54,7 +55,7 @@ fn empty_framework_dirs_falls_back_to_config() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("dist")).unwrap();
 
-    let (found, _) = detect_output_dir(dir.path(), &["dist"], &[]).unwrap();
+    let (found, _) = detect_output_dir(dir.path(), &["dist"], &[], None).unwrap();
     assert_eq!(found.file_name().unwrap(), "dist");
 }
 
@@ -65,9 +66,53 @@ fn framework_manifest_dir_wins_over_config_manifest_dir() {
     std::fs::create_dir_all(dir.path().join("dist/.onreza")).unwrap();
     std::fs::create_dir_all(dir.path().join(".next/.onreza")).unwrap();
 
-    let (found, has_manifest) = detect_output_dir(dir.path(), &["dist"], &[".next"]).unwrap();
+    let (found, has_manifest) = detect_output_dir(dir.path(), &["dist"], &[".next"], None).unwrap();
     assert_eq!(found.file_name().unwrap(), ".next");
     assert!(has_manifest);
+}
+
+// ── detect_output_dir with server_output_dir ─────────────────
+
+#[test]
+fn server_output_dir_used_when_no_framework_or_config_match() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("server-out")).unwrap();
+
+    let (found, _) = detect_output_dir(dir.path(), &["dist"], &[], Some("server-out")).unwrap();
+    assert_eq!(found.file_name().unwrap(), "server-out");
+}
+
+#[test]
+fn framework_dir_wins_over_server_output_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join(".next")).unwrap();
+    std::fs::create_dir(dir.path().join("server-out")).unwrap();
+
+    let (found, _) =
+        detect_output_dir(dir.path(), &["dist"], &[".next"], Some("server-out")).unwrap();
+    assert_eq!(found.file_name().unwrap(), ".next");
+}
+
+#[test]
+fn server_output_dir_wins_over_config_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("server-out")).unwrap();
+    std::fs::create_dir(dir.path().join("dist")).unwrap();
+
+    // server-out is checked before config "dist"
+    let (found, _) = detect_output_dir(dir.path(), &["dist"], &[], Some("server-out")).unwrap();
+    assert_eq!(found.file_name().unwrap(), "server-out");
+}
+
+#[test]
+fn server_output_dir_appears_in_error_when_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let err = detect_output_dir(dir.path(), &["dist"], &[".next"], Some("server-out")).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("server-out/"),
+        "error should list server-out: {msg}"
+    );
 }
 
 // ── compute_aware_output_dirs ────────────────────────────────
@@ -145,6 +190,7 @@ fn nextjs_standalone_found_before_dot_next() {
         dir.path(),
         &["dist", ".output", "build"],
         &[".next/standalone", ".next"],
+        None,
     )
     .unwrap();
     assert!(
@@ -194,7 +240,7 @@ async fn static_project_without_adapter_auto_generates_manifest() {
         skip_validation: true,
     };
 
-    let result = run_with_hint(args, true, &config, Some(&detection))
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
         .await
         .unwrap();
 
@@ -224,7 +270,7 @@ async fn process_project_without_adapter_returns_no_manifest_from_build() {
         skip_validation: true,
     };
 
-    let result = run_with_hint(args, true, &config, Some(&detection))
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
         .await
         .unwrap();
 
@@ -387,7 +433,7 @@ async fn nextjs_standalone_run_with_hint_generates_manifest() {
         skip_validation: false,
     };
 
-    let result = run_with_hint(args, true, &config, Some(&detection))
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
         .await
         .unwrap();
 
@@ -448,7 +494,7 @@ async fn nextjs_standalone_run_with_hint_without_public_generates_2_layer_manife
         skip_validation: false,
     };
 
-    let result = run_with_hint(args, true, &config, Some(&detection))
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
         .await
         .unwrap();
 
@@ -492,7 +538,7 @@ async fn nextjs_standalone_missing_server_js_is_error() {
         skip_validation: false,
     };
 
-    let err = run_with_hint(args, true, &config, Some(&detection))
+    let err = run_with_hint(args, true, &config, Some(&detection), None)
         .await
         .unwrap_err();
     assert!(

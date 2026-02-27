@@ -47,7 +47,7 @@ pub async fn run(
     json: bool,
     config: &ProjectConfig,
 ) -> anyhow::Result<BuildResult> {
-    run_with_hint(args, json, config, None).await
+    run_with_hint(args, json, config, None, None).await
 }
 
 pub async fn run_with_hint(
@@ -55,6 +55,7 @@ pub async fn run_with_hint(
     json: bool,
     config: &ProjectConfig,
     detection: Option<&crate::detect::types::DetectionResult>,
+    server_output_dir: Option<&str>,
 ) -> anyhow::Result<BuildResult> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
@@ -69,8 +70,12 @@ pub async fn run_with_hint(
         }
     };
     let fw_dirs = compute_aware_output_dirs(detection);
-    let (output_dir, has_manifest) =
-        detect_output_dir(&project_dir, &config.output_dirs(), &fw_dirs)?;
+    let (output_dir, has_manifest) = detect_output_dir(
+        &project_dir,
+        &config.output_dirs(),
+        &fw_dirs,
+        server_output_dir,
+    )?;
     tracing::info!(?output_dir, has_manifest, "found output directory");
 
     let loaded_manifest = if has_manifest {
@@ -264,18 +269,30 @@ fn compute_aware_output_dirs(
 /// Try framework-specific and configured output directory names.
 /// Returns `(path, has_manifest)` — first prefers dirs with `.onreza/`, then any existing dir.
 ///
-/// `framework_dirs` are checked first (more specific), then `config_dirs` (defaults).
+/// Priority: `framework_dirs` > `server_output_dir` > `config_dirs`.
 fn detect_output_dir(
     project_dir: &Path,
     config_dirs: &[&str],
     framework_dirs: &[&str],
+    server_output_dir: Option<&str>,
 ) -> anyhow::Result<(std::path::PathBuf, bool)> {
-    // Merge: framework-specific dirs first, then config defaults (dedup preserving order)
+    // Log when server-provided directory doesn't exist on disk
+    if let Some(sod) = server_output_dir
+        && !project_dir.join(sod).is_dir()
+    {
+        tracing::debug!(
+            server_output_dir = sod,
+            "server-configured output directory not found on disk, will try other candidates"
+        );
+    }
+
+    // Merge: framework-specific dirs first, then server output dir, then config defaults (dedup preserving order)
     let mut seen = std::collections::HashSet::new();
     let all_dirs: Vec<&str> = framework_dirs
         .iter()
-        .chain(config_dirs.iter())
         .copied()
+        .chain(server_output_dir)
+        .chain(config_dirs.iter().copied())
         .filter(|d| seen.insert(*d))
         .collect();
 

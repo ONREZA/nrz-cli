@@ -65,6 +65,26 @@ fn plan_limits(workspace: &WorkspaceInfo) -> (usize, u64) {
     }
 }
 
+// ── Project settings from server ─────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectInfo {
+    install_command: Option<String>,
+    build_command: Option<String>,
+    output_directory: Option<String>,
+}
+
+async fn fetch_project_settings(
+    client: &ApiClient,
+    project_id: &str,
+) -> anyhow::Result<ProjectInfo> {
+    client
+        .get(&format!("/v1/projects/{project_id}"))
+        .await
+        .context("failed to fetch project settings")
+}
+
 // ── API structs ──────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
@@ -236,15 +256,73 @@ pub async fn run(
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
 
+    // Early-resolve project_id (without interactive fallback) to fetch server settings
+    let early_project_id = args
+        .project_id
+        .as_deref()
+        .or(config.project.id.as_deref())
+        .map(String::from);
+
+    // Fetch project settings from server if project_id is known
+    let server_settings = if let Some(ref pid) = early_project_id {
+        match fetch_project_settings(&client, pid).await {
+            Ok(info) => {
+                tracing::info!(
+                    ?info.build_command,
+                    ?info.install_command,
+                    ?info.output_directory,
+                    "fetched project settings from server"
+                );
+                Some(info)
+            }
+            Err(e) => {
+                // 4xx errors (wrong project ID, no permissions) should abort early
+                let err_msg = format!("{e:#}");
+                let is_client_error = err_msg.contains("API error (4");
+                if is_client_error {
+                    return Err(e.context(format!(
+                        "failed to fetch settings for project '{pid}'. \
+                         Verify the project ID is correct"
+                    )));
+                }
+                // Transient/network errors: warn and continue with local config
+                output::warn(
+                    json,
+                    format!("Could not fetch project settings: {e}. Using local configuration."),
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let server_install_cmd = server_settings
+        .as_ref()
+        .and_then(|s| s.install_command.as_deref())
+        .filter(|v| !v.trim().is_empty());
+    let server_build_cmd = server_settings
+        .as_ref()
+        .and_then(|s| s.build_command.as_deref())
+        .filter(|v| !v.trim().is_empty());
+    let server_output_dir = server_settings
+        .as_ref()
+        .and_then(|s| s.output_directory.as_deref())
+        .filter(|v| !v.trim().is_empty());
+
     // Run install step (default: enabled, skip with --skip-install or --skip-build)
     if !args.skip_build && !args.skip_install {
-        run_install_step(&project_dir, json)?;
+        run_install_step(&project_dir, json, server_install_cmd)?;
     }
 
     // Run build step (default: enabled, skip with --skip-build)
     if !args.skip_build
-        && let Some(cmd) =
-            resolve_build_command(args.build_command.as_deref(), &project_dir, config)
+        && let Some(cmd) = resolve_build_command(
+            args.build_command.as_deref(),
+            &project_dir,
+            config,
+            server_build_cmd,
+        )
     {
         run_build_step(&cmd, &project_dir, json)?;
     }
@@ -262,6 +340,7 @@ pub async fn run(
         json,
         config,
         Some(&detection),
+        server_output_dir,
     )
     .await?;
 
@@ -1414,15 +1493,20 @@ fn resolve_bundle_upload(
 
 // ── Build step ───────────────────────────────────────────────
 
+/// Resolve build command. Priority: CLI flag > config > server > auto-detect.
 fn resolve_build_command(
     explicit: Option<&str>,
     project_dir: &Path,
     config: &ProjectConfig,
+    server_command: Option<&str>,
 ) -> Option<String> {
     if let Some(cmd) = explicit {
         return Some(cmd.to_string());
     }
     if let Some(cmd) = config.build_command() {
+        return Some(cmd.to_string());
+    }
+    if let Some(cmd) = server_command {
         return Some(cmd.to_string());
     }
     // Only auto-detect if package.json exists
@@ -1433,30 +1517,39 @@ fn resolve_build_command(
     Some(format!("{pm} run build"))
 }
 
-fn run_install_step(project_dir: &Path, json: bool) -> anyhow::Result<()> {
-    if !project_dir.join("package.json").exists() {
+fn run_install_step(
+    project_dir: &Path,
+    json: bool,
+    server_command: Option<&str>,
+) -> anyhow::Result<()> {
+    // Priority: server command > auto-detect from package manager.
+    // (No CLI flag or config field exists for install command.)
+    let cmd = if let Some(server_cmd) = server_command {
+        server_cmd.to_string()
+    } else if !project_dir.join("package.json").exists() {
         return Ok(());
-    }
-
-    let pkg = crate::detect::package_json::PackageJson::load(project_dir);
-    let pm_info = crate::detect::package_manager::detect_package_manager(project_dir, pkg.as_ref());
-    let cmd = match pm_info {
-        Some(info) => crate::detect::package_manager::install_command(info.pm_type),
-        None => "npm install",
+    } else {
+        let pkg = crate::detect::package_json::PackageJson::load(project_dir);
+        let pm_info =
+            crate::detect::package_manager::detect_package_manager(project_dir, pkg.as_ref());
+        match pm_info {
+            Some(info) => crate::detect::package_manager::install_command(info.pm_type).to_string(),
+            None => "npm install".to_string(),
+        }
     };
 
     output::status(json, ">", format!("Installing dependencies: {cmd}"));
 
     #[cfg(unix)]
     let status = std::process::Command::new("sh")
-        .args(["-c", cmd])
+        .args(["-c", &cmd])
         .current_dir(project_dir)
         .status()
         .with_context(|| format!("failed to start install command: {cmd}"))?;
 
     #[cfg(windows)]
     let status = std::process::Command::new("cmd")
-        .args(["/C", cmd])
+        .args(["/C", &cmd])
         .current_dir(project_dir)
         .status()
         .with_context(|| format!("failed to start install command: {cmd}"))?;

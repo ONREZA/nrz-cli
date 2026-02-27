@@ -219,7 +219,7 @@ fn build_command_explicit_wins_over_config_and_auto() {
     let mut config = nrz::config::ProjectConfig::default();
     config.build.command = Some("config cmd".into());
 
-    let result = resolve_build_command(Some("explicit cmd"), dir.path(), &config);
+    let result = resolve_build_command(Some("explicit cmd"), dir.path(), &config, None);
     assert_eq!(result.unwrap(), "explicit cmd");
 }
 
@@ -232,7 +232,7 @@ fn build_command_config_wins_over_auto() {
     let mut config = nrz::config::ProjectConfig::default();
     config.build.command = Some("config cmd".into());
 
-    let result = resolve_build_command(None, dir.path(), &config);
+    let result = resolve_build_command(None, dir.path(), &config, None);
     assert_eq!(result.unwrap(), "config cmd");
 }
 
@@ -243,7 +243,7 @@ fn build_command_auto_detect_bun_lock() {
     fs::write(dir.path().join("bun.lock"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config);
+    let result = resolve_build_command(None, dir.path(), &config, None);
     assert_eq!(result.unwrap(), "bun run build");
 }
 
@@ -254,7 +254,7 @@ fn build_command_auto_detect_bun_lockb() {
     fs::write(dir.path().join("bun.lockb"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config);
+    let result = resolve_build_command(None, dir.path(), &config, None);
     assert_eq!(result.unwrap(), "bun run build");
 }
 
@@ -265,7 +265,7 @@ fn build_command_auto_detect_pnpm() {
     fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config);
+    let result = resolve_build_command(None, dir.path(), &config, None);
     assert_eq!(result.unwrap(), "pnpm run build");
 }
 
@@ -276,7 +276,7 @@ fn build_command_auto_detect_yarn() {
     fs::write(dir.path().join("yarn.lock"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config);
+    let result = resolve_build_command(None, dir.path(), &config, None);
     assert_eq!(result.unwrap(), "yarn run build");
 }
 
@@ -286,7 +286,7 @@ fn build_command_auto_detect_npm_fallback() {
     fs::write(dir.path().join("package.json"), "{}").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config);
+    let result = resolve_build_command(None, dir.path(), &config, None);
     assert_eq!(result.unwrap(), "npm run build");
 }
 
@@ -295,8 +295,74 @@ fn build_command_none_without_package_json() {
     let dir = tempdir().unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config);
+    let result = resolve_build_command(None, dir.path(), &config, None);
     assert!(result.is_none());
+}
+
+// ── resolve_build_command server fallback ────────────────────
+
+#[test]
+fn build_command_server_wins_over_auto_detect() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(None, dir.path(), &config, Some("server build cmd"));
+    assert_eq!(result.unwrap(), "server build cmd");
+}
+
+#[test]
+fn build_command_config_wins_over_server() {
+    let dir = tempdir().unwrap();
+
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.command = Some("config cmd".into());
+
+    let result = resolve_build_command(None, dir.path(), &config, Some("server cmd"));
+    assert_eq!(result.unwrap(), "config cmd");
+}
+
+#[test]
+fn build_command_explicit_wins_over_server() {
+    let dir = tempdir().unwrap();
+    let config = nrz::config::ProjectConfig::default();
+
+    let result = resolve_build_command(Some("explicit"), dir.path(), &config, Some("server cmd"));
+    assert_eq!(result.unwrap(), "explicit");
+}
+
+#[test]
+fn build_command_server_used_without_package_json() {
+    let dir = tempdir().unwrap();
+    // No package.json — auto-detect would return None, but server command should still work
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(None, dir.path(), &config, Some("make build"));
+    assert_eq!(result.unwrap(), "make build");
+}
+
+// ── ProjectInfo deserialization ──────────────────────────────
+
+#[test]
+fn project_info_deserializes_camel_case() {
+    let json = r#"{
+        "id": "proj_123",
+        "installCommand": "npm ci",
+        "buildCommand": "npm run build",
+        "outputDirectory": "dist"
+    }"#;
+    let info: ProjectInfo = serde_json::from_str(json).unwrap();
+    assert_eq!(info.install_command.unwrap(), "npm ci");
+    assert_eq!(info.build_command.unwrap(), "npm run build");
+    assert_eq!(info.output_directory.unwrap(), "dist");
+}
+
+#[test]
+fn project_info_optional_fields_default_to_none() {
+    let json = r#"{"id": "proj_123"}"#;
+    let info: ProjectInfo = serde_json::from_str(json).unwrap();
+    assert!(info.install_command.is_none());
+    assert!(info.build_command.is_none());
+    assert!(info.output_directory.is_none());
 }
 
 // ── guess_content_type tests ────────────────────────────────
