@@ -41,7 +41,7 @@ async fn main() {
         Ok(c) => c,
         Err(e) => {
             if json {
-                output::json_error(&e);
+                output::log_line("user", "error", "error", &format!("{e:#}"));
             } else {
                 eprintln!("Error: {e:#}");
             }
@@ -61,7 +61,7 @@ async fn main() {
 
     if let Err(ref e) = result {
         if json {
-            output::json_error(e);
+            output::log_line("user", "error", "error", &format!("{e:#}"));
             std::process::exit(1);
         } else {
             eprintln!("Error: {e:#}");

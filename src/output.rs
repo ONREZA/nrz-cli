@@ -60,18 +60,6 @@ pub fn json_output<T: Serialize>(data: &T) {
     }
 }
 
-/// Print error as JSON to stdout.
-pub fn json_error(err: &anyhow::Error) {
-    let msg = format!("{err:#}");
-    match serde_json::to_string(&serde_json::json!({ "error": msg })) {
-        Ok(s) => println!("{s}"),
-        Err(e) => {
-            eprintln!("internal error: failed to serialize error: {e}");
-            std::process::exit(1);
-        }
-    }
-}
-
 /// Emit one structured JSON log line to stdout (JSON mode only).
 ///
 /// Format: `{"s":"user|debug","p":"phase","l":"info|warn","m":"message"}`

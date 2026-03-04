@@ -1653,11 +1653,12 @@ fn run_command_streaming(
     });
 
     let phase_err = phase.to_string();
+    let stream_err = child_stream.to_string();
     let stderr_handle = std::thread::spawn(move || {
         let reader = std::io::BufReader::new(stderr);
         for result in reader.lines() {
             match result {
-                Ok(line) => output::log_line("debug", "warn", &phase_err, &line),
+                Ok(line) => output::log_line(&stream_err, "warn", &phase_err, &line),
                 Err(e) => {
                     output::log_line(
                         "debug",
