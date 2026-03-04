@@ -102,7 +102,7 @@ pub async fn run_with_hint(
             .map(String::from);
 
         if json {
-            output::json_output(&BuildOutput {
+            let data = BuildOutput {
                 layers: manifest
                     .layers
                     .iter()
@@ -117,7 +117,10 @@ pub async fn run_with_hint(
                 output_dir: output_dir.to_string_lossy().into_owned(),
                 framework,
                 framework_version,
-            });
+            };
+            if let Ok(s) = serde_json::to_string(&data) {
+                output::log_line("debug", "info", "build", &s);
+            }
         } else {
             let layers_display: Vec<String> = manifest
                 .layers
@@ -207,7 +210,7 @@ fn emit_build_output(
     let framework_version = detection.and_then(|d| d.version.clone());
 
     if json {
-        output::json_output(&BuildOutput {
+        let data = BuildOutput {
             layers: manifest
                 .layers
                 .iter()
@@ -222,7 +225,10 @@ fn emit_build_output(
             output_dir: output_dir.to_string_lossy().into_owned(),
             framework,
             framework_version,
-        });
+        };
+        if let Ok(s) = serde_json::to_string(&data) {
+            output::log_line("debug", "info", "build", &s);
+        }
     } else {
         let layers_display: Vec<String> = manifest
             .layers

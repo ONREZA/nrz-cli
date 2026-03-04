@@ -989,10 +989,16 @@ async fn upload_and_activate(
             let error_details: Vec<String> = errors.iter().map(|e| format!("{e:#}")).collect();
 
             if json {
-                output::json_output(&serde_json::json!({
-                    "error": format!("{} of {file_count} file uploads failed", errors.len()),
-                    "failedUploads": error_details,
-                }));
+                output::log_line(
+                    "user",
+                    "error",
+                    "deploy",
+                    &format!(
+                        "{} of {file_count} file uploads failed: {}",
+                        errors.len(),
+                        error_details.join("; ")
+                    ),
+                );
                 std::process::exit(1);
             }
 
@@ -1128,11 +1134,14 @@ async fn resume_deploy(
 
     // Output result (no polling in resume mode — builder handles status)
     if json {
-        output::json_output(&ResumeDeployOutput {
+        let data = ResumeDeployOutput {
             deployment_id: deployment_id.to_string(),
             status: "activated".into(),
             warnings,
-        });
+        };
+        if let Ok(s) = serde_json::to_string(&data) {
+            output::log_line("debug", "info", "deploy", &s);
+        }
     } else {
         eprintln!();
         eprintln!(
@@ -1638,6 +1647,7 @@ fn run_command_streaming(
         let reader = std::io::BufReader::new(stdout);
         for result in reader.lines() {
             match result {
+                Ok(line) if line.is_empty() => {} // skip blank lines
                 Ok(line) => output::log_line(&stream_out, "info", &phase_out, &line),
                 Err(e) => {
                     output::log_line(
@@ -1658,6 +1668,7 @@ fn run_command_streaming(
         let reader = std::io::BufReader::new(stderr);
         for result in reader.lines() {
             match result {
+                Ok(line) if line.is_empty() => {} // skip blank lines
                 Ok(line) => output::log_line(&stream_err, "warn", &phase_err, &line),
                 Err(e) => {
                     output::log_line(
