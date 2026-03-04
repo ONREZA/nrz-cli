@@ -437,7 +437,7 @@ async fn reset_remote(
         }
     }
 
-    output::status(json, "~", "Resetting remote database...");
+    output::status(json, "~", "Resetting remote database...", output::Phase::Db);
 
     let resp: serde_json::Value = client
         .post(
@@ -456,7 +456,11 @@ async fn reset_remote(
             status: "ok".into(),
         });
     } else {
-        output::success(false, "Remote database reset successfully.");
+        output::success(
+            false,
+            "Remote database reset successfully.",
+            output::Phase::Db,
+        );
     }
 
     Ok(())

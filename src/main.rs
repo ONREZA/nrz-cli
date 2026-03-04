@@ -12,6 +12,8 @@ mod link;
 mod logs;
 mod migrations;
 mod output;
+#[cfg(test)]
+mod output_tests;
 mod rollback;
 mod upgrade;
 

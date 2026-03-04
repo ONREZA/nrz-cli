@@ -39,7 +39,7 @@ struct KvRequest {
 #[derive(Deserialize)]
 struct DbQueryRequest {
     sql: String,
-    #[serde(default)]
+    #[serde(default, alias = "params")]
     bindings: Vec<serde_json::Value>,
     mode: String,
     #[serde(default)]
@@ -56,7 +56,7 @@ struct DbBatchRequest {
 #[derive(Deserialize)]
 struct DbBatchStatement {
     sql: String,
-    #[serde(default)]
+    #[serde(default, alias = "params")]
     bindings: Vec<serde_json::Value>,
 }
 
@@ -66,14 +66,14 @@ struct DbExecRequest {
 }
 
 #[derive(Serialize)]
-struct D1Response {
+struct QueryResponse {
     results: serde_json::Value,
     success: bool,
-    meta: D1Meta,
+    meta: QueryResponseMeta,
 }
 
 #[derive(Serialize)]
-struct D1Meta {
+struct QueryResponseMeta {
     changes: i64,
     last_row_id: i64,
     duration: f64,
@@ -115,6 +115,8 @@ impl EmulatorServer {
             .route("/__nrz/kv/delete", post(kv_delete))
             .route("/__nrz/kv/has", post(kv_has))
             .route("/__nrz/kv/list", post(kv_list))
+            .route("/__nrz/kv/getMany", post(kv_get_many))
+            .route("/__nrz/kv/getWithMetadata", post(kv_get_with_metadata))
             .route("/__nrz/db/query", post(db_query))
             .route("/__nrz/db/batch", post(db_batch))
             .route("/__nrz/db/exec", post(db_exec))
@@ -169,9 +171,20 @@ async fn kv_set(
             "kv.set requires args: [key, value]".into(),
         ))?
         .to_string();
-    let ttl = req.args.get(2).and_then(|v| v.as_u64()).unwrap_or(0);
-    state.kv.set(key, value, ttl);
-    Ok(Json(serde_json::json!("OK")))
+    let ttl = match req.args.get(2) {
+        Some(v) => v.as_u64().unwrap_or_else(|| {
+            tracing::warn!("kv.set: TTL arg is not a valid u64: {v}, defaulting to 0");
+            0
+        }),
+        None => 0,
+    };
+    let metadata = req
+        .args
+        .get(3)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    state.kv.set(key, value, ttl, metadata);
+    Ok(Json(serde_json::json!(null)))
 }
 
 async fn kv_delete(
@@ -203,6 +216,42 @@ async fn kv_list(
     let prefix = req.args.first().and_then(|v| v.as_str());
     let limit = req.args.get(1).and_then(|v| v.as_u64()).unwrap_or(1000) as usize;
     Ok(Json(serde_json::json!(state.kv.list(prefix, limit))))
+}
+
+async fn kv_get_many(
+    State(state): State<AppState>,
+    Json(req): Json<KvRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let keys: Vec<String> = match req.args.first() {
+        Some(v) => serde_json::from_value::<Vec<String>>(v.clone()).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("kv.getMany: invalid keys array: {e}"),
+            )
+        })?,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "kv.getMany requires args: [keys[]]".into(),
+            ));
+        }
+    };
+    let values = state.kv.get_many(&keys);
+    Ok(Json(serde_json::json!({ "values": values })))
+}
+
+async fn kv_get_with_metadata(
+    State(state): State<AppState>,
+    Json(req): Json<KvRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let key = req.args.first().and_then(|v| v.as_str()).ok_or((
+        StatusCode::BAD_REQUEST,
+        "kv.getWithMetadata requires args: [key]".into(),
+    ))?;
+    let (value, metadata) = state.kv.get_with_metadata(key);
+    Ok(Json(
+        serde_json::json!({ "value": value, "metadata": metadata }),
+    ))
 }
 
 // --- DB helpers ---
@@ -328,7 +377,7 @@ fn execute_query(
     mode: &str,
     column: Option<&str>,
     column_names: Option<bool>,
-) -> Result<D1Response, AppError> {
+) -> Result<QueryResponse, AppError> {
     let start = Instant::now();
     let mut stmt = conn
         .prepare(sql)
@@ -378,10 +427,10 @@ fn execute_query(
     let changes = conn.changes() as i64;
     let last_row_id = conn.last_insert_rowid();
 
-    Ok(D1Response {
+    Ok(QueryResponse {
         results,
         success: true,
-        meta: D1Meta {
+        meta: QueryResponseMeta {
             changes,
             last_row_id,
             duration,
@@ -445,10 +494,10 @@ async fn db_exec(
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("SQL error: {e}")))?;
     let duration = start.elapsed().as_secs_f64();
 
-    Ok(Json(D1Response {
+    Ok(Json(QueryResponse {
         results: serde_json::json!([]),
         success: true,
-        meta: D1Meta {
+        meta: QueryResponseMeta {
             changes: conn.changes() as i64,
             last_row_id: conn.last_insert_rowid(),
             duration,

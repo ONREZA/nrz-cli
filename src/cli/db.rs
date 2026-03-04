@@ -25,13 +25,13 @@ pub enum DbCommand {
     /// Show database info (tables, size)
     Info,
 
-    /// Reset database (local by default, or --remote for remote D1)
+    /// Reset database (local by default, or --remote for remote database)
     Reset {
         /// Skip confirmation prompt
         #[arg(long)]
         force: bool,
 
-        /// Reset remote D1 database
+        /// Reset remote database
         #[arg(long)]
         remote: bool,
 
@@ -46,7 +46,7 @@ pub enum DbCommand {
         command: DbMigrateCommand,
     },
 
-    /// Push SQL to remote D1 database
+    /// Push SQL to remote database
     Push {
         /// SQL to execute (use '-' to read from stdin)
         #[arg(allow_hyphen_values = true)]
@@ -72,7 +72,7 @@ pub enum DbMigrateCommand {
 
     /// Apply pending migrations
     Apply {
-        /// Apply to remote D1 database
+        /// Apply to remote database
         #[arg(long)]
         remote: bool,
 
@@ -87,7 +87,7 @@ pub enum DbMigrateCommand {
 
     /// Show migration status
     Status {
-        /// Check remote D1 database
+        /// Check remote database
         #[arg(long)]
         remote: bool,
 

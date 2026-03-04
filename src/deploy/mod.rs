@@ -289,6 +289,7 @@ pub async fn run(
                 output::warn(
                     json,
                     format!("Could not fetch project settings: {e}. Using local configuration."),
+                    output::Phase::Deploy,
                 );
                 None
             }
@@ -331,7 +332,12 @@ pub async fn run(
     let detection = crate::detect::detect(&project_dir);
 
     // Validate build output
-    output::status(json, "~", "Validating build output...");
+    output::status(
+        json,
+        "~",
+        "Validating build output...",
+        output::Phase::Deploy,
+    );
     let build_result = build::run_with_hint(
         BuildArgs {
             dir: project_dir.to_string_lossy().into_owned(),
@@ -351,7 +357,12 @@ pub async fn run(
     // Scan output directory recursively into a flat file list, pre-compressing files
     // in STATIC layers marked isPrecompressed.
     // Run in a blocking task: combines filesystem I/O and CPU-bound brotli compression.
-    output::status(json, "~", "Scanning output directory...");
+    output::status(
+        json,
+        "~",
+        "Scanning output directory...",
+        output::Phase::Deploy,
+    );
     let pc_dirs = precompressed_dirs(loaded_manifest.as_ref());
     let output_dir_for_scan = output_dir.clone();
     let (mut files, compressed_map) = tokio::task::spawn_blocking(move || {
@@ -370,6 +381,7 @@ pub async fn run(
                 "Pre-compressed {} file(s) with brotli",
                 compressed_map.len()
             ),
+            output::Phase::Deploy,
         );
     }
 
@@ -413,7 +425,7 @@ pub async fn run(
             ),
             _ => format!("{} deploying as {}.", detection.name, compute),
         };
-        output::warn(json, &msg);
+        output::warn(json, &msg, output::Phase::Deploy);
         warnings.push(msg);
     }
 
@@ -458,7 +470,7 @@ pub async fn run(
             json,
         )?;
         if let Some(ref w) = warning {
-            output::warn(json, w);
+            output::warn(json, w, output::Phase::Deploy);
             warnings.push(w.clone());
         }
         match entry {
@@ -468,6 +480,7 @@ pub async fn run(
                     json,
                     "~",
                     format!("Auto-generated COMPUTE manifest (entry: {e})"),
+                    output::Phase::Deploy,
                 );
                 manifest_raw = Some(
                     serde_json::to_value(&auto)
@@ -540,7 +553,11 @@ pub async fn run(
                 "no linked project. Use --project-id, set [project] id in onreza.toml, or run `nrz link` first."
             );
         }
-        output::warn(false, "No linked project. Select one:");
+        output::warn(
+            false,
+            "No linked project. Select one:",
+            output::Phase::Deploy,
+        );
         let selected = link::select_project_interactive(&client).await?;
         nrz::config::save_or_update(
             &project_dir,
@@ -555,6 +572,7 @@ pub async fn run(
                 "Linked to {}",
                 console::style(&selected.project_name).bold()
             ),
+            output::Phase::Deploy,
         );
         selected.project_id
     };
@@ -586,7 +604,11 @@ pub async fn run(
     let commit_sha = match git_cmd(&["rev-parse", "HEAD"]) {
         Some(sha) => Some(sha),
         None => {
-            output::warn(json, "git not available, using synthetic commit SHA");
+            output::warn(
+                json,
+                "git not available, using synthetic commit SHA",
+                output::Phase::Deploy,
+            );
             Some(synthetic_sha(&files))
         }
     };
@@ -623,7 +645,7 @@ pub async fn run(
         .context("failed to scan migrations")?;
 
     // Create deployment
-    output::status(json, "~", "Creating deployment...");
+    output::status(json, "~", "Creating deployment...", output::Phase::Deploy);
     let body = CreateDeploymentBody {
         manifest: manifest_raw,
         files,
@@ -754,7 +776,11 @@ fn resolve_health_check(
             || flag.eq_ignore_ascii_case("false")
             || flag.eq_ignore_ascii_case("tcp")
         {
-            output::success(json, "Health check: TCP (from --health-check-path)");
+            output::success(
+                json,
+                "Health check: TCP (from --health-check-path)",
+                output::Phase::Deploy,
+            );
             return Ok(ResolvedHealthCheck {
                 path: None,
                 source: HealthCheckSource::Flag,
@@ -764,6 +790,7 @@ fn resolve_health_check(
         output::success(
             json,
             format!("Health check: HTTP {flag} (from --health-check-path)"),
+            output::Phase::Deploy,
         );
         return Ok(ResolvedHealthCheck {
             path: Some(flag.to_string()),
@@ -775,14 +802,22 @@ fn resolve_health_check(
     if let Some(hc) = config.health_check_path() {
         match hc {
             HealthCheckPathConfig::Tcp => {
-                output::success(json, "Health check: TCP (configured)");
+                output::success(
+                    json,
+                    "Health check: TCP (configured)",
+                    output::Phase::Deploy,
+                );
                 return Ok(ResolvedHealthCheck {
                     path: None,
                     source: HealthCheckSource::Config,
                 });
             }
             HealthCheckPathConfig::Http(path) => {
-                output::success(json, format!("Health check: HTTP {path} (from config)"));
+                output::success(
+                    json,
+                    format!("Health check: HTTP {path} (from config)"),
+                    output::Phase::Deploy,
+                );
                 return Ok(ResolvedHealthCheck {
                     path: Some(path.clone()),
                     source: HealthCheckSource::Config,
@@ -801,6 +836,7 @@ fn resolve_health_check(
                 "Found health endpoint: {} (source: {})",
                 det.path, det.source_description
             ),
+            output::Phase::Deploy,
         );
         return Ok(ResolvedHealthCheck {
             path: Some(det.path),
@@ -815,6 +851,7 @@ fn resolve_health_check(
         "No health check endpoint detected. Using TCP readiness check.\n    \
          To add HTTP health check, create a /health endpoint or set\n    \
          deploy.health_check_path in onreza.toml",
+        output::Phase::Deploy,
     );
     Ok(ResolvedHealthCheck {
         path: None,
@@ -859,7 +896,11 @@ async fn sync_compute_config(
     let path = format!("/v1/compute-config/{project_id}");
     let resp: Result<serde_json::Value, _> = client.put(&path, &body).await;
     if let Err(e) = resp {
-        output::warn(json, format!("failed to sync compute config: {e}"));
+        output::warn(
+            json,
+            format!("failed to sync compute config: {e}"),
+            output::Phase::Deploy,
+        );
     }
 }
 
@@ -883,6 +924,7 @@ async fn upload_and_activate(
             json,
             "~",
             format!("Uploading bundle ({})...", format_bytes(bundle_size)),
+            output::Phase::Deploy,
         );
         client
             .put_bytes(bundle_url, bundle_bytes, "application/zstd")
@@ -891,6 +933,7 @@ async fn upload_and_activate(
         output::success(
             json,
             format!("Bundle uploaded ({})", format_bytes(bundle_size)),
+            output::Phase::Deploy,
         );
     }
 
@@ -954,7 +997,11 @@ async fn upload_and_activate(
             }
 
             for detail in &error_details {
-                output::warn(false, format!("upload error: {detail}"));
+                output::warn(
+                    false,
+                    format!("upload error: {detail}"),
+                    output::Phase::Deploy,
+                );
             }
             bail!("{} of {file_count} file uploads failed", errors.len());
         }
@@ -1032,6 +1079,7 @@ async fn resume_deploy(
         json,
         "~",
         format!("Resuming deployment {deployment_id} (compute: {compute})"),
+        output::Phase::Deploy,
     );
 
     // Create bundle for PROCESS deployments
@@ -1352,6 +1400,7 @@ fn ensure_process_entry(
                         "Entry point resolved from {:?}: {}",
                         resolved.source, resolved.path
                     ),
+                    output::Phase::Deploy,
                 );
                 Some(resolved.path)
             }
@@ -1436,7 +1485,12 @@ fn ensure_process_entry(
             bail!("entry point must be inside the output directory, got: \"{entry}\"");
         }
 
-        output::status(json, "~", format!("Entry point: {entry}"));
+        output::status(
+            json,
+            "~",
+            format!("Entry point: {entry}"),
+            output::Phase::Deploy,
+        );
     } else {
         output::status(
             json,
@@ -1445,6 +1499,7 @@ fn ensure_process_entry(
                 "Entry point: <runtime default bun {}>",
                 output_dir.display()
             ),
+            output::Phase::Deploy,
         );
     }
 
@@ -1461,7 +1516,12 @@ fn maybe_create_bundle(
     if !is_process {
         return Ok(None);
     }
-    output::status(json, "~", "Creating tar.zst bundle (PROCESS deployment)...");
+    output::status(
+        json,
+        "~",
+        "Creating tar.zst bundle (PROCESS deployment)...",
+        output::Phase::Deploy,
+    );
     let (bytes, sha) =
         bundle::create_bundle(output_dir).context("failed to create tar.zst bundle")?;
     output::success(
@@ -1471,6 +1531,7 @@ fn maybe_create_bundle(
             format_bytes(bytes.len()),
             &sha[..12]
         ),
+        output::Phase::Deploy,
     );
     Ok(Some((bytes, sha)))
 }
@@ -1517,6 +1578,118 @@ fn resolve_build_command(
     Some(format!("{pm} run build"))
 }
 
+/// Run a shell command, streaming stdout/stderr through structured JSON in JSON mode.
+///
+/// In JSON mode: pipes stdout/stderr, wraps each line via `output::log_line()`.
+/// In non-JSON mode: inherits stdio (unchanged behavior).
+///
+/// `child_stream` controls the `s` field for child stdout lines ("user" or "debug").
+/// Child stderr always goes to "debug" stream with "warn" level.
+fn run_command_streaming(
+    cmd: &str,
+    project_dir: &Path,
+    json: bool,
+    phase: output::Phase,
+    child_stream: &str,
+) -> anyhow::Result<()> {
+    use std::io::BufRead;
+
+    #[cfg(unix)]
+    let (shell, shell_args) = ("sh", ["-c", cmd]);
+    #[cfg(windows)]
+    let (shell, shell_args) = ("cmd", ["/C", cmd]);
+
+    if !json {
+        let status = std::process::Command::new(shell)
+            .args(shell_args)
+            .current_dir(project_dir)
+            .status()
+            .with_context(|| format!("failed to start command: {cmd}"))?;
+        if !status.success() {
+            match status.code() {
+                Some(code) => anyhow::bail!("{phase} command `{cmd}` failed with exit code {code}"),
+                None => anyhow::bail!("{phase} process `{cmd}` was killed by signal"),
+            }
+        }
+        return Ok(());
+    }
+
+    // JSON mode: capture stdout/stderr and emit structured log lines
+    let mut child = std::process::Command::new(shell)
+        .args(shell_args)
+        .current_dir(project_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .with_context(|| format!("failed to start command: {cmd}"))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .context("expected piped stdout on child process")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("expected piped stderr on child process")?;
+
+    let phase_out = phase.to_string();
+    let stream_out = child_stream.to_string();
+    let stdout_handle = std::thread::spawn(move || {
+        let reader = std::io::BufReader::new(stdout);
+        for result in reader.lines() {
+            match result {
+                Ok(line) => output::log_line(&stream_out, "info", &phase_out, &line),
+                Err(e) => {
+                    output::log_line(
+                        "debug",
+                        "warn",
+                        &phase_out,
+                        &format!("[nrz] failed to read stdout: {e}"),
+                    );
+                    break;
+                }
+            }
+        }
+    });
+
+    let phase_err = phase.to_string();
+    let stderr_handle = std::thread::spawn(move || {
+        let reader = std::io::BufReader::new(stderr);
+        for result in reader.lines() {
+            match result {
+                Ok(line) => output::log_line("debug", "warn", &phase_err, &line),
+                Err(e) => {
+                    output::log_line(
+                        "debug",
+                        "warn",
+                        &phase_err,
+                        &format!("[nrz] failed to read stderr: {e}"),
+                    );
+                    break;
+                }
+            }
+        }
+    });
+
+    let status = child
+        .wait()
+        .with_context(|| format!("failed to wait for command: {cmd}"))?;
+    if let Err(e) = stdout_handle.join() {
+        tracing::warn!("stdout reader thread panicked: {e:?}");
+    }
+    if let Err(e) = stderr_handle.join() {
+        tracing::warn!("stderr reader thread panicked: {e:?}");
+    }
+
+    if !status.success() {
+        match status.code() {
+            Some(code) => anyhow::bail!("{phase} command failed with exit code {code}"),
+            None => anyhow::bail!("{phase} process was killed by signal"),
+        }
+    }
+    Ok(())
+}
+
 fn run_install_step(
     project_dir: &Path,
     json: bool,
@@ -1538,30 +1711,15 @@ fn run_install_step(
         }
     };
 
-    output::status(json, ">", format!("Installing dependencies: {cmd}"));
-
-    #[cfg(unix)]
-    let status = std::process::Command::new("sh")
-        .args(["-c", &cmd])
-        .current_dir(project_dir)
-        .status()
-        .with_context(|| format!("failed to start install command: {cmd}"))?;
-
-    #[cfg(windows)]
-    let status = std::process::Command::new("cmd")
-        .args(["/C", &cmd])
-        .current_dir(project_dir)
-        .status()
-        .with_context(|| format!("failed to start install command: {cmd}"))?;
-
-    if !status.success() {
-        match status.code() {
-            Some(code) => anyhow::bail!("dependency installation failed with exit code {code}"),
-            None => anyhow::bail!("install process was killed by signal"),
-        }
-    }
-
-    output::success(json, "Dependencies installed");
+    output::status(
+        json,
+        ">",
+        format!("Installing dependencies: {cmd}"),
+        output::Phase::Deploy,
+    );
+    // Install child output → debug stream (npm noise), nrz markers go through output::status/success
+    run_command_streaming(&cmd, project_dir, json, output::Phase::Install, "debug")?;
+    output::success(json, "Dependencies installed", output::Phase::Deploy);
     Ok(())
 }
 
@@ -1570,31 +1728,10 @@ fn run_build_step(cmd: &str, project_dir: &Path, json: bool) -> anyhow::Result<(
         anyhow::bail!("empty build command");
     }
 
-    output::status(json, ">", format!("Building: {cmd}"));
-
-    // Run through shell to support env vars, pipes, and paths with spaces
-    #[cfg(unix)]
-    let status = std::process::Command::new("sh")
-        .args(["-c", cmd])
-        .current_dir(project_dir)
-        .status()
-        .with_context(|| format!("failed to start build command: {cmd}"))?;
-
-    #[cfg(windows)]
-    let status = std::process::Command::new("cmd")
-        .args(["/C", cmd])
-        .current_dir(project_dir)
-        .status()
-        .with_context(|| format!("failed to start build command: {cmd}"))?;
-
-    if !status.success() {
-        match status.code() {
-            Some(code) => anyhow::bail!("build failed with exit code {code}"),
-            None => anyhow::bail!("build process was killed by signal"),
-        }
-    }
-
-    output::success(json, "Build completed");
+    output::status(json, ">", format!("Building: {cmd}"), output::Phase::Deploy);
+    // Build child output → user stream (webpack/vite output is useful)
+    run_command_streaming(cmd, project_dir, json, output::Phase::Build, "user")?;
+    output::success(json, "Build completed", output::Phase::Deploy);
     Ok(())
 }
 
@@ -1627,6 +1764,7 @@ fn detect_migrations(
             "Detected {} migration(s), will apply during activation",
             migs.len()
         ),
+        output::Phase::Deploy,
     );
     Ok(Some(migs))
 }

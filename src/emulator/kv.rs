@@ -9,7 +9,14 @@ use super::data_dir;
 
 struct Entry {
     value: String,
+    metadata: Option<String>,
     expires_at: Option<Instant>,
+}
+
+impl Entry {
+    fn is_expired(&self, now: Instant) -> bool {
+        self.expires_at.is_some_and(|e| now > e)
+    }
 }
 
 /// In-memory KV store with TTL support.
@@ -39,7 +46,7 @@ impl KvStore {
             poisoned.into_inner()
         });
         if let Some(entry) = store.get(key) {
-            if entry.expires_at.is_some_and(|e| Instant::now() > e) {
+            if entry.is_expired(Instant::now()) {
                 store.remove(key);
                 return None;
             }
@@ -49,20 +56,70 @@ impl KvStore {
         }
     }
 
-    pub fn set(&self, key: String, value: String, ttl_secs: u64) {
+    pub fn set(&self, key: String, value: String, ttl_secs: u64, metadata: Option<String>) {
         let expires_at = if ttl_secs > 0 {
             Some(Instant::now() + Duration::from_secs(ttl_secs))
         } else {
             None
         };
-
         self.inner
             .lock()
             .unwrap_or_else(|poisoned| {
                 tracing::warn!("KV store mutex was poisoned, recovering");
                 poisoned.into_inner()
             })
-            .insert(key, Entry { value, expires_at });
+            .insert(
+                key,
+                Entry {
+                    value,
+                    expires_at,
+                    metadata,
+                },
+            );
+    }
+
+    pub fn get_with_metadata(&self, key: &str) -> (Option<String>, Option<String>) {
+        let mut store = self.inner.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!("KV store mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
+        if let Some(entry) = store.get(key) {
+            if entry.is_expired(Instant::now()) {
+                store.remove(key);
+                return (None, None);
+            }
+            (Some(entry.value.clone()), entry.metadata.clone())
+        } else {
+            (None, None)
+        }
+    }
+
+    pub fn get_many(&self, keys: &[String]) -> Vec<Option<String>> {
+        let mut store = self.inner.lock().unwrap_or_else(|poisoned| {
+            tracing::warn!("KV store mutex was poisoned, recovering");
+            poisoned.into_inner()
+        });
+        let now = Instant::now();
+        let mut expired = Vec::new();
+        let values: Vec<Option<String>> = keys
+            .iter()
+            .map(|key| {
+                if let Some(entry) = store.get(key.as_str()) {
+                    if entry.is_expired(now) {
+                        expired.push(key.clone());
+                        None
+                    } else {
+                        Some(entry.value.clone())
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for key in &expired {
+            store.remove(key.as_str());
+        }
+        values
     }
 
     pub fn delete(&self, key: &str) -> bool {
@@ -82,7 +139,7 @@ impl KvStore {
             poisoned.into_inner()
         });
         if let Some(entry) = store.get(key) {
-            if entry.expires_at.is_some_and(|e| Instant::now() > e) {
+            if entry.is_expired(Instant::now()) {
                 store.remove(key);
                 return false;
             }
@@ -103,7 +160,7 @@ impl KvStore {
         let expired: Vec<String> = store
             .iter()
             .filter_map(|(k, entry)| {
-                if entry.expires_at.is_some_and(|e| now > e) {
+                if entry.is_expired(now) {
                     return Some(k.clone());
                 }
                 None
@@ -146,6 +203,8 @@ pub struct KvFileEntry {
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<String>,
 }
 
 pub fn kv_file_path(project_dir: &Path) -> std::path::PathBuf {
@@ -154,8 +213,22 @@ pub fn kv_file_path(project_dir: &Path) -> std::path::PathBuf {
 
 pub fn load_kv_file(path: &Path) -> KvFile {
     match std::fs::read_to_string(path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-        Err(_) => KvFile::default(),
+        Ok(content) => match serde_json::from_str(&content) {
+            Ok(kv) => kv,
+            Err(e) => {
+                tracing::warn!("corrupt kv.json at {}: {e}, starting fresh", path.display());
+                KvFile::default()
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => KvFile::default(),
+        Err(e) => {
+            eprintln!(
+                "  {} failed to read {}: {e}. Using empty KV store.",
+                console::style("!").yellow().bold(),
+                path.display()
+            );
+            KvFile::default()
+        }
     }
 }
 

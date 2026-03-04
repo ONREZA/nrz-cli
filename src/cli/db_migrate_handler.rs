@@ -159,7 +159,12 @@ pub async fn handle_push(
     let pid = config::resolve_project_id(project_id.as_deref(), config)?;
     let (eid, _) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
-    output::status(json, "~", "Pushing SQL to remote database...");
+    output::status(
+        json,
+        "~",
+        "Pushing SQL to remote database...",
+        output::Phase::Db,
+    );
 
     let resp: RemoteExecResponse = client
         .post(
@@ -182,6 +187,7 @@ pub async fn handle_push(
                 "Executed on remote ({} change(s), {})",
                 resp.count, resp.duration
             ),
+            output::Phase::Db,
         );
     }
 
@@ -210,7 +216,11 @@ fn create(project_dir: &Path, name: &str, json: bool, mig_dir: &str) -> anyhow::
             path: format!("{mig_dir}/{filename}"),
         });
     } else {
-        output::success(false, format!("Created {mig_dir}/{filename}"));
+        output::success(
+            false,
+            format!("Created {mig_dir}/{filename}"),
+            output::Phase::Db,
+        );
     }
 
     Ok(())
@@ -312,7 +322,7 @@ fn apply_local(
         applied_names_list.push(m.name.clone());
 
         if !json {
-            output::success(false, format!("Applied {}", m.name));
+            output::success(false, format!("Applied {}", m.name), output::Phase::Db);
         }
     }
 
@@ -360,7 +370,12 @@ async fn apply_remote(
     let pid = config::resolve_project_id(project_id, config)?;
     let (eid, _) = environment_ref::resolve_environment_id(env, &pid, &client, json).await?;
 
-    output::status(json, "~", "Applying migrations to remote database...");
+    output::status(
+        json,
+        "~",
+        "Applying migrations to remote database...",
+        output::Phase::Db,
+    );
 
     let resp: RemoteApplyResponse = client
         .post(
@@ -386,7 +401,7 @@ async fn apply_remote(
         );
     } else {
         for name in &resp.applied {
-            output::success(false, format!("Applied {name} (remote)"));
+            output::success(false, format!("Applied {name} (remote)"), output::Phase::Db);
         }
         if resp.applied.is_empty() {
             eprintln!("  All migrations already applied on remote");
@@ -472,13 +487,8 @@ async fn status_remote(
         .context("failed to fetch remote migrations")?;
 
     // Compare with local migration files to find pending
-    let all_local = match migrations::scan_migrations_dir(project_dir, config.migrations_dir()) {
-        Ok(m) => m,
-        Err(e) => {
-            output::warn(json, format!("Failed to scan local migrations: {e:#}"));
-            vec![]
-        }
-    };
+    let all_local = migrations::scan_migrations_dir(project_dir, config.migrations_dir())
+        .context("failed to scan local migrations")?;
     let remote_names: std::collections::HashSet<_> =
         remote_applied.iter().map(|m| m.name.as_str()).collect();
     let pending: Vec<_> = all_local

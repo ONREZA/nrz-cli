@@ -72,7 +72,11 @@ pub async fn login(json: bool, token: Option<&str>) -> anyhow::Result<()> {
                 "name": user.name,
             }));
         } else {
-            output::success(false, format!("Token saved. Logged in as {}", user.email));
+            output::success(
+                false,
+                format!("Token saved. Logged in as {}", user.email),
+                output::Phase::Auth,
+            );
         }
         return Ok(());
     }
@@ -164,6 +168,7 @@ pub async fn login(json: bool, token: Option<&str>) -> anyhow::Result<()> {
                         "Logged in to workspace: {} ({slug})",
                         console::style(&workspace_name).bold(),
                     ),
+                    output::Phase::Auth,
                 );
             }
         }
@@ -244,7 +249,7 @@ pub async fn logout(json: bool, ws: Option<&str>, all: bool) -> anyhow::Result<(
             status: "ok".into(),
         });
     } else {
-        output::success(false, "Logged out.");
+        output::success(false, "Logged out.", output::Phase::Auth);
     }
     Ok(())
 }

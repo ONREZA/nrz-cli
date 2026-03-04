@@ -1,4 +1,4 @@
-//! D1 migration system — scan, checksum, track, apply.
+//! Database migration system — scan, checksum, track, apply.
 
 pub mod tracking;
 

@@ -162,6 +162,7 @@ pub async fn run_with_hint(
             json,
             "~",
             "Auto-generated Next.js standalone manifest (STATIC + COMPUTE)",
+            output::Phase::Build,
         );
         if !args.skip_validation {
             manifest::verify_files(&output_dir, &auto)?;
@@ -174,12 +175,18 @@ pub async fn run_with_hint(
             json,
             "~",
             "Auto-generated STATIC manifest (no adapter found)",
+            output::Phase::Build,
         );
         emit_build_output(json, &auto, &output_dir, Some(detection));
         Some(auto)
     } else {
         if !json {
-            output::status(false, "~", "No .onreza/manifest.json found (no adapter)");
+            output::status(
+                false,
+                "~",
+                "No .onreza/manifest.json found (no adapter)",
+                output::Phase::Build,
+            );
         }
         None
     };
@@ -336,24 +343,45 @@ fn prepare_nextjs_standalone(
             json,
             "~",
             "No .next/static/ found — standalone output will have no static assets",
+            output::Phase::Build,
         );
     } else {
         // 1. Copy .next/static/ → {output}/.next/static/ (for server.js)
         let server_static_dst = output_dir.join(".next/static");
         if !server_static_dst.is_dir() {
-            output::status(json, "+", "Copying .next/static/ for server.js");
+            output::status(
+                json,
+                "+",
+                "Copying .next/static/ for server.js",
+                output::Phase::Build,
+            );
             copy_dir_recursive(&next_static_src, &server_static_dst)?;
         } else {
-            output::status(json, "~", ".next/static/ already present, skipping copy");
+            output::status(
+                json,
+                "~",
+                ".next/static/ already present, skipping copy",
+                output::Phase::Build,
+            );
         }
 
         // 2. Copy .next/static/ → {output}/_static/_next/static/ (for CDN STATIC layer)
         let cdn_static_dst = output_dir.join("_static/_next/static");
         if !cdn_static_dst.is_dir() {
-            output::status(json, "+", "Copying static assets to _static/ for CDN");
+            output::status(
+                json,
+                "+",
+                "Copying static assets to _static/ for CDN",
+                output::Phase::Build,
+            );
             copy_dir_recursive(&next_static_src, &cdn_static_dst)?;
         } else {
-            output::status(json, "~", "_static/ already present, skipping copy");
+            output::status(
+                json,
+                "~",
+                "_static/ already present, skipping copy",
+                output::Phase::Build,
+            );
         }
     }
 
@@ -362,10 +390,15 @@ fn prepare_nextjs_standalone(
     if public_src.is_dir() {
         let public_dst = output_dir.join("public");
         if !public_dst.is_dir() {
-            output::status(json, "+", "Copying public/ assets");
+            output::status(json, "+", "Copying public/ assets", output::Phase::Build);
             copy_dir_recursive(&public_src, &public_dst)?;
         } else {
-            output::status(json, "~", "public/ already present, skipping copy");
+            output::status(
+                json,
+                "~",
+                "public/ already present, skipping copy",
+                output::Phase::Build,
+            );
         }
     }
 
@@ -406,6 +439,7 @@ fn copy_metadata_routes(output_dir: &Path, json: bool) -> anyhow::Result<()> {
             json,
             "+",
             format!("Copied {copied} metadata route(s) to public/ (favicon.ico, etc.)"),
+            output::Phase::Build,
         );
     }
 

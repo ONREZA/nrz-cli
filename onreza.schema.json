@@ -57,7 +57,7 @@
         },
         "db_name": {
           "type": "string",
-          "description": "SQLite database filename for D1 emulation",
+          "description": "SQLite database filename for local emulation",
           "default": "dev.db"
         },
         "aliases": {

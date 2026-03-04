@@ -24,6 +24,7 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
                 false,
                 "+",
                 format!("Saved framework \"{}\" to onreza.toml", result.framework),
+                output::Phase::Detect,
             );
         }
     }

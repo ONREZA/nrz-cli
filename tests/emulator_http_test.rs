@@ -24,9 +24,10 @@ struct KvRequest {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct DbQueryRequest {
     sql: String,
-    #[serde(default)]
+    #[serde(default, alias = "params")]
     bindings: Vec<serde_json::Value>,
     mode: String,
 }
@@ -75,8 +76,44 @@ async fn kv_set(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    state.kv.set(key, value, 0);
-    Json(serde_json::json!("OK"))
+    let ttl = req.args.get(2).and_then(|v| v.as_u64()).unwrap_or(0);
+    let metadata = req
+        .args
+        .get(3)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    state.kv.set(key, value, ttl, metadata);
+    Json(serde_json::json!(null))
+}
+
+async fn kv_get_many(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<KvRequest>,
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    let keys: Vec<String> = req
+        .args
+        .first()
+        .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
+        .ok_or((
+            axum::http::StatusCode::BAD_REQUEST,
+            "kv.getMany requires args: [keys[]]".into(),
+        ))?;
+    let values = state.kv.get_many(&keys);
+    Ok(Json(serde_json::json!({ "values": values })))
+}
+
+async fn kv_get_with_metadata(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(req): Json<KvRequest>,
+) -> Result<Json<serde_json::Value>, (axum::http::StatusCode, String)> {
+    let key = req.args.first().and_then(|v| v.as_str()).ok_or((
+        axum::http::StatusCode::BAD_REQUEST,
+        "kv.getWithMetadata requires args: [key]".into(),
+    ))?;
+    let (value, metadata) = state.kv.get_with_metadata(key);
+    Ok(Json(
+        serde_json::json!({ "value": value, "metadata": metadata }),
+    ))
 }
 
 async fn db_exec(
@@ -202,6 +239,8 @@ async fn start_test_server() -> (String, KvStore, tempfile::TempDir) {
         .route("/__nrz/health", get(health))
         .route("/__nrz/kv/get", post(kv_get))
         .route("/__nrz/kv/set", post(kv_set))
+        .route("/__nrz/kv/getMany", post(kv_get_many))
+        .route("/__nrz/kv/getWithMetadata", post(kv_get_with_metadata))
         .route("/__nrz/db/query", post(db_query))
         .route("/__nrz/db/exec", post(db_exec))
         .with_state(state);
@@ -256,7 +295,7 @@ async fn kv_set_and_get() {
 
     assert!(set_resp.status().is_success());
     let set_body: serde_json::Value = set_resp.json().await.unwrap();
-    assert_eq!(set_body, "OK");
+    assert!(set_body.is_null());
 
     // Get the key
     let get_resp = client
@@ -400,4 +439,148 @@ async fn db_query_with_bindings() {
     let results = body["results"].as_array().unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["value"], 42);
+}
+
+#[tokio::test]
+async fn kv_get_many_returns_values() {
+    let (base_url, _kv, _temp) = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    // Set multiple keys
+    for (k, v) in [("m1", "val1"), ("m2", "val2"), ("m3", "val3")] {
+        client
+            .post(format!("{}/__nrz/kv/set", base_url))
+            .json(&serde_json::json!({ "args": [k, v] }))
+            .send()
+            .await
+            .unwrap();
+    }
+
+    // Get many
+    let resp = client
+        .post(format!("{}/__nrz/kv/getMany", base_url))
+        .json(&serde_json::json!({ "args": [["m1", "m2", "missing", "m3"]] }))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(resp.status().is_success());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let values = body["values"].as_array().unwrap();
+    assert_eq!(values.len(), 4);
+    assert_eq!(values[0], "val1");
+    assert_eq!(values[1], "val2");
+    assert!(values[2].is_null());
+    assert_eq!(values[3], "val3");
+}
+
+#[tokio::test]
+async fn kv_get_with_metadata_returns_value_and_metadata() {
+    let (base_url, _kv, _temp) = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    // Set key with metadata (args: [key, value, ttl, metadata])
+    client
+        .post(format!("{}/__nrz/kv/set", base_url))
+        .json(&serde_json::json!({ "args": ["mk", "mv", 0, "my_meta"] }))
+        .send()
+        .await
+        .unwrap();
+
+    // Get with metadata
+    let resp = client
+        .post(format!("{}/__nrz/kv/getWithMetadata", base_url))
+        .json(&serde_json::json!({ "args": ["mk"] }))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(resp.status().is_success());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["value"], "mv");
+    assert_eq!(body["metadata"], "my_meta");
+
+    // Get with metadata for key without metadata
+    client
+        .post(format!("{}/__nrz/kv/set", base_url))
+        .json(&serde_json::json!({ "args": ["nk", "nv"] }))
+        .send()
+        .await
+        .unwrap();
+
+    let resp2 = client
+        .post(format!("{}/__nrz/kv/getWithMetadata", base_url))
+        .json(&serde_json::json!({ "args": ["nk"] }))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(resp2.status().is_success());
+    let body2: serde_json::Value = resp2.json().await.unwrap();
+    assert_eq!(body2["value"], "nv");
+    assert!(body2["metadata"].is_null());
+}
+
+#[tokio::test]
+async fn kv_get_with_metadata_nonexistent_returns_nulls() {
+    let (base_url, _kv, _temp) = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    let resp = client
+        .post(format!("{}/__nrz/kv/getWithMetadata", base_url))
+        .json(&serde_json::json!({ "args": ["nonexistent"] }))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(resp.status().is_success());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert!(body["value"].is_null());
+    assert!(body["metadata"].is_null());
+}
+
+#[tokio::test]
+async fn db_query_with_params_alias() {
+    let (base_url, _kv, _temp) = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    // Create table
+    client
+        .post(format!("{}/__nrz/db/exec", base_url))
+        .json(&serde_json::json!({
+            "sql": "CREATE TABLE params_test (id INTEGER PRIMARY KEY, val TEXT)"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Insert using "params" alias instead of "bindings"
+    client
+        .post(format!("{}/__nrz/db/query", base_url))
+        .json(&serde_json::json!({
+            "sql": "INSERT INTO params_test (val) VALUES (?)",
+            "params": ["hello"],
+            "mode": "run"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Query to verify
+    let resp = client
+        .post(format!("{}/__nrz/db/query", base_url))
+        .json(&serde_json::json!({
+            "sql": "SELECT val FROM params_test",
+            "bindings": [],
+            "mode": "all"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(resp.status().is_success());
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["val"], "hello");
 }

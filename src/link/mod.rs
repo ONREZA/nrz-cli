@@ -92,6 +92,7 @@ pub async fn run(
         output::success(
             false,
             format!("Linked to {}", console::style(&project.project_name).bold()),
+            output::Phase::Link,
         );
     }
 

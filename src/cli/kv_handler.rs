@@ -57,8 +57,14 @@ pub async fn run(args: KvArgs, json: bool) -> anyhow::Result<()> {
             } else {
                 None
             };
-            kv.entries
-                .insert(key.clone(), KvFileEntry { value, expires_at });
+            kv.entries.insert(
+                key.clone(),
+                KvFileEntry {
+                    value,
+                    expires_at,
+                    metadata: None,
+                },
+            );
             save_kv_file(&path, &kv)?;
 
             if json {

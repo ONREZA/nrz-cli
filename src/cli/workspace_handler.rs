@@ -77,6 +77,7 @@ fn switch(slug: &str, json: bool) -> anyhow::Result<()> {
         output::success(
             false,
             format!("Switched to workspace {}", console::style(slug).bold(),),
+            output::Phase::Workspace,
         );
     }
 

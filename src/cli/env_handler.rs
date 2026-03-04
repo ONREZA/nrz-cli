@@ -279,7 +279,11 @@ async fn set(
         output::json_output(&resp);
     } else {
         let action = if resp.created { "Created" } else { "Updated" };
-        output::success(false, format!("{action} {}", console::style(key).bold()));
+        output::success(
+            false,
+            format!("{action} {}", console::style(key).bold()),
+            output::Phase::Env,
+        );
     }
 
     Ok(())
@@ -297,7 +301,11 @@ async fn delete(client: &ApiClient, project_id: &str, key: &str, json: bool) -> 
             "deleted": resp.deleted,
         }));
     } else {
-        output::success(false, format!("Deleted {}", console::style(key).bold()));
+        output::success(
+            false,
+            format!("Deleted {}", console::style(key).bold()),
+            output::Phase::Env,
+        );
     }
 
     Ok(())
@@ -317,7 +325,11 @@ async fn pull(client: &ApiClient, project_id: &str, file: &str, json: bool) -> a
             "status": "ok",
         }));
     } else {
-        output::success(false, format!("Written to {}", console::style(file).bold()));
+        output::success(
+            false,
+            format!("Written to {}", console::style(file).bold()),
+            output::Phase::Env,
+        );
     }
 
     Ok(())
@@ -358,6 +370,7 @@ async fn push(
             output::warn(
                 json,
                 format!("{filtered} variable(s) skipped (not declared in [env.declarations])"),
+                output::Phase::Env,
             );
         }
     }
@@ -369,6 +382,7 @@ async fn push(
                 "{} line(s) in {file} skipped (no '=' found or invalid key)",
                 result.skipped_lines
             ),
+            output::Phase::Env,
         );
     }
 
@@ -511,11 +525,12 @@ async fn push(
                 String::new()
             }
         ),
+        output::Phase::Env,
     );
     for r in &resp.results {
         if let Some(warnings) = &r.warnings {
             for w in warnings {
-                output::warn(false, format!("{}: {w}", r.key));
+                output::warn(false, format!("{}: {w}", r.key), output::Phase::Env);
             }
         }
     }
@@ -527,6 +542,7 @@ async fn push(
                 r.key,
                 r.error.as_deref().unwrap_or("unknown error")
             ),
+            output::Phase::Env,
         );
     }
 
@@ -731,6 +747,7 @@ async fn validate(
             output::success(
                 false,
                 format!("All {} required variable(s) are set", present.len()),
+                output::Phase::Env,
             );
         } else {
             eprintln!(
@@ -774,6 +791,7 @@ async fn validate(
                     undeclared.len(),
                     undeclared.join(", ")
                 ),
+                output::Phase::Env,
             );
         }
         eprintln!();
@@ -798,7 +816,12 @@ pub(crate) async fn validate_env_for_deploy(
         return Ok(());
     }
 
-    output::status(json, "~", "Checking environment variables...");
+    output::status(
+        json,
+        "~",
+        "Checking environment variables...",
+        output::Phase::Env,
+    );
 
     // Only fetch the keys we care about (declared required vars)
     let required_keys: Vec<&str> = config

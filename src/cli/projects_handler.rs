@@ -263,7 +263,11 @@ async fn create(
         output::json_output(&out);
     } else {
         if linked {
-            output::success(false, "Linked to current directory");
+            output::success(
+                false,
+                "Linked to current directory",
+                output::Phase::Projects,
+            );
         }
         output::success(
             false,
@@ -272,6 +276,7 @@ async fn create(
                 console::style(&name).bold(),
                 &resp.id,
             ),
+            output::Phase::Projects,
         );
     }
 
@@ -375,6 +380,7 @@ async fn update(
         output::success(
             false,
             format!("Updated project {}", console::style(id).bold()),
+            output::Phase::Projects,
         );
     }
 
@@ -412,6 +418,7 @@ async fn delete(client: &ApiClient, id: &str, force: bool, json: bool) -> anyhow
         output::success(
             false,
             format!("Deleted project {}", console::style(id).bold()),
+            output::Phase::Projects,
         );
     }
 

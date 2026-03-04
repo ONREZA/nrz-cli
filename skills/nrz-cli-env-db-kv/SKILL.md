@@ -1,6 +1,6 @@
 ---
 name: nrz-cli-env-db-kv
-description: Use when users manage ONREZA environment variables, D1-compatible database operations, migrations, or local KV data through nrz commands.
+description: Use when users manage ONREZA environment variables, database operations, migrations, or local KV data through nrz commands.
 ---
 
 # nrz CLI Env, DB, and KV

@@ -199,6 +199,7 @@ async fn add(
                 "Added domain {}",
                 console::style(&resp.domain.domain).bold(),
             ),
+            output::Phase::Domains,
         );
     }
 
@@ -222,7 +223,7 @@ async fn remove(
             "status": "deleted",
         }));
     } else {
-        output::success(false, "Domain removed.");
+        output::success(false, "Domain removed.", output::Phase::Domains);
     }
 
     Ok(())
@@ -242,11 +243,12 @@ async fn verify(
     if json {
         output::json_output(&resp);
     } else if resp.verified {
-        output::success(false, "Domain verified.");
+        output::success(false, "Domain verified.", output::Phase::Domains);
     } else {
         output::warn(
             false,
             "Domain verification pending. Check your DNS records.",
+            output::Phase::Domains,
         );
     }
 

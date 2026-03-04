@@ -27,6 +27,7 @@ async function __nrzFetch(url, options, operation) {{
 }}
 
 globalThis.ONREZA = {{
+  __emulatorUrl: NRZ_EMULATOR,
   env: new Map(Object.entries(process.env)),
   context: {{
     clientIp: "127.0.0.1",

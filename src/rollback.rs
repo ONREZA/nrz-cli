@@ -54,7 +54,7 @@ pub async fn run(
         let msg = resp
             .message
             .unwrap_or_else(|| "Rollback initiated".to_string());
-        output::success(false, msg);
+        output::success(false, msg, output::Phase::Rollback);
 
         if let (Some(from), Some(to)) = (&resp.rollback_from, &resp.rollback_to) {
             eprintln!(

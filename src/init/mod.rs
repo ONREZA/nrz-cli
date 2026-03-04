@@ -79,7 +79,12 @@ pub async fn run(
     if let Some(ref name) = framework
         && !json
     {
-        output::status(false, "~", format!("Detected framework: {name}"));
+        output::status(
+            false,
+            "~",
+            format!("Detected framework: {name}"),
+            output::Phase::Init,
+        );
     }
 
     let package_manager = detection_result
@@ -97,6 +102,7 @@ pub async fn run(
         output::warn(
             json,
             format!("could not save framework to onreza.toml: {e}"),
+            output::Phase::Init,
         );
     }
 
@@ -138,6 +144,7 @@ pub async fn run(
                     "Linked to {}",
                     console::style(&selected.project_name).bold()
                 ),
+                output::Phase::Init,
             );
         }
         (Some(selected.project_id), Some(selected.project_name))
@@ -170,7 +177,7 @@ pub async fn run(
             package_manager,
         });
     } else if project_id.is_none() {
-        output::success(false, "Initialized project scaffold");
+        output::success(false, "Initialized project scaffold", output::Phase::Init);
         eprintln!();
         eprintln!("  Next steps:");
         eprintln!("    1. Link project: nrz link");
@@ -179,7 +186,11 @@ pub async fn run(
         eprintln!();
     } else {
         let display = project_name.as_deref().unwrap_or("project");
-        output::success(false, format!("Project \"{display}\" created and linked"));
+        output::success(
+            false,
+            format!("Project \"{display}\" created and linked"),
+            output::Phase::Init,
+        );
         eprintln!();
         eprintln!("  Next steps:");
         if let Some(ref pm) = package_manager {
@@ -203,7 +214,7 @@ fn scaffold_local(project_dir: &Path, json: bool) -> anyhow::Result<()> {
         std::fs::write(&toml_path, content)
             .with_context(|| format!("failed to write {}", toml_path.display()))?;
         if !json {
-            output::status(false, "+", "Created onreza.toml");
+            output::status(false, "+", "Created onreza.toml", output::Phase::Init);
         }
     }
 
@@ -261,6 +272,7 @@ async fn interactive_bootstrap(
                     "Linked to {}",
                     console::style(&selected.project_name).bold()
                 ),
+                output::Phase::Init,
             );
             Ok((Some(selected.project_id), Some(selected.project_name)))
         }
@@ -279,7 +291,12 @@ async fn create_on_platform(
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
 
-    output::status(json, "~", format!("Creating project \"{name}\"..."));
+    output::status(
+        json,
+        "~",
+        format!("Creating project \"{name}\"..."),
+        output::Phase::Init,
+    );
 
     let body = CreateProjectBody {
         name: name.to_string(),

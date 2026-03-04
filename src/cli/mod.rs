@@ -73,7 +73,7 @@ pub enum Command {
     /// Deploy to ONREZA platform
     Deploy(DeployArgs),
 
-    /// Manage local D1-compatible SQLite database
+    /// Manage local SQLite database
     Db(DbArgs),
 
     /// Manage local KV store
