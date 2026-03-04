@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.2] - 2026-03-04
+
+### 🐛 Bug Fixes
+
+- **deploy:** use correct stream level for stderr logging in build output ([22acaa3](https://github.com/ONREZA/nrz-cli/commit/22acaa35c571e6fcaa43a3aefa56c78607ccaa3a))
+
 ## [0.19.1] - 2026-03-04
 
 ### 🐛 Bug Fixes
