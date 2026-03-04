@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.19.0] - 2026-03-04
+
+### ✨ Features
+
+- **cli:** add structured JSON logging phases, KV metadata/getMany/getWithMetadata, DB params alias ([28ee631](https://github.com/ONREZA/nrz-cli/commit/28ee631c1615d4757e02918a137906b12c430975))
+
 ## [0.18.0] - 2026-02-27
 
 ### ✨ Features
