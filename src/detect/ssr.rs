@@ -12,6 +12,7 @@ pub fn analyze_ssr(project_dir: &Path, framework: &str) -> Option<SsrAnalysis> {
         "nuxt" => Some(analyze_nuxt(project_dir)),
         "sveltekit" => Some(analyze_sveltekit(project_dir)),
         "astro" => Some(analyze_astro(project_dir)),
+        "react-router" => Some(analyze_react_router(project_dir)),
         "remix" => Some(analyze_remix(project_dir)),
         _ => None,
     }
@@ -268,6 +269,63 @@ fn analyze_astro(project_dir: &Path) -> SsrAnalysis {
             features.push("SSR adapter integration".into());
             is_static_compatible = false;
         }
+    }
+
+    SsrAnalysis {
+        is_static_compatible,
+        ssr_features: features,
+    }
+}
+
+// ── React Router v7 ────────────────────────────────────────────
+
+fn analyze_react_router(project_dir: &Path) -> SsrAnalysis {
+    let mut features = Vec::new();
+    // React Router v7 defaults to SSR — static only with ssr: false in react-router.config
+    let mut is_static_compatible = false;
+
+    // Check react-router.config.ts/js for ssr: false
+    let config_content = read_config_file(
+        project_dir,
+        &["react-router.config.ts", "react-router.config.js"],
+    );
+
+    if let Some(ref content) = config_content {
+        let stripped = strip_block_comments(content);
+
+        if contains_value(&stripped, "ssr", "false") {
+            features.push("ssr: false (SPA mode)".into());
+            is_static_compatible = true;
+        }
+    }
+
+    // Check for loader/action exports in routes (same structure as Remix)
+    let routes_dir = project_dir.join("app/routes");
+    if routes_dir.is_dir() {
+        if walk_for_content(&routes_dir, "export") && walk_for_content(&routes_dir, "loader") {
+            features.push("route loaders".into());
+            is_static_compatible = false;
+        }
+        if walk_for_content(&routes_dir, "export") && walk_for_content(&routes_dir, "action") {
+            features.push("route actions".into());
+            is_static_compatible = false;
+        }
+    }
+
+    // Check for entry.server
+    let app_dir = project_dir.join("app");
+    if app_dir.is_dir()
+        && file_exists_any(
+            project_dir,
+            &[
+                "app/entry.server.tsx",
+                "app/entry.server.ts",
+                "app/entry.server.jsx",
+                "app/entry.server.js",
+            ],
+        )
+    {
+        features.push("entry.server".into());
     }
 
     SsrAnalysis {

@@ -36,13 +36,23 @@ pub static PRESETS: &[FrameworkPreset] = &[
         runtime: RuntimeType::Node,
     },
     FrameworkPreset {
+        slug: "react-router",
+        name: "React Router",
+        dependencies: &["@react-router/dev"],
+        output_directory: "build",
+        build_script: Some("build"),
+        category: PresetCategory::React,
+        priority: 4,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
         slug: "remix",
         name: "Remix",
         dependencies: &["@remix-run/react", "@remix-run/dev"],
         output_directory: "build",
         build_script: Some("build"),
         category: PresetCategory::React,
-        priority: 4,
+        priority: 5,
         runtime: RuntimeType::Node,
     },
     FrameworkPreset {
@@ -52,7 +62,7 @@ pub static PRESETS: &[FrameworkPreset] = &[
         output_directory: "public",
         build_script: Some("build"),
         category: PresetCategory::React,
-        priority: 5,
+        priority: 6,
         runtime: RuntimeType::Node,
     },
     // Tier 2: CLI-based frameworks (priority 10-13)
@@ -167,6 +177,27 @@ pub static PRESETS: &[FrameworkPreset] = &[
         priority: 26,
         runtime: RuntimeType::Node,
     },
+    // Tier 3b: Server frameworks (priority 30-31)
+    FrameworkPreset {
+        slug: "hono",
+        name: "Hono",
+        dependencies: &["hono"],
+        output_directory: "dist",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 30,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "elysia",
+        name: "Elysia",
+        dependencies: &["elysia"],
+        output_directory: "dist",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 31,
+        runtime: RuntimeType::Bun,
+    },
     // Tier 4: Generic catch-all
     FrameworkPreset {
         slug: "vite",
@@ -229,6 +260,7 @@ pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
         "nextjs" => &[".next/standalone", ".next", "out"],
         "nuxt" => &[".output"],
         "sveltekit" => &["build"],
+        "react-router" => &["build/client", "build/server", "build"],
         "remix" => &["build/client", "build/server", "build"],
         "gatsby" => &["public"],
         "cra" => &["build"],
@@ -243,6 +275,8 @@ pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
         "hexo" => &["public"],
         "parcel" => &["dist"],
         "stencil" => &["www"],
+        "hono" => &["dist"],
+        "elysia" => &["dist"],
         "static-html" => &["."],
         _ => &[],
     }
@@ -251,7 +285,15 @@ pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
 /// Check if a framework slug is an SSR-capable framework.
 #[allow(dead_code)]
 pub fn is_ssr_framework(slug: &str) -> bool {
-    matches!(slug, "nextjs" | "nuxt" | "sveltekit" | "astro" | "remix")
+    matches!(
+        slug,
+        "nextjs" | "nuxt" | "sveltekit" | "astro" | "remix" | "react-router"
+    )
+}
+
+/// Check if a framework slug is a server-only framework (always PROCESS, no SSR analysis).
+pub fn is_server_framework(slug: &str) -> bool {
+    matches!(slug, "hono" | "elysia")
 }
 
 /// Get presets that have dependencies (used for detection), sorted by priority.

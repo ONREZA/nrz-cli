@@ -4,6 +4,8 @@ use super::ssr::*;
 fn non_ssr_framework_returns_none() {
     let dir = tempfile::tempdir().unwrap();
     assert!(analyze_ssr(dir.path(), "vite").is_none());
+    assert!(analyze_ssr(dir.path(), "hono").is_none());
+    assert!(analyze_ssr(dir.path(), "elysia").is_none());
     assert!(analyze_ssr(dir.path(), "other").is_none());
 }
 
@@ -612,6 +614,103 @@ export default defineConfig({ output: 'server', adapter: node({ mode: 'standalon
             .iter()
             .any(|f| f.contains("SSR adapter"))
     );
+}
+
+// ── React Router v7 ────────────────────────────────────────────
+
+#[test]
+fn react_router_default_is_ssr() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
+fn react_router_spa_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("react-router.config.ts"),
+        r#"import type { Config } from "@react-router/dev/config";
+export default { ssr: false } satisfies Config;"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    assert!(result.is_static_compatible);
+    assert!(result.ssr_features.iter().any(|f| f.contains("SPA mode")));
+}
+
+#[test]
+fn react_router_route_loaders() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/home.tsx"),
+        r#"export async function loader() { return { data: [] }; }"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("route loaders"))
+    );
+}
+
+#[test]
+fn react_router_route_actions() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/login.tsx"),
+        r#"export async function action({ request }) { }"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("route actions"))
+    );
+}
+
+#[test]
+fn react_router_entry_server() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app")).unwrap();
+    std::fs::write(
+        dir.path().join("app/entry.server.tsx"),
+        "export default function handleRequest() {}",
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("entry.server"))
+    );
+}
+
+#[test]
+fn react_router_spa_with_loaders_is_not_static() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("react-router.config.ts"),
+        r#"export default { ssr: false };"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/home.tsx"),
+        r#"export async function loader() { return {}; }"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    assert!(!result.is_static_compatible);
 }
 
 // ── Remix ──────────────────────────────────────────────────────

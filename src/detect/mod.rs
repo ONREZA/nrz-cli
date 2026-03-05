@@ -219,6 +219,14 @@ fn detect_config_files(project_dir: &Path, framework: &str) -> Vec<String> {
         ],
         "nuxt" => &["nuxt.config.ts", "nuxt.config.js"],
         "sveltekit" => &["svelte.config.js"],
+        "react-router" => &[
+            "react-router.config.ts",
+            "react-router.config.js",
+            "vite.config.ts",
+            "vite.config.mts",
+            "vite.config.js",
+            "vite.config.mjs",
+        ],
         "remix" => &[
             "vite.config.ts",
             "vite.config.mts",
@@ -295,7 +303,7 @@ fn resolve_framework_output_dir(
             }
             ".output".to_string()
         }
-        "remix" => {
+        "react-router" | "remix" => {
             if let Some(ssr) = ssr
                 && ssr.is_static_compatible
             {
@@ -335,12 +343,13 @@ fn infer_runtime(preset_runtime: RuntimeType, pm_info: &Option<PackageManagerInf
 /// Infer suggested compute type from detection metadata.
 ///
 /// Rules (in priority order):
-/// - STATIC: static runtime, non-SSR framework (CRA, Vite, Gatsby, etc.),
+/// - STATIC: static runtime, non-SSR/non-server framework (CRA, Vite, Gatsby, etc.),
 ///   or SSR framework with `is_static_compatible = true`
-/// - PROCESS: SSR framework with `is_static_compatible = false` or no SSR analysis
+/// - PROCESS: server frameworks (Hono, Elysia — always),
+///   SSR frameworks with `is_static_compatible = false` or no SSR analysis
 ///
 /// Each framework analyzer sets `is_static_compatible` based on its own defaults:
-/// - Next.js/Nuxt/SvelteKit/Remix default to `false` (SSR by default, needs explicit static config)
+/// - Next.js/Nuxt/SvelteKit/Remix/React Router default to `false` (SSR by default)
 /// - Astro defaults to `true` (static by default, needs explicit SSR config)
 fn infer_compute_type(
     runtime: RuntimeType,
@@ -350,6 +359,11 @@ fn infer_compute_type(
     // Static runtime → always STATIC
     if runtime == RuntimeType::Static {
         return ComputeType::Static;
+    }
+
+    // Server frameworks (Hono, Elysia) → always PROCESS
+    if presets::is_server_framework(framework) {
+        return ComputeType::Process;
     }
 
     // Non-SSR frameworks (CRA, Vite, Gatsby, etc.) → STATIC
@@ -422,6 +436,7 @@ fn framework_entry_point(slug: &str) -> Option<String> {
         "nextjs" => Some("server.js".into()),
         "nuxt" => Some("server/index.mjs".into()),
         "sveltekit" => Some("index.js".into()),
+        "react-router" => Some("server/index.js".into()),
         "remix" => Some("server/index.js".into()),
         _ => None,
     }

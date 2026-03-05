@@ -22,6 +22,7 @@ pub enum PresetCategory {
     Vue,
     Svelte,
     Static,
+    Server,
     Other,
 }
 

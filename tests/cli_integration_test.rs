@@ -565,6 +565,57 @@ export default defineConfig({ plugins: [remix({ ssr: false })] })"#,
 }
 
 #[test]
+fn detect_react_router_v7() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"devDependencies": {"@react-router/dev": "7.0.0"}, "dependencies": {"react-router": "7.0.0"}}"#,
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["detect", "--json"]);
+    cmd.assert()
+        .success()
+        .stdout(contains("\"framework\":\"react-router\""))
+        .stdout(contains("\"suggestedCompute\":\"PROCESS\""));
+}
+
+#[test]
+fn detect_hono_is_process() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"dependencies": {"hono": "4.0.0"}}"#,
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["detect", "--json"]);
+    cmd.assert()
+        .success()
+        .stdout(contains("\"framework\":\"hono\""))
+        .stdout(contains("\"suggestedCompute\":\"PROCESS\""));
+}
+
+#[test]
+fn detect_elysia_is_process() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"dependencies": {"elysia": "1.0.0"}}"#,
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["detect", "--json"]);
+    cmd.assert()
+        .success()
+        .stdout(contains("\"framework\":\"elysia\""))
+        .stdout(contains("\"suggestedCompute\":\"PROCESS\""));
+}
+
+#[test]
 fn detect_save_writes_framework_to_toml() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(

@@ -54,7 +54,17 @@ fn ssr_frameworks_recognized() {
     assert!(is_ssr_framework("sveltekit"));
     assert!(is_ssr_framework("astro"));
     assert!(is_ssr_framework("remix"));
+    assert!(is_ssr_framework("react-router"));
     assert!(!is_ssr_framework("vite"));
+    assert!(!is_ssr_framework("hono"));
+}
+
+#[test]
+fn server_frameworks_recognized() {
+    assert!(is_server_framework("hono"));
+    assert!(is_server_framework("elysia"));
+    assert!(!is_server_framework("nextjs"));
+    assert!(!is_server_framework("vite"));
 }
 
 #[test]
@@ -70,8 +80,8 @@ fn detection_presets_have_dependencies() {
 
 #[test]
 fn total_preset_count() {
-    // 18 detection presets (static-html is a separate const, not in PRESETS)
-    assert_eq!(PRESETS.len(), 18);
+    // 21 detection presets (static-html is a separate const, not in PRESETS)
+    assert_eq!(PRESETS.len(), 21);
 }
 
 #[test]
@@ -87,6 +97,10 @@ fn tier1_presets_correct() {
 
     let sveltekit = get_preset_by_slug("sveltekit").unwrap();
     assert_eq!(sveltekit.dependencies, &["@sveltejs/kit"]);
+
+    let react_router = get_preset_by_slug("react-router").unwrap();
+    assert_eq!(react_router.dependencies, &["@react-router/dev"]);
+    assert_eq!(react_router.output_directory, "build");
 
     let remix = get_preset_by_slug("remix").unwrap();
     assert_eq!(remix.dependencies, &["@remix-run/react", "@remix-run/dev"]);
@@ -117,6 +131,14 @@ fn framework_output_dirs_nextjs_standalone_before_dot_next() {
 }
 
 #[test]
+fn framework_output_dirs_react_router() {
+    let dirs = framework_output_dirs("react-router");
+    assert!(dirs.contains(&"build"));
+    assert!(dirs.contains(&"build/client"));
+    assert!(dirs.contains(&"build/server"));
+}
+
+#[test]
 fn framework_output_dirs_remix() {
     let dirs = framework_output_dirs("remix");
     assert!(dirs.contains(&"build"));
@@ -140,6 +162,18 @@ fn framework_output_dirs_gatsby_includes_public() {
 fn framework_output_dirs_vitepress() {
     let dirs = framework_output_dirs("vitepress");
     assert!(dirs.contains(&".vitepress/dist"));
+}
+
+#[test]
+fn framework_output_dirs_hono() {
+    let dirs = framework_output_dirs("hono");
+    assert!(dirs.contains(&"dist"));
+}
+
+#[test]
+fn framework_output_dirs_elysia() {
+    let dirs = framework_output_dirs("elysia");
+    assert!(dirs.contains(&"dist"));
 }
 
 #[test]

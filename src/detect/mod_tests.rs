@@ -109,6 +109,42 @@ fn remix_spa_mode_is_static() {
     );
 }
 
+#[test]
+fn react_router_is_process_by_default() {
+    let ssr = SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec![],
+    };
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "react-router", Some(&ssr)),
+        ComputeType::Process
+    );
+}
+
+#[test]
+fn react_router_spa_mode_is_static() {
+    let ssr = SsrAnalysis {
+        is_static_compatible: true,
+        ssr_features: vec!["ssr: false (SPA mode)".into()],
+    };
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "react-router", Some(&ssr)),
+        ComputeType::Static
+    );
+}
+
+#[test]
+fn server_framework_always_process() {
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "hono", None),
+        ComputeType::Process
+    );
+    assert_eq!(
+        infer_compute_type(RuntimeType::Bun, "elysia", None),
+        ComputeType::Process
+    );
+}
+
 // ── Full detect() integration tests ─────────────────────────
 
 #[test]
@@ -282,6 +318,178 @@ fn detect_nuxt_with_server_api_is_process() {
     let result = detect(dir.path());
     assert_eq!(result.framework, "nuxt");
     assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+// ── React Router v7 integration tests ────────────────────────
+
+#[test]
+fn detect_react_router_returns_process_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies": {"@react-router/dev": "7.0.0"}, "dependencies": {"react-router": "7.0.0", "react": "19.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "react-router");
+    assert_eq!(result.name, "React Router");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_react_router_spa_mode_is_static() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies": {"@react-router/dev": "7.0.0"}, "dependencies": {"react-router": "7.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("react-router.config.ts"),
+        r#"import type { Config } from "@react-router/dev/config";
+export default { ssr: false } satisfies Config;"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "react-router");
+    assert_eq!(result.suggested_compute, ComputeType::Static);
+}
+
+#[test]
+fn detect_react_router_output_dir_default_is_build() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies": {"@react-router/dev": "7.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some("build"));
+}
+
+#[test]
+fn detect_react_router_spa_output_dir_is_build_client() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies": {"@react-router/dev": "7.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("react-router.config.ts"),
+        r#"export default { ssr: false };"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some("build/client"));
+}
+
+#[test]
+fn react_router_wins_over_vite() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies": {"@react-router/dev": "7.0.0"}, "dependencies": {"vite": "6.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "react-router");
+}
+
+// ── Hono integration tests ──────────────────────────────────
+
+#[test]
+fn detect_hono_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"hono": "4.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "hono");
+    assert_eq!(result.name, "Hono");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_hono_no_ssr_analysis() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"hono": "4.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert!(result.metadata.ssr_analysis.is_none());
+}
+
+// ── Elysia integration tests ────────────────────────────────
+
+#[test]
+fn detect_elysia_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"elysia": "1.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "elysia");
+    assert_eq!(result.name, "Elysia");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_elysia_runtime_is_bun() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"elysia": "1.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    // Elysia preset has runtime: Bun
+    assert_eq!(
+        result.metadata.runtime.runtime_type,
+        types::RuntimeType::Bun
+    );
+}
+
+#[test]
+fn detect_elysia_no_ssr_analysis() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"elysia": "1.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert!(result.metadata.ssr_analysis.is_none());
 }
 
 // ── Remix integration tests ──────────────────────────────────
@@ -488,6 +696,14 @@ fn framework_entry_point_nuxt() {
 #[test]
 fn framework_entry_point_sveltekit() {
     assert_eq!(framework_entry_point("sveltekit"), Some("index.js".into()));
+}
+
+#[test]
+fn framework_entry_point_react_router() {
+    assert_eq!(
+        framework_entry_point("react-router"),
+        Some("server/index.js".into())
+    );
 }
 
 #[test]
