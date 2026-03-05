@@ -1201,6 +1201,9 @@ fn framework_static_hint(framework: &str) -> &'static str {
         "astro" => "remove `output: 'server'` from astro.config",
         "react-router" => "set `ssr: false` in react-router.config.ts",
         "remix" => "set `ssr: false` in the Remix Vite plugin options",
+        "solidstart" => "set `ssr: false` in app.config.ts",
+        "qwik" => "use the static adaptor in vite.config",
+        "analog" => "set `ssr: false` in the Analog plugin options",
         _ => "",
     }
 }

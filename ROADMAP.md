@@ -7,11 +7,12 @@
 
 ## Текущее состояние
 
-27 пресетов, 6 SSR-анализаторов, auto-manifest для Next.js standalone + Nuxt + SvelteKit + Remix + React Router v7 + Astro SSR + generic static/compute.
+31 пресет, 9 SSR-анализаторов, auto-manifest для Next.js standalone + Nuxt + SvelteKit + Remix + React Router v7 + Astro SSR + generic static/compute.
 
 | Tier | Фреймворки | SSR-анализ | Auto-manifest |
 |------|-----------|------------|---------------|
 | 1 (core) | Next.js, Nuxt, SvelteKit, React Router v7, Remix, Gatsby | да (6 шт) | **Next.js standalone, Nuxt, SvelteKit, Remix, RR v7, Astro SSR** |
+| 1b (next-gen) | SolidStart, Qwik City, Analog | да (3 шт) | — |
 | 2 (CLI) | CRA, Vue CLI, Angular, Preact CLI | нет | static fallback |
 | 3a (SSG) | Astro, Docusaurus, VitePress, Eleventy, Hexo, Parcel, Stencil | Astro only | static fallback / **Astro SSR** |
 | 3b (Server) | Hono, Elysia, Express, Fastify, NestJS, Koa, AdonisJS, H3, Nitro | нет (always PROCESS) | generic compute |
@@ -26,25 +27,12 @@
 
 ---
 
-## P1 — Мета-фреймворки с SSR
+## P1 — Мета-фреймворки с SSR ✅ DONE
 
-**Проблема:** SolidStart, QwikCity, Analog — SSR-фреймворки нового поколения. Растущая аудитория, zero-config деплой на конкурирующих PaaS.
-
-### P1.1 — Новые пресеты
-
-| slug | name | dependencies | output_directory | category | priority |
-|------|------|-------------|-----------------|----------|----------|
-| `solidstart` | SolidStart | `@solidjs/start` | `.output` | Other | 7 |
-| `qwik` | Qwik City | `@builder.io/qwik-city` | `dist`, `server` | Other | 8 |
-| `analog` | Analog | `@analogjs/platform` | `.output`, `dist/analog` | Other | 9 |
-
-### P1.2 — SSR-анализ для новых фреймворков
-
-- **SolidStart:** проверка `app.config.ts` на `ssr: false`, наличие `src/routes/api/`
-- **QwikCity:** проверка на `@qwik.dev/router` plugin, `src/routes/` структура
-- **Analog:** проверка `vite.config.ts` на `analog()` plugin, `src/server/routes/`
-
-### P1.3 — Обновить `is_ssr_framework()`, `DETECTION_CONTENT_FILES`
+> Реализовано: SolidStart, Qwik City, Analog.
+> Пресеты (приоритеты 7-9), SSR-анализаторы, `is_ssr_framework()`,
+> `DETECTION_CONTENT_FILES`, `detect_config_files()`, `framework_entry_point()`,
+> `framework_output_dirs()`. 20+ тестов.
 
 ---
 

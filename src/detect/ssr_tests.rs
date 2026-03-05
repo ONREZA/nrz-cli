@@ -909,6 +909,323 @@ fn re_export_loader_matched() {
     );
 }
 
+// ── SolidStart ──────────────────────────────────────────────────
+
+#[test]
+fn solidstart_default_is_ssr() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "solidstart").unwrap();
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
+fn solidstart_ssr_false() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("app.config.ts"),
+        r#"import { defineConfig } from "@solidjs/start/config";
+export default defineConfig({ ssr: false });"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "solidstart").unwrap();
+    assert!(result.is_static_compatible);
+    assert!(result.ssr_features.iter().any(|f| f.contains("ssr: false")));
+}
+
+#[test]
+fn solidstart_api_routes() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/routes/api")).unwrap();
+    std::fs::write(
+        dir.path().join("src/routes/api/hello.ts"),
+        "export function GET() { return new Response('ok'); }",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "solidstart").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("src/routes/api"))
+    );
+}
+
+#[test]
+fn solidstart_use_server() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/lib")).unwrap();
+    std::fs::write(
+        dir.path().join("src/lib/actions.ts"),
+        "\"use server\";\nexport async function submitForm() {}",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "solidstart").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(result.ssr_features.iter().any(|f| f.contains("use server")));
+}
+
+#[test]
+fn solidstart_ssr_false_with_api_is_not_static() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("app.config.ts"),
+        r#"import { defineConfig } from "@solidjs/start/config";
+export default defineConfig({ ssr: false });"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("src/routes/api")).unwrap();
+    std::fs::write(
+        dir.path().join("src/routes/api/data.ts"),
+        "export function GET() {}",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "solidstart").unwrap();
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
+fn solidstart_clean_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "solidstart").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(result.ssr_features.is_empty());
+}
+
+#[test]
+fn solidstart_block_comment_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("app.config.ts"),
+        r#"import { defineConfig } from "@solidjs/start/config";
+export default defineConfig({ /* ssr: false */ });"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "solidstart").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(!result.ssr_features.iter().any(|f| f.contains("ssr: false")));
+}
+
+// ── Qwik City ───────────────────────────────────────────────────
+
+#[test]
+fn qwik_default_is_ssr() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "qwik").unwrap();
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
+fn qwik_static_adaptor() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"import { qwikCity } from "@builder.io/qwik-city/vite";
+import staticAdapter from "@builder.io/qwik-city/adaptors/static/vite";
+export default defineConfig({ plugins: [qwikCity(), staticAdapter()] });"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "qwik").unwrap();
+    assert!(result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("static adaptor"))
+    );
+}
+
+#[test]
+fn qwik_static_adaptor_new_package() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"import { qwikRouter } from "@qwik.dev/router/vite";
+import staticAdapter from "@qwik.dev/router/adaptors/static/vite";
+export default defineConfig({ plugins: [qwikRouter(), staticAdapter()] });"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "qwik").unwrap();
+    assert!(result.is_static_compatible);
+}
+
+#[test]
+fn qwik_route_loader() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("src/routes/index.tsx"),
+        r#"import { routeLoader$ } from "@builder.io/qwik-city";
+export const useData = routeLoader$(() => { return { items: [] }; });"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "qwik").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("routeLoader$"))
+    );
+}
+
+#[test]
+fn qwik_route_action() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/routes/login")).unwrap();
+    std::fs::write(
+        dir.path().join("src/routes/login/index.tsx"),
+        r#"import { routeAction$ } from "@builder.io/qwik-city";
+export const useLogin = routeAction$((data) => { });"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "qwik").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("routeAction$"))
+    );
+}
+
+#[test]
+fn qwik_server_function() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/lib")).unwrap();
+    std::fs::write(
+        dir.path().join("src/lib/api.ts"),
+        r#"import { server$ } from "@builder.io/qwik-city";
+export const fetchData = server$(() => { });"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "qwik").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("server$ functions"))
+    );
+}
+
+#[test]
+fn qwik_static_with_route_loader_is_not_static() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"import staticAdapter from "@builder.io/qwik-city/adaptors/static/vite";
+export default defineConfig({ plugins: [staticAdapter()] });"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("src/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("src/routes/index.tsx"),
+        r#"import { routeLoader$ } from "@builder.io/qwik-city";
+export const useData = routeLoader$(() => ({}));"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "qwik").unwrap();
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
+fn qwik_clean_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "qwik").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(result.ssr_features.is_empty());
+}
+
+// ── Analog ──────────────────────────────────────────────────────
+
+#[test]
+fn analog_default_is_ssr() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "analog").unwrap();
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
+fn analog_ssr_false() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"import { defineConfig } from "vite";
+import analog from "@analogjs/platform";
+export default defineConfig({ plugins: [analog({ ssr: false })] });"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "analog").unwrap();
+    assert!(result.is_static_compatible);
+    assert!(result.ssr_features.iter().any(|f| f.contains("ssr: false")));
+}
+
+#[test]
+fn analog_server_routes() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/server/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("src/server/routes/hello.ts"),
+        "export default defineEventHandler(() => ({ message: 'hello' }));",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "analog").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("src/server/routes"))
+    );
+}
+
+#[test]
+fn analog_server_api() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/server/api")).unwrap();
+    std::fs::write(
+        dir.path().join("src/server/api/data.ts"),
+        "export default defineEventHandler(() => []);",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "analog").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("src/server/api"))
+    );
+}
+
+#[test]
+fn analog_ssr_false_with_server_routes_is_not_static() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"import analog from "@analogjs/platform";
+export default defineConfig({ plugins: [analog({ ssr: false })] });"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("src/server/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("src/server/routes/api.ts"),
+        "export default defineEventHandler(() => ({}));",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "analog").unwrap();
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
+fn analog_clean_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "analog").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(result.ssr_features.is_empty());
+}
+
 // ── strip_inline_comment edge cases (tested via analyze_ssr) ──
 
 #[test]

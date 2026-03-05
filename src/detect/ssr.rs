@@ -1,4 +1,5 @@
-//! SSR compatibility analysis for Next.js, Nuxt, SvelteKit, Astro.
+//! SSR compatibility analysis for Next.js, Nuxt, SvelteKit, Astro,
+//! SolidStart, Qwik City, and Analog.
 
 use super::fs::Fs;
 use super::types::SsrAnalysis;
@@ -13,6 +14,9 @@ pub fn analyze_ssr(fs: &dyn Fs, framework: &str) -> Option<SsrAnalysis> {
         "astro" => Some(analyze_astro(fs)),
         "react-router" => Some(analyze_react_router(fs)),
         "remix" => Some(analyze_remix(fs)),
+        "solidstart" => Some(analyze_solidstart(fs)),
+        "qwik" => Some(analyze_qwik(fs)),
+        "analog" => Some(analyze_analog(fs)),
         _ => None,
     }
 }
@@ -373,6 +377,142 @@ fn analyze_route_exports(fs: &dyn Fs, features: &mut Vec<String>, is_static_comp
     if walk_for_exported_symbol(fs, "app/routes", "action") {
         features.push("route actions".into());
         *is_static_compatible = false;
+    }
+}
+
+// ── SolidStart ──────────────────────────────────────────────────
+
+fn analyze_solidstart(fs: &dyn Fs) -> SsrAnalysis {
+    let mut features = Vec::new();
+    // SolidStart defaults to SSR — static only with ssr: false in app.config
+    let mut is_static_compatible = false;
+
+    let config_content = read_config_file(fs, &["app.config.ts", "app.config.js"]);
+
+    if let Some(ref content) = config_content {
+        let stripped = strip_block_comments(content);
+
+        if contains_value(&stripped, "ssr", "false") {
+            features.push("ssr: false (static)".into());
+            is_static_compatible = true;
+        }
+    }
+
+    // Check for API routes (src/routes/api/)
+    if dir_has_files(fs, "src/routes/api") {
+        features.push("src/routes/api/ routes".into());
+        is_static_compatible = false;
+    }
+
+    // Check for "use server" directives in src/
+    if fs.is_dir("src") && walk_for_content(fs, "src", "use server") {
+        features.push("\"use server\" directives".into());
+        is_static_compatible = false;
+    }
+
+    SsrAnalysis {
+        is_static_compatible,
+        ssr_features: features,
+    }
+}
+
+// ── Qwik City ───────────────────────────────────────────────────
+
+fn analyze_qwik(fs: &dyn Fs) -> SsrAnalysis {
+    let mut features = Vec::new();
+    // Qwik City defaults to SSR — static only with no server-side features
+    let mut is_static_compatible = false;
+
+    // Check vite config for SSR-related settings
+    let config_content = read_config_file(
+        fs,
+        &[
+            "vite.config.ts",
+            "vite.config.mts",
+            "vite.config.js",
+            "vite.config.mjs",
+        ],
+    );
+
+    if let Some(ref content) = config_content {
+        let stripped = strip_block_comments(content);
+
+        // Check for static adapter
+        if stripped.contains("@builder.io/qwik-city/adaptors/static")
+            || stripped.contains("@qwik.dev/router/adaptors/static")
+        {
+            features.push("static adaptor".into());
+            is_static_compatible = true;
+        }
+    }
+
+    // Check for server-side features in routes
+    if fs.is_dir("src/routes") {
+        // routeLoader$, routeAction$ — server-side data loading
+        if walk_for_content(fs, "src/routes", "routeLoader$") {
+            features.push("routeLoader$".into());
+            is_static_compatible = false;
+        }
+        if walk_for_content(fs, "src/routes", "routeAction$") {
+            features.push("routeAction$".into());
+            is_static_compatible = false;
+        }
+    }
+
+    // Check for server$ functions anywhere in src/
+    if fs.is_dir("src") && walk_for_content(fs, "src", "server$") {
+        features.push("server$ functions".into());
+        is_static_compatible = false;
+    }
+
+    SsrAnalysis {
+        is_static_compatible,
+        ssr_features: features,
+    }
+}
+
+// ── Analog ──────────────────────────────────────────────────────
+
+fn analyze_analog(fs: &dyn Fs) -> SsrAnalysis {
+    let mut features = Vec::new();
+    // Analog defaults to SSR — static only with ssr: false or prerender-only config
+    let mut is_static_compatible = false;
+
+    // Analog uses vite.config with analog() plugin
+    let config_content = read_config_file(
+        fs,
+        &[
+            "vite.config.ts",
+            "vite.config.mts",
+            "vite.config.js",
+            "vite.config.mjs",
+        ],
+    );
+
+    if let Some(ref content) = config_content {
+        let stripped = strip_block_comments(content);
+
+        if contains_value(&stripped, "ssr", "false") {
+            features.push("ssr: false (static)".into());
+            is_static_compatible = true;
+        }
+    }
+
+    // Check for server routes (src/server/routes/)
+    if dir_has_files(fs, "src/server/routes") {
+        features.push("src/server/routes/".into());
+        is_static_compatible = false;
+    }
+
+    // Check for API routes (src/server/api/ — alternative convention)
+    if dir_has_files(fs, "src/server/api") {
+        features.push("src/server/api/".into());
+        is_static_compatible = false;
+    }
+
+    SsrAnalysis {
+        is_static_compatible,
+        ssr_features: features,
     }
 }
 

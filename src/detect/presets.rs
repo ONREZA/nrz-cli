@@ -65,6 +65,37 @@ pub static PRESETS: &[FrameworkPreset] = &[
         priority: 6,
         runtime: RuntimeType::Node,
     },
+    // Tier 1b: Next-gen SSR meta-frameworks (priority 7-9)
+    FrameworkPreset {
+        slug: "solidstart",
+        name: "SolidStart",
+        dependencies: &["@solidjs/start"],
+        output_directory: ".output",
+        build_script: Some("build"),
+        category: PresetCategory::Other,
+        priority: 7,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "qwik",
+        name: "Qwik City",
+        dependencies: &["@builder.io/qwik-city", "@qwik.dev/router"],
+        output_directory: "dist",
+        build_script: Some("build"),
+        category: PresetCategory::Other,
+        priority: 8,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "analog",
+        name: "Analog",
+        dependencies: &["@analogjs/platform"],
+        output_directory: "dist",
+        build_script: Some("build"),
+        category: PresetCategory::Other,
+        priority: 9,
+        runtime: RuntimeType::Node,
+    },
     // Tier 2: CLI-based frameworks (priority 10-13)
     FrameworkPreset {
         slug: "cra",
@@ -334,6 +365,9 @@ pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
         "remix" => &["build/client", "build/server", "build"],
         "gatsby" => &["public"],
         "cra" => &["build"],
+        "solidstart" => &[".output"],
+        "qwik" => &["dist", "server"],
+        "analog" => &["dist/analog", "dist"],
         "astro" => &["dist"],
         "vite" => &["dist"],
         "vue" => &["dist"],
@@ -364,7 +398,15 @@ pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
 pub fn is_ssr_framework(slug: &str) -> bool {
     matches!(
         slug,
-        "nextjs" | "nuxt" | "sveltekit" | "astro" | "remix" | "react-router"
+        "nextjs"
+            | "nuxt"
+            | "sveltekit"
+            | "astro"
+            | "remix"
+            | "react-router"
+            | "solidstart"
+            | "qwik"
+            | "analog"
     )
 }
 

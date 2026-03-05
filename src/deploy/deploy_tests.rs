@@ -437,9 +437,14 @@ fn static_hint_known_frameworks_non_empty() {
     assert!(!framework_static_hint("astro").is_empty());
     assert!(!framework_static_hint("react-router").is_empty());
     assert!(!framework_static_hint("remix").is_empty());
+    assert!(!framework_static_hint("solidstart").is_empty());
+    assert!(!framework_static_hint("qwik").is_empty());
+    assert!(!framework_static_hint("analog").is_empty());
     assert!(framework_static_hint("nextjs").contains("export"));
     assert!(framework_static_hint("react-router").contains("ssr: false"));
     assert!(framework_static_hint("remix").contains("ssr: false"));
+    assert!(framework_static_hint("solidstart").contains("ssr: false"));
+    assert!(framework_static_hint("analog").contains("ssr: false"));
 }
 
 #[test]

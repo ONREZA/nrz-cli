@@ -55,6 +55,9 @@ fn ssr_frameworks_recognized() {
     assert!(is_ssr_framework("astro"));
     assert!(is_ssr_framework("remix"));
     assert!(is_ssr_framework("react-router"));
+    assert!(is_ssr_framework("solidstart"));
+    assert!(is_ssr_framework("qwik"));
+    assert!(is_ssr_framework("analog"));
     assert!(!is_ssr_framework("vite"));
     assert!(!is_ssr_framework("hono"));
 }
@@ -87,8 +90,8 @@ fn detection_presets_have_dependencies() {
 
 #[test]
 fn total_preset_count() {
-    // 28 detection presets (static-html is a separate const, not in PRESETS)
-    assert_eq!(PRESETS.len(), 28);
+    // 31 detection presets (static-html is a separate const, not in PRESETS)
+    assert_eq!(PRESETS.len(), 31);
 }
 
 #[test]
@@ -116,6 +119,27 @@ fn tier1_presets_correct() {
     let gatsby = get_preset_by_slug("gatsby").unwrap();
     assert_eq!(gatsby.dependencies, &["gatsby"]);
     assert_eq!(gatsby.output_directory, "public");
+}
+
+#[test]
+fn ssr_metaframework_presets_correct() {
+    let solidstart = get_preset_by_slug("solidstart").unwrap();
+    assert_eq!(solidstart.dependencies, &["@solidjs/start"]);
+    assert_eq!(solidstart.output_directory, ".output");
+    assert_eq!(solidstart.priority, 7);
+
+    let qwik = get_preset_by_slug("qwik").unwrap();
+    assert_eq!(
+        qwik.dependencies,
+        &["@builder.io/qwik-city", "@qwik.dev/router"]
+    );
+    assert_eq!(qwik.output_directory, "dist");
+    assert_eq!(qwik.priority, 8);
+
+    let analog = get_preset_by_slug("analog").unwrap();
+    assert_eq!(analog.dependencies, &["@analogjs/platform"]);
+    assert_eq!(analog.output_directory, "dist");
+    assert_eq!(analog.priority, 9);
 }
 
 #[test]
@@ -257,6 +281,26 @@ fn framework_output_dirs_h3() {
 fn framework_output_dirs_nitro() {
     let dirs = framework_output_dirs("nitro");
     assert!(dirs.contains(&".output"));
+}
+
+#[test]
+fn framework_output_dirs_solidstart() {
+    let dirs = framework_output_dirs("solidstart");
+    assert!(dirs.contains(&".output"));
+}
+
+#[test]
+fn framework_output_dirs_qwik() {
+    let dirs = framework_output_dirs("qwik");
+    assert!(dirs.contains(&"dist"));
+    assert!(dirs.contains(&"server"));
+}
+
+#[test]
+fn framework_output_dirs_analog() {
+    let dirs = framework_output_dirs("analog");
+    assert!(dirs.contains(&"dist"));
+    assert!(dirs.contains(&"dist/analog"));
 }
 
 #[test]

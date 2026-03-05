@@ -173,6 +173,66 @@ fn server_framework_always_process() {
     );
 }
 
+#[test]
+fn solidstart_default_is_process() {
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "solidstart", None),
+        ComputeType::Process
+    );
+}
+
+#[test]
+fn solidstart_static_compatible_is_static() {
+    let ssr = SsrAnalysis {
+        is_static_compatible: true,
+        ssr_features: vec!["ssr: false (static)".into()],
+    };
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "solidstart", Some(&ssr)),
+        ComputeType::Static
+    );
+}
+
+#[test]
+fn qwik_default_is_process() {
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "qwik", None),
+        ComputeType::Process
+    );
+}
+
+#[test]
+fn qwik_static_adaptor_is_static() {
+    let ssr = SsrAnalysis {
+        is_static_compatible: true,
+        ssr_features: vec!["static adaptor".into()],
+    };
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "qwik", Some(&ssr)),
+        ComputeType::Static
+    );
+}
+
+#[test]
+fn analog_default_is_process() {
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "analog", None),
+        ComputeType::Process
+    );
+}
+
+#[test]
+fn analog_static_compatible_is_static() {
+    let ssr = SsrAnalysis {
+        is_static_compatible: true,
+        ssr_features: vec!["ssr: false (static)".into()],
+    };
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "analog", Some(&ssr)),
+        ComputeType::Static
+    );
+}
+
 // ── Full detect() integration tests ─────────────────────────
 
 #[test]
@@ -441,6 +501,132 @@ fn react_router_wins_over_vite() {
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "react-router");
+}
+
+// ── SolidStart integration tests ─────────────────────────────
+
+#[test]
+fn detect_solidstart_returns_process_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@solidjs/start": "1.0.0", "solid-js": "1.9.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "solidstart");
+    assert_eq!(result.name, "SolidStart");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_solidstart_ssr_false_is_static() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@solidjs/start": "1.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("app.config.ts"),
+        r#"import { defineConfig } from "@solidjs/start/config";
+export default defineConfig({ ssr: false });"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "solidstart");
+    assert_eq!(result.suggested_compute, ComputeType::Static);
+}
+
+// ── Qwik City integration tests ─────────────────────────────
+
+#[test]
+fn detect_qwik_returns_process_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@builder.io/qwik": "1.0.0", "@builder.io/qwik-city": "1.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "qwik");
+    assert_eq!(result.name, "Qwik City");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_qwik_v2_via_new_package() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@qwik.dev/core": "2.0.0", "@qwik.dev/router": "2.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "qwik");
+    assert_eq!(result.name, "Qwik City");
+}
+
+#[test]
+fn detect_qwik_static_adaptor_is_static() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@builder.io/qwik-city": "1.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"import staticAdapter from "@builder.io/qwik-city/adaptors/static/vite";
+export default defineConfig({ plugins: [staticAdapter()] });"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "qwik");
+    assert_eq!(result.suggested_compute, ComputeType::Static);
+}
+
+// ── Analog integration tests ────────────────────────────────
+
+#[test]
+fn detect_analog_returns_process_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@analogjs/platform": "1.0.0", "@angular/core": "17.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    // Analog has priority 9, Angular has priority 12 → Analog wins
+    assert_eq!(result.framework, "analog");
+    assert_eq!(result.name, "Analog");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_analog_ssr_false_is_static() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@analogjs/platform": "1.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"import analog from "@analogjs/platform";
+export default defineConfig({ plugins: [analog({ ssr: false })] });"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "analog");
+    assert_eq!(result.suggested_compute, ComputeType::Static);
 }
 
 // ── Hono integration tests ──────────────────────────────────
@@ -1029,6 +1215,30 @@ fn framework_entry_point_remix() {
     assert_eq!(
         framework_entry_point("remix"),
         Some("server/index.js".into())
+    );
+}
+
+#[test]
+fn framework_entry_point_solidstart() {
+    assert_eq!(
+        framework_entry_point("solidstart"),
+        Some("server/index.mjs".into())
+    );
+}
+
+#[test]
+fn framework_entry_point_qwik() {
+    assert_eq!(
+        framework_entry_point("qwik"),
+        Some("server/entry.qwik-city.mjs".into())
+    );
+}
+
+#[test]
+fn framework_entry_point_analog() {
+    assert_eq!(
+        framework_entry_point("analog"),
+        Some("server/index.mjs".into())
     );
 }
 
