@@ -832,6 +832,101 @@ fn remix_block_comment_ignored() {
     assert!(!result.is_static_compatible);
 }
 
+// ── file_has_exported_symbol edge cases ─────────────────────
+
+#[test]
+fn exported_symbol_in_line_comment_not_matched() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/home.tsx"),
+        "// TODO: export function loader() {}\nexport default function Home() { return <div/>; }",
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    assert!(
+        !result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("route loaders")),
+        "commented-out loader should not be detected"
+    );
+}
+
+#[test]
+fn exported_symbol_in_block_comment_not_matched() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/home.tsx"),
+        "/*\n * export async function loader() { return {}; }\n */\nexport default function Home() { return <div/>; }",
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    assert!(
+        !result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("route loaders")),
+        "loader inside block comment should not be detected"
+    );
+}
+
+#[test]
+fn symbol_without_export_not_matched() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/home.tsx"),
+        "function loader() { return {}; }\nexport default function Home() { return <div/>; }",
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    assert!(
+        !result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("route loaders")),
+        "non-exported loader should not be detected"
+    );
+}
+
+#[test]
+fn export_const_loader_matched() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/home.tsx"),
+        "export const loader = async () => { return {}; };",
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("route loaders"))
+    );
+}
+
+#[test]
+fn re_export_loader_matched() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/home.tsx"),
+        "export { loader } from './home.server';",
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("route loaders"))
+    );
+}
+
 // ── strip_inline_comment edge cases (tested via analyze_ssr) ──
 
 #[test]

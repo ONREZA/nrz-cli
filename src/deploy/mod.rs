@@ -1199,6 +1199,8 @@ fn framework_static_hint(framework: &str) -> &'static str {
         "nuxt" => "set `ssr: false` in nuxt.config",
         "sveltekit" => "use `adapter-static` in svelte.config.js",
         "astro" => "remove `output: 'server'` from astro.config",
+        "react-router" => "set `ssr: false` in react-router.config.ts",
+        "remix" => "set `ssr: false` in the Remix Vite plugin options",
         _ => "",
     }
 }
@@ -1323,6 +1325,30 @@ fn framework_process_diagnostic(
              Update svelte.config.js:\n\
              \x20 import adapter from '@sveltejs/adapter-node';\n\n\
              Rebuild and redeploy."
+                .to_string(),
+        ),
+        "react-router" => Some(format!(
+            "React Router PROCESS deployment expects server/index.js in {}.\n\n\
+             Make sure you ran `npx react-router build` and the build \
+             output contains build/server/index.js.",
+            output_dir.display()
+        )),
+        "remix" => Some(format!(
+            "Remix PROCESS deployment expects server/index.js in {}.\n\n\
+             Make sure you ran the build command and the output \
+             contains build/server/index.js.",
+            output_dir.display()
+        )),
+        "hono" => Some(
+            "Hono PROCESS deployment requires a built entry point.\n\n\
+             Make sure your build script produces a runnable file in dist/ \
+             (e.g. dist/index.js)."
+                .to_string(),
+        ),
+        "elysia" => Some(
+            "Elysia PROCESS deployment requires a built entry point.\n\n\
+             Make sure your build script produces a runnable file in dist/ \
+             (e.g. dist/index.js). Elysia runs on Bun."
                 .to_string(),
         ),
         _ => None,

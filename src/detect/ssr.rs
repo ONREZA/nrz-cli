@@ -300,31 +300,18 @@ fn analyze_react_router(project_dir: &Path) -> SsrAnalysis {
     }
 
     // Check for loader/action exports in routes (same structure as Remix)
-    let routes_dir = project_dir.join("app/routes");
-    if routes_dir.is_dir() {
-        if walk_for_content(&routes_dir, "export") && walk_for_content(&routes_dir, "loader") {
-            features.push("route loaders".into());
-            is_static_compatible = false;
-        }
-        if walk_for_content(&routes_dir, "export") && walk_for_content(&routes_dir, "action") {
-            features.push("route actions".into());
-            is_static_compatible = false;
-        }
-    }
+    analyze_route_exports(project_dir, &mut features, &mut is_static_compatible);
 
     // Check for entry.server
-    let app_dir = project_dir.join("app");
-    if app_dir.is_dir()
-        && file_exists_any(
-            project_dir,
-            &[
-                "app/entry.server.tsx",
-                "app/entry.server.ts",
-                "app/entry.server.jsx",
-                "app/entry.server.js",
-            ],
-        )
-    {
+    if file_exists_any(
+        project_dir,
+        &[
+            "app/entry.server.tsx",
+            "app/entry.server.ts",
+            "app/entry.server.jsx",
+            "app/entry.server.js",
+        ],
+    ) {
         features.push("entry.server".into());
     }
 
@@ -362,35 +349,42 @@ fn analyze_remix(project_dir: &Path) -> SsrAnalysis {
         }
     }
 
-    // Check for loader/action exports in routes (server-side data loading)
-    let routes_dir = project_dir.join("app/routes");
-    if routes_dir.is_dir() {
-        if walk_for_content(&routes_dir, "export") && walk_for_content(&routes_dir, "loader") {
-            features.push("route loaders".into());
-            is_static_compatible = false;
-        }
-        if walk_for_content(&routes_dir, "export") && walk_for_content(&routes_dir, "action") {
-            features.push("route actions".into());
-            is_static_compatible = false;
-        }
-    }
+    // Check for loader/action exports in routes
+    analyze_route_exports(project_dir, &mut features, &mut is_static_compatible);
 
-    // Check for resource routes (files without default export that export loader/action)
-    // These are API-like endpoints
-    let app_dir = project_dir.join("app");
-    if app_dir.is_dir() {
-        // Check for server-only utilities
-        if file_exists_any(
-            project_dir,
-            &["app/entry.server.tsx", "app/entry.server.ts"],
-        ) {
-            features.push("entry.server".into());
-        }
+    // Check for entry.server
+    if file_exists_any(
+        project_dir,
+        &["app/entry.server.tsx", "app/entry.server.ts"],
+    ) {
+        features.push("entry.server".into());
     }
 
     SsrAnalysis {
         is_static_compatible,
         ssr_features: features,
+    }
+}
+
+/// Shared route analysis for Remix and React Router v7.
+/// Both use app/routes/ with exported `loader` and `action` functions.
+fn analyze_route_exports(
+    project_dir: &Path,
+    features: &mut Vec<String>,
+    is_static_compatible: &mut bool,
+) {
+    let routes_dir = project_dir.join("app/routes");
+    if !routes_dir.is_dir() {
+        return;
+    }
+
+    if walk_for_exported_symbol(&routes_dir, "loader") {
+        features.push("route loaders".into());
+        *is_static_compatible = false;
+    }
+    if walk_for_exported_symbol(&routes_dir, "action") {
+        features.push("route actions".into());
+        *is_static_compatible = false;
     }
 }
 
@@ -645,6 +639,65 @@ fn walk_for_content(dir: &Path, needle: &str) -> bool {
                 return true;
             }
         } else if ft.is_dir() && !should_skip_dir(&entry) && walk_for_content(&path, needle) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Recursively walk route files looking for exported symbols (e.g. `loader`, `action`).
+///
+/// Matches patterns like:
+/// - `export function loader`
+/// - `export async function loader`
+/// - `export const loader`
+/// - `export let loader`
+/// - `export { loader }`
+/// - `export { loader as default }`
+///
+/// Skips comment-only lines to reduce false positives.
+fn walk_for_exported_symbol(dir: &Path, symbol: &str) -> bool {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+    for entry in entries.flatten() {
+        let ft = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        if ft.is_file() {
+            if let Some(ext) = path.extension().and_then(|e| e.to_str())
+                && matches!(ext, "ts" | "tsx" | "js" | "jsx")
+                && let Ok(content) = std::fs::read_to_string(&path)
+                && file_has_exported_symbol(&content, symbol)
+            {
+                return true;
+            }
+        } else if ft.is_dir() && !should_skip_dir(&entry) && walk_for_exported_symbol(&path, symbol)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if file content has an exported symbol on a non-comment line.
+fn file_has_exported_symbol(content: &str, symbol: &str) -> bool {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        // Skip comment lines
+        if trimmed.starts_with("//") || trimmed.starts_with('*') || trimmed.starts_with("/*") {
+            continue;
+        }
+        // Must have `export` keyword
+        if !trimmed.contains("export") {
+            continue;
+        }
+        // Check for: export function/async function/const/let/var <symbol>
+        // or: export { <symbol> ... }
+        if trimmed.contains(symbol) {
             return true;
         }
     }

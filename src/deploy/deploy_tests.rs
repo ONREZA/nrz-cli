@@ -435,7 +435,11 @@ fn static_hint_known_frameworks_non_empty() {
     assert!(!framework_static_hint("nuxt").is_empty());
     assert!(!framework_static_hint("sveltekit").is_empty());
     assert!(!framework_static_hint("astro").is_empty());
+    assert!(!framework_static_hint("react-router").is_empty());
+    assert!(!framework_static_hint("remix").is_empty());
     assert!(framework_static_hint("nextjs").contains("export"));
+    assert!(framework_static_hint("react-router").contains("ssr: false"));
+    assert!(framework_static_hint("remix").contains("ssr: false"));
 }
 
 #[test]
@@ -932,6 +936,42 @@ fn diagnostic_unknown_framework_returns_none() {
     let detection = make_detection("vite", None);
     let msg = framework_process_diagnostic("vite", &detection, dir.path());
     assert!(msg.is_none());
+}
+
+#[test]
+fn diagnostic_react_router_mentions_server_index() {
+    let dir = tempdir().unwrap();
+    let detection = make_detection("react-router", None);
+    let msg = framework_process_diagnostic("react-router", &detection, dir.path());
+    assert!(msg.is_some());
+    assert!(msg.as_ref().unwrap().contains("server/index.js"));
+}
+
+#[test]
+fn diagnostic_remix_mentions_server_index() {
+    let dir = tempdir().unwrap();
+    let detection = make_detection("remix", None);
+    let msg = framework_process_diagnostic("remix", &detection, dir.path());
+    assert!(msg.is_some());
+    assert!(msg.as_ref().unwrap().contains("server/index.js"));
+}
+
+#[test]
+fn diagnostic_hono_mentions_entry_point() {
+    let dir = tempdir().unwrap();
+    let detection = make_detection("hono", None);
+    let msg = framework_process_diagnostic("hono", &detection, dir.path());
+    assert!(msg.is_some());
+    assert!(msg.as_ref().unwrap().contains("dist/"));
+}
+
+#[test]
+fn diagnostic_elysia_mentions_bun() {
+    let dir = tempdir().unwrap();
+    let detection = make_detection("elysia", None);
+    let msg = framework_process_diagnostic("elysia", &detection, dir.path());
+    assert!(msg.is_some());
+    assert!(msg.as_ref().unwrap().contains("Bun"));
 }
 
 // ── resolve_bundle_upload tests ──────────────────────────────
