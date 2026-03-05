@@ -73,6 +73,11 @@ fn server_frameworks_recognized() {
     assert!(is_server_framework("koa"));
     assert!(is_server_framework("h3"));
     assert!(is_server_framework("nitro"));
+    assert!(is_server_framework("blitzjs"));
+    assert!(is_server_framework("keystone"));
+    assert!(is_server_framework("redwoodjs"));
+    assert!(is_server_framework("payload"));
+    assert!(is_server_framework("strapi"));
     assert!(!is_server_framework("nextjs"));
     assert!(!is_server_framework("vite"));
 }
@@ -90,8 +95,8 @@ fn detection_presets_have_dependencies() {
 
 #[test]
 fn total_preset_count() {
-    // 31 detection presets (static-html is a separate const, not in PRESETS)
-    assert_eq!(PRESETS.len(), 31);
+    // 36 detection presets (static-html is a separate const, not in PRESETS)
+    assert_eq!(PRESETS.len(), 36);
 }
 
 #[test]
@@ -172,6 +177,26 @@ fn server_framework_presets_correct() {
     let nitro = get_preset_by_slug("nitro").unwrap();
     assert_eq!(nitro.dependencies, &["nitropack"]);
     assert_eq!(nitro.output_directory, ".output");
+
+    let blitzjs = get_preset_by_slug("blitzjs").unwrap();
+    assert_eq!(blitzjs.dependencies, &["blitz"]);
+    assert_eq!(blitzjs.output_directory, ".next");
+
+    let keystone = get_preset_by_slug("keystone").unwrap();
+    assert_eq!(keystone.dependencies, &["@keystone-6/core"]);
+    assert_eq!(keystone.output_directory, ".keystone");
+
+    let redwoodjs = get_preset_by_slug("redwoodjs").unwrap();
+    assert_eq!(redwoodjs.dependencies, &["@redwoodjs/core"]);
+    assert_eq!(redwoodjs.output_directory, "api/dist");
+
+    let payload = get_preset_by_slug("payload").unwrap();
+    assert_eq!(payload.dependencies, &["payload"]);
+    assert_eq!(payload.output_directory, "dist");
+
+    let strapi = get_preset_by_slug("strapi").unwrap();
+    assert_eq!(strapi.dependencies, &["@strapi/strapi"]);
+    assert_eq!(strapi.output_directory, "dist");
 }
 
 #[test]
@@ -301,6 +326,39 @@ fn framework_output_dirs_analog() {
     let dirs = framework_output_dirs("analog");
     assert!(dirs.contains(&"dist"));
     assert!(dirs.contains(&"dist/analog"));
+}
+
+#[test]
+fn framework_output_dirs_blitzjs() {
+    let dirs = framework_output_dirs("blitzjs");
+    assert!(dirs.contains(&".next"));
+}
+
+#[test]
+fn framework_output_dirs_keystone() {
+    let dirs = framework_output_dirs("keystone");
+    assert!(dirs.contains(&".keystone"));
+}
+
+#[test]
+fn framework_output_dirs_redwoodjs() {
+    let dirs = framework_output_dirs("redwoodjs");
+    assert!(dirs.contains(&"api/dist"));
+    assert!(dirs.contains(&"web/dist"));
+}
+
+#[test]
+fn framework_output_dirs_payload() {
+    let dirs = framework_output_dirs("payload");
+    assert!(dirs.contains(&"dist"));
+    assert!(dirs.contains(&"build"));
+}
+
+#[test]
+fn framework_output_dirs_strapi() {
+    let dirs = framework_output_dirs("strapi");
+    assert!(dirs.contains(&"dist"));
+    assert!(dirs.contains(&"build"));
 }
 
 #[test]

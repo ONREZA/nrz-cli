@@ -171,7 +171,7 @@ fn analyze_sveltekit(fs: &dyn Fs) -> SsrAnalysis {
     // SvelteKit defaults to SSR — static only with adapter-static
     let mut is_static_compatible = false;
 
-    let config_content = read_config_file(fs, &["svelte.config.js"]);
+    let config_content = read_config_file(fs, &["svelte.config.js", "svelte.config.ts"]);
 
     if let Some(ref content) = config_content {
         let stripped = strip_block_comments(content);
@@ -346,6 +346,18 @@ fn analyze_remix(fs: &dyn Fs) -> SsrAnalysis {
         if contains_value(&stripped, "ssr", "false") {
             features.push("ssr: false (SPA mode)".into());
             is_static_compatible = true;
+        }
+    }
+
+    // Legacy Remix v1: check remix.config.js only if no vite config exists
+    if config_content.is_none() {
+        let legacy_config = read_config_file(fs, &["remix.config.js"]);
+        if let Some(ref content) = legacy_config {
+            let stripped = strip_block_comments(content);
+            if contains_value(&stripped, "ssr", "false") {
+                features.push("ssr: false (legacy remix.config)".into());
+                is_static_compatible = true;
+            }
         }
     }
 
@@ -631,19 +643,12 @@ fn contains_value(content: &str, key: &str, value: &str) -> bool {
             let after = after.trim_start();
             if let Some(after) = after.strip_prefix(':') {
                 let after = after.trim();
-                // Match quoted values (exact match within quotes)
-                if after.starts_with(&format!("'{value}'"))
-                    || after.starts_with(&format!("\"{value}\""))
-                {
+                if match_value_token(after, value) {
                     return true;
                 }
-                // Match unquoted value with word boundary check
-                if let Some(rest) = after.strip_prefix(value)
-                    && (rest.is_empty()
-                        || rest.starts_with(',')
-                        || rest.starts_with('}')
-                        || rest.starts_with(' ')
-                        || rest.starts_with('\t'))
+                // Check for env variable fallback: process.env.X || 'value' / ?? 'value'
+                if let Some(fallback) = find_fallback_value(after)
+                    && match_value_token(fallback, value)
                 {
                     return true;
                 }
@@ -651,6 +656,41 @@ fn contains_value(content: &str, key: &str, value: &str) -> bool {
         }
     }
     false
+}
+
+/// Check if a value token starts at the given position (quoted or unquoted).
+fn match_value_token(after: &str, value: &str) -> bool {
+    // Match quoted values: 'value', "value", `value`
+    if after.starts_with(&format!("'{value}'"))
+        || after.starts_with(&format!("\"{value}\""))
+        || after.starts_with(&format!("`{value}`"))
+    {
+        return true;
+    }
+    // Match unquoted value with word boundary check
+    if let Some(rest) = after.strip_prefix(value)
+        && (rest.is_empty()
+            || rest.starts_with(',')
+            || rest.starts_with('}')
+            || rest.starts_with(')')
+            || rest.starts_with(';')
+            || rest.starts_with(' ')
+            || rest.starts_with('\t'))
+    {
+        return true;
+    }
+    false
+}
+
+/// Find the fallback value after `||` or `??` operators.
+/// Returns the trimmed text after the operator.
+fn find_fallback_value(text: &str) -> Option<&str> {
+    let idx = text
+        .find("||")
+        .map(|i| i + 2)
+        .or_else(|| text.find("??").map(|i| i + 2))?;
+    let after = text[idx..].trim();
+    if after.is_empty() { None } else { Some(after) }
 }
 
 /// Check if content contains any of the given patterns (non-comment lines only).

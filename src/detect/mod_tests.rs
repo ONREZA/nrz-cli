@@ -960,6 +960,24 @@ fn config_files_sveltekit() {
 }
 
 #[test]
+fn config_files_sveltekit_ts() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("svelte.config.ts"), "").unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    let files = detect_config_files(&fs, "sveltekit");
+    assert_eq!(files, vec!["svelte.config.ts"]);
+}
+
+#[test]
+fn config_files_remix_legacy() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("remix.config.js"), "").unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    let files = detect_config_files(&fs, "remix");
+    assert_eq!(files, vec!["remix.config.js"]);
+}
+
+#[test]
 fn config_files_solidstart() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("app.config.ts"), "").unwrap();
@@ -1048,6 +1066,34 @@ fn framework_entry_point_nitro() {
         framework_entry_point("nitro"),
         Some("server/index.mjs".into())
     );
+}
+
+#[test]
+fn framework_entry_point_blitzjs() {
+    assert_eq!(framework_entry_point("blitzjs"), Some("server.js".into()));
+}
+
+#[test]
+fn framework_entry_point_keystone() {
+    assert_eq!(
+        framework_entry_point("keystone"),
+        Some("keystone.js".into())
+    );
+}
+
+#[test]
+fn framework_entry_point_redwoodjs() {
+    assert_eq!(framework_entry_point("redwoodjs"), Some("server.js".into()));
+}
+
+#[test]
+fn framework_entry_point_strapi() {
+    assert_eq!(framework_entry_point("strapi"), Some("server.js".into()));
+}
+
+#[test]
+fn framework_entry_point_payload() {
+    assert_eq!(framework_entry_point("payload"), Some("server.js".into()));
 }
 
 #[test]

@@ -1302,3 +1302,155 @@ fn nextjs_no_comment_line_unmodified() {
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("standalone")));
 }
+
+// ── P3.4: Improved SSR analysis ─────────────────────────────────
+
+#[test]
+fn sveltekit_ts_config() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("svelte.config.ts"),
+        r#"import adapter from '@sveltejs/adapter-static';
+export default { kit: { adapter: adapter() } };"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "sveltekit").unwrap();
+    assert!(result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("adapter-static"))
+    );
+}
+
+#[test]
+fn sveltekit_ts_config_node_adapter() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("svelte.config.ts"),
+        r#"import adapter from '@sveltejs/adapter-node';
+export default { kit: { adapter: adapter() } };"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "sveltekit").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("adapter-node"))
+    );
+}
+
+#[test]
+fn remix_legacy_config_ssr_false() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("remix.config.js"),
+        r#"/** @type {import('@remix-run/dev').AppConfig} */
+module.exports = { ssr: false };"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
+    assert!(result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("legacy remix.config"))
+    );
+}
+
+#[test]
+fn remix_vite_config_takes_precedence_over_legacy() {
+    let dir = tempfile::tempdir().unwrap();
+    // Vite config with ssr: false
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"export default defineConfig({ plugins: [remix({ ssr: false })] });"#,
+    )
+    .unwrap();
+    // Legacy config also present — vite should take precedence
+    std::fs::write(
+        dir.path().join("remix.config.js"),
+        r#"module.exports = {};"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
+    assert!(result.is_static_compatible);
+    assert!(result.ssr_features.iter().any(|f| f.contains("SPA mode")));
+}
+
+#[test]
+fn remix_vite_exists_ignores_legacy_ssr_false() {
+    let dir = tempfile::tempdir().unwrap();
+    // Vite config present but without ssr: false (SSR enabled)
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"export default defineConfig({ plugins: [remix()] });"#,
+    )
+    .unwrap();
+    // Legacy config has ssr: false — should be IGNORED since vite config exists
+    std::fs::write(
+        dir.path().join("remix.config.js"),
+        r#"module.exports = { ssr: false };"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
+    assert!(
+        !result.is_static_compatible,
+        "legacy remix.config.js should be ignored when vite config exists"
+    );
+}
+
+#[test]
+fn nextjs_env_fallback_standalone() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("next.config.js"),
+        "module.exports = { output: process.env.NEXT_OUTPUT || 'standalone' }",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(result.ssr_features.iter().any(|f| f.contains("standalone")));
+}
+
+#[test]
+fn nextjs_env_nullish_coalescing_export() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("next.config.mjs"),
+        "export default { output: process.env.NEXT_OUTPUT ?? 'export' }",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
+    assert!(result.is_static_compatible);
+    assert!(result.ssr_features.iter().any(|f| f.contains("export")));
+}
+
+#[test]
+fn nextjs_backtick_quoted_standalone() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("next.config.js"),
+        "module.exports = { output: `standalone` }",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(result.ssr_features.iter().any(|f| f.contains("standalone")));
+}
+
+#[test]
+fn nuxt_env_fallback_ssr_false() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("nuxt.config.ts"),
+        "export default defineNuxtConfig({ ssr: process.env.NUXT_SSR ?? false })",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
+    assert!(result.is_static_compatible);
+}

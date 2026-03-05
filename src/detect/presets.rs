@@ -4,7 +4,28 @@ use super::types::{FrameworkPreset, PresetCategory, RuntimeType};
 
 /// All framework presets sorted by detection priority.
 pub static PRESETS: &[FrameworkPreset] = &[
-    // Tier 1: Highly specific frameworks (priority 1-4)
+    // Tier 0: Wrappers that also pull in a Tier 1 framework (must be checked first)
+    FrameworkPreset {
+        slug: "blitzjs",
+        name: "Blitz.js",
+        dependencies: &["blitz"],
+        output_directory: ".next",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 1,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "keystone",
+        name: "Keystone",
+        dependencies: &["@keystone-6/core"],
+        output_directory: ".keystone",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 1,
+        runtime: RuntimeType::Node,
+    },
+    // Tier 1: Highly specific frameworks (priority 1-6)
     FrameworkPreset {
         slug: "nextjs",
         name: "Next.js",
@@ -299,6 +320,37 @@ pub static PRESETS: &[FrameworkPreset] = &[
         priority: 38,
         runtime: RuntimeType::Node,
     },
+    // Tier 3c: Full-stack / CMS frameworks (priority 39-41)
+    FrameworkPreset {
+        slug: "redwoodjs",
+        name: "RedwoodJS",
+        dependencies: &["@redwoodjs/core"],
+        output_directory: "api/dist",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 39,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "payload",
+        name: "Payload CMS",
+        dependencies: &["payload"],
+        output_directory: "dist",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 40,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "strapi",
+        name: "Strapi",
+        dependencies: &["@strapi/strapi"],
+        output_directory: "dist",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 41,
+        runtime: RuntimeType::Node,
+    },
     // Tier 4: Generic catch-all
     FrameworkPreset {
         slug: "vite",
@@ -388,6 +440,11 @@ pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
         "koa" => &["."],
         "h3" => &["dist", "."],
         "nitro" => &[".output"],
+        "blitzjs" => &[".next"],
+        "keystone" => &[".keystone"],
+        "redwoodjs" => &["api/dist", "web/dist"],
+        "payload" => &["dist", "build"],
+        "strapi" => &["dist", "build"],
         "static-html" => &["."],
         _ => &[],
     }
@@ -414,7 +471,20 @@ pub fn is_ssr_framework(slug: &str) -> bool {
 pub fn is_server_framework(slug: &str) -> bool {
     matches!(
         slug,
-        "hono" | "elysia" | "nestjs" | "fastify" | "adonis" | "express" | "koa" | "h3" | "nitro"
+        "hono"
+            | "elysia"
+            | "nestjs"
+            | "fastify"
+            | "adonis"
+            | "express"
+            | "koa"
+            | "h3"
+            | "nitro"
+            | "blitzjs"
+            | "keystone"
+            | "redwoodjs"
+            | "payload"
+            | "strapi"
     )
 }
 

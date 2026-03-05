@@ -227,7 +227,7 @@ fn detect_config_files(fs: &dyn Fs, framework: &str) -> Vec<String> {
             "next.config.mts",
         ],
         "nuxt" => &["nuxt.config.ts", "nuxt.config.js"],
-        "sveltekit" => &["svelte.config.js"],
+        "sveltekit" => &["svelte.config.js", "svelte.config.ts"],
         "react-router" => &[
             "react-router.config.ts",
             "react-router.config.js",
@@ -237,6 +237,7 @@ fn detect_config_files(fs: &dyn Fs, framework: &str) -> Vec<String> {
             "vite.config.mjs",
         ],
         "remix" => &[
+            "remix.config.js",
             "vite.config.ts",
             "vite.config.mts",
             "vite.config.js",
@@ -266,6 +267,11 @@ fn detect_config_files(fs: &dyn Fs, framework: &str) -> Vec<String> {
         "angular" => &["angular.json"],
         "docusaurus" => &["docusaurus.config.js", "docusaurus.config.ts"],
         "vitepress" => &[".vitepress/config.ts", ".vitepress/config.js"],
+        "blitzjs" => &["blitz.config.ts", "blitz.config.js"],
+        "keystone" => &["keystone.ts", "keystone.js"],
+        "redwoodjs" => &["redwood.toml"],
+        "payload" => &["payload.config.ts", "payload.config.js"],
+        "strapi" => &["config/server.ts", "config/server.js"],
         _ => &[],
     };
 
@@ -491,6 +497,11 @@ fn framework_entry_point(slug: &str) -> Option<String> {
         "nestjs" => Some("main.js".into()),
         "adonis" => Some("server.js".into()),
         "nitro" => Some("server/index.mjs".into()),
+        "blitzjs" => Some("server.js".into()),
+        "keystone" => Some("keystone.js".into()),
+        "redwoodjs" => Some("server.js".into()),
+        "payload" => Some("server.js".into()),
+        "strapi" => Some("server.js".into()),
         _ => None,
     }
 }

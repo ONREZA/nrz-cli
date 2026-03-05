@@ -7,15 +7,17 @@
 
 ## Текущее состояние
 
-31 пресет, 9 SSR-анализаторов, auto-manifest для Next.js standalone + Nuxt + SvelteKit + Remix + React Router v7 + Astro SSR + generic static/compute.
+36 пресетов, 9 SSR-анализаторов (с улучшенным парсингом конфигов), auto-manifest для Next.js standalone + Nuxt + SvelteKit + Remix + React Router v7 + Astro SSR + generic static/compute.
 
 | Tier | Фреймворки | SSR-анализ | Auto-manifest |
 |------|-----------|------------|---------------|
+| 0 (wrappers) | Blitz.js, Keystone | нет (always PROCESS) | generic compute |
 | 1 (core) | Next.js, Nuxt, SvelteKit, React Router v7, Remix, Gatsby | да (6 шт) | **Next.js standalone, Nuxt, SvelteKit, Remix, RR v7, Astro SSR** |
 | 1b (next-gen) | SolidStart, Qwik City, Analog | да (3 шт) | — |
 | 2 (CLI) | CRA, Vue CLI, Angular, Preact CLI | нет | static fallback |
 | 3a (SSG) | Astro, Docusaurus, VitePress, Eleventy, Hexo, Parcel, Stencil | Astro only | static fallback / **Astro SSR** |
 | 3b (Server) | Hono, Elysia, Express, Fastify, NestJS, Koa, AdonisJS, H3, Nitro | нет (always PROCESS) | generic compute |
+| 3c (Full-stack/CMS) | RedwoodJS, Payload CMS, Strapi | нет (always PROCESS) | generic compute |
 | 4 (catch-all) | Vite, Other, Static HTML | нет | static/compute generic |
 
 ---
@@ -69,20 +71,26 @@
 - Django, FastAPI, Flask пресеты
 - Определение WSGI/ASGI entry point
 
-### P3.4 — Улучшение SSR-анализа
+### P3.4 — Улучшение SSR-анализа ✅ DONE
 
-- Обработка программных конфигов с переменными окружения
-- Более точный парсинг template-literal конфигов
-- Поддержка `svelte.config.ts` (SvelteKit TS-конфиг)
-- `remix.config.js` (legacy Remix v1)
+> - `contains_value`: поддержка backtick-кавычек (`` `value` ``)
+> - `contains_value`: обработка env variable fallbacks (`process.env.X || 'value'`, `?? 'value'`)
+> - `analyze_sveltekit`: добавлена поддержка `svelte.config.ts`
+> - `analyze_remix`: legacy `remix.config.js` для Remix v1 (`ssr: false`)
+> - `detect_config_files`, `DETECTION_CONTENT_FILES` обновлены
+> - 8 новых тестов
 
-### P3.5 — Дополнительные пресеты
+### P3.5 — Дополнительные пресеты ✅ DONE
 
-- RedwoodJS (`@redwoodjs/core`)
-- Blitz.js (`blitz`)
-- Payload CMS (`payload`)
-- Keystone (`@keystone-6/core`)
-- Strapi (`@strapi/strapi`)
+> 5 новых пресетов (36 итого):
+> - Blitz.js (`blitz`, priority 1, `.next`) — перед Next.js т.к. оборачивает его
+> - Keystone (`@keystone-6/core`, priority 1, `.keystone`) — перед Next.js т.к. часто идёт с ним
+> - RedwoodJS (`@redwoodjs/core`, priority 39, `api/dist`)
+> - Payload CMS (`payload`, priority 40, `dist`)
+> - Strapi (`@strapi/strapi`, priority 41, `dist`)
+> - Все 5 добавлены в `is_server_framework()` (всегда PROCESS)
+> - `framework_output_dirs`, `framework_entry_point` обновлены
+> - 15+ новых тестов
 
 ---
 
