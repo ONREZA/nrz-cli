@@ -783,9 +783,28 @@ fn file_has_exported_symbol(content: &str, symbol: &str) -> bool {
         }
         // Check for: export function/async function/const/let/var <symbol>
         // or: export { <symbol> ... }
-        if trimmed.contains(symbol) {
+        if contains_word(trimmed, symbol) {
             return true;
         }
+    }
+    false
+}
+
+/// Check if `haystack` contains `word` as a whole word (not a substring).
+fn contains_word(haystack: &str, word: &str) -> bool {
+    let bytes = haystack.as_bytes();
+    let mut start = 0;
+    while let Some(pos) = haystack[start..].find(word) {
+        let abs = start + pos;
+        let before_ok =
+            abs == 0 || !bytes[abs - 1].is_ascii_alphanumeric() && bytes[abs - 1] != b'_';
+        let after = abs + word.len();
+        let after_ok =
+            after >= bytes.len() || !bytes[after].is_ascii_alphanumeric() && bytes[after] != b'_';
+        if before_ok && after_ok {
+            return true;
+        }
+        start = abs + 1;
     }
     false
 }

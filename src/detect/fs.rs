@@ -39,7 +39,19 @@ impl Fs for LocalFs {
     }
 
     fn read_file(&self, path: &str) -> Option<String> {
-        std::fs::read_to_string(self.root.join(path)).ok()
+        let full = self.root.join(path);
+        match std::fs::read_to_string(&full) {
+            Ok(content) => Some(content),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+            Err(err) => {
+                tracing::warn!(
+                    path = %full.display(),
+                    error = %err,
+                    "failed to read detection file"
+                );
+                None
+            }
+        }
     }
 
     fn list_dir(&self, path: &str) -> Vec<String> {
@@ -50,7 +62,15 @@ impl Fs for LocalFs {
         };
         let entries = match std::fs::read_dir(&dir) {
             Ok(e) => e,
-            Err(_) => return Vec::new(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+            Err(err) => {
+                tracing::warn!(
+                    path = %dir.display(),
+                    error = %err,
+                    "failed to list detection directory"
+                );
+                return Vec::new();
+            }
         };
         let mut result: Vec<String> = entries
             .flatten()

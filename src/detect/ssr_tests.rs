@@ -909,6 +909,44 @@ fn re_export_loader_matched() {
     );
 }
 
+#[test]
+fn substring_loader_not_matched() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/home.tsx"),
+        "export const preloader = () => {};\nexport default function Home() { return <div/>; }",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
+    assert!(
+        !result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("route loaders")),
+        "preloader should not be matched as loader"
+    );
+}
+
+#[test]
+fn substring_action_not_matched() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/home.tsx"),
+        "export const reactionState = {};\nexport default function Home() { return <div/>; }",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "react-router").unwrap();
+    assert!(
+        !result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("route actions")),
+        "reactionState should not be matched as action"
+    );
+}
+
 // ── SolidStart ──────────────────────────────────────────────────
 
 #[test]
