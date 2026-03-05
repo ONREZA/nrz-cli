@@ -321,8 +321,9 @@ fn resolve_framework_output_dir(
             "build".to_string()
         }
         _ => {
-            // For non-SSR frameworks with a vite config, check outDir override
+            // For non-SSR, non-server frameworks with a vite config, check outDir override
             if !presets::is_ssr_framework(preset.slug)
+                && !presets::is_server_framework(preset.slug)
                 && vite_config::has_vite_config(fs)
                 && let Some(out_dir) = vite_config::parse_vite_out_dir(fs)
             {
@@ -471,6 +472,9 @@ fn framework_entry_point(slug: &str) -> Option<String> {
         "sveltekit" => Some("index.js".into()),
         "react-router" => Some("server/index.js".into()),
         "remix" => Some("server/index.js".into()),
+        "nestjs" => Some("main.js".into()),
+        "adonis" => Some("server.js".into()),
+        "nitro" => Some("server/index.mjs".into()),
         _ => None,
     }
 }

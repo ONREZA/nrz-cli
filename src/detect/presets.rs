@@ -177,7 +177,7 @@ pub static PRESETS: &[FrameworkPreset] = &[
         priority: 26,
         runtime: RuntimeType::Node,
     },
-    // Tier 3b: Server frameworks (priority 30-31)
+    // Tier 3b: Server frameworks (priority 30-39)
     FrameworkPreset {
         slug: "hono",
         name: "Hono",
@@ -197,6 +197,76 @@ pub static PRESETS: &[FrameworkPreset] = &[
         category: PresetCategory::Server,
         priority: 31,
         runtime: RuntimeType::Bun,
+    },
+    FrameworkPreset {
+        slug: "nestjs",
+        name: "NestJS",
+        dependencies: &["@nestjs/core"],
+        output_directory: "dist",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 32,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "fastify",
+        name: "Fastify",
+        dependencies: &["fastify"],
+        output_directory: "dist",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 33,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "adonis",
+        name: "AdonisJS",
+        dependencies: &["@adonisjs/core"],
+        output_directory: "build",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 34,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "express",
+        name: "Express",
+        dependencies: &["express"],
+        output_directory: ".",
+        build_script: None,
+        category: PresetCategory::Server,
+        priority: 35,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "koa",
+        name: "Koa",
+        dependencies: &["koa"],
+        output_directory: ".",
+        build_script: None,
+        category: PresetCategory::Server,
+        priority: 36,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "h3",
+        name: "H3",
+        dependencies: &["h3"],
+        output_directory: "dist",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 37,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "nitro",
+        name: "Nitro",
+        dependencies: &["nitropack"],
+        output_directory: ".output",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 38,
+        runtime: RuntimeType::Node,
     },
     // Tier 4: Generic catch-all
     FrameworkPreset {
@@ -277,6 +347,13 @@ pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
         "stencil" => &["www"],
         "hono" => &["dist"],
         "elysia" => &["dist"],
+        "nestjs" => &["dist"],
+        "fastify" => &["dist", "."],
+        "adonis" => &["build"],
+        "express" => &["."],
+        "koa" => &["."],
+        "h3" => &["dist", "."],
+        "nitro" => &[".output"],
         "static-html" => &["."],
         _ => &[],
     }
@@ -293,7 +370,10 @@ pub fn is_ssr_framework(slug: &str) -> bool {
 
 /// Check if a framework slug is a server-only framework (always PROCESS, no SSR analysis).
 pub fn is_server_framework(slug: &str) -> bool {
-    matches!(slug, "hono" | "elysia")
+    matches!(
+        slug,
+        "hono" | "elysia" | "nestjs" | "fastify" | "adonis" | "express" | "koa" | "h3" | "nitro"
+    )
 }
 
 /// Get presets that have dependencies (used for detection), sorted by priority.

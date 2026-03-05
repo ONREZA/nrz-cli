@@ -143,6 +143,34 @@ fn server_framework_always_process() {
         infer_compute_type(RuntimeType::Bun, "elysia", None),
         ComputeType::Process
     );
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "express", None),
+        ComputeType::Process
+    );
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "fastify", None),
+        ComputeType::Process
+    );
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "nestjs", None),
+        ComputeType::Process
+    );
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "koa", None),
+        ComputeType::Process
+    );
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "adonis", None),
+        ComputeType::Process
+    );
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "h3", None),
+        ComputeType::Process
+    );
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "nitro", None),
+        ComputeType::Process
+    );
 }
 
 // ── Full detect() integration tests ─────────────────────────
@@ -490,6 +518,296 @@ fn detect_elysia_no_ssr_analysis() {
 
     let result = detect(dir.path());
     assert!(result.metadata.ssr_analysis.is_none());
+}
+
+// ── Server framework integration tests ───────────────────────
+
+#[test]
+fn detect_express_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"express": "4.18.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "express");
+    assert_eq!(result.name, "Express");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_express_no_start_script_still_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"express": "4.18.0"}, "scripts": {"test": "jest"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "express");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_fastify_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"fastify": "4.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "fastify");
+    assert_eq!(result.name, "Fastify");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_nestjs_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@nestjs/core": "10.0.0", "express": "4.18.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nestjs");
+    assert_eq!(result.name, "NestJS");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_nestjs_wins_over_express() {
+    // NestJS (priority 32) should win over Express (priority 35)
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@nestjs/core": "10.0.0", "express": "4.18.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nestjs");
+}
+
+#[test]
+fn detect_koa_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"koa": "2.15.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "koa");
+    assert_eq!(result.name, "Koa");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_adonis_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@adonisjs/core": "6.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "adonis");
+    assert_eq!(result.name, "AdonisJS");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_h3_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"h3": "1.10.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "h3");
+    assert_eq!(result.name, "H3");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_nitro_standalone_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"nitropack": "2.8.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nitro");
+    assert_eq!(result.name, "Nitro");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn nuxt_wins_over_nitro_and_h3() {
+    // Nuxt (priority 2) depends on nitropack and h3 internally — Nuxt should win
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"nuxt": "3.0.0", "nitropack": "2.8.0", "h3": "1.10.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nuxt");
+}
+
+#[test]
+fn nextjs_wins_over_express() {
+    // Next.js (priority 1) + express (priority 35) → Next.js wins
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0", "express": "4.18.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nextjs");
+}
+
+#[test]
+fn server_frameworks_no_ssr_analysis() {
+    for dep_json in [
+        r#"{"dependencies": {"express": "4.0.0"}}"#,
+        r#"{"dependencies": {"fastify": "4.0.0"}}"#,
+        r#"{"dependencies": {"@nestjs/core": "10.0.0"}}"#,
+        r#"{"dependencies": {"koa": "2.0.0"}}"#,
+        r#"{"dependencies": {"@adonisjs/core": "6.0.0"}}"#,
+        r#"{"dependencies": {"h3": "1.10.0"}}"#,
+        r#"{"dependencies": {"nitropack": "2.8.0"}}"#,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("package.json"), dep_json).unwrap();
+
+        let result = detect(dir.path());
+        assert!(
+            result.metadata.ssr_analysis.is_none(),
+            "server framework {} should have no SSR analysis",
+            result.framework
+        );
+    }
+}
+
+#[test]
+fn hono_wins_over_express() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"hono": "4.0.0", "express": "4.18.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "hono");
+}
+
+#[test]
+fn fastify_wins_over_express() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"fastify": "4.0.0", "express": "4.18.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "fastify");
+}
+
+#[test]
+fn framework_entry_point_hono_returns_none() {
+    assert_eq!(framework_entry_point("hono"), None);
+}
+
+#[test]
+fn framework_entry_point_elysia_returns_none() {
+    assert_eq!(framework_entry_point("elysia"), None);
+}
+
+#[test]
+fn framework_entry_point_h3_returns_none() {
+    assert_eq!(framework_entry_point("h3"), None);
+}
+
+// ── Server framework entry points ────────────────────────────
+
+#[test]
+fn framework_entry_point_nestjs() {
+    assert_eq!(framework_entry_point("nestjs"), Some("main.js".into()));
+}
+
+#[test]
+fn framework_entry_point_adonis() {
+    assert_eq!(framework_entry_point("adonis"), Some("server.js".into()));
+}
+
+#[test]
+fn framework_entry_point_nitro() {
+    assert_eq!(
+        framework_entry_point("nitro"),
+        Some("server/index.mjs".into())
+    );
+}
+
+#[test]
+fn framework_entry_point_express_returns_none() {
+    // Express has no fixed entry point — resolved via main/scripts heuristic
+    assert_eq!(framework_entry_point("express"), None);
+}
+
+#[test]
+fn framework_entry_point_fastify_returns_none() {
+    assert_eq!(framework_entry_point("fastify"), None);
+}
+
+#[test]
+fn framework_entry_point_koa_returns_none() {
+    assert_eq!(framework_entry_point("koa"), None);
+}
+
+#[test]
+fn nestjs_ignores_vite_config_outdir() {
+    // NestJS project with vite.config.ts for Vitest — output_dir should be "dist", not vite's outDir
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@nestjs/core": "10.0.0"}, "devDependencies": {"vitest": "1.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        "export default { build: { outDir: 'coverage' } }",
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nestjs");
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some("dist")); // NOT "coverage"
 }
 
 // ── Remix integration tests ──────────────────────────────────

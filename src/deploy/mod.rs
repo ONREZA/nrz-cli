@@ -1351,6 +1351,48 @@ fn framework_process_diagnostic(
              (e.g. dist/index.js). Elysia runs on Bun."
                 .to_string(),
         ),
+        "nestjs" => Some(
+            "NestJS PROCESS deployment expects main.js in the dist/ directory.\n\n\
+             Make sure you ran `npm run build` (nest build).\n\
+             The build should create dist/main.js."
+                .to_string(),
+        ),
+        "fastify" => Some(
+            "Fastify PROCESS deployment requires a runnable entry point.\n\n\
+             Set \"main\" in package.json to your server file, \
+             or add a \"start\" script."
+                .to_string(),
+        ),
+        "adonis" => Some(
+            "AdonisJS PROCESS deployment expects server.js in the build/ directory.\n\n\
+             Make sure you ran `node ace build`.\n\
+             The build should create build/server.js."
+                .to_string(),
+        ),
+        "express" => Some(
+            "Express PROCESS deployment requires a runnable entry point.\n\n\
+             Set \"main\" in package.json to your server file \
+             (e.g. \"main\": \"server.js\"), or add a \"start\" script."
+                .to_string(),
+        ),
+        "koa" => Some(
+            "Koa PROCESS deployment requires a runnable entry point.\n\n\
+             Set \"main\" in package.json to your server file \
+             (e.g. \"main\": \"server.js\"), or add a \"start\" script."
+                .to_string(),
+        ),
+        "h3" => Some(
+            "H3 PROCESS deployment requires a runnable entry point.\n\n\
+             Make sure your build produces a file in dist/ \
+             (e.g. dist/index.mjs), or set \"main\" in package.json."
+                .to_string(),
+        ),
+        "nitro" => Some(
+            "Nitro PROCESS deployment expects server/index.mjs in the .output/ directory.\n\n\
+             Make sure you ran the build command.\n\
+             The build should create .output/server/index.mjs."
+                .to_string(),
+        ),
         _ => None,
     }
 }

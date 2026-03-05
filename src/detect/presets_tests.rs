@@ -63,6 +63,13 @@ fn ssr_frameworks_recognized() {
 fn server_frameworks_recognized() {
     assert!(is_server_framework("hono"));
     assert!(is_server_framework("elysia"));
+    assert!(is_server_framework("nestjs"));
+    assert!(is_server_framework("fastify"));
+    assert!(is_server_framework("adonis"));
+    assert!(is_server_framework("express"));
+    assert!(is_server_framework("koa"));
+    assert!(is_server_framework("h3"));
+    assert!(is_server_framework("nitro"));
     assert!(!is_server_framework("nextjs"));
     assert!(!is_server_framework("vite"));
 }
@@ -80,8 +87,8 @@ fn detection_presets_have_dependencies() {
 
 #[test]
 fn total_preset_count() {
-    // 21 detection presets (static-html is a separate const, not in PRESETS)
-    assert_eq!(PRESETS.len(), 21);
+    // 28 detection presets (static-html is a separate const, not in PRESETS)
+    assert_eq!(PRESETS.len(), 28);
 }
 
 #[test]
@@ -109,6 +116,38 @@ fn tier1_presets_correct() {
     let gatsby = get_preset_by_slug("gatsby").unwrap();
     assert_eq!(gatsby.dependencies, &["gatsby"]);
     assert_eq!(gatsby.output_directory, "public");
+}
+
+#[test]
+fn server_framework_presets_correct() {
+    let nestjs = get_preset_by_slug("nestjs").unwrap();
+    assert_eq!(nestjs.dependencies, &["@nestjs/core"]);
+    assert_eq!(nestjs.output_directory, "dist");
+    assert_eq!(nestjs.runtime, RuntimeType::Node);
+
+    let fastify = get_preset_by_slug("fastify").unwrap();
+    assert_eq!(fastify.dependencies, &["fastify"]);
+
+    let adonis = get_preset_by_slug("adonis").unwrap();
+    assert_eq!(adonis.dependencies, &["@adonisjs/core"]);
+    assert_eq!(adonis.output_directory, "build");
+
+    let express = get_preset_by_slug("express").unwrap();
+    assert_eq!(express.dependencies, &["express"]);
+    assert_eq!(express.output_directory, ".");
+    assert_eq!(express.build_script, None);
+
+    let koa = get_preset_by_slug("koa").unwrap();
+    assert_eq!(koa.dependencies, &["koa"]);
+    assert_eq!(koa.output_directory, ".");
+    assert_eq!(koa.build_script, None);
+
+    let h3 = get_preset_by_slug("h3").unwrap();
+    assert_eq!(h3.dependencies, &["h3"]);
+
+    let nitro = get_preset_by_slug("nitro").unwrap();
+    assert_eq!(nitro.dependencies, &["nitropack"]);
+    assert_eq!(nitro.output_directory, ".output");
 }
 
 #[test]
@@ -174,6 +213,50 @@ fn framework_output_dirs_hono() {
 fn framework_output_dirs_elysia() {
     let dirs = framework_output_dirs("elysia");
     assert!(dirs.contains(&"dist"));
+}
+
+#[test]
+fn framework_output_dirs_nestjs() {
+    let dirs = framework_output_dirs("nestjs");
+    assert!(dirs.contains(&"dist"));
+}
+
+#[test]
+fn framework_output_dirs_fastify() {
+    let dirs = framework_output_dirs("fastify");
+    assert!(dirs.contains(&"dist"));
+    assert!(dirs.contains(&"."));
+}
+
+#[test]
+fn framework_output_dirs_adonis() {
+    let dirs = framework_output_dirs("adonis");
+    assert!(dirs.contains(&"build"));
+}
+
+#[test]
+fn framework_output_dirs_express() {
+    let dirs = framework_output_dirs("express");
+    assert!(dirs.contains(&"."));
+}
+
+#[test]
+fn framework_output_dirs_koa() {
+    let dirs = framework_output_dirs("koa");
+    assert!(dirs.contains(&"."));
+}
+
+#[test]
+fn framework_output_dirs_h3() {
+    let dirs = framework_output_dirs("h3");
+    assert!(dirs.contains(&"dist"));
+    assert!(dirs.contains(&"."));
+}
+
+#[test]
+fn framework_output_dirs_nitro() {
+    let dirs = framework_output_dirs("nitro");
+    assert!(dirs.contains(&".output"));
 }
 
 #[test]
