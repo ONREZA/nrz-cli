@@ -730,6 +730,127 @@ pub fn generate_nextjs_standalone_manifest(has_public: bool) -> Manifest {
     }
 }
 
+/// Configuration for generating an SSR manifest with optional STATIC + COMPUTE layers.
+struct SsrManifestConfig {
+    /// Static assets directory (e.g. "client", "public"). `None` to skip the static layer.
+    static_dir: Option<&'static str>,
+    /// CDN route pattern for hashed/immutable assets (e.g. "^/_nuxt/.*$").
+    static_route_pattern: Option<&'static str>,
+    /// Server/compute directory (e.g. "server", ".").
+    server_dir: &'static str,
+    /// Server entry file (e.g. "index.mjs", "index.js").
+    server_entry: &'static str,
+}
+
+/// Build an SSR manifest from the given configuration.
+///
+/// Produces a two-layer manifest (STATIC + COMPUTE) when `static_dir` is set,
+/// or a single COMPUTE layer otherwise. The catch-all `/*` route always falls
+/// through to the server at priority 0.
+fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
+    let mut layers = Vec::new();
+    let mut routes = Vec::new();
+
+    if let (Some(dir), Some(pattern)) = (config.static_dir, config.static_route_pattern) {
+        layers.push(Layer {
+            name: "static-assets".to_string(),
+            target: LayerTarget::Static,
+            directory: dir.to_string(),
+            entry: None,
+            export_format: None,
+            runtime: None,
+            is_precompressed: None,
+        });
+        routes.push(Route {
+            pattern: pattern.to_string(),
+            layer: "static-assets".to_string(),
+            priority: Some(100),
+            revalidate: None,
+            methods: None,
+            headers: None,
+        });
+    }
+
+    layers.push(Layer {
+        name: "server".to_string(),
+        target: LayerTarget::Compute,
+        directory: config.server_dir.to_string(),
+        entry: Some(config.server_entry.to_string()),
+        export_format: None,
+        runtime: None,
+        is_precompressed: None,
+    });
+    routes.push(Route {
+        pattern: "^/.*$".to_string(),
+        layer: "server".to_string(),
+        priority: Some(0),
+        revalidate: None,
+        methods: None,
+        headers: None,
+    });
+
+    Manifest {
+        version: 1,
+        layers,
+        routes,
+        prerender: None,
+        middleware: None,
+        meta: None,
+    }
+}
+
+/// Nuxt `.output/`: `public/` (static, `_nuxt/*` CDN) + `server/index.mjs` (compute).
+pub fn generate_nuxt_manifest(has_public: bool) -> Manifest {
+    generate_ssr_manifest(SsrManifestConfig {
+        static_dir: if has_public { Some("public") } else { None },
+        static_route_pattern: if has_public {
+            Some("^/_nuxt/.*$")
+        } else {
+            None
+        },
+        server_dir: "server",
+        server_entry: "index.mjs",
+    })
+}
+
+/// SvelteKit `build/`: `client/` (static, `_app/*` CDN) + `./index.js` (compute).
+pub fn generate_sveltekit_manifest(has_client: bool) -> Manifest {
+    generate_ssr_manifest(SsrManifestConfig {
+        static_dir: if has_client { Some("client") } else { None },
+        static_route_pattern: if has_client { Some("^/_app/.*$") } else { None },
+        server_dir: ".",
+        server_entry: "index.js",
+    })
+}
+
+/// Remix / React Router v7 `build/`: `client/` (static, `assets/*` CDN) + `server/index.js` (compute).
+pub fn generate_remix_manifest(has_client: bool) -> Manifest {
+    generate_ssr_manifest(SsrManifestConfig {
+        static_dir: if has_client { Some("client") } else { None },
+        static_route_pattern: if has_client {
+            Some("^/assets/.*$")
+        } else {
+            None
+        },
+        server_dir: "server",
+        server_entry: "index.js",
+    })
+}
+
+/// Astro SSR `dist/`: `client/` (static, `_astro/*` CDN) + `server/entry.mjs` (compute).
+pub fn generate_astro_ssr_manifest(has_client: bool) -> Manifest {
+    generate_ssr_manifest(SsrManifestConfig {
+        static_dir: if has_client { Some("client") } else { None },
+        static_route_pattern: if has_client {
+            Some("^/_astro/.*$")
+        } else {
+            None
+        },
+        server_dir: "server",
+        server_entry: "entry.mjs",
+    })
+}
+
 pub fn verify_files(output_dir: &Path, manifest: &Manifest) -> anyhow::Result<()> {
     for layer in &manifest.layers {
         let layer_dir = output_dir.join(&layer.directory);

@@ -3,8 +3,10 @@
 use std::path::Path;
 
 use super::manifest::{
-    LayerTarget, generate_compute_manifest, generate_nextjs_standalone_manifest,
-    generate_static_manifest, load_and_validate, primary_compute_target, validate, verify_files,
+    LayerTarget, generate_astro_ssr_manifest, generate_compute_manifest,
+    generate_nextjs_standalone_manifest, generate_nuxt_manifest, generate_remix_manifest,
+    generate_static_manifest, generate_sveltekit_manifest, load_and_validate,
+    primary_compute_target, validate, verify_files,
 };
 
 // ── Fixtures ─────────────────────────────────────────────────
@@ -1687,6 +1689,65 @@ fn generate_compute_manifest_empty_entry_fails_validation() {
         err.to_string().contains("entry must not be empty"),
         "unexpected error: {err}"
     );
+}
+
+// ── SSR auto-generation ────────────────────────────────────────
+
+#[test]
+fn generate_nuxt_manifest_with_public_is_valid() {
+    let m = generate_nuxt_manifest(true);
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 2);
+}
+
+#[test]
+fn generate_nuxt_manifest_without_public_is_valid() {
+    let m = generate_nuxt_manifest(false);
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 1);
+    assert_eq!(m.layers[0].target, LayerTarget::Compute);
+}
+
+#[test]
+fn generate_sveltekit_manifest_with_client_is_valid() {
+    let m = generate_sveltekit_manifest(true);
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 2);
+}
+
+#[test]
+fn generate_sveltekit_manifest_without_client_is_valid() {
+    let m = generate_sveltekit_manifest(false);
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 1);
+}
+
+#[test]
+fn generate_remix_manifest_with_client_is_valid() {
+    let m = generate_remix_manifest(true);
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 2);
+}
+
+#[test]
+fn generate_remix_manifest_without_client_is_valid() {
+    let m = generate_remix_manifest(false);
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 1);
+}
+
+#[test]
+fn generate_astro_ssr_manifest_with_client_is_valid() {
+    let m = generate_astro_ssr_manifest(true);
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 2);
+}
+
+#[test]
+fn generate_astro_ssr_manifest_without_client_is_valid() {
+    let m = generate_astro_ssr_manifest(false);
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 1);
 }
 
 // ── isPrecompressed ────────────────────────────────────────────

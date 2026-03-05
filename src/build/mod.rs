@@ -172,6 +172,21 @@ pub async fn run_with_hint(
         }
         emit_build_output(json, &auto, &output_dir, Some(detection));
         Some(auto)
+    } else if let Some(auto) = try_generate_ssr_manifest(detection, &output_dir) {
+        output::status(
+            json,
+            "~",
+            format!(
+                "Auto-generated {} SSR manifest (STATIC + COMPUTE)",
+                detection.name
+            ),
+            output::Phase::Build,
+        );
+        if !args.skip_validation {
+            manifest::verify_files(&output_dir, &auto)?;
+        }
+        emit_build_output(json, &auto, &output_dir, Some(detection));
+        Some(auto)
     } else if detection.suggested_compute == crate::detect::types::ComputeType::Static {
         let auto = manifest::generate_static_manifest();
         output::status(
@@ -275,7 +290,86 @@ fn compute_aware_output_dirs(
             // misses `output: 'standalone'` in a complex config file.
             vec![".next/standalone", ".next"]
         }
+        "nuxt" => {
+            if let Some(ref ssr) = detection.metadata.ssr_analysis
+                && ssr.is_static_compatible
+            {
+                // Static Nuxt: serve from .output/public/ directly
+                return vec![".output/public", ".output"];
+            }
+            vec![".output"]
+        }
+        "remix" | "react-router" => {
+            if let Some(ref ssr) = detection.metadata.ssr_analysis
+                && ssr.is_static_compatible
+            {
+                return vec!["build/client", "build"];
+            }
+            // SSR: build/ is the root containing both client/ and server/
+            vec!["build"]
+        }
         slug => crate::detect::presets::framework_output_dirs(slug).to_vec(),
+    }
+}
+
+/// Try to auto-generate an SSR manifest for known frameworks.
+/// Returns `None` if the framework is not SSR, is static-compatible,
+/// or the expected build output structure is not found.
+/// Expected SSR entry point for a framework, or `None` for non-SSR frameworks.
+fn ssr_expected_entry(framework: &str) -> Option<&'static str> {
+    match framework {
+        "nuxt" => Some("server/index.mjs"),
+        "sveltekit" => Some("index.js"),
+        "remix" | "react-router" => Some("server/index.js"),
+        "astro" => Some("server/entry.mjs"),
+        _ => None,
+    }
+}
+
+fn try_generate_ssr_manifest(
+    detection: &crate::detect::types::DetectionResult,
+    output_dir: &Path,
+) -> Option<manifest::Manifest> {
+    let ssr = detection.metadata.ssr_analysis.as_ref()?;
+    if ssr.is_static_compatible {
+        return None;
+    }
+
+    let expected_entry = ssr_expected_entry(&detection.framework)?;
+
+    if !output_dir.join(expected_entry).is_file() {
+        tracing::warn!(
+            framework = %detection.framework,
+            expected = %output_dir.join(expected_entry).display(),
+            "SSR entry point not found; cannot auto-generate manifest"
+        );
+        return None;
+    }
+
+    tracing::debug!(
+        framework = %detection.framework,
+        entry = expected_entry,
+        "auto-generating SSR manifest"
+    );
+
+    match detection.framework.as_str() {
+        "nuxt" => {
+            let has_public = output_dir.join("public").is_dir();
+            Some(manifest::generate_nuxt_manifest(has_public))
+        }
+        "sveltekit" => {
+            let has_client = output_dir.join("client").is_dir();
+            Some(manifest::generate_sveltekit_manifest(has_client))
+        }
+        "remix" | "react-router" => {
+            let has_client = output_dir.join("client").is_dir();
+            Some(manifest::generate_remix_manifest(has_client))
+        }
+        "astro" => {
+            let has_client = output_dir.join("client").is_dir();
+            Some(manifest::generate_astro_ssr_manifest(has_client))
+        }
+        _ => None,
     }
 }
 

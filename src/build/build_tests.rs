@@ -1,6 +1,6 @@
 use super::{
     collect_body_files, compute_aware_output_dirs, copy_dir_recursive, detect_output_dir,
-    prepare_nextjs_standalone, run_with_hint,
+    prepare_nextjs_standalone, run_with_hint, try_generate_ssr_manifest,
 };
 use crate::cli::BuildArgs;
 
@@ -692,4 +692,529 @@ fn metadata_routes_ignores_meta_files() {
 
     assert_eq!(copied, 0);
     assert!(!public_dst.join("favicon.ico").exists());
+}
+
+// ── SSR auto-manifest: Nuxt ─────────────────────────────────
+
+#[tokio::test]
+async fn nuxt_ssr_generates_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Create Nuxt .output/ structure
+    std::fs::create_dir_all(dir.path().join(".output/public/_nuxt")).unwrap();
+    std::fs::write(
+        dir.path().join(".output/public/_nuxt/entry.abc123.js"),
+        "// app",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join(".output/server")).unwrap();
+    std::fs::write(dir.path().join(".output/server/index.mjs"), "// server").unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["server/api/ routes".into()],
+    };
+    let detection = make_detection("nuxt", Some(ssr));
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result.manifest.expect("Nuxt SSR should produce a manifest");
+    assert_eq!(manifest.layers.len(), 2);
+    assert_eq!(
+        manifest.layers[0].target,
+        super::manifest::LayerTarget::Static
+    );
+    assert_eq!(manifest.layers[0].directory, "public");
+    assert_eq!(
+        manifest.layers[1].target,
+        super::manifest::LayerTarget::Compute
+    );
+    assert_eq!(manifest.layers[1].directory, "server");
+    assert_eq!(manifest.layers[1].entry.as_deref(), Some("index.mjs"));
+    assert_eq!(manifest.routes.len(), 2);
+    assert_eq!(manifest.routes[0].pattern, "^/_nuxt/.*$");
+    assert_eq!(manifest.routes[0].priority, Some(100));
+    assert_eq!(manifest.routes[1].pattern, "^/.*$");
+    assert_eq!(manifest.routes[1].priority, Some(0));
+}
+
+#[tokio::test]
+async fn nuxt_static_falls_through_to_static_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Nuxt static: .output/public/ has the static site
+    std::fs::create_dir_all(dir.path().join(".output/public")).unwrap();
+    std::fs::write(dir.path().join(".output/public/index.html"), "<h1>hi</h1>").unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: true,
+        ssr_features: vec!["ssr: false (static)".into()],
+    };
+    let mut detection = make_detection("nuxt", Some(ssr));
+    detection.suggested_compute = crate::detect::types::ComputeType::Static;
+
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: true,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("static Nuxt should produce a STATIC manifest");
+    assert_eq!(manifest.layers.len(), 1);
+    assert_eq!(
+        manifest.layers[0].target,
+        super::manifest::LayerTarget::Static
+    );
+}
+
+#[test]
+fn nuxt_ssr_output_dirs_prefer_dot_output() {
+    let detection = make_detection(
+        "nuxt",
+        Some(crate::detect::types::SsrAnalysis {
+            is_static_compatible: false,
+            ssr_features: vec!["server/api/ routes".into()],
+        }),
+    );
+    let dirs = compute_aware_output_dirs(&detection);
+    assert_eq!(dirs, vec![".output"]);
+}
+
+#[test]
+fn nuxt_static_output_dirs_prefer_public() {
+    let detection = make_detection(
+        "nuxt",
+        Some(crate::detect::types::SsrAnalysis {
+            is_static_compatible: true,
+            ssr_features: vec!["ssr: false (static)".into()],
+        }),
+    );
+    let dirs = compute_aware_output_dirs(&detection);
+    assert_eq!(dirs, vec![".output/public", ".output"]);
+}
+
+#[tokio::test]
+async fn nuxt_ssr_without_public_generates_compute_only() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Nuxt .output/ with server but no public/
+    std::fs::create_dir_all(dir.path().join(".output/server")).unwrap();
+    std::fs::write(dir.path().join(".output/server/index.mjs"), "// server").unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["server/api/ routes".into()],
+    };
+    let detection = make_detection("nuxt", Some(ssr));
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("Nuxt SSR without public should produce a manifest");
+    assert_eq!(manifest.layers.len(), 1, "no public/ → compute only");
+    assert_eq!(
+        manifest.layers[0].target,
+        super::manifest::LayerTarget::Compute
+    );
+    assert_eq!(manifest.layers[0].entry.as_deref(), Some("index.mjs"));
+}
+
+// ── SSR auto-manifest: SvelteKit ────────────────────────────
+
+#[tokio::test]
+async fn sveltekit_ssr_generates_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Create SvelteKit build/ structure (adapter-node)
+    std::fs::create_dir_all(dir.path().join("build/client/_app")).unwrap();
+    std::fs::write(dir.path().join("build/client/_app/immutable.js"), "// app").unwrap();
+    std::fs::write(dir.path().join("build/index.js"), "// server").unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["adapter-node (runtime)".into()],
+    };
+    let detection = make_detection("sveltekit", Some(ssr));
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("SvelteKit SSR should produce a manifest");
+    assert_eq!(manifest.layers.len(), 2);
+    assert_eq!(manifest.layers[0].directory, "client");
+    assert_eq!(
+        manifest.layers[0].target,
+        super::manifest::LayerTarget::Static
+    );
+    assert_eq!(manifest.layers[1].directory, ".");
+    assert_eq!(manifest.layers[1].entry.as_deref(), Some("index.js"));
+    assert_eq!(manifest.routes[0].pattern, "^/_app/.*$");
+    assert_eq!(manifest.routes[0].priority, Some(100));
+}
+
+#[tokio::test]
+async fn sveltekit_ssr_without_client_generates_compute_only() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // SvelteKit build with no client/ dir
+    std::fs::create_dir_all(dir.path().join("build")).unwrap();
+    std::fs::write(dir.path().join("build/index.js"), "// server").unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["adapter-node (runtime)".into()],
+    };
+    let detection = make_detection("sveltekit", Some(ssr));
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("SvelteKit SSR without client should produce a manifest");
+    assert_eq!(manifest.layers.len(), 1, "no client/ → compute only");
+    assert_eq!(
+        manifest.layers[0].target,
+        super::manifest::LayerTarget::Compute
+    );
+    assert_eq!(manifest.routes.len(), 1);
+}
+
+// ── SSR auto-manifest: Remix ────────────────────────────────
+
+#[tokio::test]
+async fn remix_ssr_generates_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Create Remix build/ structure
+    std::fs::create_dir_all(dir.path().join("build/client/assets")).unwrap();
+    std::fs::write(
+        dir.path().join("build/client/assets/root-abc123.js"),
+        "// app",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("build/server")).unwrap();
+    std::fs::write(dir.path().join("build/server/index.js"), "// server").unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["route loaders".into()],
+    };
+    let detection = make_detection("remix", Some(ssr));
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("Remix SSR should produce a manifest");
+    assert_eq!(manifest.layers.len(), 2);
+    assert_eq!(manifest.layers[0].directory, "client");
+    assert_eq!(manifest.layers[1].directory, "server");
+    assert_eq!(manifest.layers[1].entry.as_deref(), Some("index.js"));
+    assert_eq!(manifest.routes[0].pattern, "^/assets/.*$");
+    assert_eq!(manifest.routes[0].priority, Some(100));
+}
+
+#[tokio::test]
+async fn react_router_ssr_generates_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // React Router v7 uses the same build/ structure as Remix
+    std::fs::create_dir_all(dir.path().join("build/client/assets")).unwrap();
+    std::fs::write(
+        dir.path().join("build/client/assets/root-abc123.js"),
+        "// app",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("build/server")).unwrap();
+    std::fs::write(dir.path().join("build/server/index.js"), "// server").unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["route loaders".into()],
+    };
+    let detection = make_detection("react-router", Some(ssr));
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("React Router SSR should produce a manifest");
+    assert_eq!(manifest.layers.len(), 2);
+    assert_eq!(manifest.layers[0].directory, "client");
+    assert_eq!(manifest.layers[1].directory, "server");
+    assert_eq!(manifest.layers[1].entry.as_deref(), Some("index.js"));
+}
+
+#[test]
+fn remix_ssr_output_dirs_prefer_build_root() {
+    let detection = make_detection(
+        "remix",
+        Some(crate::detect::types::SsrAnalysis {
+            is_static_compatible: false,
+            ssr_features: vec!["route loaders".into()],
+        }),
+    );
+    let dirs = compute_aware_output_dirs(&detection);
+    assert_eq!(dirs, vec!["build"]);
+}
+
+#[test]
+fn remix_static_output_dirs_prefer_build_client() {
+    let detection = make_detection(
+        "remix",
+        Some(crate::detect::types::SsrAnalysis {
+            is_static_compatible: true,
+            ssr_features: vec!["ssr: false (SPA mode)".into()],
+        }),
+    );
+    let dirs = compute_aware_output_dirs(&detection);
+    assert_eq!(dirs, vec!["build/client", "build"]);
+}
+
+#[tokio::test]
+async fn remix_ssr_without_client_generates_compute_only() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Remix build with server but no client/
+    std::fs::create_dir_all(dir.path().join("build/server")).unwrap();
+    std::fs::write(dir.path().join("build/server/index.js"), "// server").unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["route loaders".into()],
+    };
+    let detection = make_detection("remix", Some(ssr));
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("Remix SSR without client should produce a manifest");
+    assert_eq!(manifest.layers.len(), 1, "no client/ → compute only");
+    assert_eq!(
+        manifest.layers[0].target,
+        super::manifest::LayerTarget::Compute
+    );
+    assert_eq!(manifest.routes.len(), 1);
+}
+
+#[test]
+fn react_router_ssr_output_dirs_prefer_build_root() {
+    let detection = make_detection(
+        "react-router",
+        Some(crate::detect::types::SsrAnalysis {
+            is_static_compatible: false,
+            ssr_features: vec!["route loaders".into()],
+        }),
+    );
+    let dirs = compute_aware_output_dirs(&detection);
+    assert_eq!(dirs, vec!["build"]);
+}
+
+// ── SSR auto-manifest: Astro ────────────────────────────────
+
+#[tokio::test]
+async fn astro_ssr_generates_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Create Astro SSR dist/ structure
+    std::fs::create_dir_all(dir.path().join("dist/client/_astro")).unwrap();
+    std::fs::write(
+        dir.path().join("dist/client/_astro/index.abc123.js"),
+        "// app",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("dist/server")).unwrap();
+    std::fs::write(dir.path().join("dist/server/entry.mjs"), "// server").unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["output: 'server' (SSR)".into()],
+    };
+    let detection = make_detection("astro", Some(ssr));
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("Astro SSR should produce a manifest");
+    assert_eq!(manifest.layers.len(), 2);
+    assert_eq!(manifest.layers[0].directory, "client");
+    assert_eq!(
+        manifest.layers[0].target,
+        super::manifest::LayerTarget::Static
+    );
+    assert_eq!(manifest.layers[1].directory, "server");
+    assert_eq!(manifest.layers[1].entry.as_deref(), Some("entry.mjs"));
+    assert_eq!(manifest.routes[0].pattern, "^/_astro/.*$");
+    assert_eq!(manifest.routes[0].priority, Some(100));
+}
+
+#[tokio::test]
+async fn astro_ssr_without_client_generates_compute_only() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Astro SSR with no client/ dir
+    std::fs::create_dir_all(dir.path().join("dist/server")).unwrap();
+    std::fs::write(dir.path().join("dist/server/entry.mjs"), "// server").unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["output: 'server' (SSR)".into()],
+    };
+    let detection = make_detection("astro", Some(ssr));
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("Astro SSR without client should produce a manifest");
+    assert_eq!(manifest.layers.len(), 1, "no client/ → compute only");
+    assert_eq!(
+        manifest.layers[0].target,
+        super::manifest::LayerTarget::Compute
+    );
+    assert_eq!(manifest.layers[0].entry.as_deref(), Some("entry.mjs"));
+}
+
+// ── SSR auto-manifest: edge cases ───────────────────────────
+
+#[test]
+fn try_generate_ssr_returns_none_for_static_compatible() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("server")).unwrap();
+    std::fs::write(dir.path().join("server/index.mjs"), "// server").unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: true,
+        ssr_features: vec!["ssr: false (static)".into()],
+    };
+    let detection = make_detection("nuxt", Some(ssr));
+
+    assert!(try_generate_ssr_manifest(&detection, dir.path()).is_none());
+}
+
+#[test]
+fn try_generate_ssr_returns_none_for_missing_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    // Create output dir but NOT the entry file
+    std::fs::create_dir_all(dir.path().join("server")).unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["server/api/ routes".into()],
+    };
+    let detection = make_detection("nuxt", Some(ssr));
+
+    assert!(try_generate_ssr_manifest(&detection, dir.path()).is_none());
+}
+
+#[test]
+fn try_generate_ssr_returns_none_for_unknown_framework() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let ssr = crate::detect::types::SsrAnalysis {
+        is_static_compatible: false,
+        ssr_features: vec!["some feature".into()],
+    };
+    let detection = make_detection("other", Some(ssr));
+
+    assert!(try_generate_ssr_manifest(&detection, dir.path()).is_none());
+}
+
+#[test]
+#[test]
+fn sveltekit_output_dirs_delegate_to_presets() {
+    let detection = make_detection("sveltekit", None);
+    let dirs = compute_aware_output_dirs(&detection);
+    assert_eq!(dirs, vec!["build"]);
+}
+
+#[test]
+fn astro_output_dirs_delegate_to_presets() {
+    let detection = make_detection("astro", None);
+    let dirs = compute_aware_output_dirs(&detection);
+    assert_eq!(dirs, vec!["dist"]);
+}
+
+#[test]
+fn try_generate_ssr_returns_none_without_ssr_analysis() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("server")).unwrap();
+    std::fs::write(dir.path().join("server/index.mjs"), "// server").unwrap();
+
+    let detection = make_detection("nuxt", None);
+
+    assert!(try_generate_ssr_manifest(&detection, dir.path()).is_none());
 }
