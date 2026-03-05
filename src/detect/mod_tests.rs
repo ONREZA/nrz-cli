@@ -918,6 +918,103 @@ fn fastify_wins_over_express() {
     assert_eq!(result.framework, "fastify");
 }
 
+// ── detect_config_files ─────────────────────────────────────
+
+#[test]
+fn config_files_nextjs() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("next.config.ts"), "").unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    let files = detect_config_files(&fs, "nextjs");
+    assert_eq!(files, vec!["next.config.ts"]);
+}
+
+#[test]
+fn config_files_nextjs_multiple() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("next.config.js"), "").unwrap();
+    std::fs::write(dir.path().join("next.config.mjs"), "").unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    let files = detect_config_files(&fs, "nextjs");
+    assert_eq!(files.len(), 2);
+    assert!(files.contains(&"next.config.js".to_string()));
+    assert!(files.contains(&"next.config.mjs".to_string()));
+}
+
+#[test]
+fn config_files_nuxt() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("nuxt.config.ts"), "").unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    let files = detect_config_files(&fs, "nuxt");
+    assert_eq!(files, vec!["nuxt.config.ts"]);
+}
+
+#[test]
+fn config_files_sveltekit() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("svelte.config.js"), "").unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    let files = detect_config_files(&fs, "sveltekit");
+    assert_eq!(files, vec!["svelte.config.js"]);
+}
+
+#[test]
+fn config_files_solidstart() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("app.config.ts"), "").unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    let files = detect_config_files(&fs, "solidstart");
+    assert_eq!(files, vec!["app.config.ts"]);
+}
+
+#[test]
+fn config_files_qwik() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("vite.config.ts"), "").unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    let files = detect_config_files(&fs, "qwik");
+    assert_eq!(files, vec!["vite.config.ts"]);
+}
+
+#[test]
+fn config_files_analog() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("vite.config.ts"), "").unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    let files = detect_config_files(&fs, "analog");
+    assert_eq!(files, vec!["vite.config.ts"]);
+}
+
+#[test]
+fn config_files_astro() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("astro.config.mjs"), "").unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    let files = detect_config_files(&fs, "astro");
+    assert_eq!(files, vec!["astro.config.mjs"]);
+}
+
+#[test]
+fn config_files_empty_when_none_exist() {
+    let dir = tempfile::tempdir().unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    assert!(detect_config_files(&fs, "nextjs").is_empty());
+    assert!(detect_config_files(&fs, "nuxt").is_empty());
+    assert!(detect_config_files(&fs, "solidstart").is_empty());
+}
+
+#[test]
+fn config_files_unknown_framework_returns_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    assert!(detect_config_files(&fs, "express").is_empty());
+    assert!(detect_config_files(&fs, "hono").is_empty());
+    assert!(detect_config_files(&fs, "unknown").is_empty());
+}
+
+// ── framework_entry_point ───────────────────────────────────
+
 #[test]
 fn framework_entry_point_hono_returns_none() {
     assert_eq!(framework_entry_point("hono"), None);
