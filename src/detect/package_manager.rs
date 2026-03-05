@@ -1,13 +1,12 @@
 //! Package manager detection.
 
-use std::path::Path;
-
+use super::fs::Fs;
 use super::package_json::PackageJson;
 use super::types::{PackageManagerInfo, PackageManagerType};
 
 /// Detect package manager from package.json and lock files.
 pub fn detect_package_manager(
-    project_dir: &Path,
+    fs: &dyn Fs,
     pkg: Option<&PackageJson>,
 ) -> Option<PackageManagerInfo> {
     // 1. Check packageManager field in package.json (e.g. "pnpm@9.0.0")
@@ -19,7 +18,7 @@ pub fn detect_package_manager(
     }
 
     // 2. Detect from lock files
-    if let Some(info) = detect_from_lockfile(project_dir) {
+    if let Some(info) = detect_from_lockfile(fs) {
         return Some(info);
     }
 
@@ -68,7 +67,7 @@ fn parse_package_manager_field(field: &str) -> Option<PackageManagerInfo> {
 }
 
 /// Detect from lock file presence.
-fn detect_from_lockfile(project_dir: &Path) -> Option<PackageManagerInfo> {
+fn detect_from_lockfile(fs: &dyn Fs) -> Option<PackageManagerInfo> {
     let lockfiles: &[(&str, PackageManagerType)] = &[
         ("bun.lock", PackageManagerType::Bun),
         ("bun.lockb", PackageManagerType::Bun),
@@ -78,7 +77,7 @@ fn detect_from_lockfile(project_dir: &Path) -> Option<PackageManagerInfo> {
     ];
 
     for (file, pm_type) in lockfiles {
-        if project_dir.join(file).exists() {
+        if fs.exists(file) {
             return Some(PackageManagerInfo {
                 pm_type: *pm_type,
                 version: None,

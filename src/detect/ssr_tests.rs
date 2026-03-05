@@ -1,12 +1,14 @@
+use super::fs::LocalFs;
 use super::ssr::*;
 
 #[test]
 fn non_ssr_framework_returns_none() {
     let dir = tempfile::tempdir().unwrap();
-    assert!(analyze_ssr(dir.path(), "vite").is_none());
-    assert!(analyze_ssr(dir.path(), "hono").is_none());
-    assert!(analyze_ssr(dir.path(), "elysia").is_none());
-    assert!(analyze_ssr(dir.path(), "other").is_none());
+    let fs = LocalFs::new(dir.path());
+    assert!(analyze_ssr(&fs, "vite").is_none());
+    assert!(analyze_ssr(&fs, "hono").is_none());
+    assert!(analyze_ssr(&fs, "elysia").is_none());
+    assert!(analyze_ssr(&fs, "other").is_none());
 }
 
 // ── Next.js ────────────────────────────────────────────────────
@@ -19,7 +21,7 @@ fn nextjs_static_export() {
         "module.exports = { output: 'export' }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("export")));
 }
@@ -32,7 +34,7 @@ fn nextjs_standalone_mode() {
         "export default { output: 'standalone' }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("standalone")));
 }
@@ -45,7 +47,7 @@ fn nextjs_middleware_detected() {
         "export function middleware() {}",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("middleware")));
 }
@@ -55,7 +57,7 @@ fn nextjs_api_routes() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("pages/api")).unwrap();
     std::fs::write(dir.path().join("pages/api/hello.ts"), "export default fn").unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("pages/api")));
 }
@@ -65,7 +67,7 @@ fn nextjs_route_handlers() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("app/api")).unwrap();
     std::fs::write(dir.path().join("app/api/route.ts"), "export async fn GET").unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("route")));
 }
@@ -79,7 +81,7 @@ fn nextjs_gssp() {
         "export async function getServerSideProps() { return { props: {} } }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -92,7 +94,7 @@ fn nextjs_gssp() {
 #[test]
 fn nextjs_clean_project() {
     let dir = tempfile::tempdir().unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     // Next.js defaults to SSR → not static compatible
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.is_empty());
@@ -107,7 +109,7 @@ fn nextjs_use_server_directive() {
         "\"use server\"\n\nexport async function submitForm() {}",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("use server")));
 }
@@ -121,7 +123,7 @@ fn nextjs_revalidate() {
         "export const revalidate = 60;",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("revalidate")));
 }
@@ -135,9 +137,8 @@ fn nextjs_get_static_props() {
         "export async function getStaticProps() { return { props: {} } }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     // getStaticProps is SSG — doesn't enable static compatibility on its own
-    // (Next.js defaults to SSR, getStaticProps is just informational)
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -156,8 +157,7 @@ fn nextjs_generate_static_params() {
         "export function generateStaticParams() { return [] }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
-    // generateStaticParams is SSG — informational only
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -175,8 +175,7 @@ fn nextjs_block_comment_ignored() {
         "module.exports = {\n  /* output: 'standalone' */\n}",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
-    // Block comment should be stripped — standalone not detected
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(!result.ssr_features.iter().any(|f| f.contains("standalone")));
 }
 
@@ -188,18 +187,15 @@ fn nextjs_inline_comment_ignored() {
         "module.exports = {\n  // output: 'standalone' // was active before\n  output: 'export', // deploy as static\n}",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
-    // inline comment after value shouldn't interfere
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("export")));
-    // commented-out standalone should not be detected
     assert!(!result.ssr_features.iter().any(|f| f.contains("standalone")));
 }
 
 #[test]
 fn inline_comment_respects_string_literals() {
     let dir = tempfile::tempdir().unwrap();
-    // URL with // inside a string should NOT be treated as comment
     std::fs::write(
         dir.path().join("nuxt.config.ts"),
         r#"export default defineNuxtConfig({
@@ -209,8 +205,7 @@ fn inline_comment_respects_string_literals() {
 })"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
-    // The proxy rule should still be detected (// in URL is inside a string)
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
     assert!(result.ssr_features.iter().any(|f| f.contains("routeRules")));
 }
 
@@ -229,8 +224,7 @@ fn nextjs_export_with_middleware_is_not_static() {
         "export function middleware() {}",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
-    // middleware overrides output: 'export' → not static compatible
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("export")));
     assert!(result.ssr_features.iter().any(|f| f.contains("middleware")));
@@ -246,9 +240,8 @@ fn nuxt_ssr_false() {
         "export default defineNuxtConfig({ ssr: false })",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
     assert!(result.ssr_features.iter().any(|f| f.contains("ssr: false")));
-    // ssr: false with no server features → static compatible
     assert!(result.is_static_compatible);
 }
 
@@ -257,7 +250,7 @@ fn nuxt_server_api_routes() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("server/api")).unwrap();
     std::fs::write(dir.path().join("server/api/hello.ts"), "export default").unwrap();
-    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("server/api")));
 }
@@ -267,15 +260,14 @@ fn nuxt_server_routes() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("server/routes")).unwrap();
     std::fs::write(dir.path().join("server/routes/feed.ts"), "export default").unwrap();
-    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
     assert!(!result.is_static_compatible);
 }
 
 #[test]
 fn nuxt_clean_project() {
     let dir = tempfile::tempdir().unwrap();
-    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
-    // Nuxt defaults to SSR → not static compatible
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.is_empty());
 }
@@ -289,7 +281,7 @@ fn nuxt_server_middleware() {
         "export default",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -312,7 +304,7 @@ fn nuxt_route_rules_ssr() {
 })"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("routeRules")));
 }
@@ -320,7 +312,6 @@ fn nuxt_route_rules_ssr() {
 #[test]
 fn nuxt_nitro_preset_static_no_false_positive() {
     let dir = tempfile::tempdir().unwrap();
-    // "static" appears in a class name, not as a preset value
     std::fs::write(
         dir.path().join("nuxt.config.ts"),
         r#"export default defineNuxtConfig({
@@ -328,8 +319,7 @@ fn nuxt_nitro_preset_static_no_false_positive() {
 })"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
-    // Should NOT detect preset: 'static'
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
     assert!(!result.ssr_features.iter().any(|f| f.contains("preset")));
 }
 
@@ -343,9 +333,8 @@ fn nuxt_nitro_preset_static_correct() {
 })"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
     assert!(result.ssr_features.iter().any(|f| f.contains("preset")));
-    // preset: 'static' → static compatible
     assert!(result.is_static_compatible);
 }
 
@@ -361,8 +350,7 @@ fn nuxt_ssr_false_with_server_api_is_not_static() {
     .unwrap();
     std::fs::create_dir_all(dir.path().join("server/api")).unwrap();
     std::fs::write(dir.path().join("server/api/hello.ts"), "export default").unwrap();
-    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
-    // server/api/ overrides ssr: false → not static compatible
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
     assert!(!result.is_static_compatible);
 }
 
@@ -376,7 +364,7 @@ fn sveltekit_adapter_static() {
         "import adapter from '@sveltejs/adapter-static';\nexport default { kit: { adapter: adapter() } }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "sveltekit").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "sveltekit").unwrap();
     assert!(result.is_static_compatible);
     assert!(
         result
@@ -395,7 +383,7 @@ fn sveltekit_server_routes() {
         "export async function GET() {}",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "sveltekit").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "sveltekit").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("+server")));
 }
@@ -409,7 +397,7 @@ fn sveltekit_hooks_server() {
         "export const handle = ...",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "sveltekit").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "sveltekit").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -422,8 +410,7 @@ fn sveltekit_hooks_server() {
 #[test]
 fn sveltekit_clean_project() {
     let dir = tempfile::tempdir().unwrap();
-    let result = analyze_ssr(dir.path(), "sveltekit").unwrap();
-    // SvelteKit defaults to SSR → not static compatible
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "sveltekit").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.is_empty());
 }
@@ -437,7 +424,7 @@ fn sveltekit_page_server() {
         "export async function load() { return {} }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "sveltekit").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "sveltekit").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -456,7 +443,7 @@ fn sveltekit_layout_server() {
         "export async function load() { return {} }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "sveltekit").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "sveltekit").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -475,7 +462,7 @@ fn sveltekit_form_actions() {
         "export const actions = { default: async ({ request }) => {} }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "sveltekit").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "sveltekit").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -493,7 +480,7 @@ fn sveltekit_adapter_node() {
         "import adapter from '@sveltejs/adapter-node';\nexport default { kit: { adapter: adapter() } }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "sveltekit").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "sveltekit").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -511,7 +498,7 @@ fn sveltekit_adapter_auto() {
         "import adapter from '@sveltejs/adapter-auto';\nexport default { kit: { adapter: adapter() } }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "sveltekit").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "sveltekit").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -537,8 +524,7 @@ fn sveltekit_adapter_static_with_server_routes_is_not_static() {
         "export async function GET() {}",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "sveltekit").unwrap();
-    // +server routes override adapter-static → not static compatible
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "sveltekit").unwrap();
     assert!(!result.is_static_compatible);
 }
 
@@ -552,7 +538,7 @@ fn astro_output_server() {
         "import { defineConfig } from 'astro/config';\nexport default defineConfig({ output: 'server' })",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "astro").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "astro").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -570,7 +556,7 @@ fn astro_output_hybrid() {
         "import { defineConfig } from 'astro/config';\nexport default defineConfig({ output: 'hybrid' })",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "astro").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "astro").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("hybrid")));
 }
@@ -583,15 +569,14 @@ fn astro_default_static() {
         "import { defineConfig } from 'astro/config';\nexport default defineConfig({})",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "astro").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "astro").unwrap();
     assert!(result.is_static_compatible);
 }
 
 #[test]
 fn astro_clean_project() {
     let dir = tempfile::tempdir().unwrap();
-    let result = analyze_ssr(dir.path(), "astro").unwrap();
-    // Astro defaults to static
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "astro").unwrap();
     assert!(result.is_static_compatible);
     assert!(result.ssr_features.is_empty());
 }
@@ -606,7 +591,7 @@ import node from '@astrojs/node';
 export default defineConfig({ output: 'server', adapter: node({ mode: 'standalone' }) })"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "astro").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "astro").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -621,7 +606,7 @@ export default defineConfig({ output: 'server', adapter: node({ mode: 'standalon
 #[test]
 fn react_router_default_is_ssr() {
     let dir = tempfile::tempdir().unwrap();
-    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "react-router").unwrap();
     assert!(!result.is_static_compatible);
 }
 
@@ -634,7 +619,7 @@ fn react_router_spa_mode() {
 export default { ssr: false } satisfies Config;"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "react-router").unwrap();
     assert!(result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("SPA mode")));
 }
@@ -648,7 +633,7 @@ fn react_router_route_loaders() {
         r#"export async function loader() { return { data: [] }; }"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "react-router").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -667,7 +652,7 @@ fn react_router_route_actions() {
         r#"export async function action({ request }) { }"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "react-router").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -686,7 +671,7 @@ fn react_router_entry_server() {
         "export default function handleRequest() {}",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "react-router").unwrap();
     assert!(
         result
             .ssr_features
@@ -709,7 +694,7 @@ fn react_router_spa_with_loaders_is_not_static() {
         r#"export async function loader() { return {}; }"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "react-router").unwrap();
     assert!(!result.is_static_compatible);
 }
 
@@ -718,8 +703,7 @@ fn react_router_spa_with_loaders_is_not_static() {
 #[test]
 fn remix_default_is_ssr() {
     let dir = tempfile::tempdir().unwrap();
-    let result = analyze_ssr(dir.path(), "remix").unwrap();
-    // Remix defaults to SSR → not static compatible
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
     assert!(!result.is_static_compatible);
 }
 
@@ -734,7 +718,7 @@ export default defineConfig({
 })"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
     assert!(result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("SPA mode")));
 }
@@ -748,7 +732,7 @@ fn remix_route_loaders() {
         r#"export async function loader() { return json({}); }"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -767,7 +751,7 @@ fn remix_route_actions() {
         r#"export async function action({ request }) { }"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
     assert!(!result.is_static_compatible);
     assert!(
         result
@@ -786,7 +770,7 @@ fn remix_entry_server() {
         "export default function handleRequest() {}",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
     assert!(
         result
             .ssr_features
@@ -812,8 +796,7 @@ export default defineConfig({
         r#"export async function loader() { return json({}); }"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "remix").unwrap();
-    // loaders override ssr: false → not static compatible
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
     assert!(!result.is_static_compatible);
 }
 
@@ -827,8 +810,7 @@ fn remix_block_comment_ignored() {
 })"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "remix").unwrap();
-    // Block comment should be stripped — ssr: false not detected
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
     assert!(!result.is_static_compatible);
 }
 
@@ -843,7 +825,7 @@ fn exported_symbol_in_line_comment_not_matched() {
         "// TODO: export function loader() {}\nexport default function Home() { return <div/>; }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "react-router").unwrap();
     assert!(
         !result
             .ssr_features
@@ -862,7 +844,7 @@ fn exported_symbol_in_block_comment_not_matched() {
         "/*\n * export async function loader() { return {}; }\n */\nexport default function Home() { return <div/>; }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
     assert!(
         !result
             .ssr_features
@@ -881,7 +863,7 @@ fn symbol_without_export_not_matched() {
         "function loader() { return {}; }\nexport default function Home() { return <div/>; }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "react-router").unwrap();
     assert!(
         !result
             .ssr_features
@@ -900,7 +882,7 @@ fn export_const_loader_matched() {
         "export const loader = async () => { return {}; };",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "remix").unwrap();
     assert!(
         result
             .ssr_features
@@ -918,7 +900,7 @@ fn re_export_loader_matched() {
         "export { loader } from './home.server';",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "react-router").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "react-router").unwrap();
     assert!(
         result
             .ssr_features
@@ -932,40 +914,36 @@ fn re_export_loader_matched() {
 #[test]
 fn nextjs_inline_comment_with_escaped_quotes() {
     let dir = tempfile::tempdir().unwrap();
-    // Escaped quote before // should not confuse the parser
     std::fs::write(
         dir.path().join("next.config.js"),
         r#"module.exports = { output: "export" } // deploy as static"#,
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
-    // Should detect "export" despite inline comment
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(result.is_static_compatible);
 }
 
 #[test]
 fn nuxt_backtick_string_with_slashes() {
     let dir = tempfile::tempdir().unwrap();
-    // Template literal with // inside — should not be treated as comment
     std::fs::write(
         dir.path().join("nuxt.config.ts"),
         "export default defineNuxtConfig({\n  devServer: { url: `http://localhost:3000` },\n  ssr: false\n})",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nuxt").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
     assert!(result.is_static_compatible);
 }
 
 #[test]
 fn nextjs_no_comment_line_unmodified() {
     let dir = tempfile::tempdir().unwrap();
-    // No inline comments — output: 'standalone' should be detected cleanly
     std::fs::write(
         dir.path().join("next.config.mjs"),
         "export default { output: 'standalone' }",
     )
     .unwrap();
-    let result = analyze_ssr(dir.path(), "nextjs").unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(!result.is_static_compatible);
     assert!(result.ssr_features.iter().any(|f| f.contains("standalone")));
 }

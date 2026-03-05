@@ -1,6 +1,7 @@
 //! Framework detection module — the source of truth for detecting
 //! frameworks, package managers, SSR features, and adapters.
 
+pub mod fs;
 pub mod package_json;
 pub mod package_manager;
 pub mod presets;
@@ -9,6 +10,8 @@ pub mod static_html;
 pub mod types;
 pub mod vite_config;
 
+#[cfg(test)]
+mod fs_tests;
 #[cfg(test)]
 mod mod_tests;
 #[cfg(test)]
@@ -28,27 +31,35 @@ use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::Context;
+use fs::{Fs, LocalFs};
 use package_json::PackageJson;
 use types::*;
 
 /// Full framework detection — returns a complete `DetectionResult`.
 pub fn detect(project_dir: &Path) -> DetectionResult {
-    let pkg = PackageJson::load(project_dir);
+    detect_with_fs(&LocalFs::new(project_dir))
+}
+
+/// Full framework detection from an abstract filesystem.
+///
+/// Used by `nrz detect --stdin` with a `VirtualFs` manifest.
+pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
+    let pkg = PackageJson::load_from_fs(fs);
 
     // 1. Detect package manager
-    let pm_info = package_manager::detect_package_manager(project_dir, pkg.as_ref());
+    let pm_info = package_manager::detect_package_manager(fs, pkg.as_ref());
 
     // 2. Try to detect framework from package.json dependencies
     if let Some(ref pkg) = pkg
-        && let Some(result) = detect_from_package_json(project_dir, pkg, &pm_info)
+        && let Some(result) = detect_from_package_json(fs, pkg, &pm_info)
     {
         return result;
     }
 
     // 3. Fallback: static HTML site (no package.json + index.html)
-    if static_html::is_static_html_site(project_dir) {
+    if static_html::is_static_html_site(fs) {
         let preset = presets::get_static_html_preset();
-        let html_files = static_html::find_html_files(project_dir);
+        let html_files = static_html::find_html_files(fs);
 
         return DetectionResult {
             framework: preset.slug.to_string(),
@@ -79,7 +90,7 @@ pub fn detect(project_dir: &Path) -> DetectionResult {
 
     // 4. Unknown project
     let preset = presets::get_default_preset();
-    let suggested_compute = infer_unknown_compute_type(project_dir, pkg.as_ref());
+    let suggested_compute = infer_unknown_compute_type(fs, pkg.as_ref());
     let reason = if suggested_compute == ComputeType::Process {
         "No known framework detected, but runtime entry signals found (scripts/main/module)"
             .to_string()
@@ -93,7 +104,7 @@ pub fn detect(project_dir: &Path) -> DetectionResult {
         version: None,
         suggested_compute,
         metadata: DetectionMetadata {
-            uses_typescript: detect_typescript(project_dir),
+            uses_typescript: detect_typescript(fs),
             config_files: Vec::new(),
             runtime: RuntimeInfo {
                 runtime_type: infer_runtime(preset.runtime, &pm_info),
@@ -103,7 +114,7 @@ pub fn detect(project_dir: &Path) -> DetectionResult {
             build_info: None,
             monorepo: detect_monorepo(pkg.as_ref()),
             ssr_analysis: None,
-            structure: detect_structure(project_dir),
+            structure: detect_structure(fs),
         },
         reason,
     }
@@ -111,7 +122,7 @@ pub fn detect(project_dir: &Path) -> DetectionResult {
 
 /// Detect framework from package.json dependencies using preset priorities.
 fn detect_from_package_json(
-    project_dir: &Path,
+    fs: &dyn Fs,
     pkg: &PackageJson,
     pm_info: &Option<PackageManagerInfo>,
 ) -> Option<DetectionResult> {
@@ -135,14 +146,13 @@ fn detect_from_package_json(
                 .map(|script| package_manager::build_command(pm_type, script));
 
             // SSR analysis for capable frameworks (needed before output_dir resolution)
-            let ssr_analysis = ssr::analyze_ssr(project_dir, preset.slug);
+            let ssr_analysis = ssr::analyze_ssr(fs, preset.slug);
 
             // Output directory — context-dependent based on framework + SSR analysis
-            let output_dir =
-                resolve_framework_output_dir(preset, ssr_analysis.as_ref(), project_dir);
+            let output_dir = resolve_framework_output_dir(preset, ssr_analysis.as_ref(), fs);
 
             // Config files
-            let config_files = detect_config_files(project_dir, preset.slug);
+            let config_files = detect_config_files(fs, preset.slug);
 
             // Infer compute type
             let suggested_compute =
@@ -156,7 +166,7 @@ fn detect_from_package_json(
                 version,
                 suggested_compute,
                 metadata: DetectionMetadata {
-                    uses_typescript: detect_typescript(project_dir),
+                    uses_typescript: detect_typescript(fs),
                     config_files,
                     runtime: RuntimeInfo {
                         runtime_type: infer_runtime(preset.runtime, pm_info),
@@ -173,7 +183,7 @@ fn detect_from_package_json(
                     }),
                     monorepo: detect_monorepo(Some(pkg)),
                     ssr_analysis,
-                    structure: detect_structure(project_dir),
+                    structure: detect_structure(fs),
                 },
                 reason: format!(
                     "Detected {dep} in dependencies (priority {})",
@@ -187,9 +197,8 @@ fn detect_from_package_json(
 }
 
 /// Detect TypeScript usage (tsconfig.json or tsconfig.app.json).
-fn detect_typescript(project_dir: &Path) -> Option<bool> {
-    if project_dir.join("tsconfig.json").exists() || project_dir.join("tsconfig.app.json").exists()
-    {
+fn detect_typescript(fs: &dyn Fs) -> Option<bool> {
+    if fs.exists("tsconfig.json") || fs.exists("tsconfig.app.json") {
         Some(true)
     } else {
         Some(false)
@@ -209,7 +218,7 @@ fn detect_monorepo(pkg: Option<&PackageJson>) -> Option<MonorepoInfo> {
 }
 
 /// Detect framework-specific config files.
-fn detect_config_files(project_dir: &Path, framework: &str) -> Vec<String> {
+fn detect_config_files(fs: &dyn Fs, framework: &str) -> Vec<String> {
     let candidates: &[&str] = match framework {
         "nextjs" => &[
             "next.config.js",
@@ -249,13 +258,13 @@ fn detect_config_files(project_dir: &Path, framework: &str) -> Vec<String> {
 
     candidates
         .iter()
-        .filter(|&&f| project_dir.join(f).exists())
+        .filter(|&&f| fs.exists(f))
         .map(|f| f.to_string())
         .collect()
 }
 
 /// Detect key project structure directories.
-fn detect_structure(project_dir: &Path) -> Vec<String> {
+fn detect_structure(fs: &dyn Fs) -> Vec<String> {
     let dirs = &[
         "src",
         "pages",
@@ -267,7 +276,7 @@ fn detect_structure(project_dir: &Path) -> Vec<String> {
         "server",
     ];
     dirs.iter()
-        .filter(|&&d| project_dir.join(d).is_dir())
+        .filter(|&&d| fs.is_dir(d))
         .map(|d| d.to_string())
         .collect()
 }
@@ -281,7 +290,7 @@ fn detect_structure(project_dir: &Path) -> Vec<String> {
 fn resolve_framework_output_dir(
     preset: &types::FrameworkPreset,
     ssr: Option<&SsrAnalysis>,
-    project_dir: &Path,
+    fs: &dyn Fs,
 ) -> String {
     match preset.slug {
         "nextjs" => {
@@ -314,8 +323,8 @@ fn resolve_framework_output_dir(
         _ => {
             // For non-SSR frameworks with a vite config, check outDir override
             if !presets::is_ssr_framework(preset.slug)
-                && vite_config::has_vite_config(project_dir)
-                && let Some(out_dir) = vite_config::parse_vite_out_dir(project_dir)
+                && vite_config::has_vite_config(fs)
+                && let Some(out_dir) = vite_config::parse_vite_out_dir(fs)
             {
                 return out_dir;
             }
@@ -383,7 +392,7 @@ fn infer_compute_type(
 /// We avoid framework hardcoding and use generic runtime signals:
 /// - runtime-like scripts (`start`, `serve`, `prod`, ...)
 /// - resolvable `main`/`module` path in package.json
-fn infer_unknown_compute_type(project_dir: &Path, pkg: Option<&PackageJson>) -> ComputeType {
+fn infer_unknown_compute_type(fs: &dyn Fs, pkg: Option<&PackageJson>) -> ComputeType {
     let Some(pkg) = pkg else {
         return ComputeType::Static;
     };
@@ -396,25 +405,49 @@ fn infer_unknown_compute_type(project_dir: &Path, pkg: Option<&PackageJson>) -> 
         return ComputeType::Process;
     }
 
-    let has_main_entry = pkg
-        .main
-        .as_deref()
-        .and_then(|raw| resolve_candidate_path(raw, project_dir, project_dir))
-        .is_some();
-    if has_main_entry {
+    if has_resolvable_entry(fs, pkg.main.as_deref()) {
         return ComputeType::Process;
     }
 
-    let has_module_entry = pkg
-        .module
-        .as_deref()
-        .and_then(|raw| resolve_candidate_path(raw, project_dir, project_dir))
-        .is_some();
-    if has_module_entry {
+    if has_resolvable_entry(fs, pkg.module.as_deref()) {
         return ComputeType::Process;
     }
 
     ComputeType::Static
+}
+
+/// Check if a package.json main/module field points to an existing file.
+fn has_resolvable_entry(fs: &dyn Fs, raw: Option<&str>) -> bool {
+    let Some(raw) = raw else { return false };
+    let Some(rel) = sanitize_relative_path(raw) else {
+        return false;
+    };
+    let rel_str = stringify_path(&rel);
+
+    // Direct match
+    if fs.exists(&rel_str) && !fs.is_dir(&rel_str) {
+        return true;
+    }
+
+    // Try with extensions
+    if rel.extension().is_none() {
+        for ext in RUNNABLE_EXTENSIONS {
+            let candidate = format!("{rel_str}.{ext}");
+            if fs.exists(&candidate) && !fs.is_dir(&candidate) {
+                return true;
+            }
+        }
+    }
+
+    // Try index files in directory
+    for ext in RUNNABLE_EXTENSIONS {
+        let candidate = format!("{rel_str}/index.{ext}");
+        if fs.exists(&candidate) {
+            return true;
+        }
+    }
+
+    false
 }
 
 // ── Public convenience wrappers (for init/deploy) ────────────
@@ -1123,8 +1156,9 @@ pub fn resolve_entry_point(
 
 /// Detect package manager name (backward-compatible wrapper for init/deploy).
 pub fn detect_package_manager_name(project_dir: &Path) -> String {
-    let pkg = PackageJson::load(project_dir);
-    let pm = package_manager::detect_package_manager(project_dir, pkg.as_ref());
+    let fs = LocalFs::new(project_dir);
+    let pkg = PackageJson::load_from_fs(&fs);
+    let pm = package_manager::detect_package_manager(&fs, pkg.as_ref());
     pm.map(|p| p.pm_type.as_str().to_string())
         .unwrap_or_else(|| "npm".to_string())
 }

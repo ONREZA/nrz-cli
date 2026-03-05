@@ -61,6 +61,21 @@ impl Workspaces {
 }
 
 impl PackageJson {
+    /// Load package.json from an abstract filesystem (for remote detection).
+    pub fn load_from_fs(fs: &dyn super::fs::Fs) -> Option<Self> {
+        let content = fs.read_file("package.json")?;
+        match serde_json::from_str(&content) {
+            Ok(pkg) => Some(pkg),
+            Err(e) => {
+                eprintln!(
+                    "  {} could not parse package.json: {e}",
+                    console::style("warn").yellow(),
+                );
+                None
+            }
+        }
+    }
+
     /// Read and parse package.json from a directory.
     ///
     /// Returns `None` if the file doesn't exist.

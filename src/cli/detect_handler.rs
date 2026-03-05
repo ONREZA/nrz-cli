@@ -1,5 +1,6 @@
 //! Handler for `nrz detect`.
 
+use std::io::Read as _;
 use std::path::Path;
 
 use anyhow::Context;
@@ -10,6 +11,38 @@ use crate::output;
 use super::detect::DetectArgs;
 
 pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
+    // --needed-files: output files the server should include in the manifest
+    if args.needed_files {
+        let files = detect::fs::DETECTION_CONTENT_FILES;
+        if json {
+            output::json_output(&serde_json::json!({ "files": files }));
+        } else {
+            for f in files {
+                eprintln!("  {f}");
+            }
+        }
+        return Ok(());
+    }
+
+    // --stdin: read JSON manifest from stdin, detect via VirtualFs
+    if args.stdin {
+        if args.save {
+            anyhow::bail!("--stdin and --save cannot be used together");
+        }
+
+        let mut input = String::new();
+        std::io::stdin()
+            .read_to_string(&mut input)
+            .context("failed to read stdin")?;
+
+        let vfs =
+            detect::fs::VirtualFs::from_json(&input).context("failed to parse stdin manifest")?;
+
+        let result = detect::detect_with_fs(&vfs);
+        return output_result(&result, &args, json);
+    }
+
+    // Local detection (default)
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("directory not found: {}", args.dir))?;
@@ -29,6 +62,14 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
         }
     }
 
+    output_result(&result, &args, json)
+}
+
+fn output_result(
+    result: &detect::types::DetectionResult,
+    args: &DetectArgs,
+    json: bool,
+) -> anyhow::Result<()> {
     if args.slug_only {
         if json {
             output::json_output(&serde_json::json!({ "framework": result.framework }));
@@ -39,9 +80,9 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
     }
 
     if json {
-        output::json_output(&result);
+        output::json_output(result);
     } else {
-        print_human(&result);
+        print_human(result);
     }
 
     Ok(())

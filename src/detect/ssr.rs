@@ -1,33 +1,32 @@
 //! SSR compatibility analysis for Next.js, Nuxt, SvelteKit, Astro.
 
-use std::path::Path;
-
+use super::fs::Fs;
 use super::types::SsrAnalysis;
 
 /// Analyze SSR features for a given framework.
 /// Returns `None` if the framework is not SSR-capable.
-pub fn analyze_ssr(project_dir: &Path, framework: &str) -> Option<SsrAnalysis> {
+pub fn analyze_ssr(fs: &dyn Fs, framework: &str) -> Option<SsrAnalysis> {
     match framework {
-        "nextjs" => Some(analyze_nextjs(project_dir)),
-        "nuxt" => Some(analyze_nuxt(project_dir)),
-        "sveltekit" => Some(analyze_sveltekit(project_dir)),
-        "astro" => Some(analyze_astro(project_dir)),
-        "react-router" => Some(analyze_react_router(project_dir)),
-        "remix" => Some(analyze_remix(project_dir)),
+        "nextjs" => Some(analyze_nextjs(fs)),
+        "nuxt" => Some(analyze_nuxt(fs)),
+        "sveltekit" => Some(analyze_sveltekit(fs)),
+        "astro" => Some(analyze_astro(fs)),
+        "react-router" => Some(analyze_react_router(fs)),
+        "remix" => Some(analyze_remix(fs)),
         _ => None,
     }
 }
 
 // ── Next.js ────────────────────────────────────────────────────
 
-fn analyze_nextjs(project_dir: &Path) -> SsrAnalysis {
+fn analyze_nextjs(fs: &dyn Fs) -> SsrAnalysis {
     let mut features = Vec::new();
     // Next.js defaults to SSR — static only with explicit output: 'export'
     let mut is_static_compatible = false;
 
     // Check next.config for output mode
     let config_content = read_config_file(
-        project_dir,
+        fs,
         &[
             "next.config.js",
             "next.config.mjs",
@@ -48,55 +47,53 @@ fn analyze_nextjs(project_dir: &Path) -> SsrAnalysis {
     }
 
     // Check for middleware
-    if file_exists_any(project_dir, &["middleware.ts", "middleware.js"]) {
+    if file_exists_any(fs, &["middleware.ts", "middleware.js"]) {
         features.push("middleware".into());
         is_static_compatible = false;
     }
 
     // Check for API routes (pages/api/)
-    if dir_has_files(project_dir, "pages/api") {
+    if dir_has_files(fs, "pages/api") {
         features.push("pages/api/ routes".into());
         is_static_compatible = false;
     }
 
     // Check for route handlers (app/**/route.{ts,js})
-    if has_route_handlers(project_dir) {
+    if has_route_handlers(fs) {
         features.push("app/ route handlers".into());
         is_static_compatible = false;
     }
 
     // Check for getServerSideProps
-    if has_gssp(project_dir) {
+    if has_gssp(fs) {
         features.push("getServerSideProps".into());
         is_static_compatible = false;
     }
 
     // Check for "use server" directives (Server Actions / Server Components)
-    let app_dir = project_dir.join("app");
-    if app_dir.is_dir() && walk_for_content(&app_dir, "use server") {
+    if fs.is_dir("app") && walk_for_content(fs, "app", "use server") {
         features.push("\"use server\" directives".into());
         is_static_compatible = false;
     }
 
     // Check for revalidate export (ISR — needs runtime)
-    if app_dir.is_dir() && walk_for_content(&app_dir, "export const revalidate") {
+    if fs.is_dir("app") && walk_for_content(fs, "app", "export const revalidate") {
         features.push("revalidate (ISR)".into());
         is_static_compatible = false;
     }
 
     // Check for getStaticProps / getStaticPaths (Pages Router SSG — informational)
-    let pages_dir = project_dir.join("pages");
-    if pages_dir.is_dir() {
-        if walk_for_content(&pages_dir, "getStaticProps") {
+    if fs.is_dir("pages") {
+        if walk_for_content(fs, "pages", "getStaticProps") {
             features.push("getStaticProps (SSG)".into());
         }
-        if walk_for_content(&pages_dir, "getStaticPaths") {
+        if walk_for_content(fs, "pages", "getStaticPaths") {
             features.push("getStaticPaths (SSG)".into());
         }
     }
 
     // Check for generateStaticParams (App Router SSG — informational)
-    if app_dir.is_dir() && walk_for_content(&app_dir, "generateStaticParams") {
+    if fs.is_dir("app") && walk_for_content(fs, "app", "generateStaticParams") {
         features.push("generateStaticParams (SSG)".into());
     }
 
@@ -108,12 +105,12 @@ fn analyze_nextjs(project_dir: &Path) -> SsrAnalysis {
 
 // ── Nuxt ───────────────────────────────────────────────────────
 
-fn analyze_nuxt(project_dir: &Path) -> SsrAnalysis {
+fn analyze_nuxt(fs: &dyn Fs) -> SsrAnalysis {
     let mut features = Vec::new();
     // Nuxt defaults to SSR — static only with ssr: false or preset: 'static'
     let mut is_static_compatible = false;
 
-    let config_content = read_config_file(project_dir, &["nuxt.config.ts", "nuxt.config.js"]);
+    let config_content = read_config_file(fs, &["nuxt.config.ts", "nuxt.config.js"]);
 
     if let Some(ref content) = config_content {
         let stripped = strip_block_comments(content);
@@ -140,19 +137,19 @@ fn analyze_nuxt(project_dir: &Path) -> SsrAnalysis {
     }
 
     // Check for server/api/ directory
-    if dir_has_files(project_dir, "server/api") {
+    if dir_has_files(fs, "server/api") {
         features.push("server/api/ routes".into());
         is_static_compatible = false;
     }
 
     // Check for server/routes/ directory
-    if dir_has_files(project_dir, "server/routes") {
+    if dir_has_files(fs, "server/routes") {
         features.push("server/routes/".into());
         is_static_compatible = false;
     }
 
     // Check for server/middleware/ directory
-    if dir_has_files(project_dir, "server/middleware") {
+    if dir_has_files(fs, "server/middleware") {
         features.push("server/middleware/".into());
         is_static_compatible = false;
     }
@@ -165,12 +162,12 @@ fn analyze_nuxt(project_dir: &Path) -> SsrAnalysis {
 
 // ── SvelteKit ──────────────────────────────────────────────────
 
-fn analyze_sveltekit(project_dir: &Path) -> SsrAnalysis {
+fn analyze_sveltekit(fs: &dyn Fs) -> SsrAnalysis {
     let mut features = Vec::new();
     // SvelteKit defaults to SSR — static only with adapter-static
     let mut is_static_compatible = false;
 
-    let config_content = read_config_file(project_dir, &["svelte.config.js"]);
+    let config_content = read_config_file(fs, &["svelte.config.js"]);
 
     if let Some(ref content) = config_content {
         let stripped = strip_block_comments(content);
@@ -190,32 +187,36 @@ fn analyze_sveltekit(project_dir: &Path) -> SsrAnalysis {
     }
 
     // Check for +server.{ts,js} files
-    if has_sveltekit_server_routes(project_dir) {
+    if has_sveltekit_server_routes(fs) {
         features.push("+server routes".into());
         is_static_compatible = false;
     }
 
     // Check for hooks.server.{ts,js}
-    if file_exists_any(project_dir, &["src/hooks.server.ts", "src/hooks.server.js"]) {
+    if file_exists_any(fs, &["src/hooks.server.ts", "src/hooks.server.js"]) {
         features.push("hooks.server".into());
         is_static_compatible = false;
     }
 
     // Check for +page.server.{ts,js} and +layout.server.{ts,js} (server load functions)
-    let routes_dir = project_dir.join("src/routes");
-    if routes_dir.is_dir() {
-        if walk_for_file(&routes_dir, &["+page.server.ts", "+page.server.js"]) {
+    if fs.is_dir("src/routes") {
+        if walk_for_file(fs, "src/routes", &["+page.server.ts", "+page.server.js"]) {
             features.push("+page.server (server load)".into());
             is_static_compatible = false;
         }
-        if walk_for_file(&routes_dir, &["+layout.server.ts", "+layout.server.js"]) {
+        if walk_for_file(
+            fs,
+            "src/routes",
+            &["+layout.server.ts", "+layout.server.js"],
+        ) {
             features.push("+layout.server (server load)".into());
             is_static_compatible = false;
         }
 
         // Check for form actions (export const actions)
         if walk_for_content_with_names(
-            &routes_dir,
+            fs,
+            "src/routes",
             "export const actions",
             &["+page.server.ts", "+page.server.js"],
         ) {
@@ -232,13 +233,13 @@ fn analyze_sveltekit(project_dir: &Path) -> SsrAnalysis {
 
 // ── Astro ──────────────────────────────────────────────────────
 
-fn analyze_astro(project_dir: &Path) -> SsrAnalysis {
+fn analyze_astro(fs: &dyn Fs) -> SsrAnalysis {
     let mut features = Vec::new();
     // Astro defaults to static — SSR only with output: 'server' or 'hybrid'
     let mut is_static_compatible = true;
 
     let config_content = read_config_file(
-        project_dir,
+        fs,
         &["astro.config.mjs", "astro.config.ts", "astro.config.js"],
     );
 
@@ -252,9 +253,6 @@ fn analyze_astro(project_dir: &Path) -> SsrAnalysis {
         }
 
         // output: 'hybrid' — hybrid rendering (some SSR, some static)
-        // Note: Astro 5 (Dec 2024) removed 'hybrid' in favor of per-page `export const prerender`.
-        // Kept for Astro 4 backward compatibility.
-        // See: https://docs.astro.build/en/guides/upgrade-to/v5/#removed-hybrid-rendering-mode
         if contains_value(&stripped, "output", "hybrid") {
             features.push("output: 'hybrid'".into());
             is_static_compatible = false;
@@ -279,16 +277,14 @@ fn analyze_astro(project_dir: &Path) -> SsrAnalysis {
 
 // ── React Router v7 ────────────────────────────────────────────
 
-fn analyze_react_router(project_dir: &Path) -> SsrAnalysis {
+fn analyze_react_router(fs: &dyn Fs) -> SsrAnalysis {
     let mut features = Vec::new();
     // React Router v7 defaults to SSR — static only with ssr: false in react-router.config
     let mut is_static_compatible = false;
 
     // Check react-router.config.ts/js for ssr: false
-    let config_content = read_config_file(
-        project_dir,
-        &["react-router.config.ts", "react-router.config.js"],
-    );
+    let config_content =
+        read_config_file(fs, &["react-router.config.ts", "react-router.config.js"]);
 
     if let Some(ref content) = config_content {
         let stripped = strip_block_comments(content);
@@ -300,11 +296,11 @@ fn analyze_react_router(project_dir: &Path) -> SsrAnalysis {
     }
 
     // Check for loader/action exports in routes (same structure as Remix)
-    analyze_route_exports(project_dir, &mut features, &mut is_static_compatible);
+    analyze_route_exports(fs, &mut features, &mut is_static_compatible);
 
     // Check for entry.server
     if file_exists_any(
-        project_dir,
+        fs,
         &[
             "app/entry.server.tsx",
             "app/entry.server.ts",
@@ -323,14 +319,14 @@ fn analyze_react_router(project_dir: &Path) -> SsrAnalysis {
 
 // ── Remix ──────────────────────────────────────────────────────
 
-fn analyze_remix(project_dir: &Path) -> SsrAnalysis {
+fn analyze_remix(fs: &dyn Fs) -> SsrAnalysis {
     let mut features = Vec::new();
     // Remix defaults to SSR — static only with explicit ssr: false in vite config
     let mut is_static_compatible = false;
 
     // Remix v2+ uses Vite — check vite.config for ssr: false
     let config_content = read_config_file(
-        project_dir,
+        fs,
         &[
             "vite.config.ts",
             "vite.config.mts",
@@ -350,13 +346,10 @@ fn analyze_remix(project_dir: &Path) -> SsrAnalysis {
     }
 
     // Check for loader/action exports in routes
-    analyze_route_exports(project_dir, &mut features, &mut is_static_compatible);
+    analyze_route_exports(fs, &mut features, &mut is_static_compatible);
 
     // Check for entry.server
-    if file_exists_any(
-        project_dir,
-        &["app/entry.server.tsx", "app/entry.server.ts"],
-    ) {
+    if file_exists_any(fs, &["app/entry.server.tsx", "app/entry.server.ts"]) {
         features.push("entry.server".into());
     }
 
@@ -368,21 +361,16 @@ fn analyze_remix(project_dir: &Path) -> SsrAnalysis {
 
 /// Shared route analysis for Remix and React Router v7.
 /// Both use app/routes/ with exported `loader` and `action` functions.
-fn analyze_route_exports(
-    project_dir: &Path,
-    features: &mut Vec<String>,
-    is_static_compatible: &mut bool,
-) {
-    let routes_dir = project_dir.join("app/routes");
-    if !routes_dir.is_dir() {
+fn analyze_route_exports(fs: &dyn Fs, features: &mut Vec<String>, is_static_compatible: &mut bool) {
+    if !fs.is_dir("app/routes") {
         return;
     }
 
-    if walk_for_exported_symbol(&routes_dir, "loader") {
+    if walk_for_exported_symbol(fs, "app/routes", "loader") {
         features.push("route loaders".into());
         *is_static_compatible = false;
     }
-    if walk_for_exported_symbol(&routes_dir, "action") {
+    if walk_for_exported_symbol(fs, "app/routes", "action") {
         features.push("route actions".into());
         *is_static_compatible = false;
     }
@@ -391,10 +379,9 @@ fn analyze_route_exports(
 // ── Helpers ────────────────────────────────────────────────────
 
 /// Read the first existing config file from a list.
-fn read_config_file(project_dir: &Path, candidates: &[&str]) -> Option<String> {
+fn read_config_file(fs: &dyn Fs, candidates: &[&str]) -> Option<String> {
     for name in candidates {
-        let path = project_dir.join(name);
-        if let Ok(content) = std::fs::read_to_string(&path) {
+        if let Some(content) = fs.read_file(name) {
             return Some(content);
         }
     }
@@ -403,8 +390,6 @@ fn read_config_file(project_dir: &Path, candidates: &[&str]) -> Option<String> {
 
 /// Strip block comments (`/* ... */`) from content, respecting string literals.
 /// Line comments (`//`) are handled separately in `contains_value`/`contains_any_pattern`.
-/// Note: template literal interpolation (`${...}`) is not fully handled —
-/// acceptable since config files rarely use complex template literals.
 fn strip_block_comments(content: &str) -> String {
     let mut result = String::with_capacity(content.len());
     let bytes = content.as_bytes();
@@ -448,26 +433,22 @@ fn strip_block_comments(content: &str) -> String {
 }
 
 /// Check if any file from the list exists.
-fn file_exists_any(project_dir: &Path, files: &[&str]) -> bool {
-    files.iter().any(|f| project_dir.join(f).exists())
+fn file_exists_any(fs: &dyn Fs, files: &[&str]) -> bool {
+    files.iter().any(|f| fs.exists(f))
 }
 
 /// Check if a directory has any files (non-recursive, just direct children).
-fn dir_has_files(project_dir: &Path, subdir: &str) -> bool {
-    let dir = project_dir.join(subdir);
-    match std::fs::read_dir(&dir) {
-        Ok(entries) => entries
-            .flatten()
-            .any(|e| e.file_type().is_ok_and(|ft| ft.is_file())),
-        Err(_) => false,
+fn dir_has_files(fs: &dyn Fs, subdir: &str) -> bool {
+    if !fs.is_dir(subdir) {
+        return false;
     }
+    fs.list_dir(subdir).iter().any(|entry| {
+        let path = format!("{subdir}/{entry}");
+        !fs.is_dir(&path)
+    })
 }
 
 /// Strip `//` inline comment from a line, respecting string literals.
-///
-/// Limitation: multi-line template literals (backticks spanning multiple lines)
-/// are not fully handled since this function operates on individual lines.
-/// Acceptable for framework config files which rarely use multi-line template literals.
 fn strip_inline_comment(line: &str) -> &str {
     let bytes = line.as_bytes();
     let mut i = 0;
@@ -550,30 +531,27 @@ fn contains_any_pattern(content: &str, patterns: &[&str]) -> bool {
 }
 
 /// Check for Next.js route handlers (app/**/route.{ts,js}).
-fn has_route_handlers(project_dir: &Path) -> bool {
-    let app_dir = project_dir.join("app");
-    if !app_dir.is_dir() {
+fn has_route_handlers(fs: &dyn Fs) -> bool {
+    if !fs.is_dir("app") {
         return false;
     }
-    walk_for_file(&app_dir, &["route.ts", "route.js"])
+    walk_for_file(fs, "app", &["route.ts", "route.js"])
 }
 
 /// Check for getServerSideProps in pages/ directory.
-fn has_gssp(project_dir: &Path) -> bool {
-    let pages_dir = project_dir.join("pages");
-    if !pages_dir.is_dir() {
+fn has_gssp(fs: &dyn Fs) -> bool {
+    if !fs.is_dir("pages") {
         return false;
     }
-    walk_for_content(&pages_dir, "getServerSideProps")
+    walk_for_content(fs, "pages", "getServerSideProps")
 }
 
 /// Check for SvelteKit +server.{ts,js} files in src/routes/.
-fn has_sveltekit_server_routes(project_dir: &Path) -> bool {
-    let routes_dir = project_dir.join("src/routes");
-    if !routes_dir.is_dir() {
+fn has_sveltekit_server_routes(fs: &dyn Fs) -> bool {
+    if !fs.is_dir("src/routes") {
         return false;
     }
-    walk_for_file(&routes_dir, &["+server.ts", "+server.js"])
+    walk_for_file(fs, "src/routes", &["+server.ts", "+server.js"])
 }
 
 /// Directories to skip during recursive walks.
@@ -587,31 +565,28 @@ const SKIP_DIRS: &[&str] = &[
     ".astro",
 ];
 
-fn should_skip_dir(entry: &std::fs::DirEntry) -> bool {
-    entry
-        .file_name()
-        .to_str()
-        .is_some_and(|name| SKIP_DIRS.contains(&name))
+fn should_skip_dir(name: &str) -> bool {
+    SKIP_DIRS.contains(&name)
+}
+
+/// Build a child path from a directory and entry name.
+fn child_path(dir: &str, entry: &str) -> String {
+    if dir.is_empty() {
+        entry.to_string()
+    } else {
+        format!("{dir}/{entry}")
+    }
 }
 
 /// Recursively walk a directory looking for files with specific names.
-fn walk_for_file(dir: &Path, names: &[&str]) -> bool {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return false,
-    };
-    for entry in entries.flatten() {
-        let ft = match entry.file_type() {
-            Ok(ft) => ft,
-            Err(_) => continue,
-        };
-        if ft.is_file() {
-            if let Some(name) = entry.file_name().to_str()
-                && names.contains(&name)
-            {
+fn walk_for_file(fs: &dyn Fs, dir: &str, names: &[&str]) -> bool {
+    for entry in fs.list_dir(dir) {
+        let path = child_path(dir, &entry);
+        if fs.is_dir(&path) {
+            if !should_skip_dir(&entry) && walk_for_file(fs, &path, names) {
                 return true;
             }
-        } else if ft.is_dir() && !should_skip_dir(&entry) && walk_for_file(&entry.path(), names) {
+        } else if names.contains(&entry.as_str()) {
             return true;
         }
     }
@@ -619,26 +594,17 @@ fn walk_for_file(dir: &Path, names: &[&str]) -> bool {
 }
 
 /// Recursively walk a directory looking for file content containing a string.
-fn walk_for_content(dir: &Path, needle: &str) -> bool {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return false,
-    };
-    for entry in entries.flatten() {
-        let ft = match entry.file_type() {
-            Ok(ft) => ft,
-            Err(_) => continue,
-        };
-        let path = entry.path();
-        if ft.is_file() {
-            if let Some(ext) = path.extension().and_then(|e| e.to_str())
-                && matches!(ext, "ts" | "tsx" | "js" | "jsx")
-                && let Ok(content) = std::fs::read_to_string(&path)
-                && content.contains(needle)
-            {
+fn walk_for_content(fs: &dyn Fs, dir: &str, needle: &str) -> bool {
+    for entry in fs.list_dir(dir) {
+        let path = child_path(dir, &entry);
+        if fs.is_dir(&path) {
+            if !should_skip_dir(&entry) && walk_for_content(fs, &path, needle) {
                 return true;
             }
-        } else if ft.is_dir() && !should_skip_dir(&entry) && walk_for_content(&path, needle) {
+        } else if is_code_file(&entry)
+            && let Some(content) = fs.read_file(&path)
+            && content.contains(needle)
+        {
             return true;
         }
     }
@@ -646,36 +612,16 @@ fn walk_for_content(dir: &Path, needle: &str) -> bool {
 }
 
 /// Recursively walk route files looking for exported symbols (e.g. `loader`, `action`).
-///
-/// Matches patterns like:
-/// - `export function loader`
-/// - `export async function loader`
-/// - `export const loader`
-/// - `export let loader`
-/// - `export { loader }`
-/// - `export { loader as default }`
-///
-/// Skips comment-only lines to reduce false positives.
-fn walk_for_exported_symbol(dir: &Path, symbol: &str) -> bool {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return false,
-    };
-    for entry in entries.flatten() {
-        let ft = match entry.file_type() {
-            Ok(ft) => ft,
-            Err(_) => continue,
-        };
-        let path = entry.path();
-        if ft.is_file() {
-            if let Some(ext) = path.extension().and_then(|e| e.to_str())
-                && matches!(ext, "ts" | "tsx" | "js" | "jsx")
-                && let Ok(content) = std::fs::read_to_string(&path)
-                && file_has_exported_symbol(&content, symbol)
-            {
+fn walk_for_exported_symbol(fs: &dyn Fs, dir: &str, symbol: &str) -> bool {
+    for entry in fs.list_dir(dir) {
+        let path = child_path(dir, &entry);
+        if fs.is_dir(&path) {
+            if !should_skip_dir(&entry) && walk_for_exported_symbol(fs, &path, symbol) {
                 return true;
             }
-        } else if ft.is_dir() && !should_skip_dir(&entry) && walk_for_exported_symbol(&path, symbol)
+        } else if is_code_file(&entry)
+            && let Some(content) = fs.read_file(&path)
+            && file_has_exported_symbol(&content, symbol)
         {
             return true;
         }
@@ -705,31 +651,25 @@ fn file_has_exported_symbol(content: &str, symbol: &str) -> bool {
 }
 
 /// Recursively walk looking for specific file names that contain a string.
-fn walk_for_content_with_names(dir: &Path, needle: &str, file_names: &[&str]) -> bool {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return false,
-    };
-    for entry in entries.flatten() {
-        let ft = match entry.file_type() {
-            Ok(ft) => ft,
-            Err(_) => continue,
-        };
-        let path = entry.path();
-        if ft.is_file() {
-            if let Some(name) = entry.file_name().to_str()
-                && file_names.contains(&name)
-                && let Ok(content) = std::fs::read_to_string(&path)
-                && content.contains(needle)
+fn walk_for_content_with_names(fs: &dyn Fs, dir: &str, needle: &str, file_names: &[&str]) -> bool {
+    for entry in fs.list_dir(dir) {
+        let path = child_path(dir, &entry);
+        if fs.is_dir(&path) {
+            if !should_skip_dir(&entry)
+                && walk_for_content_with_names(fs, &path, needle, file_names)
             {
                 return true;
             }
-        } else if ft.is_dir()
-            && !should_skip_dir(&entry)
-            && walk_for_content_with_names(&path, needle, file_names)
+        } else if file_names.contains(&entry.as_str())
+            && let Some(content) = fs.read_file(&path)
+            && content.contains(needle)
         {
             return true;
         }
     }
     false
+}
+
+fn is_code_file(name: &str) -> bool {
+    matches!(name.rsplit('.').next(), Some("ts" | "tsx" | "js" | "jsx"))
 }

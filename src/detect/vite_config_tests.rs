@@ -1,3 +1,4 @@
+use super::fs::LocalFs;
 use super::vite_config::*;
 
 #[test]
@@ -15,7 +16,7 @@ export default defineConfig({
     )
     .unwrap();
     assert_eq!(
-        parse_vite_out_dir(dir.path()),
+        parse_vite_out_dir(&LocalFs::new(dir.path())),
         Some("custom-dist".to_string())
     );
 }
@@ -28,7 +29,10 @@ fn parse_vite_out_dir_single_quotes() {
         "export default { build: {\n    outDir: 'build',\n  } }",
     )
     .unwrap();
-    assert_eq!(parse_vite_out_dir(dir.path()), Some("build".to_string()));
+    assert_eq!(
+        parse_vite_out_dir(&LocalFs::new(dir.path())),
+        Some("build".to_string())
+    );
 }
 
 #[test]
@@ -39,7 +43,10 @@ fn parse_vite_out_dir_mts_file() {
         "export default { build: { outDir: \"output\" } }",
     )
     .unwrap();
-    assert_eq!(parse_vite_out_dir(dir.path()), Some("output".to_string()));
+    assert_eq!(
+        parse_vite_out_dir(&LocalFs::new(dir.path())),
+        Some("output".to_string())
+    );
 }
 
 #[test]
@@ -50,13 +57,16 @@ fn parse_vite_out_dir_mjs_file() {
         "export default { build: { outDir: 'public' } }",
     )
     .unwrap();
-    assert_eq!(parse_vite_out_dir(dir.path()), Some("public".to_string()));
+    assert_eq!(
+        parse_vite_out_dir(&LocalFs::new(dir.path())),
+        Some("public".to_string())
+    );
 }
 
 #[test]
 fn no_vite_config_returns_none() {
     let dir = tempfile::tempdir().unwrap();
-    assert!(parse_vite_out_dir(dir.path()).is_none());
+    assert!(parse_vite_out_dir(&LocalFs::new(dir.path())).is_none());
 }
 
 #[test]
@@ -67,20 +77,20 @@ fn vite_config_without_out_dir() {
         "export default defineConfig({ plugins: [react()] })",
     )
     .unwrap();
-    assert!(parse_vite_out_dir(dir.path()).is_none());
+    assert!(parse_vite_out_dir(&LocalFs::new(dir.path())).is_none());
 }
 
 #[test]
 fn has_vite_config_true() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("vite.config.ts"), "").unwrap();
-    assert!(has_vite_config(dir.path()));
+    assert!(has_vite_config(&LocalFs::new(dir.path())));
 }
 
 #[test]
 fn has_vite_config_false() {
     let dir = tempfile::tempdir().unwrap();
-    assert!(!has_vite_config(dir.path()));
+    assert!(!has_vite_config(&LocalFs::new(dir.path())));
 }
 
 #[test]
@@ -91,7 +101,10 @@ fn parse_out_dir_with_spaces() {
         "export default { build: {\n    outDir :  \"my-dist\" ,\n} }",
     )
     .unwrap();
-    assert_eq!(parse_vite_out_dir(dir.path()), Some("my-dist".to_string()));
+    assert_eq!(
+        parse_vite_out_dir(&LocalFs::new(dir.path())),
+        Some("my-dist".to_string())
+    );
 }
 
 #[test]
@@ -107,5 +120,8 @@ fn ts_config_takes_priority_over_js() {
         "export default { build: { outDir: \"from-js\" } }",
     )
     .unwrap();
-    assert_eq!(parse_vite_out_dir(dir.path()), Some("from-ts".to_string()));
+    assert_eq!(
+        parse_vite_out_dir(&LocalFs::new(dir.path())),
+        Some("from-ts".to_string())
+    );
 }

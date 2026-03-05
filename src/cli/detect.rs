@@ -15,4 +15,12 @@ pub struct DetectArgs {
     /// Save detected framework to onreza.toml
     #[arg(long)]
     pub save: bool,
+
+    /// Read JSON manifest from stdin (remote detection)
+    #[arg(long)]
+    pub stdin: bool,
+
+    /// Output the list of files needed for remote detection
+    #[arg(long)]
+    pub needed_files: bool,
 }

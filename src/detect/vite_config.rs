@@ -1,7 +1,7 @@
 //! Parse vite.config.{ts,mts,js,mjs} for outDir.
 //! Uses string parsing — no regex dependency.
 
-use std::path::Path;
+use super::fs::Fs;
 
 const VITE_CONFIG_FILES: &[&str] = &[
     "vite.config.ts",
@@ -12,10 +12,9 @@ const VITE_CONFIG_FILES: &[&str] = &[
 
 /// Try to extract `outDir` from vite.config.* files.
 /// Returns the outDir value if found (without quotes).
-pub fn parse_vite_out_dir(project_dir: &Path) -> Option<String> {
+pub fn parse_vite_out_dir(fs: &dyn Fs) -> Option<String> {
     for file in VITE_CONFIG_FILES {
-        let path = project_dir.join(file);
-        if let Ok(content) = std::fs::read_to_string(&path)
+        if let Some(content) = fs.read_file(file)
             && let Some(out_dir) = extract_out_dir(&content)
         {
             return Some(out_dir);
@@ -26,10 +25,8 @@ pub fn parse_vite_out_dir(project_dir: &Path) -> Option<String> {
 
 /// Check if any vite config file exists.
 #[allow(dead_code)]
-pub fn has_vite_config(project_dir: &Path) -> bool {
-    VITE_CONFIG_FILES
-        .iter()
-        .any(|f| project_dir.join(f).exists())
+pub fn has_vite_config(fs: &dyn Fs) -> bool {
+    VITE_CONFIG_FILES.iter().any(|f| fs.exists(f))
 }
 
 /// Extract outDir value from config content.

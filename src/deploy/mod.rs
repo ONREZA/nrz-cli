@@ -1740,9 +1740,10 @@ fn run_install_step(
     } else if !project_dir.join("package.json").exists() {
         return Ok(());
     } else {
-        let pkg = crate::detect::package_json::PackageJson::load(project_dir);
+        let local_fs = crate::detect::fs::LocalFs::new(project_dir);
+        let pkg = crate::detect::package_json::PackageJson::load_from_fs(&local_fs);
         let pm_info =
-            crate::detect::package_manager::detect_package_manager(project_dir, pkg.as_ref());
+            crate::detect::package_manager::detect_package_manager(&local_fs, pkg.as_ref());
         match pm_info {
             Some(info) => crate::detect::package_manager::install_command(info.pm_type).to_string(),
             None => "npm install".to_string(),
