@@ -7,78 +7,22 @@
 
 ## Текущее состояние
 
-20 пресетов, 6 SSR-анализаторов, auto-manifest только для Next.js standalone + generic static/compute.
+27 пресетов, 6 SSR-анализаторов, auto-manifest для Next.js standalone + Nuxt + SvelteKit + Remix + React Router v7 + Astro SSR + generic static/compute.
 
 | Tier | Фреймворки | SSR-анализ | Auto-manifest |
 |------|-----------|------------|---------------|
-| 1 (core) | Next.js, Nuxt, SvelteKit, React Router v7, Remix, Gatsby | да (6 шт) | Next.js standalone only |
+| 1 (core) | Next.js, Nuxt, SvelteKit, React Router v7, Remix, Gatsby | да (6 шт) | **Next.js standalone, Nuxt, SvelteKit, Remix, RR v7, Astro SSR** |
 | 2 (CLI) | CRA, Vue CLI, Angular, Preact CLI | нет | static fallback |
-| 3a (SSG) | Astro, Docusaurus, VitePress, Eleventy, Hexo, Parcel, Stencil | Astro only | static fallback |
-| 3b (Server) | Hono, Elysia | нет (always PROCESS) | generic compute |
+| 3a (SSG) | Astro, Docusaurus, VitePress, Eleventy, Hexo, Parcel, Stencil | Astro only | static fallback / **Astro SSR** |
+| 3b (Server) | Hono, Elysia, Express, Fastify, NestJS, Koa, AdonisJS, H3, Nitro | нет (always PROCESS) | generic compute |
 | 4 (catch-all) | Vite, Other, Static HTML | нет | static/compute generic |
 
 ---
 
-## P0 — Серверные фреймворки: неправильная категоризация (критично)
+## P0 — Серверные фреймворки: неправильная категоризация ✅ DONE
 
-**Проблема:** `is_server_framework()` знает только Hono и Elysia. Express/Fastify/NestJS/Koa и другие серверные фреймворки попадают в `other` и получают `ComputeType::Static` (если нет явного `start` скрипта). Пользователь деплоит Express-app — получает STATIC. Это ломает деплой.
-
-### P0.1 — Добавить пресеты серверных фреймворков
-
-Новые пресеты в `presets.rs` (category: `Server`, priority: 30-39):
-
-| slug | name | dependencies | output_directory | runtime |
-|------|------|-------------|-----------------|---------|
-| `express` | Express | `express` | `.` | Node |
-| `fastify` | Fastify | `fastify` | `.` | Node |
-| `nestjs` | NestJS | `@nestjs/core` | `dist` | Node |
-| `koa` | Koa | `koa` | `.` | Node |
-| `adonis` | AdonisJS | `@adonisjs/core` | `build` | Node |
-| `h3` | H3 | `h3` | `.` | Node |
-| `nitro` | Nitro (standalone) | `nitropack` | `.output` | Node |
-
-**Важно:** `express` имеет priority ниже чем SSR-фреймворки (Next.js, Nuxt и т.д.), которые тоже зависят от express/connect. SSR-фреймворки ловятся раньше по priority.
-
-### P0.2 — Расширить `is_server_framework()`
-
-Добавить все новые серверные slug в `is_server_framework()` — это гарантирует `ComputeType::Process` без SSR-анализа.
-
-### P0.3 — Entry points для серверных фреймворков
-
-Обновить `framework_entry_point()`:
-
-| slug | entry |
-|------|-------|
-| `nestjs` | `main.js` |
-| `adonis` | `server.js` |
-| `nitro` | `server/index.mjs` |
-
-Express/Fastify/Koa/H3 — entry определяется через `main`/`module`/scripts (эвристика уже работает).
-
-### P0.4 — Config files и DETECTION_CONTENT_FILES
-
-Ничего не нужно добавлять — серверные фреймворки не имеют специфичных config-файлов для анализа.
-
-### P0.5 — `framework_output_dirs()`
-
-Добавить маппинги для новых фреймворков:
-
-| slug | dirs |
-|------|------|
-| `express` | `.` |
-| `fastify` | `.`, `dist` |
-| `nestjs` | `dist` |
-| `koa` | `.` |
-| `adonis` | `build` |
-| `h3` | `.`, `dist` |
-| `nitro` | `.output` |
-
-### P0.6 — Тесты
-
-- Юнит-тесты в `presets_tests.rs`: каждый новый пресет правильно матчится
-- Тесты в `mod_tests.rs`: серверный фреймворк → `ComputeType::Process`
-- Тесты на priority: Express не перебивает Next.js/Nuxt
-- Тест: Express без `start` скрипта → всё равно PROCESS (а не STATIC)
+> Реализовано в `29809e7` — Express, Fastify, NestJS, Koa, AdonisJS, H3, Nitro.
+> Пресеты, `is_server_framework()`, entry points, output dirs, тесты.
 
 ---
 
@@ -104,44 +48,15 @@ Express/Fastify/Koa/H3 — entry определяется через `main`/`mod
 
 ---
 
-## P2 — Auto-manifest для SSR-фреймворков
+## P2 — Auto-manifest для SSR-фреймворков ✅ DONE
 
-**Проблема:** все PROCESS-фреймворки кроме Next.js standalone требуют ручного `.onreza/manifest.json` или полагаются на эвристику entry point. Это ломает zero-config цель.
-
-### P2.1 — `generate_nuxt_manifest()`
-
-Nuxt `.output/` структура:
-- STATIC layer: `.output/public/` (static assets, `_nuxt/`)
-- COMPUTE layer: `.output/server/` (entry: `index.mjs`)
-- Routes: `^/_nuxt/.*$` → static (priority 100), `^/.*$` → server (priority 0)
-
-### P2.2 — `generate_sveltekit_manifest()`
-
-SvelteKit с adapter-node:
-- STATIC layer: `build/client/` (immutable assets)
-- COMPUTE layer: `build/` (entry: `index.js`)
-- Routes: `^/_app/.*$` → static (priority 100), `^/.*$` → server (priority 0)
-
-### P2.3 — `generate_remix_manifest()` / `generate_react_router_manifest()`
-
-Remix/React Router v7:
-- STATIC layer: `build/client/` (assets)
-- COMPUTE layer: `build/server/` (entry: `index.js`)
-- Routes: `^/assets/.*$` → static (priority 100), `^/.*$` → server (priority 0)
-
-### P2.4 — `generate_astro_ssr_manifest()`
-
-Astro SSR (output: 'server' / 'hybrid'):
-- STATIC layer: `dist/client/` (static assets)
-- COMPUTE layer: `dist/server/` (entry: `entry.mjs`)
-
-### P2.5 — Интеграция в `build/mod.rs`
-
-Добавить ветки в `run_with_hint()` после Next.js standalone:
-- Nuxt: `.output/server/index.mjs` exists → auto-manifest
-- SvelteKit: `build/index.js` exists + adapter-node → auto-manifest
-- Remix/RR: `build/server/index.js` exists → auto-manifest
-- Astro SSR: `dist/server/entry.mjs` exists → auto-manifest
+> Реализовано в `9b8a034`.
+>
+> Генераторы: `generate_nuxt_manifest`, `generate_sveltekit_manifest`, `generate_remix_manifest`, `generate_astro_ssr_manifest`.
+> Общая логика вынесена в `SsrManifestConfig` + `generate_ssr_manifest()`.
+> Интеграция через `try_generate_ssr_manifest()` в `run_with_hint()`.
+> Также: `compute_aware_output_dirs` для Nuxt static (.output/public) и Remix/RR SSR (build root).
+> Tracing при missing entry point. 8 validate-тестов + 17 integration-тестов.
 
 ---
 
