@@ -94,14 +94,6 @@ impl SsrAnalysis {
     }
 }
 
-/// Information about a detected @onreza/* adapter.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AdapterInfo {
-    pub adapter_package: String,
-    pub adapter_version: Option<String>,
-}
-
 /// Detected package manager info.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -166,9 +158,6 @@ pub struct DetectionMetadata {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssr_analysis: Option<SsrAnalysis>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ssr_adapter: Option<AdapterInfo>,
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub structure: Vec<String>,

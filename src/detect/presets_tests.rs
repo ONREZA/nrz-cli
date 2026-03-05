@@ -53,6 +53,7 @@ fn ssr_frameworks_recognized() {
     assert!(is_ssr_framework("nuxt"));
     assert!(is_ssr_framework("sveltekit"));
     assert!(is_ssr_framework("astro"));
+    assert!(is_ssr_framework("remix"));
     assert!(!is_ssr_framework("vite"));
 }
 
@@ -69,8 +70,8 @@ fn detection_presets_have_dependencies() {
 
 #[test]
 fn total_preset_count() {
-    // 17 detection presets (static-html is a separate const, not in PRESETS)
-    assert_eq!(PRESETS.len(), 17);
+    // 18 detection presets (static-html is a separate const, not in PRESETS)
+    assert_eq!(PRESETS.len(), 18);
 }
 
 #[test]
@@ -86,6 +87,10 @@ fn tier1_presets_correct() {
 
     let sveltekit = get_preset_by_slug("sveltekit").unwrap();
     assert_eq!(sveltekit.dependencies, &["@sveltejs/kit"]);
+
+    let remix = get_preset_by_slug("remix").unwrap();
+    assert_eq!(remix.dependencies, &["@remix-run/react", "@remix-run/dev"]);
+    assert_eq!(remix.output_directory, "build");
 
     let gatsby = get_preset_by_slug("gatsby").unwrap();
     assert_eq!(gatsby.dependencies, &["gatsby"]);
@@ -109,6 +114,14 @@ fn framework_output_dirs_nextjs_standalone_before_dot_next() {
         standalone_pos < dot_next_pos,
         ".next/standalone should come before .next (standalone_pos={standalone_pos}, dot_next_pos={dot_next_pos})"
     );
+}
+
+#[test]
+fn framework_output_dirs_remix() {
+    let dirs = framework_output_dirs("remix");
+    assert!(dirs.contains(&"build"));
+    assert!(dirs.contains(&"build/client"));
+    assert!(dirs.contains(&"build/server"));
 }
 
 #[test]

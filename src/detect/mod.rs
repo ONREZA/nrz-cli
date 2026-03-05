@@ -1,7 +1,6 @@
 //! Framework detection module — the source of truth for detecting
 //! frameworks, package managers, SSR features, and adapters.
 
-pub mod adapter;
 pub mod package_json;
 pub mod package_manager;
 pub mod presets;
@@ -10,8 +9,6 @@ pub mod static_html;
 pub mod types;
 pub mod vite_config;
 
-#[cfg(test)]
-mod adapter_tests;
 #[cfg(test)]
 mod mod_tests;
 #[cfg(test)]
@@ -74,7 +71,6 @@ pub fn detect(project_dir: &Path) -> DetectionResult {
                 }),
                 monorepo: None,
                 ssr_analysis: None,
-                ssr_adapter: None,
                 structure: html_files,
             },
             reason: "Static HTML site detected (index.html found, no package.json)".into(),
@@ -107,7 +103,6 @@ pub fn detect(project_dir: &Path) -> DetectionResult {
             build_info: None,
             monorepo: detect_monorepo(pkg.as_ref()),
             ssr_analysis: None,
-            ssr_adapter: None,
             structure: detect_structure(project_dir),
         },
         reason,
@@ -146,19 +141,12 @@ fn detect_from_package_json(
             let output_dir =
                 resolve_framework_output_dir(preset, ssr_analysis.as_ref(), project_dir);
 
-            // Adapter detection
-            let ssr_adapter = adapter::detect_adapter(pkg);
-
             // Config files
             let config_files = detect_config_files(project_dir, preset.slug);
 
             // Infer compute type
-            let suggested_compute = infer_compute_type(
-                preset.runtime,
-                preset.slug,
-                ssr_analysis.as_ref(),
-                ssr_adapter.as_ref(),
-            );
+            let suggested_compute =
+                infer_compute_type(preset.runtime, preset.slug, ssr_analysis.as_ref());
 
             let entry_point = framework_entry_point(preset.slug);
 
@@ -185,7 +173,6 @@ fn detect_from_package_json(
                     }),
                     monorepo: detect_monorepo(Some(pkg)),
                     ssr_analysis,
-                    ssr_adapter,
                     structure: detect_structure(project_dir),
                 },
                 reason: format!(
@@ -232,6 +219,12 @@ fn detect_config_files(project_dir: &Path, framework: &str) -> Vec<String> {
         ],
         "nuxt" => &["nuxt.config.ts", "nuxt.config.js"],
         "sveltekit" => &["svelte.config.js"],
+        "remix" => &[
+            "vite.config.ts",
+            "vite.config.mts",
+            "vite.config.js",
+            "vite.config.mjs",
+        ],
         "astro" => &["astro.config.mjs", "astro.config.ts", "astro.config.js"],
         "vite" => &[
             "vite.config.ts",
@@ -302,6 +295,14 @@ fn resolve_framework_output_dir(
             }
             ".output".to_string()
         }
+        "remix" => {
+            if let Some(ssr) = ssr
+                && ssr.is_static_compatible
+            {
+                return "build/client".to_string();
+            }
+            "build".to_string()
+        }
         _ => {
             // For non-SSR frameworks with a vite config, check outDir override
             if !presets::is_ssr_framework(preset.slug)
@@ -336,26 +337,19 @@ fn infer_runtime(preset_runtime: RuntimeType, pm_info: &Option<PackageManagerInf
 /// Rules (in priority order):
 /// - STATIC: static runtime, non-SSR framework (CRA, Vite, Gatsby, etc.),
 ///   or SSR framework with `is_static_compatible = true`
-/// - ISOLATE: @onreza adapter installed (any framework, takes priority)
 /// - PROCESS: SSR framework with `is_static_compatible = false` or no SSR analysis
 ///
 /// Each framework analyzer sets `is_static_compatible` based on its own defaults:
-/// - Next.js/Nuxt/SvelteKit default to `false` (SSR by default, needs explicit static config)
+/// - Next.js/Nuxt/SvelteKit/Remix default to `false` (SSR by default, needs explicit static config)
 /// - Astro defaults to `true` (static by default, needs explicit SSR config)
 fn infer_compute_type(
     runtime: RuntimeType,
     framework: &str,
     ssr: Option<&SsrAnalysis>,
-    adapter: Option<&AdapterInfo>,
 ) -> ComputeType {
     // Static runtime → always STATIC
     if runtime == RuntimeType::Static {
         return ComputeType::Static;
-    }
-
-    // Adapter installed → ISOLATE regardless of framework category
-    if adapter.is_some() {
-        return ComputeType::Isolate;
     }
 
     // Non-SSR frameworks (CRA, Vite, Gatsby, etc.) → STATIC
@@ -428,6 +422,7 @@ fn framework_entry_point(slug: &str) -> Option<String> {
         "nextjs" => Some("server.js".into()),
         "nuxt" => Some("server/index.mjs".into()),
         "sveltekit" => Some("index.js".into()),
+        "remix" => Some("server/index.js".into()),
         _ => None,
     }
 }

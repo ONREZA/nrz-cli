@@ -525,11 +525,11 @@ fn detect_suggested_compute_process_for_nextjs() {
 }
 
 #[test]
-fn detect_suggested_compute_isolate_with_adapter() {
+fn detect_suggested_compute_process_for_remix() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(
         temp.path().join("package.json"),
-        r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0", "@onreza/adapter-nextjs": "1.0.0"}}"#,
+        r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
     )
     .unwrap();
 
@@ -537,7 +537,31 @@ fn detect_suggested_compute_isolate_with_adapter() {
     cmd.current_dir(&temp).args(["detect", "--json"]);
     cmd.assert()
         .success()
-        .stdout(contains("\"suggestedCompute\":\"ISOLATE\""));
+        .stdout(contains("\"framework\":\"remix\""))
+        .stdout(contains("\"suggestedCompute\":\"PROCESS\""));
+}
+
+#[test]
+fn detect_remix_spa_mode_is_static() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("vite.config.ts"),
+        r#"import { vitePlugin as remix } from "@remix-run/dev";
+export default defineConfig({ plugins: [remix({ ssr: false })] })"#,
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["detect", "--json"]);
+    cmd.assert()
+        .success()
+        .stdout(contains("\"framework\":\"remix\""))
+        .stdout(contains("\"suggestedCompute\":\"STATIC\""));
 }
 
 #[test]

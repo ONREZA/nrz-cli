@@ -12,6 +12,7 @@ pub fn analyze_ssr(project_dir: &Path, framework: &str) -> Option<SsrAnalysis> {
         "nuxt" => Some(analyze_nuxt(project_dir)),
         "sveltekit" => Some(analyze_sveltekit(project_dir)),
         "astro" => Some(analyze_astro(project_dir)),
+        "remix" => Some(analyze_remix(project_dir)),
         _ => None,
     }
 }
@@ -266,6 +267,66 @@ fn analyze_astro(project_dir: &Path) -> SsrAnalysis {
         {
             features.push("SSR adapter integration".into());
             is_static_compatible = false;
+        }
+    }
+
+    SsrAnalysis {
+        is_static_compatible,
+        ssr_features: features,
+    }
+}
+
+// ── Remix ──────────────────────────────────────────────────────
+
+fn analyze_remix(project_dir: &Path) -> SsrAnalysis {
+    let mut features = Vec::new();
+    // Remix defaults to SSR — static only with explicit ssr: false in vite config
+    let mut is_static_compatible = false;
+
+    // Remix v2+ uses Vite — check vite.config for ssr: false
+    let config_content = read_config_file(
+        project_dir,
+        &[
+            "vite.config.ts",
+            "vite.config.mts",
+            "vite.config.js",
+            "vite.config.mjs",
+        ],
+    );
+
+    if let Some(ref content) = config_content {
+        let stripped = strip_block_comments(content);
+
+        // ssr: false disables server rendering
+        if contains_value(&stripped, "ssr", "false") {
+            features.push("ssr: false (SPA mode)".into());
+            is_static_compatible = true;
+        }
+    }
+
+    // Check for loader/action exports in routes (server-side data loading)
+    let routes_dir = project_dir.join("app/routes");
+    if routes_dir.is_dir() {
+        if walk_for_content(&routes_dir, "export") && walk_for_content(&routes_dir, "loader") {
+            features.push("route loaders".into());
+            is_static_compatible = false;
+        }
+        if walk_for_content(&routes_dir, "export") && walk_for_content(&routes_dir, "action") {
+            features.push("route actions".into());
+            is_static_compatible = false;
+        }
+    }
+
+    // Check for resource routes (files without default export that export loader/action)
+    // These are API-like endpoints
+    let app_dir = project_dir.join("app");
+    if app_dir.is_dir() {
+        // Check for server-only utilities
+        if file_exists_any(
+            project_dir,
+            &["app/entry.server.tsx", "app/entry.server.ts"],
+        ) {
+            features.push("entry.server".into());
         }
     }
 

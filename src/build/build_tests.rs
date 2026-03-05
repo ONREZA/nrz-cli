@@ -138,7 +138,7 @@ fn make_detection(
             build_info: None,
             monorepo: None,
             ssr_analysis: ssr,
-            ssr_adapter: None,
+
             structure: vec![],
         },
     }
@@ -220,7 +220,7 @@ fn make_static_detection(framework: &str) -> crate::detect::types::DetectionResu
             build_info: None,
             monorepo: None,
             ssr_analysis: None,
-            ssr_adapter: None,
+
             structure: vec![],
         },
     }

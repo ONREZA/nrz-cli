@@ -643,7 +643,7 @@ fn make_detection(
             build_info: None,
             monorepo: None,
             ssr_analysis: ssr,
-            ssr_adapter: None,
+
             structure: vec![],
         },
     }

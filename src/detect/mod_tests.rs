@@ -1,12 +1,11 @@
 use super::*;
-use types::*;
 
 // ── infer_compute_type ──────────────────────────────────────
 
 #[test]
 fn static_runtime_always_static() {
     assert_eq!(
-        infer_compute_type(RuntimeType::Static, "static-html", None, None),
+        infer_compute_type(RuntimeType::Static, "static-html", None),
         ComputeType::Static
     );
 }
@@ -15,135 +14,98 @@ fn static_runtime_always_static() {
 fn non_ssr_framework_always_static() {
     // Vite, CRA, Gatsby, etc. are not SSR frameworks → STATIC
     assert_eq!(
-        infer_compute_type(RuntimeType::Node, "vite", None, None),
+        infer_compute_type(RuntimeType::Node, "vite", None),
         ComputeType::Static
     );
     assert_eq!(
-        infer_compute_type(RuntimeType::Node, "cra", None, None),
+        infer_compute_type(RuntimeType::Node, "cra", None),
         ComputeType::Static
     );
     assert_eq!(
-        infer_compute_type(RuntimeType::Node, "gatsby", None, None),
+        infer_compute_type(RuntimeType::Node, "gatsby", None),
         ComputeType::Static
     );
 }
 
 #[test]
-fn ssr_framework_explicit_static_export_no_adapter_is_static() {
-    // Explicitly configured: output: 'export' → has_ssr_features: true, is_static_compatible: true
+fn ssr_framework_explicit_static_export_is_static() {
     let ssr = SsrAnalysis {
         is_static_compatible: true,
         ssr_features: vec!["output: export".into()],
     };
     assert_eq!(
-        infer_compute_type(RuntimeType::Node, "nextjs", Some(&ssr), None),
+        infer_compute_type(RuntimeType::Node, "nextjs", Some(&ssr)),
         ComputeType::Static
     );
 }
 
 #[test]
 fn ssr_framework_clean_project_is_process() {
-    // Next.js/Nuxt/SvelteKit analyzers set is_static_compatible = false by default
+    // Next.js/Nuxt/SvelteKit/Remix analyzers set is_static_compatible = false by default
     let ssr = SsrAnalysis {
         is_static_compatible: false,
         ssr_features: vec![],
     };
     assert_eq!(
-        infer_compute_type(RuntimeType::Node, "nextjs", Some(&ssr), None),
+        infer_compute_type(RuntimeType::Node, "nextjs", Some(&ssr)),
         ComputeType::Process
     );
 }
 
 #[test]
-fn ssr_framework_with_adapter_is_isolate() {
-    let ssr = SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["middleware".into()],
-    };
-    let adapter = AdapterInfo {
-        adapter_package: "@onreza/adapter-nextjs".into(),
-        adapter_version: Some("1.0.0".into()),
-    };
-    assert_eq!(
-        infer_compute_type(RuntimeType::Node, "nextjs", Some(&ssr), Some(&adapter)),
-        ComputeType::Isolate
-    );
-}
-
-#[test]
-fn ssr_framework_static_export_with_adapter_is_isolate() {
-    let ssr = SsrAnalysis {
-        is_static_compatible: true,
-        ssr_features: vec![],
-    };
-    let adapter = AdapterInfo {
-        adapter_package: "@onreza/adapter-nextjs".into(),
-        adapter_version: None,
-    };
-    assert_eq!(
-        infer_compute_type(RuntimeType::Node, "nextjs", Some(&ssr), Some(&adapter)),
-        ComputeType::Isolate
-    );
-}
-
-#[test]
-fn ssr_framework_no_adapter_is_process() {
+fn ssr_framework_with_features_is_process() {
     let ssr = SsrAnalysis {
         is_static_compatible: false,
         ssr_features: vec!["standalone".into()],
     };
     assert_eq!(
-        infer_compute_type(RuntimeType::Node, "nextjs", Some(&ssr), None),
+        infer_compute_type(RuntimeType::Node, "nextjs", Some(&ssr)),
         ComputeType::Process
     );
 }
 
 #[test]
-fn ssr_framework_no_analysis_no_adapter_is_process() {
+fn ssr_framework_no_analysis_is_process() {
     // No SSR analysis available, SSR framework → PROCESS
     assert_eq!(
-        infer_compute_type(RuntimeType::Node, "nextjs", None, None),
+        infer_compute_type(RuntimeType::Node, "nextjs", None),
         ComputeType::Process
     );
 }
 
 #[test]
-fn ssr_framework_no_analysis_with_adapter_is_isolate() {
-    let adapter = AdapterInfo {
-        adapter_package: "@onreza/adapter-nuxt".into(),
-        adapter_version: None,
-    };
-    assert_eq!(
-        infer_compute_type(RuntimeType::Node, "nuxt", None, Some(&adapter)),
-        ComputeType::Isolate
-    );
-}
-
-#[test]
-fn nuxt_without_adapter_is_process() {
+fn nuxt_with_server_features_is_process() {
     let ssr = SsrAnalysis {
         is_static_compatible: false,
         ssr_features: vec!["server/api".into()],
     };
     assert_eq!(
-        infer_compute_type(RuntimeType::Node, "nuxt", Some(&ssr), None),
+        infer_compute_type(RuntimeType::Node, "nuxt", Some(&ssr)),
         ComputeType::Process
     );
 }
 
 #[test]
-fn sveltekit_with_adapter_is_isolate() {
+fn remix_is_process_by_default() {
     let ssr = SsrAnalysis {
         is_static_compatible: false,
-        ssr_features: vec!["+server routes".into()],
-    };
-    let adapter = AdapterInfo {
-        adapter_package: "@onreza/adapter-sveltekit".into(),
-        adapter_version: Some("0.1.0".into()),
+        ssr_features: vec![],
     };
     assert_eq!(
-        infer_compute_type(RuntimeType::Node, "sveltekit", Some(&ssr), Some(&adapter)),
-        ComputeType::Isolate
+        infer_compute_type(RuntimeType::Node, "remix", Some(&ssr)),
+        ComputeType::Process
+    );
+}
+
+#[test]
+fn remix_spa_mode_is_static() {
+    let ssr = SsrAnalysis {
+        is_static_compatible: true,
+        ssr_features: vec!["ssr: false (SPA mode)".into()],
+    };
+    assert_eq!(
+        infer_compute_type(RuntimeType::Node, "remix", Some(&ssr)),
+        ComputeType::Static
     );
 }
 
@@ -181,20 +143,6 @@ fn detect_nextjs_static_export_is_static() {
     let result = detect(dir.path());
     assert_eq!(result.framework, "nextjs");
     assert_eq!(result.suggested_compute, ComputeType::Static);
-}
-
-#[test]
-fn detect_nextjs_with_adapter_is_isolate() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0", "@onreza/adapter-nextjs": "1.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "nextjs");
-    assert_eq!(result.suggested_compute, ComputeType::Isolate);
 }
 
 #[test]
@@ -336,50 +284,163 @@ fn detect_nuxt_with_server_api_is_process() {
     assert_eq!(result.suggested_compute, ComputeType::Process);
 }
 
+// ── Remix integration tests ──────────────────────────────────
+
 #[test]
-fn detect_nuxt_with_adapter_is_isolate() {
+fn detect_remix_returns_process_by_default() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("package.json"),
-        r#"{"dependencies": {"nuxt": "3.0.0", "@onreza/adapter-nuxt": "0.1.0"}}"#,
+        r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
     )
     .unwrap();
 
     let result = detect(dir.path());
-    assert_eq!(result.framework, "nuxt");
-    assert_eq!(result.suggested_compute, ComputeType::Isolate);
-}
-
-// ── Fix 1: non-SSR framework with adapter → ISOLATE ──────────
-
-#[test]
-fn non_ssr_framework_with_adapter_is_isolate() {
-    // Astro + @onreza/adapter-astro → ISOLATE, not STATIC
-    let adapter = AdapterInfo {
-        adapter_package: "@onreza/adapter-astro".into(),
-        adapter_version: Some("1.0.0".into()),
-    };
-    assert_eq!(
-        infer_compute_type(RuntimeType::Node, "astro", None, Some(&adapter)),
-        ComputeType::Isolate
-    );
+    assert_eq!(result.framework, "remix");
+    assert_eq!(result.name, "Remix");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
 }
 
 #[test]
-fn detect_astro_with_adapter_is_isolate() {
+fn detect_remix_spa_mode_is_static() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("package.json"),
-        r#"{"dependencies": {"astro": "4.0.0", "@onreza/adapter-astro": "1.0.0"}}"#,
+        r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"import { vitePlugin as remix } from "@remix-run/dev";
+export default defineConfig({
+  plugins: [remix({ ssr: false })],
+})"#,
     )
     .unwrap();
 
     let result = detect(dir.path());
-    assert_eq!(result.framework, "astro");
-    assert_eq!(result.suggested_compute, ComputeType::Isolate);
+    assert_eq!(result.framework, "remix");
+    assert_eq!(result.suggested_compute, ComputeType::Static);
 }
 
-// ── Fix 12: multiple frameworks — highest priority wins ──────
+#[test]
+fn detect_remix_with_loaders_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/_index.tsx"),
+        r#"export async function loader() { return json({ data: [] }); }
+export default function Index() { return <div/>; }"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "remix");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_remix_with_actions_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/login.tsx"),
+        r#"export async function action({ request }) { }
+export default function Login() { return <form/>; }"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "remix");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn detect_remix_output_dir_default_is_build() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some("build"));
+}
+
+#[test]
+fn detect_remix_spa_output_dir_is_build_client() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"import { vitePlugin as remix } from "@remix-run/dev";
+export default defineConfig({
+  plugins: [remix({ ssr: false })],
+})"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    let output_dir = result
+        .metadata
+        .build_info
+        .as_ref()
+        .unwrap()
+        .output_dir
+        .as_deref();
+    assert_eq!(output_dir, Some("build/client"));
+}
+
+#[test]
+fn detect_remix_via_dev_dependency() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"react": "18.0.0"}, "devDependencies": {"@remix-run/dev": "2.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "remix");
+}
+
+#[test]
+fn remix_wins_over_vite() {
+    let dir = tempfile::tempdir().unwrap();
+    // Remix (priority 4) + Vite (priority 100) → Remix wins
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@remix-run/react": "2.0.0", "vite": "5.0.0", "react": "18.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "remix");
+}
+
+// ── Multiple frameworks — highest priority wins ──────────────
 
 #[test]
 fn multiple_frameworks_highest_priority_wins() {
@@ -427,6 +488,14 @@ fn framework_entry_point_nuxt() {
 #[test]
 fn framework_entry_point_sveltekit() {
     assert_eq!(framework_entry_point("sveltekit"), Some("index.js".into()));
+}
+
+#[test]
+fn framework_entry_point_remix() {
+    assert_eq!(
+        framework_entry_point("remix"),
+        Some("server/index.js".into())
+    );
 }
 
 #[test]

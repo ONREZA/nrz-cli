@@ -138,20 +138,6 @@ fn print_human(result: &detect::types::DetectionResult) {
         }
     }
 
-    if let Some(ref adapter) = result.metadata.ssr_adapter {
-        let ver = adapter
-            .adapter_version
-            .as_deref()
-            .map(|v| format!(" ({v})"))
-            .unwrap_or_default();
-        eprintln!(
-            "  {} {}{}",
-            console::style("ONREZA adapter:").bold(),
-            adapter.adapter_package,
-            ver,
-        );
-    }
-
     if !result.metadata.structure.is_empty() {
         eprintln!(
             "  {} {}",

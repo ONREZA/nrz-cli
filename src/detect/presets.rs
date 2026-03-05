@@ -36,13 +36,23 @@ pub static PRESETS: &[FrameworkPreset] = &[
         runtime: RuntimeType::Node,
     },
     FrameworkPreset {
+        slug: "remix",
+        name: "Remix",
+        dependencies: &["@remix-run/react", "@remix-run/dev"],
+        output_directory: "build",
+        build_script: Some("build"),
+        category: PresetCategory::React,
+        priority: 4,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
         slug: "gatsby",
         name: "Gatsby",
         dependencies: &["gatsby"],
         output_directory: "public",
         build_script: Some("build"),
         category: PresetCategory::React,
-        priority: 4,
+        priority: 5,
         runtime: RuntimeType::Node,
     },
     // Tier 2: CLI-based frameworks (priority 10-13)
@@ -219,6 +229,7 @@ pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
         "nextjs" => &[".next/standalone", ".next", "out"],
         "nuxt" => &[".output"],
         "sveltekit" => &["build"],
+        "remix" => &["build/client", "build/server", "build"],
         "gatsby" => &["public"],
         "cra" => &["build"],
         "astro" => &["dist"],
@@ -240,7 +251,7 @@ pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
 /// Check if a framework slug is an SSR-capable framework.
 #[allow(dead_code)]
 pub fn is_ssr_framework(slug: &str) -> bool {
-    matches!(slug, "nextjs" | "nuxt" | "sveltekit" | "astro")
+    matches!(slug, "nextjs" | "nuxt" | "sveltekit" | "astro" | "remix")
 }
 
 /// Get presets that have dependencies (used for detection), sorted by priority.

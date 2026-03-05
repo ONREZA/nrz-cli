@@ -614,6 +614,125 @@ export default defineConfig({ output: 'server', adapter: node({ mode: 'standalon
     );
 }
 
+// ── Remix ──────────────────────────────────────────────────────
+
+#[test]
+fn remix_default_is_ssr() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    // Remix defaults to SSR → not static compatible
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
+fn remix_spa_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"import { vitePlugin as remix } from "@remix-run/dev";
+export default defineConfig({
+  plugins: [remix({ ssr: false })],
+})"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    assert!(result.is_static_compatible);
+    assert!(result.ssr_features.iter().any(|f| f.contains("SPA mode")));
+}
+
+#[test]
+fn remix_route_loaders() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/_index.tsx"),
+        r#"export async function loader() { return json({}); }"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("route loaders"))
+    );
+}
+
+#[test]
+fn remix_route_actions() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/login.tsx"),
+        r#"export async function action({ request }) { }"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("route actions"))
+    );
+}
+
+#[test]
+fn remix_entry_server() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("app")).unwrap();
+    std::fs::write(
+        dir.path().join("app/entry.server.tsx"),
+        "export default function handleRequest() {}",
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("entry.server"))
+    );
+}
+
+#[test]
+fn remix_spa_mode_with_loaders_is_not_static() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"import { vitePlugin as remix } from "@remix-run/dev";
+export default defineConfig({
+  plugins: [remix({ ssr: false })],
+})"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("app/routes/_index.tsx"),
+        r#"export async function loader() { return json({}); }"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    // loaders override ssr: false → not static compatible
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
+fn remix_block_comment_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("vite.config.ts"),
+        r#"export default defineConfig({
+  plugins: [remix({ /* ssr: false */ })],
+})"#,
+    )
+    .unwrap();
+    let result = analyze_ssr(dir.path(), "remix").unwrap();
+    // Block comment should be stripped — ssr: false not detected
+    assert!(!result.is_static_compatible);
+}
+
 // ── strip_inline_comment edge cases (tested via analyze_ssr) ──
 
 #[test]
