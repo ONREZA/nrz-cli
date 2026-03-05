@@ -177,7 +177,7 @@ pub async fn run_with_hint(
         output::status(
             json,
             "~",
-            "Auto-generated STATIC manifest (no adapter found)",
+            "Auto-generated STATIC manifest",
             output::Phase::Build,
         );
         emit_build_output(json, &auto, &output_dir, Some(detection));
@@ -187,7 +187,7 @@ pub async fn run_with_hint(
             output::status(
                 false,
                 "~",
-                "No .onreza/manifest.json found (no adapter)",
+                "No .onreza/manifest.json found",
                 output::Phase::Build,
             );
         }
@@ -309,7 +309,7 @@ fn detect_output_dir(
         .filter(|d| seen.insert(*d))
         .collect();
 
-    // Phase 1: prefer dir with .onreza/ (adapter-generated manifest)
+    // Phase 1: prefer dir with .onreza/ (pre-existing manifest)
     for name in &all_dirs {
         let candidate = project_dir.join(name);
         if candidate.is_dir() && candidate.join(".onreza").is_dir() {
@@ -317,7 +317,7 @@ fn detect_output_dir(
         }
     }
 
-    // Phase 2: any existing output dir (no adapter — static/process deploy)
+    // Phase 2: any existing output dir (static/process deploy)
     for name in &all_dirs {
         let candidate = project_dir.join(name);
         if candidate.is_dir() {

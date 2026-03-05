@@ -181,7 +181,7 @@ pub async fn run(
         eprintln!();
         eprintln!("  Next steps:");
         eprintln!("    1. Link project: nrz link");
-        eprintln!("    2. Install adapter: npm add @onreza/adapter-<framework>");
+        eprintln!("    2. Build: nrz build");
         eprintln!("    3. Deploy: nrz deploy");
         eprintln!();
     } else {
@@ -193,13 +193,8 @@ pub async fn run(
         );
         eprintln!();
         eprintln!("  Next steps:");
-        if let Some(ref pm) = package_manager {
-            eprintln!("    1. Install adapter: {pm} add @onreza/adapter-<framework>");
-        } else {
-            eprintln!("    1. Install adapter: npm add @onreza/adapter-<framework>");
-        }
-        eprintln!("    2. Build: nrz build");
-        eprintln!("    3. Deploy: nrz deploy");
+        eprintln!("    1. Build: nrz build");
+        eprintln!("    2. Deploy: nrz deploy");
         eprintln!();
     }
 

@@ -420,7 +420,7 @@ pub async fn run(
             }
             ComputeType::Static => format!(
                 "{} deploying as STATIC. \
-                 For edge/serverless deployment, install an @onreza/* adapter.",
+                 For server-side rendering, use --compute process.",
                 detection.name
             ),
             _ => format!("{} deploying as {}.", detection.name, compute),
@@ -490,7 +490,7 @@ pub async fn run(
             None => {
                 bail!(
                     "Cannot auto-generate COMPUTE manifest: entry point not detected in {}.\n\n\
-                     Create .onreza/manifest.json manually or install an @onreza/* adapter.\n\
+                     Create .onreza/manifest.json manually.\n\
                      See: docs.onreza.ru/manifest",
                     output_dir.display()
                 );
@@ -1162,27 +1162,27 @@ fn validate_compute_manifest_contract(
     has_manifest: bool,
     detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<()> {
-    // ISOLATE without a manifest is always an error — it requires an adapter.
+    // ISOLATE without a manifest is always an error — it requires a pre-built manifest.
     if compute == ComputeType::Isolate && !has_manifest {
         let framework = &detection.name;
         bail!(
-            "{framework} project detected but no @onreza/* adapter found.\n\n\
-             ISOLATE compute requires an adapter that generates .onreza/manifest.json.\n\n\
+            "{framework} project detected but no .onreza/manifest.json found.\n\n\
+             ISOLATE compute requires a manifest with ISOLATE layers.\n\n\
              Options:\n\
-             \x20 1. Install an adapter for your framework\n\
+             \x20 1. Create .onreza/manifest.json manually\n\
              \x20 2. Use --compute static if your build output is static files only\n\
              \x20 3. Use --compute process for standalone server deployment"
         );
     }
 
-    // Safety net: PROCESS auto-generation (or an adapter) should have produced a manifest
+    // Safety net: PROCESS auto-generation should have produced a manifest
     // before this point. Reaching here without one is an unexpected internal state.
     if compute == ComputeType::Process && !has_manifest {
         bail!(
             "Internal error: PROCESS deploy reached validation without a manifest.\n\
              This is unexpected — please report this at github.com/onreza/nrz-cli/issues.\n\n\
              If you see this consistently, work around it by creating .onreza/manifest.json\n\
-             manually or installing an @onreza/* adapter."
+             manually."
         );
     }
 

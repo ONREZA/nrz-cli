@@ -596,7 +596,7 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Auto-generate a minimal STATIC manifest for plain static deploys (no adapter).
+/// Auto-generate a minimal STATIC manifest for plain static deploys.
 pub fn generate_static_manifest() -> Manifest {
     Manifest {
         version: 1,
@@ -623,7 +623,7 @@ pub fn generate_static_manifest() -> Manifest {
     }
 }
 
-/// Auto-generate a minimal COMPUTE manifest for PROCESS deploys without adapter.
+/// Auto-generate a minimal COMPUTE manifest for PROCESS deploys.
 /// `entry` — resolved entry point relative to output dir (e.g. "server.js").
 pub fn generate_compute_manifest(entry: &str) -> Manifest {
     Manifest {
