@@ -101,7 +101,9 @@ impl SsrAnalysis {
 pub struct PackageManagerInfo {
     #[serde(rename = "type")]
     pub pm_type: PackageManagerType,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lockfile: Option<String>,
 }
 
@@ -109,9 +111,11 @@ pub struct PackageManagerInfo {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuildInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub build_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub install_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub output_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entry_point: Option<String>,
