@@ -264,6 +264,10 @@ pub struct DeployArgs {
     /// Health check path for PROCESS deployments (e.g. "/health"). Use "none" for TCP only.
     #[arg(long)]
     pub health_check_path: Option<String>,
+
+    /// Monorepo app/workspace to deploy (name, directory basename, or path)
+    #[arg(long, alias = "filter")]
+    pub app: Option<String>,
 }
 
 #[derive(Parser)]

@@ -125,6 +125,8 @@ pub struct DeploySection {
     /// Health check path for PROCESS deployments.
     /// String → HTTP check at that path; `false` → TCP only; absent → autodetect.
     pub health_check_path: Option<HealthCheckPathConfig>,
+    /// Monorepo app/workspace to deploy (name, directory basename, or path).
+    pub app: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -308,6 +310,10 @@ impl ProjectConfig {
 
     pub fn deploy_entry(&self) -> Option<&str> {
         self.deploy.entry.as_deref()
+    }
+
+    pub fn deploy_app(&self) -> Option<&str> {
+        self.deploy.app.as_deref()
     }
 
     pub fn health_check_path(&self) -> Option<&HealthCheckPathConfig> {

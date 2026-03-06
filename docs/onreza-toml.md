@@ -98,6 +98,7 @@ output_dirs = ["dist"]
 | `skip_migrations` | boolean | `false` | Пропустить применение DB-миграций при деплое. Полезно если миграции применяются отдельным CI-шагом. |
 | `compute` | string | авто | Принудительно задать compute type вместо авто-определения. Значения: `"static"`, `"isolate"`, `"process"`. Используйте только если авто-определение даёт неверный результат. |
 | `entry` | string | авто | Точка входа для `PROCESS`-деплоев (Node.js/Bun сервер). Должна быть относительным путём без `..`. Пример: `"server.ts"`, `"dist/index.js"`. Если не задана, CLI определяет автоматически. |
+| `app` | string | нет | Монорепо: какой workspace/пакет деплоить. Матчится по имени пакета из `package.json`, имени директории, или относительному пути. Эквивалент CLI флага `--app` / `--filter`. |
 
 **Compute types:**
 
@@ -130,6 +131,7 @@ CLI не патчит `package.json` в build output для PROCESS. Резол�
 skip_migrations = false
 compute = "process"
 entry = "dist/server.js"
+app = "web"  # для монорепо — какой пакет деплоить
 ```
 
 ---

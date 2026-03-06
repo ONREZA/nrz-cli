@@ -117,13 +117,58 @@ pub struct BuildInfo {
     pub entry_point: Option<String>,
 }
 
+/// Monorepo orchestration tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MonorepoTool {
+    /// npm workspaces (package.json only)
+    Npm,
+    /// yarn workspaces (package.json only)
+    Yarn,
+    /// pnpm workspaces (pnpm-workspace.yaml)
+    Pnpm,
+    /// bun workspaces (package.json only)
+    Bun,
+    /// Turborepo (turbo.json on top of npm/pnpm/yarn/bun workspaces)
+    Turbo,
+    /// Nx (nx.json on top of workspaces or standalone)
+    Nx,
+}
+
+impl std::fmt::Display for MonorepoTool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Npm => f.write_str("npm workspaces"),
+            Self::Yarn => f.write_str("yarn workspaces"),
+            Self::Pnpm => f.write_str("pnpm workspaces"),
+            Self::Bun => f.write_str("bun workspaces"),
+            Self::Turbo => f.write_str("turborepo"),
+            Self::Nx => f.write_str("nx"),
+        }
+    }
+}
+
+/// Resolved workspace package in a monorepo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonorepoPackage {
+    /// Package name from package.json (may be absent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Relative path from the monorepo root.
+    pub path: String,
+}
+
 /// Monorepo information.
 ///
 /// Presence of `Some(MonorepoInfo)` in metadata means the project is a monorepo.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MonorepoInfo {
+    pub tool: MonorepoTool,
     pub workspaces: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub packages: Vec<MonorepoPackage>,
 }
 
 /// Runtime info.

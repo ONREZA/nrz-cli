@@ -206,6 +206,9 @@ fn register_parent_dirs(path: &str, dirs: &mut HashSet<String>) {
 /// for accurate remote detection.
 pub const DETECTION_CONTENT_FILES: &[&str] = &[
     "package.json",
+    "pnpm-workspace.yaml",
+    "turbo.json",
+    "nx.json",
     "next.config.js",
     "next.config.mjs",
     "next.config.ts",

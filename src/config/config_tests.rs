@@ -515,6 +515,23 @@ fn load_config_with_framework() {
     assert_eq!(config.project.framework.as_deref(), Some("astro"));
 }
 
+// ── deploy app ───────────────────────────────────────────────
+
+#[test]
+fn load_config_with_deploy_app() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("onreza.toml"), "[deploy]\napp = \"web\"\n").unwrap();
+
+    let config = load(dir.path()).unwrap();
+    assert_eq!(config.deploy_app(), Some("web"));
+}
+
+#[test]
+fn deploy_app_absent_by_default() {
+    let config = ProjectConfig::default();
+    assert_eq!(config.deploy_app(), None);
+}
+
 // ── health_check_path ────────────────────────────────────────
 
 #[test]

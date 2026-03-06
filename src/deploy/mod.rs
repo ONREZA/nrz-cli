@@ -248,9 +248,71 @@ pub async fn run(
     workspace: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
-    let project_dir = Path::new(&args.dir)
+    let mut project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
+
+    // Resolve --app for monorepo: detect workspaces and switch to the target app directory
+    // Priority: CLI --app > [deploy] app in onreza.toml
+    let effective_app = args.app.as_deref().or(config.deploy_app());
+    if let Some(app_name) = effective_app {
+        let mono_fs = crate::detect::fs::LocalFs::new(&project_dir);
+        let mono_pkg = crate::detect::package_json::PackageJson::load_from_fs(&mono_fs);
+        let mono_pm =
+            crate::detect::package_manager::detect_package_manager(&mono_fs, mono_pkg.as_ref());
+        let mono_info =
+            crate::detect::monorepo::detect_monorepo(&mono_fs, mono_pkg.as_ref(), mono_pm.as_ref());
+
+        match mono_info {
+            Some(info) => match crate::detect::monorepo::resolve_app(&info, app_name) {
+                Some(app_path) => {
+                    let resolved = project_dir.join(&app_path);
+                    if !resolved.is_dir() {
+                        bail!(
+                            "resolved app directory does not exist: {}",
+                            resolved.display()
+                        );
+                    }
+                    output::status(
+                        json,
+                        "~",
+                        format!("Monorepo: deploying app \"{app_name}\" from {app_path}/"),
+                        output::Phase::Deploy,
+                    );
+                    project_dir = resolved
+                        .canonicalize()
+                        .with_context(|| format!("failed to resolve app path: {app_path}"))?;
+                }
+                None => {
+                    let available: Vec<String> = info
+                        .packages
+                        .iter()
+                        .map(|p| p.name.as_deref().unwrap_or(&p.path).to_string())
+                        .collect();
+                    bail!(
+                        "app \"{app_name}\" not found in monorepo workspaces.\n\
+                         Available packages: {}",
+                        if available.is_empty() {
+                            "(none resolved)".to_string()
+                        } else {
+                            available.join(", ")
+                        }
+                    );
+                }
+            },
+            None => {
+                let source = if args.app.is_some() {
+                    "--app"
+                } else {
+                    "[deploy] app in onreza.toml"
+                };
+                bail!(
+                    "{source} was specified but no monorepo detected in {}",
+                    project_dir.display()
+                );
+            }
+        }
+    }
 
     // Verify auth early to avoid wasting time on build if token is invalid
     let tok = auth::resolve_token(token, workspace)?;

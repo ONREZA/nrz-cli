@@ -394,6 +394,46 @@ fn db_execute_batch_json_has_batch_field() {
     );
 }
 
+// ── deploy --app error paths ────────────────────────────────
+
+#[test]
+fn deploy_app_in_non_monorepo_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"name": "simple-app", "dependencies": {"next": "14.0.0"}}"#,
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["deploy", "--app", "web"]);
+    cmd.assert()
+        .failure()
+        .stdout(contains("no monorepo detected"));
+}
+
+#[test]
+fn deploy_app_not_found_lists_available() {
+    let temp = tempfile::tempdir().unwrap();
+    // Create a monorepo with npm workspaces
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"name": "root", "workspaces": ["apps/*"]}"#,
+    )
+    .unwrap();
+    let apps_web = temp.path().join("apps").join("web");
+    fs::create_dir_all(&apps_web).unwrap();
+    fs::write(apps_web.join("package.json"), r#"{"name": "@my/web"}"#).unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["deploy", "--app", "nonexistent"]);
+    cmd.assert()
+        .failure()
+        .stdout(contains("not found"))
+        .stdout(contains("@my/web"));
+}
+
 // ── nrz detect ──────────────────────────────────────────────
 
 #[test]

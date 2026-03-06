@@ -2,6 +2,7 @@
 //! frameworks, package managers, SSR features, and adapters.
 
 pub mod fs;
+pub mod monorepo;
 pub mod package_json;
 pub mod package_manager;
 pub mod presets;
@@ -14,6 +15,8 @@ pub mod vite_config;
 mod fs_tests;
 #[cfg(test)]
 mod mod_tests;
+#[cfg(test)]
+mod monorepo_tests;
 #[cfg(test)]
 mod package_json_tests;
 #[cfg(test)]
@@ -110,9 +113,9 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
                 runtime_type: infer_runtime(preset.runtime, &pm_info),
                 version: None,
             },
+            monorepo: detect_monorepo_info(fs, pkg.as_ref(), pm_info.as_ref()),
             package_manager: pm_info,
             build_info: None,
-            monorepo: detect_monorepo(pkg.as_ref()),
             ssr_analysis: None,
             structure: detect_structure(fs),
         },
@@ -181,7 +184,7 @@ fn detect_from_package_json(
                         output_dir: Some(output_dir),
                         entry_point,
                     }),
-                    monorepo: detect_monorepo(Some(pkg)),
+                    monorepo: detect_monorepo_info(fs, Some(pkg), pm_info.as_ref()),
                     ssr_analysis,
                     structure: detect_structure(fs),
                 },
@@ -205,16 +208,13 @@ fn detect_typescript(fs: &dyn Fs) -> Option<bool> {
     }
 }
 
-/// Detect monorepo (workspaces in package.json).
-fn detect_monorepo(pkg: Option<&PackageJson>) -> Option<MonorepoInfo> {
-    let pkg = pkg?;
-    if pkg.is_monorepo() {
-        Some(MonorepoInfo {
-            workspaces: pkg.workspaces.to_vec(),
-        })
-    } else {
-        None
-    }
+/// Detect monorepo (pnpm-workspace.yaml, package.json workspaces, turbo.json, nx.json).
+fn detect_monorepo_info(
+    fs: &dyn Fs,
+    pkg: Option<&PackageJson>,
+    pm: Option<&PackageManagerInfo>,
+) -> Option<MonorepoInfo> {
+    monorepo::detect_monorepo(fs, pkg, pm)
 }
 
 /// Detect framework-specific config files.

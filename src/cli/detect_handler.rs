@@ -144,10 +144,22 @@ fn print_human(result: &detect::types::DetectionResult) {
 
     if let Some(ref mono) = result.metadata.monorepo {
         eprintln!(
-            "  {} yes ({} workspace patterns)",
+            "  {} yes — {} ({} workspace patterns, {} packages)",
             console::style("Monorepo:").bold(),
+            mono.tool,
             mono.workspaces.len(),
+            mono.packages.len(),
         );
+        if !mono.packages.is_empty() {
+            for pkg in &mono.packages {
+                let label = pkg
+                    .name
+                    .as_deref()
+                    .map(|n| format!("{n} ({p})", p = pkg.path))
+                    .unwrap_or_else(|| pkg.path.clone());
+                eprintln!("    {} {label}", console::style("·").dim());
+            }
+        }
     }
 
     if !result.metadata.config_files.is_empty() {

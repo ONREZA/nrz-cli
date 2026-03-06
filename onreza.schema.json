@@ -121,6 +121,10 @@
               "description": "Disable HTTP health check, use TCP port check only"
             }
           ]
+        },
+        "app": {
+          "type": "string",
+          "description": "Monorepo app/workspace to deploy. Matches by package name, directory basename, or relative path. Equivalent to --app CLI flag."
         }
       }
     },
