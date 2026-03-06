@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.20.0] - 2026-03-06
+
+### ✨ Features
+
+- **cli:** add monorepo detection with --app deploy flag ([62e73eb](https://github.com/ONREZA/nrz-cli/commit/62e73ebd553065e8d86fbcd18b80268afceee8da))
+- **cli:** add P3.4 SSR improvements and P3.5 framework presets ([c321288](https://github.com/ONREZA/nrz-cli/commit/c321288c9d58b3db7bc93b26aeaf3f3e74b18793))
+- **cli:** add SolidStart, Qwik City, Analog framework detection ([b613465](https://github.com/ONREZA/nrz-cli/commit/b6134654d5e21c92b16be8bd7be691b4973643c1))
+- **build:** auto-generate SSR manifests for Nuxt, SvelteKit, Remix, React Router, Astro ([ec3c971](https://github.com/ONREZA/nrz-cli/commit/ec3c971f956d2abb863cdcc031b605b47cf1970a))
+- **cli:** add Express, Fastify, NestJS, Koa, AdonisJS, H3, Nitro framework detection ([43524cd](https://github.com/ONREZA/nrz-cli/commit/43524cdcae04aac042f283c872474aeaa8b44fec))
+- **cli:** add filesystem abstraction for remote framework detection ([c02c1dc](https://github.com/ONREZA/nrz-cli/commit/c02c1dc20a47321344f4369fa10eb708fecd50fb))
+- **cli:** add React Router v7, Hono, and Elysia framework detection ([b45c442](https://github.com/ONREZA/nrz-cli/commit/b45c4425912564d40fe3ee5868b793145d547b45))
+- **cli:** add Remix framework support, remove deprecated adapter detection ([0a21fed](https://github.com/ONREZA/nrz-cli/commit/0a21fed73d75125cda2ab24e7568781731fbe754))
+
+### 🐛 Bug Fixes
+
+- **cli:** improve detection reliability and precision ([844cb44](https://github.com/ONREZA/nrz-cli/commit/844cb44c354316f460cf718afa83135c7ad869c3))
+- **cli:** improve SSR analysis precision, add deploy diagnostics for new frameworks ([d09a6a5](https://github.com/ONREZA/nrz-cli/commit/d09a6a52fe61f4d3037d9478d6c2913e7d677fff))
+- **cli:** remove adapter references from error messages and user-facing text ([78a53a5](https://github.com/ONREZA/nrz-cli/commit/78a53a5c11f47e6f69342c4048a055c3026ed95f))
+
+### 📚 Documentation
+
+- mark P0 and P2 as done in ROADMAP.md ([454925a](https://github.com/ONREZA/nrz-cli/commit/454925a1862f1e5e0161a4178e5ef6b7cda9faab))
+
+### ✅ Testing
+
+- **cli:** add detect_config_files test coverage ([6f2cfe7](https://github.com/ONREZA/nrz-cli/commit/6f2cfe75666f147298bcb23030fbfd7790dae96a))
+
 ## [0.19.2] - 2026-03-04
 
 ### 🐛 Bug Fixes
