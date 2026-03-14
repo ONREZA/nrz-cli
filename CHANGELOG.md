@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.21.0] - 2026-03-14
+
+### ✨ Features
+
+- **cli:** structured error codes and install stderr visibility ([97a8c34](https://github.com/ONREZA/nrz-cli/commit/97a8c348e2fe72bd4330c9ebcd384bdd2e62a1bc))
+
+### 🐛 Bug Fixes
+
+- **cli:** skip None fields in JSON serialization ([57c4386](https://github.com/ONREZA/nrz-cli/commit/57c438611d47557d2b9304bbca41a374308abc18))
+
 ## [0.20.0] - 2026-03-06
 
 ### ✨ Features
