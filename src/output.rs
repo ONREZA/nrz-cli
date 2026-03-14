@@ -6,7 +6,7 @@ use serde::Serialize;
 ///
 /// Used in `--json` mode to tag each log line with the active operation,
 /// allowing LLM consumers to filter and route output by phase.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
     Auth,
     Build,
@@ -100,6 +100,31 @@ pub fn warn(json: bool, msg: impl std::fmt::Display, phase: Phase) {
     } else {
         eprintln!("  {} {msg}", console::style("!").yellow().bold());
     }
+}
+
+/// Emit a structured error line with error code and optional limit details.
+///
+/// Format: `{"s":"error","p":"phase","l":"error","m":"message","code":"...","details":{...}}`
+///
+/// Used by Builder to extract structured error info (e.g., LIMIT_EXCEEDED with limitType)
+/// and persist it to the deployment record for frontend upsell dialogs.
+pub fn log_error_structured(
+    phase: &str,
+    message: &str,
+    code: &str,
+    details: Option<&serde_json::Value>,
+) {
+    let mut obj = serde_json::json!({
+        "s": "error",
+        "p": phase,
+        "l": "error",
+        "m": message,
+        "code": code,
+    });
+    if let Some(d) = details {
+        obj["details"] = d.clone();
+    }
+    println!("{obj}");
 }
 
 /// Interactive numeric choice prompt. Returns 1-based selection.

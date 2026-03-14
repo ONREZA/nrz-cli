@@ -642,23 +642,49 @@ pub async fn run(
     // Validate plan-based limits
     let (max_files, max_size) = plan_limits(&ws_info);
     if files.len() > max_files {
-        bail!(
+        let msg = format!(
             "Deployment exceeds maximum file count ({} / {}). \
              Consider using blob storage for large assets. \
              For higher limits contact support@onreza.ru",
             files.len(),
             max_files
         );
+        if json {
+            output::log_error_structured(
+                "deploy",
+                &msg,
+                "LIMIT_EXCEEDED",
+                Some(&serde_json::json!({
+                    "limitType": "artifactFileCount",
+                    "current": files.len(),
+                    "limit": max_files,
+                })),
+            );
+        }
+        bail!("{msg}");
     }
     let total_size: u64 = files.iter().map(|f| f.size).sum();
     if total_size > max_size {
         let total_mb = total_size / (1024 * 1024);
         let limit_mb = max_size / (1024 * 1024);
-        bail!(
+        let msg = format!(
             "Deployment artifact size ({total_mb} MB) exceeds the {limit_mb} MB limit \
              for your plan. Use blob storage for large assets. \
              For higher limits contact support@onreza.ru"
         );
+        if json {
+            output::log_error_structured(
+                "deploy",
+                &msg,
+                "LIMIT_EXCEEDED",
+                Some(&serde_json::json!({
+                    "limitType": "artifactSizeMb",
+                    "current": total_mb,
+                    "limit": limit_mb,
+                })),
+            );
+        }
+        bail!("{msg}");
     }
 
     // Git info
@@ -1163,13 +1189,29 @@ async fn resume_deploy(
         bundle_sha256: bundle_data.as_ref().map(|(_, sha)| sha.clone()),
     };
 
-    let prepared: PrepareUploadResponse = client
+    let prepared: PrepareUploadResponse = match client
         .post(
             &format!("/v1/deployments/{deployment_id}/prepare-upload"),
             &body,
         )
         .await
-        .context("failed to prepare upload")?;
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            if json
+                && let Some(api_err) = e.downcast_ref::<crate::api::StructuredApiError>()
+                && (api_err.code == "LIMIT_EXCEEDED" || api_err.code == "SUBSCRIPTION_REQUIRED")
+            {
+                output::log_error_structured(
+                    "deploy",
+                    &api_err.message,
+                    &api_err.code,
+                    api_err.details.as_ref(),
+                );
+            }
+            return Err(e.context("failed to prepare upload"));
+        }
+    };
 
     // PROCESS skips individual file uploads — only bundle.tar.zst is uploaded
     if prepared.bundle_upload_url.is_none() && prepared.upload_urls.len() != file_count {
@@ -1796,7 +1838,12 @@ fn run_command_streaming(
     });
 
     let phase_err = phase.to_string();
-    let stream_err = child_stream.to_string();
+    // Install stderr → "user" stream (errors visible to user), other phases follow child_stream
+    let stream_err = if phase == output::Phase::Install {
+        "user".to_string()
+    } else {
+        child_stream.to_string()
+    };
     let stderr_handle = std::thread::spawn(move || {
         let reader = std::io::BufReader::new(stderr);
         for result in reader.lines() {

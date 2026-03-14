@@ -8,7 +8,35 @@ struct ApiError {
     error: Option<String>,
     #[serde(default)]
     message: Option<String>,
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    details: Option<serde_json::Value>,
 }
+
+/// Structured API error preserving code and details for downstream consumers.
+/// Used to emit structured error lines in JSON mode (e.g., LIMIT_EXCEEDED with limit details).
+#[derive(Debug)]
+pub struct StructuredApiError {
+    pub status: reqwest::StatusCode,
+    pub code: String,
+    pub message: String,
+    pub details: Option<serde_json::Value>,
+}
+
+impl std::fmt::Display for StructuredApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "API error ({} {}): {}",
+            self.status.as_u16(),
+            self.code,
+            self.message
+        )
+    }
+}
+
+impl std::error::Error for StructuredApiError {}
 
 /// Standard API envelope: `{"success":bool,"result":T,"errors":[],"messages":[]}`
 #[derive(Debug, Deserialize)]
@@ -273,8 +301,21 @@ fn extract_api_error(status: reqwest::StatusCode, body: &str) -> anyhow::Error {
     if let Ok(api_err) = serde_json::from_str::<ApiError>(body) {
         let msg = api_err
             .message
-            .or(api_err.error)
+            .clone()
+            .or(api_err.error.clone())
             .unwrap_or_else(|| format!("HTTP {status}"));
+
+        // Return StructuredApiError when API provides a structured error code
+        if let Some(code) = api_err.code {
+            return StructuredApiError {
+                status,
+                code,
+                message: msg,
+                details: api_err.details,
+            }
+            .into();
+        }
+
         return anyhow::anyhow!("API error ({}): {}", status, msg);
     }
     anyhow::anyhow!("API error ({}): {}", status, body)
