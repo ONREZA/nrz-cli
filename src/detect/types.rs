@@ -185,35 +185,6 @@ pub struct RuntimeInfo {
     pub version: Option<String>,
 }
 
-/// Known tool identifiers for detected project tools.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ToolSlug {
-    Prisma,
-}
-
-impl std::fmt::Display for ToolSlug {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Prisma => f.write_str("prisma"),
-        }
-    }
-}
-
-/// Detected project tool that requires a pre-build step.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolInfo {
-    pub slug: ToolSlug,
-    /// Human-readable display name (e.g., "Prisma ORM").
-    pub name: String,
-    /// Version from package.json dependencies, if found.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-    /// Pre-build command to run before the build step.
-    pub pre_build_command: String,
-}
-
 /// Detection metadata — additional info beyond the framework slug.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -240,9 +211,6 @@ pub struct DetectionMetadata {
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub structure: Vec<String>,
-
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<ToolInfo>,
 }
 
 /// Suggested compute type for deployment.

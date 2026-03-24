@@ -191,25 +191,6 @@ fn print_human(result: &detect::types::DetectionResult) {
         }
     }
 
-    if !result.metadata.tools.is_empty() {
-        eprintln!(
-            "  {} {}",
-            console::style("Tools:").bold(),
-            result
-                .metadata
-                .tools
-                .iter()
-                .map(|t| {
-                    match t.version.as_deref() {
-                        Some(v) => format!("{} ({v})", t.name),
-                        None => t.name.clone(),
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", "),
-        );
-    }
-
     if !result.metadata.structure.is_empty() {
         eprintln!(
             "  {} {}",

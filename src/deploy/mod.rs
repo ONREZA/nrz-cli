@@ -379,19 +379,15 @@ pub async fn run(
     }
 
     // Run build step (default: enabled, skip with --skip-build)
-    if !args.skip_build {
-        // Pre-build: auto-detected tool steps (e.g., prisma generate)
-        let prebuild_tools = detect_prebuild_tools(&project_dir);
-        run_prebuild_steps(&project_dir, json, &prebuild_tools)?;
-
-        if let Some(cmd) = resolve_build_command(
+    if !args.skip_build
+        && let Some(cmd) = resolve_build_command(
             args.build_command.as_deref(),
             &project_dir,
             config,
             server_build_cmd,
-        ) {
-            run_build_step(&cmd, &project_dir, json)?;
-        }
+        )
+    {
+        run_build_step(&cmd, &project_dir, json)?;
     }
 
     // Detect framework once — shared by build (output dir search) and deploy (compute type)
@@ -1917,47 +1913,6 @@ fn run_install_step(
     // Install child output → debug stream (npm noise), nrz markers go through output::status/success
     run_command_streaming(&cmd, project_dir, json, output::Phase::Install, "debug")?;
     output::success(json, "Dependencies installed", output::Phase::Deploy);
-    Ok(())
-}
-
-/// Lightweight detection of tools needing pre-build steps.
-fn detect_prebuild_tools(project_dir: &Path) -> Vec<crate::detect::types::ToolInfo> {
-    let fs = crate::detect::fs::LocalFs::new(project_dir);
-    let pkg = match crate::detect::package_json::PackageJson::load_from_fs(&fs) {
-        Some(p) => p,
-        None => return Vec::new(),
-    };
-    let pm_info = crate::detect::package_manager::detect_package_manager(&fs, Some(&pkg));
-    let pm_type = pm_info
-        .map(|p| p.pm_type)
-        .unwrap_or(crate::detect::types::PackageManagerType::Npm);
-    crate::detect::detect_tools(&pkg, pm_type)
-}
-
-/// Run auto-detected pre-build steps (e.g., `prisma generate`).
-fn run_prebuild_steps(
-    project_dir: &Path,
-    json: bool,
-    tools: &[crate::detect::types::ToolInfo],
-) -> anyhow::Result<()> {
-    for tool in tools {
-        let cmd = &tool.pre_build_command;
-        if cmd.trim().is_empty() {
-            continue;
-        }
-        output::status(
-            json,
-            ">",
-            format!("{}: {cmd}", tool.name),
-            output::Phase::Deploy,
-        );
-        run_command_streaming(cmd, project_dir, json, output::Phase::Build, "debug")?;
-        output::success(
-            json,
-            format!("{} completed", tool.name),
-            output::Phase::Deploy,
-        );
-    }
     Ok(())
 }
 

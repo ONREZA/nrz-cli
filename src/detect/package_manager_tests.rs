@@ -160,11 +160,3 @@ fn build_command_variants() {
 fn build_command_empty_script() {
     assert_eq!(build_command(PackageManagerType::Npm, ""), "");
 }
-
-#[test]
-fn runner_command_variants() {
-    assert_eq!(runner_command(PackageManagerType::Npm), "npx");
-    assert_eq!(runner_command(PackageManagerType::Yarn), "yarn");
-    assert_eq!(runner_command(PackageManagerType::Pnpm), "pnpm exec");
-    assert_eq!(runner_command(PackageManagerType::Bun), "bunx");
-}

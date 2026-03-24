@@ -140,7 +140,6 @@ fn make_detection(
             ssr_analysis: ssr,
 
             structure: vec![],
-            tools: vec![],
         },
     }
 }
@@ -223,7 +222,6 @@ fn make_static_detection(framework: &str) -> crate::detect::types::DetectionResu
             ssr_analysis: None,
 
             structure: vec![],
-            tools: vec![],
         },
     }
 }
