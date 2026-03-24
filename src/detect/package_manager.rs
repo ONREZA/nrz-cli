@@ -99,6 +99,16 @@ pub fn install_command(pm: PackageManagerType) -> &'static str {
     }
 }
 
+/// Get the command runner for executing locally-installed package binaries.
+pub fn runner_command(pm: PackageManagerType) -> &'static str {
+    match pm {
+        PackageManagerType::Npm => "npx",
+        PackageManagerType::Yarn => "yarn",
+        PackageManagerType::Pnpm => "pnpm exec",
+        PackageManagerType::Bun => "bunx",
+    }
+}
+
 /// Get the build command for a package manager type with a given script name.
 pub fn build_command(pm: PackageManagerType, script: &str) -> String {
     if script.is_empty() {

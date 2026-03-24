@@ -654,6 +654,7 @@ fn make_detection(
             ssr_analysis: ssr,
 
             structure: vec![],
+            tools: vec![],
         },
     }
 }

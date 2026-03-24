@@ -2048,3 +2048,81 @@ fn nuxt_build_command_is_build_not_generate() {
         .as_deref();
     assert_eq!(build_cmd, Some("npm run build"));
 }
+
+// ── Tools detection (Prisma) ─────────────────────────────────
+
+#[test]
+fn nextjs_with_prisma_detects_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{
+            "dependencies": { "next": "^14.0.0", "@prisma/client": "^6.0.0" },
+            "devDependencies": { "prisma": "^6.0.0" }
+        }"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nextjs");
+    assert_eq!(result.metadata.tools.len(), 1);
+    assert_eq!(result.metadata.tools[0].slug, ToolSlug::Prisma);
+    assert_eq!(
+        result.metadata.tools[0].pre_build_command,
+        "npx prisma generate"
+    );
+}
+
+#[test]
+fn nextjs_with_prisma_bun_uses_bunx() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{
+            "dependencies": { "next": "^14.0.0", "@prisma/client": "^6.0.0" },
+            "devDependencies": { "prisma": "^6.0.0" },
+            "packageManager": "bun@1.0.0"
+        }"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.metadata.tools.len(), 1);
+    assert_eq!(
+        result.metadata.tools[0].pre_build_command,
+        "bunx prisma generate"
+    );
+}
+
+#[test]
+fn project_without_prisma_has_no_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"next": "^14.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert!(result.metadata.tools.is_empty());
+}
+
+#[test]
+fn unknown_project_with_prisma_detects_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{
+            "dependencies": { "some-unknown-lib": "^1.0.0", "@prisma/client": "^6.0.0" },
+            "devDependencies": { "prisma": "^6.0.0" }
+        }"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    // No recognized framework → "other"
+    assert_eq!(result.framework, "other");
+    // But Prisma should still be detected
+    assert_eq!(result.metadata.tools.len(), 1);
+    assert_eq!(result.metadata.tools[0].slug, ToolSlug::Prisma);
+}

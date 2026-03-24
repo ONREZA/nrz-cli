@@ -6,6 +6,7 @@ pub mod monorepo;
 pub mod package_json;
 pub mod package_manager;
 pub mod presets;
+pub mod prisma;
 pub mod ssr;
 pub mod static_html;
 pub mod types;
@@ -23,6 +24,8 @@ mod package_json_tests;
 mod package_manager_tests;
 #[cfg(test)]
 mod presets_tests;
+#[cfg(test)]
+mod prisma_tests;
 #[cfg(test)]
 mod ssr_tests;
 #[cfg(test)]
@@ -86,6 +89,7 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
                 monorepo: None,
                 ssr_analysis: None,
                 structure: html_files,
+                tools: Vec::new(),
             },
             reason: "Static HTML site detected (index.html found, no package.json)".into(),
         };
@@ -99,6 +103,17 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
             .to_string()
     } else {
         "No known framework detected".to_string()
+    };
+
+    // Detect tools even for unknown projects (e.g., Express + Prisma)
+    let tools = if let Some(ref pkg) = pkg {
+        let pm_type = pm_info
+            .as_ref()
+            .map(|pm| pm.pm_type)
+            .unwrap_or(PackageManagerType::Npm);
+        detect_tools(pkg, pm_type)
+    } else {
+        Vec::new()
     };
 
     DetectionResult {
@@ -118,6 +133,7 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
             build_info: None,
             ssr_analysis: None,
             structure: detect_structure(fs),
+            tools,
         },
         reason,
     }
@@ -163,6 +179,9 @@ fn detect_from_package_json(
 
             let entry_point = framework_entry_point(preset.slug);
 
+            // Detect tools (Prisma, etc.)
+            let tools = detect_tools(pkg, pm_type);
+
             return Some(DetectionResult {
                 framework: preset.slug.to_string(),
                 name: preset.name.to_string(),
@@ -187,6 +206,7 @@ fn detect_from_package_json(
                     monorepo: detect_monorepo_info(fs, Some(pkg), pm_info.as_ref()),
                     ssr_analysis,
                     structure: detect_structure(fs),
+                    tools,
                 },
                 reason: format!(
                     "Detected {dep} in dependencies (priority {})",
@@ -197,6 +217,15 @@ fn detect_from_package_json(
     }
 
     None
+}
+
+/// Detect project tools that may require pre-build steps.
+pub fn detect_tools(pkg: &PackageJson, pm_type: PackageManagerType) -> Vec<ToolInfo> {
+    let mut tools = Vec::new();
+    if let Some(info) = prisma::detect_prisma(pkg, pm_type) {
+        tools.push(info);
+    }
+    tools
 }
 
 /// Detect TypeScript usage (tsconfig.json or tsconfig.app.json).
