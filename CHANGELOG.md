@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.22.0] - 2026-04-04
+
+### ✨ Features
+
+- **db:** replace D1 (SQLite) with managed PostgreSQL (kaiki) ([68a4b31](https://github.com/ONREZA/nrz-cli/commit/68a4b311efb7a3706e59d71e0c6bf9e0c30f5a48))
+- **deploy:** auto-detect Prisma and run prisma generate as pre-build step ([f8f92a3](https://github.com/ONREZA/nrz-cli/commit/f8f92a3161f256587411857f930b494f87555189))
+
 ## [0.21.0] - 2026-03-14
 
 ### ✨ Features
