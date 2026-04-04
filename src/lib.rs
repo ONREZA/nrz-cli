@@ -3,7 +3,6 @@
 pub mod config;
 pub mod detect;
 pub mod emulator;
-pub mod migrations;
 
 // Re-export commonly used types
 pub use emulator::kv::KvStore;

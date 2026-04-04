@@ -16,19 +16,13 @@ port = 3000
 host = "0.0.0.0"
 
 data_dir = "custom/data"
-db_name = "custom.db"
 
 [build]
 output_dirs = ["out", "public"]
 
-[deploy]
-skip_migrations = true
-
-[migrations]
-dir = "db/migrations"
-
 [db]
-default_env = "preview"
+database = "my-db"
+branch = "dev"
 "#,
     )
     .unwrap();
@@ -41,11 +35,9 @@ default_env = "preview"
     assert_eq!(config.dev_port(), 3000);
     assert_eq!(config.dev_host(), "0.0.0.0");
     assert_eq!(config.data_dir_relative(), "custom/data");
-    assert_eq!(config.db_name(), "custom.db");
     assert_eq!(config.output_dirs(), vec!["out", "public"]);
-    assert!(config.skip_migrations());
-    assert_eq!(config.migrations_dir(), "db/migrations");
-    assert_eq!(config.db.default_env.as_deref(), Some("preview"));
+    assert_eq!(config.db_database(), Some("my-db"));
+    assert_eq!(config.db_branch(), Some("dev"));
     assert!(config.build_command().is_none());
     assert!(config.dev.aliases.is_empty());
 }
@@ -111,7 +103,6 @@ fn load_minimal_config() {
     assert_eq!(config.dev_port(), 4321);
     assert_eq!(config.dev_host(), "127.0.0.1");
     assert_eq!(config.data_dir_relative(), ".onreza/data");
-    assert_eq!(config.db_name(), "dev.db");
     assert_eq!(
         config.output_dirs(),
         vec![
@@ -124,9 +115,8 @@ fn load_minimal_config() {
             ".vitepress/dist"
         ]
     );
-    assert!(!config.skip_migrations());
-    assert_eq!(config.migrations_dir(), "migrations");
-    assert!(config.db.default_env.is_none());
+    assert!(config.db_database().is_none());
+    assert!(config.db_branch().is_none());
 }
 
 #[test]

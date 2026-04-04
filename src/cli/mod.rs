@@ -1,10 +1,5 @@
 pub mod db;
 pub mod db_handler;
-#[cfg(test)]
-mod db_handler_tests;
-pub mod db_migrate_handler;
-#[cfg(test)]
-mod db_migrate_handler_tests;
 pub mod detect;
 pub mod detect_handler;
 pub mod domains;
@@ -64,7 +59,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Start local dev server with platform emulation (KV, DB, Context)
+    /// Start local dev server with platform emulation (KV, Context)
     Dev(DevArgs),
 
     /// Validate build output and manifest
@@ -73,7 +68,7 @@ pub enum Command {
     /// Deploy to ONREZA platform
     Deploy(DeployArgs),
 
-    /// Manage local SQLite database
+    /// Manage managed PostgreSQL databases
     Db(DbArgs),
 
     /// Manage local KV store
@@ -203,6 +198,10 @@ pub struct DevArgs {
     #[arg(long, conflicts_with = "inspect")]
     pub inspect_brk: bool,
 
+    /// Database branch to use for DATABASE_URL injection
+    #[arg(long)]
+    pub db_branch: Option<String>,
+
     /// Path to project directory
     #[arg(default_value = ".")]
     pub dir: String,
@@ -232,10 +231,6 @@ pub struct DeployArgs {
     /// Project ID (skip interactive selection)
     #[arg(long)]
     pub project_id: Option<String>,
-
-    /// Skip database migrations during deploy
-    #[arg(long)]
-    pub skip_migrations: bool,
 
     /// Skip build step before deploying
     #[arg(long)]

@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`nrz` is a Rust CLI. Entrypoints are `src/main.rs` (binary) and `src/lib.rs` (shared exports). Core domains are split under `src/`: `cli/`, `deploy/`, `build/`, `detect/`, `dev/`, `emulator/`, `auth/`, `config/`, `migrations/`, `init/`, and `upgrade/`.
+`nrz` is a Rust CLI. Entrypoints are `src/main.rs` (binary) and `src/lib.rs` (shared exports). Core domains are split under `src/`: `cli/`, `deploy/`, `build/`, `detect/`, `dev/`, `emulator/`, `auth/`, `config/`, `init/`, and `upgrade/`.
 
 Integration tests are in `tests/` (for example `tests/cli_integration_test.rs`). Unit tests are colocated as dedicated `*_tests.rs` files (for example `src/build/manifest_tests.rs`). Operational docs live in `docs/`; root config includes `onreza.schema.json`, `lefthook.yml`, and `commitlint.config.js`.
 
@@ -31,7 +31,7 @@ Testing rules:
 - Add regression tests for bug fixes.
 
 ## Configuration, Commits, and PRs
-`onreza.toml` is committed and is the single project config source. `.onreza/` is local state only (dev DB/KV/environment refs) and must remain gitignored.
+`onreza.toml` is committed and is the single project config source. `.onreza/` is local state only (KV/environment refs) and must remain gitignored.
 
 Conventional Commits are enforced by Lefthook + commitlint. Format: `type(scope): subject` (example: `fix(deploy): resolve process entry fallback`). Typical scopes: `cli`, `deploy`, `build`, `config`, `emulator`, `db`, `kv`, `tests`, `release`.
 

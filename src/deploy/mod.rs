@@ -28,7 +28,6 @@ use crate::build::manifest as build_manifest;
 use crate::cli::{BuildArgs, DeployArgs};
 use crate::detect::types::ComputeType;
 use crate::link;
-use crate::migrations;
 use crate::output;
 use nrz::config::{HealthCheckPathConfig, ProjectConfig};
 
@@ -105,8 +104,6 @@ struct CreateDeploymentBody {
     branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     commit_sha: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    migrations: Option<Vec<migrations::Migration>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bundle_sha256: Option<String>,
 }
@@ -727,11 +724,6 @@ pub async fn run(
     // Create bundle for PROCESS deployments
     let bundle_data = maybe_create_bundle(&output_dir, is_process, json)?;
 
-    // Detect migrations
-    let skip_mig = args.skip_migrations || config.skip_migrations();
-    let mig_entries = detect_migrations(&project_dir, json, skip_mig, config.migrations_dir())
-        .context("failed to scan migrations")?;
-
     // Create deployment
     output::status(json, "~", "Creating deployment...", output::Phase::Deploy);
     let body = CreateDeploymentBody {
@@ -740,7 +732,6 @@ pub async fn run(
         production: args.prod,
         branch,
         commit_sha,
-        migrations: mig_entries,
         bundle_sha256: bundle_data.as_ref().map(|(_, sha)| sha.clone()),
     };
     let file_count = body.files.len();
@@ -821,19 +812,6 @@ pub async fn run(
                 finish_spinner(spinner, "");
                 let msg = status.error.unwrap_or_else(|| "unknown error".into());
                 bail!("deployment failed: {msg}");
-            }
-            "migration_failed" => {
-                finish_spinner(spinner, "");
-                let msg = status
-                    .error
-                    .unwrap_or_else(|| "migration failed during deployment".into());
-                bail!("migration failed: {msg}");
-            }
-            "migrating" => {
-                if let Some(ref s) = spinner {
-                    s.set_message("Applying migrations...");
-                }
-                continue;
             }
             other => {
                 if let Some(ref s) = spinner {
@@ -1926,40 +1904,6 @@ fn run_build_step(cmd: &str, project_dir: &Path, json: bool) -> anyhow::Result<(
     run_command_streaming(cmd, project_dir, json, output::Phase::Build, "user")?;
     output::success(json, "Build completed", output::Phase::Deploy);
     Ok(())
-}
-
-// ── Migration detection ──────────────────────────────────────
-
-fn detect_migrations(
-    project_dir: &Path,
-    json: bool,
-    skip: bool,
-    migrations_subdir: &str,
-) -> anyhow::Result<Option<Vec<migrations::Migration>>> {
-    if skip {
-        return Ok(None);
-    }
-
-    let migrations_dir = project_dir.join(migrations_subdir);
-    if !migrations_dir.is_dir() {
-        return Ok(None);
-    }
-
-    let migs = migrations::scan_migrations_dir(project_dir, migrations_subdir)?;
-    if migs.is_empty() {
-        return Ok(None);
-    }
-
-    output::status(
-        json,
-        "~",
-        format!(
-            "Detected {} migration(s), will apply during activation",
-            migs.len()
-        ),
-        output::Phase::Deploy,
-    );
-    Ok(Some(migs))
 }
 
 // ── File scanning ────────────────────────────────────────────

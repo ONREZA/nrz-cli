@@ -29,9 +29,6 @@ regex = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Emulator: SQLite
-rusqlite = { version = "0.38", features = ["bundled"] }
-
 # HTTP server (emulator)
 axum = "0.8"
 

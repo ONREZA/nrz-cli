@@ -1,8 +1,3 @@
-pub mod environment_ref;
-
-#[cfg(test)]
-mod environment_ref_tests;
-
 use std::path::Path;
 
 use anyhow::{Context, bail};

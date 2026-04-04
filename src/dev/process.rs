@@ -17,6 +17,7 @@ pub async fn spawn_dev_server(
     dev_command: &str,
     bootstrap_path: &Path,
     inspect_flag: Option<&str>,
+    extra_env: &std::collections::HashMap<String, String>,
 ) -> anyhow::Result<()> {
     let parts: Vec<&str> = dev_command.split_whitespace().collect();
     let (bin, args) = parts.split_first().context("empty dev command")?;
@@ -41,6 +42,10 @@ pub async fn spawn_dev_server(
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .env("NODE_OPTIONS", node_options);
+
+    for (key, val) in extra_env {
+        cmd.env(key, val);
+    }
 
     let mut child = cmd.spawn().context("failed to start dev server")?;
 

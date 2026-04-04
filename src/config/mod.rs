@@ -77,7 +77,6 @@ pub struct ProjectConfig {
     pub dev: DevSection,
     pub build: BuildSection,
     pub deploy: DeploySection,
-    pub migrations: MigrationsSection,
     pub db: DbSection,
     /// Environment variable declarations: `[env]` section.
     pub env: EnvSection,
@@ -100,7 +99,6 @@ pub struct DevSection {
     pub host: Option<String>,
 
     pub data_dir: Option<String>,
-    pub db_name: Option<String>,
 
     /// Named command profiles, defined as `[dev.aliases]` in onreza.toml.
     /// Run with `nrz dev --alias <name>`.
@@ -117,7 +115,6 @@ pub struct BuildSection {
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct DeploySection {
-    pub skip_migrations: Option<bool>,
     /// Compute type override: "static", "isolate", "process".
     pub compute: Option<String>,
     /// Explicit entry point for PROCESS deployments (e.g. "server.ts").
@@ -129,16 +126,20 @@ pub struct DeploySection {
     pub app: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
-#[serde(default)]
-pub struct MigrationsSection {
-    pub dir: Option<String>,
-}
-
+/// Managed database (kaiki) configuration.
+///
+/// ```toml
+/// [db]
+/// database = "my-db"    # id or name — auto-resolved if omitted
+/// branch = "dev"        # branch for nrz dev — main if omitted
+/// ```
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct DbSection {
-    pub default_env: Option<String>,
+    /// Database ID or name. If omitted, uses first auto-inject-enabled DB.
+    pub database: Option<String>,
+    /// Branch name for `nrz dev`. If omitted, uses main connection.
+    pub branch: Option<String>,
 }
 
 // ── Environment variable declarations ───────────────────────
@@ -273,8 +274,12 @@ impl ProjectConfig {
         project_dir.join(self.data_dir_relative())
     }
 
-    pub fn db_name(&self) -> &str {
-        self.dev.db_name.as_deref().unwrap_or("dev.db")
+    pub fn db_database(&self) -> Option<&str> {
+        self.db.database.as_deref()
+    }
+
+    pub fn db_branch(&self) -> Option<&str> {
+        self.db.branch.as_deref()
     }
 
     pub fn output_dirs(&self) -> Vec<&str> {
@@ -294,14 +299,6 @@ impl ProjectConfig {
 
     pub fn build_command(&self) -> Option<&str> {
         self.build.command.as_deref()
-    }
-
-    pub fn skip_migrations(&self) -> bool {
-        self.deploy.skip_migrations.unwrap_or(false)
-    }
-
-    pub fn migrations_dir(&self) -> &str {
-        self.migrations.dir.as_deref().unwrap_or("migrations")
     }
 
     pub fn deploy_compute(&self) -> Option<&str> {
@@ -397,6 +394,17 @@ pub fn load(project_dir: &Path) -> anyhow::Result<ProjectConfig> {
                     );
                 }
             }
+            // Validate [db] section
+            if let Some(ref db) = config.db.database
+                && db.trim().is_empty()
+            {
+                anyhow::bail!("[db] database must not be empty");
+            }
+            if let Some(ref branch) = config.db.branch
+                && branch.trim().is_empty()
+            {
+                anyhow::bail!("[db] branch must not be empty");
+            }
             Ok(config)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(ProjectConfig::default()),
@@ -441,7 +449,6 @@ pub fn generate_template(
 # host = "127.0.0.1"
 
 # data_dir = ".onreza/data"
-# db_name = "dev.db"
 
 # [dev.aliases]
 # network = "npm run dev -- --host 0.0.0.0"
@@ -452,16 +459,13 @@ pub fn generate_template(
 # output_dirs = ["dist", ".output", "build", "out", "_site", "www", ".vitepress/dist"]
 
 # [deploy]
-# skip_migrations = false
 # compute = "static"    # "static", "isolate", or "process"
 # entry = "server.ts"   # entry point for PROCESS deployments
 # health_check_path = "/health"  # HTTP health check path, or false for TCP only
 
-# [migrations]
-# dir = "migrations"
-
 # [db]
-# default_env = "development"
+# database = ""          # managed database id or name (auto-resolved if omitted)
+# branch = ""            # branch for nrz dev (main if omitted)
 
 # [env]
 # strict = false

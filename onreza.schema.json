@@ -52,13 +52,8 @@
         },
         "data_dir": {
           "type": "string",
-          "description": "Directory for local data (SQLite, KV)",
+          "description": "Directory for local data (KV store)",
           "default": ".onreza/data"
-        },
-        "db_name": {
-          "type": "string",
-          "description": "SQLite database filename for local emulation",
-          "default": "dev.db"
         },
         "aliases": {
           "type": "object",
@@ -93,11 +88,6 @@
       "description": "Deployment settings",
       "additionalProperties": true,
       "properties": {
-        "skip_migrations": {
-          "type": "boolean",
-          "description": "Skip database migrations during deploy",
-          "default": false
-        },
         "compute": {
           "type": "string",
           "description": "Compute type override. If not set, inferred automatically from framework detection. Use when auto-detection is incorrect.",
@@ -128,27 +118,18 @@
         }
       }
     },
-    "migrations": {
-      "type": "object",
-      "description": "Database migration settings",
-      "additionalProperties": true,
-      "properties": {
-        "dir": {
-          "type": "string",
-          "description": "Directory containing migration files",
-          "default": "migrations"
-        }
-      }
-    },
     "db": {
       "type": "object",
-      "description": "Database settings",
+      "description": "Managed database (kaiki) settings",
       "additionalProperties": true,
       "properties": {
-        "default_env": {
+        "database": {
           "type": "string",
-          "description": "Default environment for remote DB commands",
-          "enum": ["production", "preview", "development"]
+          "description": "Database ID or name. If omitted, auto-resolves to first auto-inject-enabled database."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch name for nrz dev. If omitted, uses main database connection."
         }
       }
     },

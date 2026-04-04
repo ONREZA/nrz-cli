@@ -10,13 +10,6 @@ fn bootstrap_contains_port() {
 }
 
 #[test]
-fn bootstrap_contains_db_path() {
-    let dir = tempfile::tempdir().unwrap();
-    let script = generate_bootstrap(dir.path(), 4322).unwrap();
-    assert!(script.contains("dev.db"));
-}
-
-#[test]
 fn bootstrap_sets_global() {
     let dir = tempfile::tempdir().unwrap();
     let script = generate_bootstrap(dir.path(), 4322).unwrap();
@@ -31,12 +24,11 @@ fn bootstrap_has_kv_proxy() {
 }
 
 #[test]
-fn bootstrap_has_db_methods() {
+fn bootstrap_no_db_references() {
     let dir = tempfile::tempdir().unwrap();
     let script = generate_bootstrap(dir.path(), 4322).unwrap();
-    assert!(script.contains("/__nrz/db/query"));
-    assert!(script.contains("/__nrz/db/batch"));
-    assert!(script.contains("/__nrz/db/exec"));
+    assert!(!script.contains("/__nrz/db/"));
+    assert!(!script.contains("DB_PATH"));
 }
 
 #[test]
@@ -56,11 +48,4 @@ fn bootstrap_different_ports() {
     assert!(s2.contains("http://127.0.0.1:5000"));
     assert!(!s1.contains("5000"));
     assert!(!s2.contains("3000"));
-}
-
-#[test]
-fn bootstrap_db_path_is_json_string() {
-    let dir = tempfile::tempdir().unwrap();
-    let script = generate_bootstrap(dir.path(), 4322).unwrap();
-    assert!(script.contains("const DB_PATH = \""));
 }

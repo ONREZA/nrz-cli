@@ -10,7 +10,6 @@ mod dev;
 mod init;
 mod link;
 mod logs;
-mod migrations;
 mod output;
 #[cfg(test)]
 mod output_tests;
@@ -78,16 +77,11 @@ async fn run_command(
     env: &[String],
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
-    // For commands that expect a single env value, take the first element.
-    let env_single = env.first().map(|s| s.as_str());
-
     match command {
         Command::Dev(args) => dev::run(args, config).await,
         Command::Build(args) => build::run(args, json, config).await.map(|_| ()),
         Command::Deploy(args) => deploy::run(args, json, token, workspace, config).await,
-        Command::Db(args) => {
-            cli::db_handler::run(args, json, token, workspace, env_single, config).await
-        }
+        Command::Db(args) => cli::db_handler::run(args, json, token, workspace, config).await,
         Command::Kv(args) => cli::kv_handler::run(args, json).await,
         Command::Login => auth::login(json, token).await,
         Command::Whoami => auth::whoami(json, token, workspace).await,

@@ -134,80 +134,6 @@ fn synthetic_sha_is_64_hex_chars() {
     assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
 }
 
-// ── detect_migrations tests ─────────────────────────────────
-
-#[test]
-fn detect_migrations_skip_flag() {
-    let dir = tempdir().unwrap();
-    fs::create_dir(dir.path().join("migrations")).unwrap();
-    fs::write(
-        dir.path().join("migrations/0001_init.sql"),
-        "CREATE TABLE t;",
-    )
-    .unwrap();
-
-    let result = detect_migrations(dir.path(), true, true, "migrations").unwrap();
-    assert!(result.is_none());
-}
-
-#[test]
-fn detect_migrations_no_migrations_dir() {
-    let dir = tempdir().unwrap();
-
-    let result = detect_migrations(dir.path(), true, false, "migrations").unwrap();
-    assert!(result.is_none());
-}
-
-#[test]
-fn detect_migrations_empty_migrations_dir() {
-    let dir = tempdir().unwrap();
-    fs::create_dir(dir.path().join("migrations")).unwrap();
-
-    let result = detect_migrations(dir.path(), true, false, "migrations").unwrap();
-    assert!(result.is_none());
-}
-
-#[test]
-fn detect_migrations_returns_entries() {
-    let dir = tempdir().unwrap();
-    fs::create_dir(dir.path().join("migrations")).unwrap();
-    fs::write(
-        dir.path().join("migrations/0001_init.sql"),
-        "CREATE TABLE t;",
-    )
-    .unwrap();
-    fs::write(
-        dir.path().join("migrations/0002_users.sql"),
-        "CREATE TABLE users;",
-    )
-    .unwrap();
-
-    let entries = detect_migrations(dir.path(), true, false, "migrations")
-        .unwrap()
-        .expect("should return migrations");
-    assert_eq!(entries.len(), 2);
-    assert_eq!(entries[0].name, "0001_init");
-    assert_eq!(entries[1].name, "0002_users");
-    assert!(!entries[0].checksum.is_empty());
-}
-
-#[test]
-fn detect_migrations_custom_dir() {
-    let dir = tempdir().unwrap();
-    fs::create_dir_all(dir.path().join("db/migrations")).unwrap();
-    fs::write(
-        dir.path().join("db/migrations/0001_init.sql"),
-        "CREATE TABLE t;",
-    )
-    .unwrap();
-
-    let entries = detect_migrations(dir.path(), true, false, "db/migrations")
-        .unwrap()
-        .expect("should find migrations in custom dir");
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].name, "0001_init");
-}
-
 // ── resolve_build_command tests ──────────────────────────────
 
 #[test]
@@ -511,7 +437,7 @@ fn create_deployment_body_with_manifest_serializes_correctly() {
         production: false,
         branch: None,
         commit_sha: None,
-        migrations: None,
+
         bundle_sha256: None,
     };
 
@@ -529,7 +455,7 @@ fn create_deployment_body_without_manifest_omits_manifest_field() {
         production: false,
         branch: None,
         commit_sha: None,
-        migrations: None,
+
         bundle_sha256: None,
     };
 
