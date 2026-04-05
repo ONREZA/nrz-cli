@@ -91,6 +91,8 @@ async fn fetch_project_settings(
 struct FileEntry {
     path: String,
     size: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2087,6 +2089,7 @@ fn scan_dir_recursive_compress(
             if !precompressed.is_empty() && is_precompressed_path(&rel_str, precompressed) {
                 let raw = std::fs::read(&path)
                     .with_context(|| format!("failed to read {}", path.display()))?;
+                let hash = Some(format!("{:x}", Sha256::digest(&raw)));
                 let compressed = brotli_compress(&raw)
                     .with_context(|| format!("failed to compress {}", rel_str))?;
                 if compressed.len() < raw.len() {
@@ -2095,6 +2098,7 @@ fn scan_dir_recursive_compress(
                     files.push(FileEntry {
                         path: rel_str,
                         size: compressed_size,
+                        sha256: hash,
                     });
                 } else {
                     // Brotli expanded the file — upload raw bytes instead.
@@ -2109,12 +2113,28 @@ fn scan_dir_recursive_compress(
                     files.push(FileEntry {
                         path: rel_str,
                         size: raw.len() as u64,
+                        sha256: hash,
                     });
                 }
             } else {
+                let (size, hash) = match std::fs::read(&path) {
+                    Ok(raw) => {
+                        let h = format!("{:x}", Sha256::digest(&raw));
+                        (raw.len() as u64, Some(h))
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %rel_str,
+                            error = %e,
+                            "failed to read file for hashing, skipping sha256"
+                        );
+                        (entry.metadata()?.len(), None)
+                    }
+                };
                 files.push(FileEntry {
                     path: rel_str,
-                    size: entry.metadata()?.len(),
+                    size,
+                    sha256: hash,
                 });
             }
         }

@@ -47,6 +47,51 @@ fn scan_files_records_correct_sizes() {
 }
 
 #[test]
+fn scan_files_computes_sha256_from_original_content() {
+    let dir = tempdir().unwrap();
+    let content = "hello world";
+    fs::write(dir.path().join("file.txt"), content).unwrap();
+
+    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+
+    assert_eq!(files.len(), 1);
+    let hash = files[0]
+        .sha256
+        .as_deref()
+        .expect("sha256 should be present");
+    assert_eq!(hash.len(), 64);
+    assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+
+    // Known SHA-256 of "hello world"
+    assert_eq!(
+        hash,
+        "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    );
+}
+
+#[test]
+fn scan_files_sha256_deterministic_across_calls() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "same content").unwrap();
+
+    let (files1, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+    let (files2, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+
+    assert_eq!(files1[0].sha256, files2[0].sha256);
+}
+
+#[test]
+fn scan_files_sha256_differs_for_different_content() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("a.txt"), "content A").unwrap();
+    fs::write(dir.path().join("b.txt"), "content B").unwrap();
+
+    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+
+    assert_ne!(files[0].sha256, files[1].sha256);
+}
+
+#[test]
 fn scan_files_empty_directory() {
     let dir = tempdir().unwrap();
     let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
@@ -97,10 +142,12 @@ fn synthetic_sha_deterministic() {
         FileEntry {
             path: "a.js".into(),
             size: 100,
+            sha256: None,
         },
         FileEntry {
             path: "b.css".into(),
             size: 200,
+            sha256: None,
         },
     ];
 
@@ -114,10 +161,12 @@ fn synthetic_sha_differs_for_different_files() {
     let files_a = vec![FileEntry {
         path: "a.js".into(),
         size: 100,
+        sha256: None,
     }];
     let files_b = vec![FileEntry {
         path: "b.js".into(),
         size: 100,
+        sha256: None,
     }];
 
     assert_ne!(synthetic_sha(&files_a), synthetic_sha(&files_b));
@@ -128,6 +177,7 @@ fn synthetic_sha_is_64_hex_chars() {
     let files = vec![FileEntry {
         path: "x.txt".into(),
         size: 1,
+        sha256: None,
     }];
     let sha = synthetic_sha(&files);
     assert_eq!(sha.len(), 64);
@@ -481,6 +531,30 @@ fn prepare_upload_body_serializes_without_deprecated_fields() {
         value.get("bundleSha256").and_then(|v| v.as_str()),
         Some("abc123")
     );
+}
+
+#[test]
+fn file_entry_serializes_sha256_when_present() {
+    let entry = FileEntry {
+        path: "a.js".into(),
+        size: 42,
+        sha256: Some("abc123".into()),
+    };
+    let json = serde_json::to_value(&entry).unwrap();
+    assert_eq!(json["sha256"], "abc123");
+    assert_eq!(json["path"], "a.js");
+    assert_eq!(json["size"], 42);
+}
+
+#[test]
+fn file_entry_omits_sha256_when_none() {
+    let entry = FileEntry {
+        path: "b.js".into(),
+        size: 10,
+        sha256: None,
+    };
+    let json = serde_json::to_value(&entry).unwrap();
+    assert!(json.get("sha256").is_none());
 }
 
 // ── manifest → compute type mapping tests ────────────────────
@@ -1209,6 +1283,9 @@ fn scan_and_compress_compresses_precompressed_files() {
     assert_ne!(br_bytes.as_slice(), content.as_bytes());
     // Verify output differs from raw input (brotli has no magic bytes, but the stream is structurally different)
     assert_ne!(&br_bytes[..4], &content.as_bytes()[..4]);
+    // SHA-256 is computed from the original content, not from compressed
+    let expected_hash = format!("{:x}", sha2::Sha256::digest(content.as_bytes()));
+    assert_eq!(entries[0].sha256.as_deref(), Some(expected_hash.as_str()));
 }
 
 #[test]
@@ -1385,6 +1462,9 @@ fn scan_and_compress_skips_brotli_when_expansion() {
         content.len() as u64,
         "raw size must be reported"
     );
+    // SHA-256 must be computed from the original content even when brotli expands
+    let expected_hash = format!("{:x}", sha2::Sha256::digest(content));
+    assert_eq!(entries[0].sha256.as_deref(), Some(expected_hash.as_str()));
 }
 
 #[test]
@@ -1402,6 +1482,11 @@ fn scan_and_compress_empty_file_not_compressed() {
         "empty file should not be in compressed_map"
     );
     assert_eq!(entries[0].size, 0, "empty file size must be 0");
+    // SHA-256 of empty content is a well-known constant
+    assert_eq!(
+        entries[0].sha256.as_deref(),
+        Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    );
 }
 
 // ── static_layer_dirs / is_in_layer_dirs ────────────────────
@@ -1461,22 +1546,27 @@ fn file_list_filtered_for_process_with_manifest() {
         FileEntry {
             path: "_static/_next/static/chunks/main.js".into(),
             size: 100,
+            sha256: None,
         },
         FileEntry {
             path: "public/favicon.ico".into(),
             size: 50,
+            sha256: None,
         },
         FileEntry {
             path: "server.js".into(),
             size: 200,
+            sha256: None,
         },
         FileEntry {
             path: "node_modules/react/index.js".into(),
             size: 300,
+            sha256: None,
         },
         FileEntry {
             path: ".next/server/app/page.js".into(),
             size: 400,
+            sha256: None,
         },
     ];
     let sd = vec!["_static/".to_string(), "public/".to_string()];
