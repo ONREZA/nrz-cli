@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.23.0] - 2026-04-05
+
+### ✨ Features
+
+- **deploy:** compute per-file SHA-256 hash for edge cache deduplication ([612e678](https://github.com/ONREZA/nrz-cli/commit/612e6788bf5ae300f3232f4131d6dee603e74026))
+- **deploy:** auto-enable Next.js standalone and copy Prisma external packages ([05b1892](https://github.com/ONREZA/nrz-cli/commit/05b189299f5196d5eac4147bd83304a0809d34a3))
+
+### 📚 Documentation
+
+- task spec for per-file SHA-256 hashing during deploy ([32b7159](https://github.com/ONREZA/nrz-cli/commit/32b71597060f1590011390c08534ff3ec2237b96))
+
 ## [0.22.0] - 2026-04-04
 
 ### ✨ Features
