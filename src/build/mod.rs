@@ -144,11 +144,12 @@ pub async fn run_with_hint(
         }
         Some(manifest)
     } else if detection.framework == "nextjs"
-        && detection
+        && (detection
             .metadata
             .ssr_analysis
             .as_ref()
             .is_some_and(|ssr| ssr.has_standalone_output())
+            || output_dir.join("server.js").is_file())
     {
         if !output_dir.join("server.js").is_file() {
             anyhow::bail!(
@@ -511,6 +512,15 @@ fn prepare_nextjs_standalone(
     // are served from CDN without hitting the COMPUTE layer.
     copy_metadata_routes(output_dir, json)?;
 
+    // 5. Copy missing Prisma external packages into standalone node_modules.
+    //
+    // Prisma 6+ generates a client into `@prisma/client-<hash>` (a content-addressed
+    // package). Next.js standalone file tracing may not include these dynamically-named
+    // packages, causing runtime "Cannot find module" errors. We detect any `@prisma/client-*`
+    // directories in the project's node_modules that are absent from the standalone output
+    // and copy them over.
+    copy_missing_prisma_packages(project_dir, output_dir, json)?;
+
     Ok(())
 }
 
@@ -603,6 +613,81 @@ fn collect_body_files(
             *copied += 1;
         }
     }
+    Ok(())
+}
+
+/// Copy Prisma generated client packages missing from standalone output.
+///
+/// Prisma 6+ generates a client into `node_modules/@prisma/client-<hash>`. Next.js standalone
+/// file tracing may not include these dynamically-named packages. This function scans the
+/// project's `node_modules/@prisma/` for `client-*` directories and copies any that are
+/// absent from the standalone output's `node_modules/@prisma/`.
+fn copy_missing_prisma_packages(
+    project_dir: &Path,
+    output_dir: &Path,
+    json: bool,
+) -> anyhow::Result<()> {
+    let src_prisma_dir = project_dir.join("node_modules/@prisma");
+    if !src_prisma_dir.is_dir() {
+        return Ok(());
+    }
+
+    let dst_prisma_dir = output_dir.join("node_modules/@prisma");
+    let mut copied = 0usize;
+
+    let entries = std::fs::read_dir(&src_prisma_dir)
+        .with_context(|| format!("failed to read {}", src_prisma_dir.display()))?;
+
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        // Match @prisma/client-<hash> directories (e.g. "client-2c3a283f134fdcb6")
+        if !name_str.starts_with("client-") {
+            continue;
+        }
+
+        let dst_pkg = dst_prisma_dir.join(&name);
+        if dst_pkg.exists() {
+            continue;
+        }
+
+        let src_pkg = entry.path();
+        // Resolve symlinks: in pnpm setups the package may be a symlink to the store
+        let src_resolved = if src_pkg.is_symlink() {
+            match std::fs::canonicalize(&src_pkg) {
+                Ok(resolved) => resolved,
+                Err(e) => {
+                    tracing::warn!(
+                        path = %src_pkg.display(),
+                        error = %e,
+                        "could not resolve Prisma package symlink, skipping"
+                    );
+                    continue;
+                }
+            }
+        } else {
+            src_pkg
+        };
+
+        if !src_resolved.is_dir() {
+            continue;
+        }
+
+        copy_dir_recursive(&src_resolved, &dst_pkg)?;
+        copied += 1;
+    }
+
+    if copied > 0 {
+        output::status(
+            json,
+            "+",
+            format!("Copied {copied} Prisma external package(s) to standalone output"),
+            output::Phase::Build,
+        );
+    }
+
     Ok(())
 }
 

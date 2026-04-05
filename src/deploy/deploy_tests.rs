@@ -1488,3 +1488,44 @@ fn file_list_filtered_for_process_with_manifest() {
     assert_eq!(filtered[0].path, "_static/_next/static/chunks/main.js");
     assert_eq!(filtered[1].path, "public/favicon.ico");
 }
+
+// ── is_nextjs_project ───────────────────────────────────────
+
+#[test]
+fn is_nextjs_detects_next_in_dependencies() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"next":"^16.2.0","react":"^19.0.0"}}"#,
+    )
+    .unwrap();
+    assert!(is_nextjs_project(dir.path()));
+}
+
+#[test]
+fn is_nextjs_detects_next_in_dev_dependencies() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies":{"next":"16.2.0"}}"#,
+    )
+    .unwrap();
+    assert!(is_nextjs_project(dir.path()));
+}
+
+#[test]
+fn is_nextjs_false_for_non_next_project() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"react":"^19.0.0","vite":"^6.0.0"}}"#,
+    )
+    .unwrap();
+    assert!(!is_nextjs_project(dir.path()));
+}
+
+#[test]
+fn is_nextjs_false_without_package_json() {
+    let dir = tempdir().unwrap();
+    assert!(!is_nextjs_project(dir.path()));
+}

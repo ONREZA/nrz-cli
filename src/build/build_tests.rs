@@ -1,6 +1,7 @@
 use super::{
-    collect_body_files, compute_aware_output_dirs, copy_dir_recursive, detect_output_dir,
-    prepare_nextjs_standalone, run_with_hint, try_generate_ssr_manifest,
+    collect_body_files, compute_aware_output_dirs, copy_dir_recursive,
+    copy_missing_prisma_packages, detect_output_dir, prepare_nextjs_standalone, run_with_hint,
+    try_generate_ssr_manifest,
 };
 use crate::cli::BuildArgs;
 
@@ -1217,4 +1218,209 @@ fn try_generate_ssr_returns_none_without_ssr_analysis() {
     let detection = make_detection("nuxt", None);
 
     assert!(try_generate_ssr_manifest(&detection, dir.path()).is_none());
+}
+
+// ── copy_missing_prisma_packages ────────────────────────────
+
+#[test]
+fn prisma_client_hash_packages_copied_to_standalone() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    // Create @prisma/client-<hash> in project node_modules
+    let src = project
+        .path()
+        .join("node_modules/@prisma/client-2c3a283f134fdcb6");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("index.js"), "// prisma client").unwrap();
+    std::fs::write(
+        src.join("package.json"),
+        r#"{"name":"@prisma/client-2c3a283f134fdcb6"}"#,
+    )
+    .unwrap();
+
+    // Create standalone output with node_modules/@prisma/ but WITHOUT the hash package
+    std::fs::create_dir_all(output.path().join("node_modules/@prisma/client")).unwrap();
+    std::fs::write(
+        output.path().join("node_modules/@prisma/client/index.js"),
+        "// base client",
+    )
+    .unwrap();
+
+    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+
+    // Hash package should now exist in output
+    let dst = output
+        .path()
+        .join("node_modules/@prisma/client-2c3a283f134fdcb6");
+    assert!(dst.is_dir());
+    assert!(dst.join("index.js").is_file());
+    assert!(dst.join("package.json").is_file());
+}
+
+#[test]
+fn prisma_packages_not_copied_when_already_present() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    let hash = "client-abc123";
+    let src = project.path().join(format!("node_modules/@prisma/{hash}"));
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("index.js"), "// src version").unwrap();
+
+    // Already present in output
+    let dst = output.path().join(format!("node_modules/@prisma/{hash}"));
+    std::fs::create_dir_all(&dst).unwrap();
+    std::fs::write(dst.join("index.js"), "// dst version").unwrap();
+
+    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+
+    // Should NOT overwrite — dst version should remain
+    let content = std::fs::read_to_string(dst.join("index.js")).unwrap();
+    assert_eq!(content, "// dst version");
+}
+
+#[test]
+fn prisma_noop_when_no_prisma_in_project() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    // No node_modules/@prisma/ at all
+    std::fs::create_dir_all(project.path().join("node_modules")).unwrap();
+
+    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+
+    // Should not create anything in output
+    assert!(!output.path().join("node_modules/@prisma").is_dir());
+}
+
+#[test]
+fn prisma_skips_non_client_hash_packages() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    // Create @prisma/engines and @prisma/client (not client-<hash>)
+    std::fs::create_dir_all(project.path().join("node_modules/@prisma/engines")).unwrap();
+    std::fs::write(
+        project
+            .path()
+            .join("node_modules/@prisma/engines/schema.js"),
+        "// engine",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join("node_modules/@prisma/client")).unwrap();
+    std::fs::write(
+        project.path().join("node_modules/@prisma/client/index.js"),
+        "// client",
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(output.path().join("node_modules/@prisma")).unwrap();
+
+    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+
+    // Neither engines nor client should be copied (only client-<hash> pattern)
+    assert!(!output.path().join("node_modules/@prisma/engines").exists());
+    assert!(!output.path().join("node_modules/@prisma/client").exists());
+}
+
+#[test]
+fn prisma_copies_multiple_hash_packages() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    for hash in ["client-aaa111", "client-bbb222"] {
+        let src = project.path().join(format!("node_modules/@prisma/{hash}"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("index.js"), hash).unwrap();
+    }
+
+    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+
+    for hash in ["client-aaa111", "client-bbb222"] {
+        let dst = output.path().join(format!("node_modules/@prisma/{hash}"));
+        assert!(dst.is_dir(), "missing {hash}");
+        assert_eq!(std::fs::read_to_string(dst.join("index.js")).unwrap(), hash);
+    }
+}
+
+#[test]
+fn prisma_standalone_integration_via_prepare() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    // Set up minimal standalone structure
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(project.path().join(".next/static/chunks/main.js"), "// js").unwrap();
+    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+
+    // Add Prisma hash package
+    let src = project.path().join("node_modules/@prisma/client-deadbeef");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("index.js"), "// prisma").unwrap();
+
+    prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
+
+    // Static should be copied
+    assert!(
+        output
+            .path()
+            .join("_static/_next/static/chunks/main.js")
+            .is_file()
+    );
+    // Prisma package should also be copied
+    assert!(
+        output
+            .path()
+            .join("node_modules/@prisma/client-deadbeef/index.js")
+            .is_file()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prisma_copies_through_symlink() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    // Simulate pnpm: real package lives elsewhere, symlink in node_modules
+    let store = tempfile::tempdir().unwrap();
+    let real_pkg = store.path().join("@prisma/client-sym123");
+    std::fs::create_dir_all(&real_pkg).unwrap();
+    std::fs::write(real_pkg.join("index.js"), "// from store").unwrap();
+
+    let prisma_dir = project.path().join("node_modules/@prisma");
+    std::fs::create_dir_all(&prisma_dir).unwrap();
+    std::os::unix::fs::symlink(&real_pkg, prisma_dir.join("client-sym123")).unwrap();
+
+    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+
+    let dst = output.path().join("node_modules/@prisma/client-sym123");
+    assert!(dst.is_dir());
+    assert_eq!(
+        std::fs::read_to_string(dst.join("index.js")).unwrap(),
+        "// from store"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prisma_skips_dangling_symlink() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    let prisma_dir = project.path().join("node_modules/@prisma");
+    std::fs::create_dir_all(&prisma_dir).unwrap();
+    // Symlink pointing to nonexistent path
+    std::os::unix::fs::symlink("/nonexistent/path", prisma_dir.join("client-dangling")).unwrap();
+
+    // Should not panic or error — just skip with a warning
+    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+
+    assert!(
+        !output
+            .path()
+            .join("node_modules/@prisma/client-dangling")
+            .exists()
+    );
 }

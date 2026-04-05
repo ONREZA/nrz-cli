@@ -375,6 +375,21 @@ pub async fn run(
         run_install_step(&project_dir, json, server_install_cmd)?;
     }
 
+    // Pre-build: detect Next.js and inject NEXT_PRIVATE_STANDALONE=1 so users don't have to
+    // manually set `output: 'standalone'` in next.config. The env var is a no-op when the user
+    // has explicitly set `output: 'export'`.
+    let build_env: Vec<(&str, &str)> = if is_nextjs_project(&project_dir) {
+        output::status(
+            json,
+            "~",
+            "Next.js detected, enabling standalone output (NEXT_PRIVATE_STANDALONE=1)",
+            output::Phase::Deploy,
+        );
+        vec![("NEXT_PRIVATE_STANDALONE", "1")]
+    } else {
+        vec![]
+    };
+
     // Run build step (default: enabled, skip with --skip-build)
     if !args.skip_build
         && let Some(cmd) = resolve_build_command(
@@ -384,7 +399,7 @@ pub async fn run(
             server_build_cmd,
         )
     {
-        run_build_step(&cmd, &project_dir, json)?;
+        run_build_step(&cmd, &project_dir, json, &build_env)?;
     }
 
     // Detect framework once — shared by build (output dir search) and deploy (compute type)
@@ -1740,6 +1755,14 @@ fn resolve_build_command(
     Some(format!("{pm} run build"))
 }
 
+/// Lightweight pre-build check: does the project have `next` as a dependency?
+fn is_nextjs_project(project_dir: &Path) -> bool {
+    let Some(pkg) = crate::detect::package_json::PackageJson::load(project_dir) else {
+        return false;
+    };
+    pkg.dependencies.contains_key("next") || pkg.dev_dependencies.contains_key("next")
+}
+
 /// Run a shell command, streaming stdout/stderr through structured JSON in JSON mode.
 ///
 /// In JSON mode: pipes stdout/stderr, wraps each line via `output::log_line()`.
@@ -1753,6 +1776,7 @@ fn run_command_streaming(
     json: bool,
     phase: output::Phase,
     child_stream: &str,
+    extra_env: &[(&str, &str)],
 ) -> anyhow::Result<()> {
     use std::io::BufRead;
 
@@ -1765,6 +1789,7 @@ fn run_command_streaming(
         let status = std::process::Command::new(shell)
             .args(shell_args)
             .current_dir(project_dir)
+            .envs(extra_env.iter().copied())
             .status()
             .with_context(|| format!("failed to start command: {cmd}"))?;
         if !status.success() {
@@ -1780,6 +1805,7 @@ fn run_command_streaming(
     let mut child = std::process::Command::new(shell)
         .args(shell_args)
         .current_dir(project_dir)
+        .envs(extra_env.iter().copied())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -1889,19 +1915,38 @@ fn run_install_step(
         output::Phase::Deploy,
     );
     // Install child output → debug stream (npm noise), nrz markers go through output::status/success
-    run_command_streaming(&cmd, project_dir, json, output::Phase::Install, "debug")?;
+    run_command_streaming(
+        &cmd,
+        project_dir,
+        json,
+        output::Phase::Install,
+        "debug",
+        &[],
+    )?;
     output::success(json, "Dependencies installed", output::Phase::Deploy);
     Ok(())
 }
 
-fn run_build_step(cmd: &str, project_dir: &Path, json: bool) -> anyhow::Result<()> {
+fn run_build_step(
+    cmd: &str,
+    project_dir: &Path,
+    json: bool,
+    extra_env: &[(&str, &str)],
+) -> anyhow::Result<()> {
     if cmd.trim().is_empty() {
         anyhow::bail!("empty build command");
     }
 
     output::status(json, ">", format!("Building: {cmd}"), output::Phase::Deploy);
     // Build child output → user stream (webpack/vite output is useful)
-    run_command_streaming(cmd, project_dir, json, output::Phase::Build, "user")?;
+    run_command_streaming(
+        cmd,
+        project_dir,
+        json,
+        output::Phase::Build,
+        "user",
+        extra_env,
+    )?;
     output::success(json, "Build completed", output::Phase::Deploy);
     Ok(())
 }
