@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.0] - 2026-04-12
+
+### ✨ Features
+
+- **deploy:** add TanStack Start, Hydrogen presets and fix framework detection ([7626f9e](https://github.com/ONREZA/nrz-cli/commit/7626f9e886a8972db93a2184eabf0a8f106c55c8))
+
 ## [0.23.0] - 2026-04-05
 
 ### ✨ Features
