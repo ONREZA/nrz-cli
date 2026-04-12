@@ -8,7 +8,7 @@ pub static PRESETS: &[FrameworkPreset] = &[
     FrameworkPreset {
         slug: "blitzjs",
         name: "Blitz.js",
-        dependencies: &["blitz"],
+        dependencies: &["@blitzjs/next"],
         output_directory: ".next",
         build_script: Some("build"),
         category: PresetCategory::Server,
@@ -22,6 +22,26 @@ pub static PRESETS: &[FrameworkPreset] = &[
         output_directory: ".keystone",
         build_script: Some("build"),
         category: PresetCategory::Server,
+        priority: 1,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "payload",
+        name: "Payload CMS",
+        dependencies: &["@payloadcms/next"],
+        output_directory: ".next",
+        build_script: Some("build"),
+        category: PresetCategory::Server,
+        priority: 1,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "hydrogen",
+        name: "Hydrogen",
+        dependencies: &["@shopify/hydrogen"],
+        output_directory: "build",
+        build_script: Some("build"),
+        category: PresetCategory::React,
         priority: 1,
         runtime: RuntimeType::Node,
     },
@@ -114,6 +134,27 @@ pub static PRESETS: &[FrameworkPreset] = &[
         output_directory: "dist",
         build_script: Some("build"),
         category: PresetCategory::Other,
+        priority: 9,
+        runtime: RuntimeType::Node,
+    },
+    FrameworkPreset {
+        slug: "tanstack-start",
+        name: "TanStack Start",
+        dependencies: &["@tanstack/react-start"],
+        output_directory: "dist",
+        build_script: Some("build"),
+        category: PresetCategory::React,
+        priority: 9,
+        runtime: RuntimeType::Node,
+    },
+    // Tier 1c: Mobile-first web frameworks (priority 9)
+    FrameworkPreset {
+        slug: "expo",
+        name: "Expo",
+        dependencies: &["expo"],
+        output_directory: "dist",
+        build_script: None,
+        category: PresetCategory::React,
         priority: 9,
         runtime: RuntimeType::Node,
     },
@@ -332,16 +373,6 @@ pub static PRESETS: &[FrameworkPreset] = &[
         runtime: RuntimeType::Node,
     },
     FrameworkPreset {
-        slug: "payload",
-        name: "Payload CMS",
-        dependencies: &["payload"],
-        output_directory: "dist",
-        build_script: Some("build"),
-        category: PresetCategory::Server,
-        priority: 40,
-        runtime: RuntimeType::Node,
-    },
-    FrameworkPreset {
         slug: "strapi",
         name: "Strapi",
         dependencies: &["@strapi/strapi"],
@@ -416,6 +447,7 @@ pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
         "react-router" => &["build/client", "build/server", "build"],
         "remix" => &["build/client", "build/server", "build"],
         "gatsby" => &["public"],
+        "expo" => &["dist"],
         "cra" => &["build"],
         "solidstart" => &[".output"],
         "qwik" => &["dist", "server"],
@@ -439,11 +471,13 @@ pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
         "express" => &["."],
         "koa" => &["."],
         "h3" => &["dist", "."],
+        "tanstack-start" => &["dist"],
+        "hydrogen" => &["build/client", "build/server", "build"],
         "nitro" => &[".output"],
-        "blitzjs" => &[".next"],
+        "blitzjs" => &[".next/standalone", ".next"],
         "keystone" => &[".keystone"],
         "redwoodjs" => &["api/dist", "web/dist"],
-        "payload" => &["dist", "build"],
+        "payload" => &[".next/standalone", ".next"],
         "strapi" => &["dist", "build"],
         "static-html" => &["."],
         _ => &[],
@@ -464,6 +498,10 @@ pub fn is_ssr_framework(slug: &str) -> bool {
             | "solidstart"
             | "qwik"
             | "analog"
+            | "blitzjs"
+            | "payload"
+            | "tanstack-start"
+            | "hydrogen"
     )
 }
 
@@ -480,12 +518,16 @@ pub fn is_server_framework(slug: &str) -> bool {
             | "koa"
             | "h3"
             | "nitro"
-            | "blitzjs"
             | "keystone"
             | "redwoodjs"
-            | "payload"
             | "strapi"
     )
+}
+
+/// Check if a framework slug is a Next.js wrapper (uses Next.js internals).
+#[allow(dead_code)]
+pub fn is_nextjs_wrapper(slug: &str) -> bool {
+    matches!(slug, "blitzjs" | "payload")
 }
 
 /// Get presets that have dependencies (used for detection), sorted by priority.

@@ -278,7 +278,7 @@ fn compute_aware_output_dirs(
     detection: &crate::detect::types::DetectionResult,
 ) -> Vec<&'static str> {
     match detection.framework.as_str() {
-        "nextjs" => {
+        "nextjs" | "blitzjs" | "payload" => {
             if let Some(ref ssr) = detection.metadata.ssr_analysis {
                 if ssr.is_static_compatible {
                     return vec!["out"];
@@ -300,15 +300,15 @@ fn compute_aware_output_dirs(
             }
             vec![".output"]
         }
-        "remix" | "react-router" => {
+        "remix" | "react-router" | "hydrogen" => {
             if let Some(ref ssr) = detection.metadata.ssr_analysis
                 && ssr.is_static_compatible
             {
                 return vec!["build/client", "build"];
             }
-            // SSR: build/ is the root containing both client/ and server/
             vec!["build"]
         }
+        "tanstack-start" => vec!["dist"],
         slug => crate::detect::presets::framework_output_dirs(slug).to_vec(),
     }
 }
@@ -319,9 +319,11 @@ fn compute_aware_output_dirs(
 /// Expected SSR entry point for a framework, or `None` for non-SSR frameworks.
 fn ssr_expected_entry(framework: &str) -> Option<&'static str> {
     match framework {
+        "nextjs" | "blitzjs" | "payload" => Some("server.js"),
         "nuxt" => Some("server/index.mjs"),
         "sveltekit" => Some("index.js"),
-        "remix" | "react-router" => Some("server/index.js"),
+        "remix" | "react-router" | "hydrogen" => Some("server/index.js"),
+        "tanstack-start" => Some("server/server.js"),
         "astro" => Some("server/entry.mjs"),
         _ => None,
     }

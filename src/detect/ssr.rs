@@ -8,12 +8,13 @@ use super::types::SsrAnalysis;
 /// Returns `None` if the framework is not SSR-capable.
 pub fn analyze_ssr(fs: &dyn Fs, framework: &str) -> Option<SsrAnalysis> {
     match framework {
-        "nextjs" => Some(analyze_nextjs(fs)),
+        "nextjs" | "blitzjs" | "payload" => Some(analyze_nextjs(fs)),
         "nuxt" => Some(analyze_nuxt(fs)),
         "sveltekit" => Some(analyze_sveltekit(fs)),
         "astro" => Some(analyze_astro(fs)),
-        "react-router" => Some(analyze_react_router(fs)),
+        "react-router" | "hydrogen" => Some(analyze_react_router(fs)),
         "remix" => Some(analyze_remix(fs)),
+        "tanstack-start" => Some(analyze_tanstack_start(fs)),
         "solidstart" => Some(analyze_solidstart(fs)),
         "qwik" => Some(analyze_qwik(fs)),
         "analog" => Some(analyze_analog(fs)),
@@ -424,6 +425,21 @@ fn analyze_solidstart(fs: &dyn Fs) -> SsrAnalysis {
 
     SsrAnalysis {
         is_static_compatible,
+        ssr_features: features,
+    }
+}
+
+// ── TanStack Start ─────────────────────────────────────────────
+
+fn analyze_tanstack_start(fs: &dyn Fs) -> SsrAnalysis {
+    let mut features = Vec::new();
+
+    if fs.is_dir("src/routes") && walk_for_content(fs, "src/routes", "createServerFn") {
+        features.push("server functions".into());
+    }
+
+    SsrAnalysis {
+        is_static_compatible: false,
         ssr_features: features,
     }
 }

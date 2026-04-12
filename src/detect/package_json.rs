@@ -67,10 +67,7 @@ impl PackageJson {
         match serde_json::from_str(&content) {
             Ok(pkg) => Some(pkg),
             Err(e) => {
-                eprintln!(
-                    "  {} could not parse package.json: {e}",
-                    console::style("warn").yellow(),
-                );
+                tracing::warn!("could not parse package.json: {e}");
                 None
             }
         }
@@ -86,22 +83,14 @@ impl PackageJson {
             Ok(c) => c,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
             Err(e) => {
-                eprintln!(
-                    "  {} could not read {}: {e}",
-                    console::style("warn").yellow(),
-                    path.display(),
-                );
+                tracing::warn!("could not read {}: {e}", path.display());
                 return None;
             }
         };
         match serde_json::from_str(&content) {
             Ok(pkg) => Some(pkg),
             Err(e) => {
-                eprintln!(
-                    "  {} could not parse {}: {e}",
-                    console::style("warn").yellow(),
-                    path.display(),
-                );
+                tracing::warn!("could not parse {}: {e}", path.display());
                 None
             }
         }

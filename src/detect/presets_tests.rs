@@ -58,8 +58,13 @@ fn ssr_frameworks_recognized() {
     assert!(is_ssr_framework("solidstart"));
     assert!(is_ssr_framework("qwik"));
     assert!(is_ssr_framework("analog"));
+    assert!(is_ssr_framework("blitzjs"));
+    assert!(is_ssr_framework("payload"));
+    assert!(is_ssr_framework("tanstack-start"));
+    assert!(is_ssr_framework("hydrogen"));
     assert!(!is_ssr_framework("vite"));
     assert!(!is_ssr_framework("hono"));
+    assert!(!is_ssr_framework("expo"));
 }
 
 #[test]
@@ -73,11 +78,12 @@ fn server_frameworks_recognized() {
     assert!(is_server_framework("koa"));
     assert!(is_server_framework("h3"));
     assert!(is_server_framework("nitro"));
-    assert!(is_server_framework("blitzjs"));
     assert!(is_server_framework("keystone"));
     assert!(is_server_framework("redwoodjs"));
-    assert!(is_server_framework("payload"));
     assert!(is_server_framework("strapi"));
+    // Blitz.js and Payload are Next.js wrappers, not plain server frameworks
+    assert!(!is_server_framework("blitzjs"));
+    assert!(!is_server_framework("payload"));
     assert!(!is_server_framework("nextjs"));
     assert!(!is_server_framework("vite"));
 }
@@ -95,8 +101,8 @@ fn detection_presets_have_dependencies() {
 
 #[test]
 fn total_preset_count() {
-    // 36 detection presets (static-html is a separate const, not in PRESETS)
-    assert_eq!(PRESETS.len(), 36);
+    // 39 detection presets (static-html is a separate const, not in PRESETS)
+    assert_eq!(PRESETS.len(), 39);
 }
 
 #[test]
@@ -124,6 +130,68 @@ fn tier1_presets_correct() {
     let gatsby = get_preset_by_slug("gatsby").unwrap();
     assert_eq!(gatsby.dependencies, &["gatsby"]);
     assert_eq!(gatsby.output_directory, "public");
+}
+
+#[test]
+fn expo_preset_correct() {
+    let expo = get_preset_by_slug("expo").unwrap();
+    assert_eq!(expo.dependencies, &["expo"]);
+    assert_eq!(expo.output_directory, "dist");
+    assert_eq!(expo.priority, 9);
+}
+
+#[test]
+fn nextjs_wrappers_correct() {
+    let blitzjs = get_preset_by_slug("blitzjs").unwrap();
+    assert_eq!(blitzjs.priority, 1);
+    assert_eq!(blitzjs.output_directory, ".next");
+    assert!(is_nextjs_wrapper(blitzjs.slug));
+
+    let payload = get_preset_by_slug("payload").unwrap();
+    assert_eq!(payload.priority, 1);
+    assert_eq!(payload.output_directory, ".next");
+    assert!(is_nextjs_wrapper(payload.slug));
+
+    assert!(!is_nextjs_wrapper("nextjs"));
+    assert!(!is_nextjs_wrapper("vite"));
+}
+
+#[test]
+fn framework_output_dirs_expo() {
+    let dirs = framework_output_dirs("expo");
+    assert!(dirs.contains(&"dist"));
+}
+
+#[test]
+fn tanstack_start_preset_correct() {
+    let ts = get_preset_by_slug("tanstack-start").unwrap();
+    assert_eq!(ts.dependencies, &["@tanstack/react-start"]);
+    assert_eq!(ts.output_directory, "dist");
+    assert_eq!(ts.priority, 9);
+    assert!(is_ssr_framework(ts.slug));
+}
+
+#[test]
+fn hydrogen_preset_correct() {
+    let h = get_preset_by_slug("hydrogen").unwrap();
+    assert_eq!(h.dependencies, &["@shopify/hydrogen"]);
+    assert_eq!(h.output_directory, "build");
+    assert_eq!(h.priority, 1);
+    assert!(is_ssr_framework(h.slug));
+}
+
+#[test]
+fn framework_output_dirs_tanstack_start() {
+    let dirs = framework_output_dirs("tanstack-start");
+    assert!(dirs.contains(&"dist"));
+}
+
+#[test]
+fn framework_output_dirs_hydrogen() {
+    let dirs = framework_output_dirs("hydrogen");
+    assert!(dirs.contains(&"build"));
+    assert!(dirs.contains(&"build/client"));
+    assert!(dirs.contains(&"build/server"));
 }
 
 #[test]
@@ -179,7 +247,7 @@ fn server_framework_presets_correct() {
     assert_eq!(nitro.output_directory, ".output");
 
     let blitzjs = get_preset_by_slug("blitzjs").unwrap();
-    assert_eq!(blitzjs.dependencies, &["blitz"]);
+    assert_eq!(blitzjs.dependencies, &["@blitzjs/next"]);
     assert_eq!(blitzjs.output_directory, ".next");
 
     let keystone = get_preset_by_slug("keystone").unwrap();
@@ -191,8 +259,9 @@ fn server_framework_presets_correct() {
     assert_eq!(redwoodjs.output_directory, "api/dist");
 
     let payload = get_preset_by_slug("payload").unwrap();
-    assert_eq!(payload.dependencies, &["payload"]);
-    assert_eq!(payload.output_directory, "dist");
+    assert_eq!(payload.dependencies, &["@payloadcms/next"]);
+    assert_eq!(payload.output_directory, ".next");
+    assert_eq!(payload.priority, 1);
 
     let strapi = get_preset_by_slug("strapi").unwrap();
     assert_eq!(strapi.dependencies, &["@strapi/strapi"]);
@@ -331,6 +400,7 @@ fn framework_output_dirs_analog() {
 #[test]
 fn framework_output_dirs_blitzjs() {
     let dirs = framework_output_dirs("blitzjs");
+    assert!(dirs.contains(&".next/standalone"));
     assert!(dirs.contains(&".next"));
 }
 
@@ -350,8 +420,8 @@ fn framework_output_dirs_redwoodjs() {
 #[test]
 fn framework_output_dirs_payload() {
     let dirs = framework_output_dirs("payload");
-    assert!(dirs.contains(&"dist"));
-    assert!(dirs.contains(&"build"));
+    assert!(dirs.contains(&".next/standalone"));
+    assert!(dirs.contains(&".next"));
 }
 
 #[test]

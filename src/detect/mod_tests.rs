@@ -918,6 +918,160 @@ fn fastify_wins_over_express() {
     assert_eq!(result.framework, "fastify");
 }
 
+// ── Expo detection ──────────────────────────────────────────
+
+#[test]
+fn detect_expo_is_static() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"expo": "~52.0.0", "react": "^19.0.0", "react-native": "0.76.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "expo");
+    assert_eq!(result.name, "Expo");
+    assert_eq!(result.suggested_compute, ComputeType::Static);
+}
+
+#[test]
+fn expo_loses_to_nextjs() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"expo": "~52.0.0", "next": "^15.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nextjs");
+}
+
+// ── Payload v3 detection ────────────────────────────────────
+
+#[test]
+fn payload_v3_detected_as_payload_with_next_output() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"payload": "^3.0.0", "next": "^15.0.0", "@payloadcms/next": "^3.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "payload");
+    assert_eq!(result.name, "Payload CMS");
+    assert_eq!(
+        result
+            .metadata
+            .build_info
+            .as_ref()
+            .unwrap()
+            .output_dir
+            .as_deref(),
+        Some(".next")
+    );
+}
+
+#[test]
+fn payload_wins_over_nextjs_for_v3() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"payload": "^3.0.0", "next": "^15.0.0", "@payloadcms/next": "^3.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "payload");
+}
+
+#[test]
+fn payload_v2_detected_as_nextjs_not_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"payload": "^2.0.0", "express": "^4.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_ne!(result.framework, "payload");
+}
+
+#[test]
+fn blitzjs_detected_by_blitzjs_next() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@blitzjs/next": "2.0.0", "next": "^14.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "blitzjs");
+    assert_eq!(result.name, "Blitz.js");
+}
+
+// ── TanStack Start detection ────────────────────────────────
+
+#[test]
+fn detect_tanstack_start() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@tanstack/react-start": "^1.0.0", "react": "^19.0.0", "vinxi": "^0.5.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "tanstack-start");
+    assert_eq!(result.name, "TanStack Start");
+}
+
+#[test]
+fn tanstack_start_wins_over_vite() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@tanstack/react-start": "^1.0.0", "vite": "^6.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "tanstack-start");
+}
+
+// ── Hydrogen detection ──────────────────────────────────────
+
+#[test]
+fn detect_hydrogen() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@shopify/hydrogen": "^2026.4.0", "@react-router/dev": "^7.0.0", "react": "^19.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "hydrogen");
+    assert_eq!(result.name, "Hydrogen");
+}
+
+#[test]
+fn hydrogen_wins_over_react_router() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"@shopify/hydrogen": "^2026.4.0", "@react-router/dev": "^7.0.0"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "hydrogen");
+}
+
 // ── detect_config_files ─────────────────────────────────────
 
 #[test]
@@ -1014,6 +1168,24 @@ fn config_files_astro() {
 }
 
 #[test]
+fn config_files_tanstack_start() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("vite.config.ts"), "").unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    let files = detect_config_files(&fs, "tanstack-start");
+    assert_eq!(files, vec!["vite.config.ts"]);
+}
+
+#[test]
+fn config_files_hydrogen() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("vite.config.ts"), "").unwrap();
+    let fs = fs::LocalFs::new(dir.path());
+    let files = detect_config_files(&fs, "hydrogen");
+    assert_eq!(files, vec!["vite.config.ts"]);
+}
+
+#[test]
 fn config_files_empty_when_none_exist() {
     let dir = tempfile::tempdir().unwrap();
     let fs = fs::LocalFs::new(dir.path());
@@ -1057,7 +1229,10 @@ fn framework_entry_point_nestjs() {
 
 #[test]
 fn framework_entry_point_adonis() {
-    assert_eq!(framework_entry_point("adonis"), Some("server.js".into()));
+    assert_eq!(
+        framework_entry_point("adonis"),
+        Some("bin/server.js".into())
+    );
 }
 
 #[test]
@@ -1094,6 +1269,22 @@ fn framework_entry_point_strapi() {
 #[test]
 fn framework_entry_point_payload() {
     assert_eq!(framework_entry_point("payload"), Some("server.js".into()));
+}
+
+#[test]
+fn framework_entry_point_tanstack_start() {
+    assert_eq!(
+        framework_entry_point("tanstack-start"),
+        Some("server/server.js".into())
+    );
+}
+
+#[test]
+fn framework_entry_point_hydrogen() {
+    assert_eq!(
+        framework_entry_point("hydrogen"),
+        Some("server/index.js".into())
+    );
 }
 
 #[test]

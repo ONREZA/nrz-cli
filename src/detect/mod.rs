@@ -263,14 +263,26 @@ fn detect_config_files(fs: &dyn Fs, framework: &str) -> Vec<String> {
             "vite.config.js",
             "vite.config.mjs",
         ],
+        "expo" => &["app.json", "app.config.js", "app.config.ts"],
         "gatsby" => &["gatsby-config.js", "gatsby-config.ts"],
         "angular" => &["angular.json"],
         "docusaurus" => &["docusaurus.config.js", "docusaurus.config.ts"],
         "vitepress" => &[".vitepress/config.ts", ".vitepress/config.js"],
-        "blitzjs" => &["blitz.config.ts", "blitz.config.js"],
+        "blitzjs" | "payload" => &[
+            "next.config.js",
+            "next.config.mjs",
+            "next.config.ts",
+            "next.config.mts",
+        ],
+        "tanstack-start" => &[
+            "vite.config.ts",
+            "vite.config.mts",
+            "vite.config.js",
+            "vite.config.mjs",
+        ],
+        "hydrogen" => &["vite.config.ts", "vite.config.js"],
         "keystone" => &["keystone.ts", "keystone.js"],
         "redwoodjs" => &["redwood.toml"],
-        "payload" => &["payload.config.ts", "payload.config.js"],
         "strapi" => &["config/server.ts", "config/server.js"],
         _ => &[],
     };
@@ -312,7 +324,7 @@ fn resolve_framework_output_dir(
     fs: &dyn Fs,
 ) -> String {
     match preset.slug {
-        "nextjs" => {
+        "nextjs" | "blitzjs" | "payload" => {
             if let Some(ssr) = ssr {
                 if ssr.is_static_compatible {
                     return "out".to_string();
@@ -331,7 +343,7 @@ fn resolve_framework_output_dir(
             }
             ".output".to_string()
         }
-        "react-router" | "remix" => {
+        "react-router" | "remix" | "hydrogen" => {
             if let Some(ssr) = ssr
                 && ssr.is_static_compatible
             {
@@ -339,6 +351,7 @@ fn resolve_framework_output_dir(
             }
             "build".to_string()
         }
+        "tanstack-start" => "dist".to_string(),
         _ => {
             // For non-SSR, non-server frameworks with a vite config, check outDir override
             if !presets::is_ssr_framework(preset.slug)
@@ -486,7 +499,7 @@ pub fn detect_framework_slug(project_dir: &Path) -> Option<String> {
 /// Known entry point for a framework's build output (relative to output dir).
 fn framework_entry_point(slug: &str) -> Option<String> {
     match slug {
-        "nextjs" => Some("server.js".into()),
+        "nextjs" | "blitzjs" | "payload" => Some("server.js".into()),
         "nuxt" => Some("server/index.mjs".into()),
         "sveltekit" => Some("index.js".into()),
         "react-router" => Some("server/index.js".into()),
@@ -495,12 +508,12 @@ fn framework_entry_point(slug: &str) -> Option<String> {
         "qwik" => Some("server/entry.qwik-city.mjs".into()),
         "analog" => Some("server/index.mjs".into()),
         "nestjs" => Some("main.js".into()),
-        "adonis" => Some("server.js".into()),
+        "adonis" => Some("bin/server.js".into()),
+        "tanstack-start" => Some("server/server.js".into()),
+        "hydrogen" => Some("server/index.js".into()),
         "nitro" => Some("server/index.mjs".into()),
-        "blitzjs" => Some("server.js".into()),
         "keystone" => Some("keystone.js".into()),
         "redwoodjs" => Some("server.js".into()),
-        "payload" => Some("server.js".into()),
         "strapi" => Some("server.js".into()),
         _ => None,
     }

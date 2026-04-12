@@ -215,7 +215,11 @@ fn build_command_config_wins_over_auto() {
 #[test]
 fn build_command_auto_detect_bun_lock() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
     fs::write(dir.path().join("bun.lock"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
@@ -226,7 +230,11 @@ fn build_command_auto_detect_bun_lock() {
 #[test]
 fn build_command_auto_detect_bun_lockb() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
     fs::write(dir.path().join("bun.lockb"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
@@ -237,7 +245,11 @@ fn build_command_auto_detect_bun_lockb() {
 #[test]
 fn build_command_auto_detect_pnpm() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
     fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
@@ -248,7 +260,11 @@ fn build_command_auto_detect_pnpm() {
 #[test]
 fn build_command_auto_detect_yarn() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
     fs::write(dir.path().join("yarn.lock"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
@@ -259,11 +275,29 @@ fn build_command_auto_detect_yarn() {
 #[test]
 fn build_command_auto_detect_npm_fallback() {
     let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"next build"}}"#,
+    )
+    .unwrap();
 
     let config = nrz::config::ProjectConfig::default();
     let result = resolve_build_command(None, dir.path(), &config, None);
     assert_eq!(result.unwrap(), "npm run build");
+}
+
+#[test]
+fn build_command_none_without_build_script() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"dev":"next dev"}}"#,
+    )
+    .unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(None, dir.path(), &config, None);
+    assert!(result.is_none());
 }
 
 #[test]
@@ -1618,4 +1652,102 @@ fn is_nextjs_false_for_non_next_project() {
 fn is_nextjs_false_without_package_json() {
     let dir = tempdir().unwrap();
     assert!(!is_nextjs_project(dir.path()));
+}
+
+// ── is_sveltekit_with_adapter_auto ───────────────────────────
+
+#[test]
+fn sveltekit_adapter_auto_false_for_non_sveltekit() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"react":"^19.0.0"}}"#,
+    )
+    .unwrap();
+    assert!(!is_sveltekit_with_adapter_auto(dir.path()));
+}
+
+#[test]
+fn sveltekit_adapter_auto_false_when_adapter_node_installed() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"@sveltejs/kit":"^2.0.0"}, "devDependencies":{"@sveltejs/adapter-node":"^5.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("svelte.config.js"),
+        "import adapter from '@sveltejs/adapter-node';\nexport default { kit: { adapter: adapter() } };",
+    )
+    .unwrap();
+    assert!(!is_sveltekit_with_adapter_auto(dir.path()));
+}
+
+#[test]
+fn sveltekit_adapter_auto_true_with_adapter_auto_config() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"@sveltejs/kit":"^2.0.0"}, "devDependencies":{"@sveltejs/adapter-auto":"^3.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("svelte.config.js"),
+        "import adapter from '@sveltejs/adapter-auto';\nexport default { kit: { adapter: adapter() } };",
+    )
+    .unwrap();
+    assert!(is_sveltekit_with_adapter_auto(dir.path()));
+}
+
+#[test]
+fn sveltekit_adapter_auto_true_when_no_config() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"@sveltejs/kit":"^2.0.0"}}"#,
+    )
+    .unwrap();
+    assert!(is_sveltekit_with_adapter_auto(dir.path()));
+}
+
+#[test]
+fn sveltekit_adapter_auto_false_when_adapter_vercel_installed() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"@sveltejs/kit":"^2.0.0"}, "devDependencies":{"@sveltejs/adapter-vercel":"^6.0.0"}}"#,
+    )
+    .unwrap();
+    assert!(!is_sveltekit_with_adapter_auto(dir.path()));
+}
+
+#[test]
+fn sveltekit_adapter_auto_false_when_adapter_cloudflare_installed() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"@sveltejs/kit":"^2.0.0"}, "devDependencies":{"@sveltejs/adapter-cloudflare":"^7.0.0"}}"#,
+    )
+    .unwrap();
+    assert!(!is_sveltekit_with_adapter_auto(dir.path()));
+}
+
+#[test]
+fn sveltekit_adapter_auto_false_when_adapter_netlify_installed() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"@sveltejs/kit":"^2.0.0"}, "devDependencies":{"@sveltejs/adapter-netlify":"^6.0.0"}}"#,
+    )
+    .unwrap();
+    assert!(!is_sveltekit_with_adapter_auto(dir.path()));
+}
+
+#[test]
+fn diagnostic_payload_mentions_standalone() {
+    let dir = tempdir().unwrap();
+    let detection = make_detection("payload", None);
+    let msg = framework_process_diagnostic("payload", &detection, dir.path());
+    assert!(msg.is_some());
+    assert!(msg.as_ref().unwrap().contains("standalone"));
 }

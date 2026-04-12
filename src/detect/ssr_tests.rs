@@ -1382,6 +1382,78 @@ fn remix_vite_config_takes_precedence_over_legacy() {
     assert!(result.ssr_features.iter().any(|f| f.contains("SPA mode")));
 }
 
+// ── Next.js wrappers (Blitz.js, Payload CMS) ──────────────────
+
+#[test]
+fn blitzjs_uses_nextjs_ssr_analysis() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("next.config.js"),
+        "module.exports = { output: 'standalone' }",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "blitzjs").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(result.has_standalone_output());
+}
+
+#[test]
+fn payload_uses_nextjs_ssr_analysis() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("next.config.mjs"),
+        "export default { output: 'standalone' }",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "payload").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(result.has_standalone_output());
+}
+
+#[test]
+fn payload_no_config_defaults_to_ssr() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "payload").unwrap();
+    assert!(!result.is_static_compatible);
+}
+
+// ── TanStack Start (Vinxi) SSR analysis ───────────────────────
+
+#[test]
+fn tanstack_start_defaults_to_ssr() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "tanstack-start").unwrap();
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
+fn tanstack_start_detects_server_functions() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/routes")).unwrap();
+    std::fs::write(
+        dir.path().join("src/routes/index.tsx"),
+        "import { createServerFn } from '@tanstack/react-start'",
+    )
+    .unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "tanstack-start").unwrap();
+    assert!(!result.is_static_compatible);
+    assert!(
+        result
+            .ssr_features
+            .iter()
+            .any(|f| f.contains("server functions"))
+    );
+}
+
+// ── Hydrogen SSR analysis ─────────────────────────────────────
+
+#[test]
+fn hydrogen_uses_react_router_ssr_analysis() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "hydrogen").unwrap();
+    assert!(!result.is_static_compatible);
+}
+
 #[test]
 fn remix_vite_exists_ignores_legacy_ssr_false() {
     let dir = tempfile::tempdir().unwrap();

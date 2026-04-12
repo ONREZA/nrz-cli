@@ -229,6 +229,7 @@ pub const DETECTION_CONTENT_FILES: &[&str] = &[
     "vite.config.mjs",
     "app.config.ts",
     "app.config.js",
+    "app.json",
     "tsconfig.json",
     "tsconfig.app.json",
     "gatsby-config.js",

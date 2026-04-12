@@ -377,19 +377,36 @@ pub async fn run(
         run_install_step(&project_dir, json, server_install_cmd)?;
     }
 
-    // Pre-build: detect Next.js and inject NEXT_PRIVATE_STANDALONE=1 so users don't have to
-    // manually set `output: 'standalone'` in next.config. The env var is a no-op when the user
-    // has explicitly set `output: 'export'`.
-    let build_env: Vec<(&str, &str)> = if is_nextjs_project(&project_dir) {
-        output::status(
-            json,
-            "~",
-            "Next.js detected, enabling standalone output (NEXT_PRIVATE_STANDALONE=1)",
-            output::Phase::Deploy,
-        );
-        vec![("NEXT_PRIVATE_STANDALONE", "1")]
-    } else {
-        vec![]
+    // Pre-build env injection for framework compatibility.
+    let build_env: Vec<(&str, &str)> = {
+        let mut env = Vec::new();
+
+        // Next.js: inject NEXT_PRIVATE_STANDALONE=1 so users don't have to manually set
+        // `output: 'standalone'` in next.config. No-op when user has `output: 'export'`.
+        if is_nextjs_project(&project_dir) {
+            output::status(
+                json,
+                "~",
+                "Next.js detected, enabling standalone output (NEXT_PRIVATE_STANDALONE=1)",
+                output::Phase::Deploy,
+            );
+            env.push(("NEXT_PRIVATE_STANDALONE", "1"));
+        }
+
+        // SvelteKit: adapter-auto checks platform env vars to pick an adapter.
+        // GCP_BUILDPACKS makes it choose adapter-node, which produces the build/
+        // output we expect. Without this, adapter-auto fails silently on unknown hosts.
+        if is_sveltekit_with_adapter_auto(&project_dir) {
+            output::status(
+                json,
+                "~",
+                "SvelteKit adapter-auto detected, enabling adapter-node (GCP_BUILDPACKS=1)",
+                output::Phase::Deploy,
+            );
+            env.push(("GCP_BUILDPACKS", "1"));
+        }
+
+        env
     };
 
     // Run build step (default: enabled, skip with --skip-build)
@@ -1294,11 +1311,12 @@ fn validate_compute_manifest_contract(
 /// Framework-specific hint about switching to static export.
 fn framework_static_hint(framework: &str) -> &'static str {
     match framework {
-        "nextjs" => "add `output: 'export'` to next.config",
+        "nextjs" | "blitzjs" | "payload" => "add `output: 'export'` to next.config",
         "nuxt" => "set `ssr: false` in nuxt.config",
         "sveltekit" => "use `adapter-static` in svelte.config.js",
         "astro" => "remove `output: 'server'` from astro.config",
-        "react-router" => "set `ssr: false` in react-router.config.ts",
+        "react-router" | "hydrogen" => "set `ssr: false` in react-router.config.ts",
+        "tanstack-start" => "set `ssr: false` in app.config.ts",
         "remix" => "set `ssr: false` in the Remix Vite plugin options",
         "solidstart" => "set `ssr: false` in app.config.ts",
         "qwik" => "use the static adaptor in vite.config",
@@ -1317,7 +1335,7 @@ fn validate_process_output(
     detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<()> {
     match detection.framework.as_str() {
-        "nextjs" => {
+        "nextjs" | "blitzjs" | "payload" => {
             let has_standalone = detection
                 .metadata
                 .ssr_analysis
@@ -1387,7 +1405,7 @@ fn framework_process_diagnostic(
     output_dir: &Path,
 ) -> Option<String> {
     match framework {
-        "nextjs" => {
+        "nextjs" | "blitzjs" | "payload" => {
             let has_standalone = detection
                 .metadata
                 .ssr_analysis
@@ -1466,9 +1484,9 @@ fn framework_process_diagnostic(
                 .to_string(),
         ),
         "adonis" => Some(
-            "AdonisJS PROCESS deployment expects server.js in the build/ directory.\n\n\
+            "AdonisJS PROCESS deployment expects bin/server.js in the build/ directory.\n\n\
              Make sure you ran `node ace build`.\n\
-             The build should create build/server.js."
+             The build should create build/bin/server.js."
                 .to_string(),
         ),
         "express" => Some(
@@ -1495,6 +1513,18 @@ fn framework_process_diagnostic(
              The build should create .output/server/index.mjs."
                 .to_string(),
         ),
+        "tanstack-start" => Some(format!(
+            "TanStack Start PROCESS deployment expects server/server.js in {}.\n\n\
+             Make sure you ran `npm run build` and the output \
+             contains dist/server/server.js.",
+            output_dir.display()
+        )),
+        "hydrogen" => Some(format!(
+            "Hydrogen PROCESS deployment expects server/index.js in {}.\n\n\
+             Make sure you ran `npm run build` and the output \
+             contains build/server/index.js.",
+            output_dir.display()
+        )),
         _ => None,
     }
 }
@@ -1749,20 +1779,48 @@ fn resolve_build_command(
     if let Some(cmd) = server_command {
         return Some(cmd.to_string());
     }
-    // Only auto-detect if package.json exists
-    if !project_dir.join("package.json").exists() {
+    // Only auto-detect if package.json has a "build" script
+    let pkg = crate::detect::package_json::PackageJson::load(project_dir)?;
+    if !pkg.scripts.contains_key("build") {
         return None;
     }
     let pm = crate::detect::detect_package_manager_name(project_dir);
     Some(format!("{pm} run build"))
 }
 
-/// Lightweight pre-build check: does the project have `next` as a dependency?
+/// Lightweight pre-build check: does the project use Next.js (directly or via wrapper like Payload v3)?
 fn is_nextjs_project(project_dir: &Path) -> bool {
     let Some(pkg) = crate::detect::package_json::PackageJson::load(project_dir) else {
         return false;
     };
-    pkg.dependencies.contains_key("next") || pkg.dev_dependencies.contains_key("next")
+    pkg.has_dependency("next")
+}
+
+/// Check if the project uses SvelteKit with adapter-auto (needs GCP_BUILDPACKS env injection).
+fn is_sveltekit_with_adapter_auto(project_dir: &Path) -> bool {
+    let Some(pkg) = crate::detect::package_json::PackageJson::load(project_dir) else {
+        return false;
+    };
+    if !pkg.has_dependency("@sveltejs/kit") {
+        return false;
+    }
+    if pkg.has_dependency("@sveltejs/adapter-node")
+        || pkg.has_dependency("@sveltejs/adapter-static")
+        || pkg.has_dependency("@sveltejs/adapter-vercel")
+        || pkg.has_dependency("@sveltejs/adapter-cloudflare")
+        || pkg.has_dependency("@sveltejs/adapter-netlify")
+    {
+        return false;
+    }
+    let config_content = ["svelte.config.js", "svelte.config.ts"]
+        .iter()
+        .map(|n| project_dir.join(n))
+        .find(|p| p.is_file())
+        .and_then(|p| std::fs::read_to_string(p).ok());
+    match config_content {
+        Some(content) => content.contains("adapter-auto"),
+        None => true,
+    }
 }
 
 /// Run a shell command, streaming stdout/stderr through structured JSON in JSON mode.

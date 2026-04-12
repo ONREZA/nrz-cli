@@ -1195,7 +1195,6 @@ fn try_generate_ssr_returns_none_for_unknown_framework() {
 }
 
 #[test]
-#[test]
 fn sveltekit_output_dirs_delegate_to_presets() {
     let detection = make_detection("sveltekit", None);
     let dirs = compute_aware_output_dirs(&detection);
