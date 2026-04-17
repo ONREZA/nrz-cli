@@ -75,25 +75,44 @@ impl PackageJson {
 
     /// Read and parse package.json from a directory.
     ///
-    /// Returns `None` if the file doesn't exist.
-    /// Logs a warning if the file exists but cannot be parsed.
+    /// Returns `None` for *any* failure (file not found, IO error, parse error),
+    /// emitting a `tracing::warn!` for the non-NotFound cases. Callers that must
+    /// distinguish "file absent" from "file present but unreadable" should use
+    /// `load_strict` — silencing an IO or parse error here has bitten callers
+    /// (e.g. `detect_workers_runtime_target` missing Oxygen/CF signals when the
+    /// package.json was corrupted).
     pub fn load(project_dir: &Path) -> Option<Self> {
-        let path = project_dir.join("package.json");
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        match Self::load_strict(project_dir) {
+            Ok(opt) => opt,
             Err(e) => {
-                tracing::warn!("could not read {}: {e}", path.display());
-                return None;
-            }
-        };
-        match serde_json::from_str(&content) {
-            Ok(pkg) => Some(pkg),
-            Err(e) => {
-                tracing::warn!("could not parse {}: {e}", path.display());
+                tracing::warn!(
+                    "could not load {}/package.json: {e:#}",
+                    project_dir.display()
+                );
                 None
             }
         }
+    }
+
+    /// Strict variant of `load`: returns `Ok(None)` only when the file doesn't
+    /// exist. IO errors and parse errors are propagated so callers that treat
+    /// package.json as a *signal source* can surface the failure instead of
+    /// silently degrading to "no signal present".
+    pub fn load_strict(project_dir: &Path) -> anyhow::Result<Option<Self>> {
+        use anyhow::Context as _;
+
+        let path = project_dir.join("package.json");
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => {
+                return Err(anyhow::Error::new(e))
+                    .with_context(|| format!("failed to read {}", path.display()));
+            }
+        };
+        let pkg = serde_json::from_str(&content)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        Ok(Some(pkg))
     }
 
     /// Check if a package exists in dependencies or devDependencies.

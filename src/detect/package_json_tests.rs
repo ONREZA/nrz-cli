@@ -109,6 +109,39 @@ fn load_invalid_json_returns_none() {
 }
 
 #[test]
+fn load_strict_missing_returns_ok_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let result = PackageJson::load_strict(dir.path()).unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn load_strict_invalid_json_returns_err() {
+    // Regression: the lenient `load` silences parse errors, which hid a whole
+    // class of bugs in signal-based detection (workers runtime, framework
+    // presets). `load_strict` must surface them.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("package.json"), "not json{").unwrap();
+    let result = PackageJson::load_strict(dir.path());
+    assert!(result.is_err());
+    let msg = format!("{:#}", result.unwrap_err());
+    assert!(msg.contains("failed to parse"), "unexpected error: {msg}");
+}
+
+#[test]
+fn load_strict_valid_returns_pkg() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"test","dependencies":{"astro":"4.0.0"}}"#,
+    )
+    .unwrap();
+    let pkg = PackageJson::load_strict(dir.path()).unwrap().unwrap();
+    assert_eq!(pkg.name.as_deref(), Some("test"));
+    assert!(pkg.has_dependency("astro"));
+}
+
+#[test]
 fn workspaces_none_variant() {
     let ws = Workspaces::None;
     assert!(ws.is_empty());

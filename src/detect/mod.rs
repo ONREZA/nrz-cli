@@ -1008,12 +1008,15 @@ fn collect_runnable_files_recursive(
 
         let path = entry.path();
         if ft.is_file() {
-            if is_runnable_file(&path)
-                && let Ok(meta) = entry.metadata()
-                && meta.len() >= ENTRY_SCAN_MIN_SIZE
-                && let Ok(rel) = path.strip_prefix(base)
-            {
-                out.push(rel.to_path_buf());
+            if is_runnable_file(&path) {
+                let meta = entry
+                    .metadata()
+                    .with_context(|| format!("failed to read metadata: {}", path.display()))?;
+                if meta.len() >= ENTRY_SCAN_MIN_SIZE
+                    && let Ok(rel) = path.strip_prefix(base)
+                {
+                    out.push(rel.to_path_buf());
+                }
             }
             continue;
         }

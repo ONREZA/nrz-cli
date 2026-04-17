@@ -1334,7 +1334,7 @@ fn validate_process_output(
     project_dir: &Path,
     detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<()> {
-    if let Some(msg) = detect_workers_runtime_target(project_dir, output_dir) {
+    if let Some(msg) = detect_workers_runtime_target(project_dir, output_dir)? {
         bail!("{msg}");
     }
 
@@ -1414,8 +1414,15 @@ fn validate_process_output(
 /// - `@shopify/mini-oxygen` in package.json → Shopify Oxygen
 /// - `server/wrangler.json` in build output → Cloudflare Workers (fallback)
 /// - `server/oxygen.json` in build output → Shopify Oxygen (fallback)
-fn detect_workers_runtime_target(project_dir: &Path, output_dir: &Path) -> Option<String> {
-    let pkg = crate::detect::package_json::PackageJson::load(project_dir);
+fn detect_workers_runtime_target(
+    project_dir: &Path,
+    output_dir: &Path,
+) -> anyhow::Result<Option<String>> {
+    // Strict load: an unreadable or malformed package.json is propagated as an
+    // error instead of silently yielding "no signal". Otherwise a corrupted
+    // manifest would let a Workers bundle ship as PROCESS — the exact failure
+    // mode this detector exists to prevent.
+    let pkg = crate::detect::package_json::PackageJson::load_strict(project_dir)?;
     let has_cf_plugin = pkg
         .as_ref()
         .is_some_and(|p| p.has_dependency("@cloudflare/vite-plugin"));
@@ -1426,7 +1433,7 @@ fn detect_workers_runtime_target(project_dir: &Path, output_dir: &Path) -> Optio
     let has_oxygen_output = output_dir.join("server/oxygen.json").is_file();
 
     if !has_cf_plugin && !has_mini_oxygen && !has_wrangler_output && !has_oxygen_output {
-        return None;
+        return Ok(None);
     }
 
     let (runtime, trigger, remedy) = if has_cf_plugin {
@@ -1464,7 +1471,7 @@ fn detect_workers_runtime_target(project_dir: &Path, output_dir: &Path) -> Optio
         )
     };
 
-    Some(format!(
+    Ok(Some(format!(
         "{runtime} target detected ({trigger}).\n\n\
          ONREZA PROCESS compute runs Node/Bun servers, not the Workers runtime (workerd), \
          so this build cannot be deployed as-is.\n\n\
@@ -1473,7 +1480,7 @@ fn detect_workers_runtime_target(project_dir: &Path, output_dir: &Path) -> Optio
          \x20    nrz deploy --compute static\n\n\
          \x20 2. Switch to a Node server build.\n\
          \x20    {remedy}"
-    ))
+    )))
 }
 
 /// Framework-specific diagnostic when entry point resolution fails.
@@ -2102,12 +2109,8 @@ fn run_build_step(
 
 // ── File scanning ────────────────────────────────────────────
 
-/// Returns the set of layer directories (relative to output_dir, normalised with trailing `/`
-/// or `"."` for root) that have `isPrecompressed: true`.
-///
-/// Files whose relative path starts with one of these prefixes will be brotli-compressed
-/// before upload, and their compressed size will be reported to the server.
-/// Returns normalised directory prefixes for all STATIC layers in the manifest.
+/// Returns normalised directory prefixes (trailing `/` or `"."` for root) for all
+/// STATIC-target layers in the manifest.
 ///
 /// Used to filter the file list for bundle deployments: only STATIC-layer files
 /// need individual presigned URL uploads; COMPUTE/ISOLATE files go via tar.zst bundle.

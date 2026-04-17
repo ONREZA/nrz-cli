@@ -904,6 +904,26 @@ fn validate_hydrogen_express_recipe_ok() {
 }
 
 #[test]
+fn validate_malformed_package_json_bails_with_parse_error() {
+    // Regression: a corrupted package.json used to silently yield "no workers
+    // signal" and ship a broken PROCESS deploy. validate_process_output must
+    // surface the parse error loudly so the user can fix the manifest.
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join("dist");
+    fs::create_dir(&output_dir).unwrap();
+    fs::write(dir.path().join("package.json"), "not json{").unwrap();
+
+    let detection = make_detection("tanstack-start", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_err());
+    let msg = format!("{:#}", result.unwrap_err());
+    assert!(
+        msg.contains("failed to parse") && msg.contains("package.json"),
+        "should report parse error: {msg}"
+    );
+}
+
+#[test]
 fn validate_tanstack_start_nitro_output_ok() {
     // TanStack Start with Nitro node-server preset: .output/server/index.mjs layout
     // should pass validation (no CF workers signals present).
