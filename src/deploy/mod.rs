@@ -1626,8 +1626,28 @@ fn framework_process_diagnostic(
 }
 
 /// Frameworks where PROCESS output must be explicit and validated.
+///
+/// For these, a failed entry-point resolution triggers `framework_process_diagnostic`
+/// and `bail!` with actionable guidance. Non-strict frameworks silently fall back
+/// to `bun <output_dir>`, which for SSR frameworks is almost always a 404-machine —
+/// so every SSR framework we ship support for is listed here explicitly.
 fn is_strict_process_framework(framework: &str) -> bool {
-    matches!(framework, "nextjs" | "nuxt")
+    matches!(
+        framework,
+        "nextjs"
+            | "nuxt"
+            | "sveltekit"
+            | "astro"
+            | "remix"
+            | "react-router"
+            | "solidstart"
+            | "qwik"
+            | "analog"
+            | "blitzjs"
+            | "payload"
+            | "tanstack-start"
+            | "hydrogen"
+    )
 }
 
 // ── PROCESS entry point ──────────────────────────────────────

@@ -1060,6 +1060,67 @@ fn ensure_process_entry_not_found_is_error_for_strict_framework() {
     );
 }
 
+#[test]
+fn ensure_process_entry_not_found_is_error_for_hydrogen() {
+    // Regression: hydrogen lost its FrameworkHint in this PR; without strict
+    // handling, a hydrogen project with no buildable entry would silently fall
+    // back to `bun <output>` and 404. Must bail with Hydrogen diagnostic.
+    let dir = tempdir().unwrap();
+    let detection = make_detection("hydrogen", None);
+    let err =
+        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).expect_err("error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Hydrogen PROCESS") && msg.contains("Express recipe"),
+        "expected Hydrogen diagnostic, got: {msg}"
+    );
+}
+
+#[test]
+fn ensure_process_entry_not_found_is_error_for_tanstack_start() {
+    let dir = tempdir().unwrap();
+    let detection = make_detection("tanstack-start", None);
+    let err =
+        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).expect_err("error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("TanStack Start PROCESS") && msg.contains("server/index.mjs"),
+        "expected TSS diagnostic, got: {msg}"
+    );
+}
+
+#[test]
+fn is_strict_process_framework_covers_all_ssr() {
+    // All SSR frameworks must be strict — falling back to `bun <output>` for
+    // a framework we claim to support is the exact silent-404 failure mode
+    // this PR was created to eliminate.
+    for framework in [
+        "nextjs",
+        "nuxt",
+        "sveltekit",
+        "astro",
+        "remix",
+        "react-router",
+        "solidstart",
+        "qwik",
+        "analog",
+        "blitzjs",
+        "payload",
+        "tanstack-start",
+        "hydrogen",
+    ] {
+        assert!(
+            is_strict_process_framework(framework),
+            "{framework} must be strict"
+        );
+    }
+    // Unknown / non-SSR frameworks stay non-strict (generic server projects
+    // may legitimately want the bun fallback).
+    assert!(!is_strict_process_framework("other"));
+    assert!(!is_strict_process_framework("vite"));
+    assert!(!is_strict_process_framework("hono"));
+}
+
 // ── COMPUTE auto-gen bail: entry not found ────────────────────
 
 #[test]
