@@ -471,8 +471,18 @@ pub fn framework_output_dirs(slug: &str) -> &'static [&'static str] {
         "express" => &["."],
         "koa" => &["."],
         "h3" => &["dist", "."],
-        "tanstack-start" => &["dist"],
-        "hydrogen" => &["build/client", "build/server", "build"],
+        "tanstack-start" => &[".output", "dist"],
+        // Hydrogen has two layouts: default (Oxygen workers) emits dist/,
+        // Express recipe emits build/. `dist` is tried first so the workers-runtime
+        // detector can fail fast on Oxygen; `build` covers the Express recipe.
+        "hydrogen" => &[
+            "dist/client",
+            "dist/server",
+            "dist",
+            "build/client",
+            "build/server",
+            "build",
+        ],
         "nitro" => &[".output"],
         "blitzjs" => &[".next/standalone", ".next"],
         "keystone" => &[".keystone"],

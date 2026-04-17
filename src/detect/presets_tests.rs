@@ -183,15 +183,34 @@ fn hydrogen_preset_correct() {
 #[test]
 fn framework_output_dirs_tanstack_start() {
     let dirs = framework_output_dirs("tanstack-start");
+    assert!(dirs.contains(&".output"));
     assert!(dirs.contains(&"dist"));
+    let output_pos = dirs.iter().position(|d| *d == ".output").unwrap();
+    let dist_pos = dirs.iter().position(|d| *d == "dist").unwrap();
+    assert!(
+        output_pos < dist_pos,
+        ".output (Nitro default) should come before dist (legacy vinxi): output_pos={output_pos}, dist_pos={dist_pos}"
+    );
 }
 
 #[test]
 fn framework_output_dirs_hydrogen() {
     let dirs = framework_output_dirs("hydrogen");
+    // Oxygen (default) emits dist/*, Express recipe emits build/*. Both covered.
+    assert!(dirs.contains(&"dist"));
+    assert!(dirs.contains(&"dist/client"));
+    assert!(dirs.contains(&"dist/server"));
     assert!(dirs.contains(&"build"));
     assert!(dirs.contains(&"build/client"));
     assert!(dirs.contains(&"build/server"));
+    // dist must come first so the workers-runtime detector catches Oxygen builds
+    // before we fall back to the Express recipe layout.
+    let dist_pos = dirs.iter().position(|d| *d == "dist").unwrap();
+    let build_pos = dirs.iter().position(|d| *d == "build").unwrap();
+    assert!(
+        dist_pos < build_pos,
+        "dist (Oxygen default) must precede build (Express recipe): dist_pos={dist_pos}, build_pos={build_pos}"
+    );
 }
 
 #[test]

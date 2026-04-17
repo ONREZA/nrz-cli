@@ -795,6 +795,133 @@ fn validate_unknown_framework_ok() {
     assert!(result.is_ok());
 }
 
+#[test]
+fn validate_cloudflare_vite_plugin_dep_bails() {
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join("dist");
+    fs::create_dir(&output_dir).unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies":{"@cloudflare/vite-plugin":"^1.0.0"}}"#,
+    )
+    .unwrap();
+
+    let detection = make_detection("tanstack-start", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("Cloudflare Workers target detected")
+            && msg.contains("@cloudflare/vite-plugin"),
+        "should mention CF Workers + plugin: {msg}"
+    );
+    assert!(
+        msg.contains("--compute static") && msg.contains("nitro"),
+        "should offer both escape hatches: {msg}"
+    );
+}
+
+#[test]
+fn validate_cloudflare_wrangler_output_bails() {
+    // Fallback signal: even without the dep in package.json (e.g. pnpm workspace root),
+    // the build emits server/wrangler.json and we must catch it.
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join("dist");
+    fs::create_dir_all(output_dir.join("server")).unwrap();
+    fs::write(output_dir.join("server/wrangler.json"), r#"{"name":"x"}"#).unwrap();
+
+    let detection = make_detection("tanstack-start", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("server/wrangler.json was emitted"),
+        "should mention wrangler.json trigger: {msg}"
+    );
+}
+
+#[test]
+fn validate_hydrogen_oxygen_bails_via_mini_oxygen_dep() {
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join("dist");
+    fs::create_dir(&output_dir).unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies":{"@shopify/mini-oxygen":"^3.0.0","@shopify/hydrogen":"^2026.0.0"}}"#,
+    )
+    .unwrap();
+
+    let detection = make_detection("hydrogen", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("Shopify Oxygen") && msg.contains("@shopify/mini-oxygen"),
+        "should mention Oxygen + mini-oxygen: {msg}"
+    );
+    assert!(
+        msg.contains("Express recipe"),
+        "should recommend Express recipe: {msg}"
+    );
+}
+
+#[test]
+fn validate_hydrogen_oxygen_bails_via_output_marker() {
+    // Fallback: even without the dep signal we catch Oxygen by its marker file.
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join("dist");
+    fs::create_dir_all(output_dir.join("server")).unwrap();
+    fs::write(output_dir.join("server/oxygen.json"), r#"{"version":1}"#).unwrap();
+
+    let detection = make_detection("hydrogen", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("server/oxygen.json was emitted"),
+        "should mention oxygen.json trigger: {msg}"
+    );
+}
+
+#[test]
+fn validate_hydrogen_express_recipe_ok() {
+    // Express recipe emits build/server/index.js plus server.mjs at project root.
+    // No Oxygen signals → validate passes, entry resolution happens downstream.
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join("build");
+    fs::create_dir_all(output_dir.join("server")).unwrap();
+    fs::write(output_dir.join("server/index.js"), "x".repeat(600)).unwrap();
+    fs::write(dir.path().join("server.mjs"), "x".repeat(600)).unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"start":"node server.mjs"},"dependencies":{"express":"^4.19.0","@shopify/hydrogen":"^2026.0.0"}}"#,
+    )
+    .unwrap();
+
+    let detection = make_detection("hydrogen", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_ok(), "Express recipe should pass: {result:?}");
+}
+
+#[test]
+fn validate_tanstack_start_nitro_output_ok() {
+    // TanStack Start with Nitro node-server preset: .output/server/index.mjs layout
+    // should pass validation (no CF workers signals present).
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join(".output");
+    fs::create_dir_all(output_dir.join("server")).unwrap();
+    fs::write(output_dir.join("server/index.mjs"), "export default {}").unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"@tanstack/react-start":"^1.0.0"}}"#,
+    )
+    .unwrap();
+
+    let detection = make_detection("tanstack-start", None);
+    let result = validate_process_output(&output_dir, dir.path(), &detection);
+    assert!(result.is_ok(), "validation should pass: {result:?}");
+}
+
 // ── ensure_process_entry tests ───────────────────────────────
 
 #[test]
@@ -818,8 +945,18 @@ fn ensure_process_entry_resolves_module_field() {
 fn ensure_process_entry_ambiguous_candidates_falls_back_for_non_strict_framework() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("runtime")).unwrap();
-    fs::write(dir.path().join("runtime/foo.mjs"), "console.log('foo')").unwrap();
-    fs::write(dir.path().join("runtime/bar.mjs"), "console.log('bar')").unwrap();
+    // Both files must exceed the heuristic-scan min-size threshold, otherwise
+    // they're classified as ESM stubs and skipped before ambiguity kicks in.
+    fs::write(
+        dir.path().join("runtime/foo.mjs"),
+        format!("console.log('foo') // {}", "x".repeat(600)),
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("runtime/bar.mjs"),
+        format!("console.log('bar') // {}", "x".repeat(600)),
+    )
+    .unwrap();
 
     let detection = make_detection("other", None);
     let (entry, warning) =

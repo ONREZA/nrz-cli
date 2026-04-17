@@ -300,7 +300,7 @@ fn compute_aware_output_dirs(
             }
             vec![".output"]
         }
-        "remix" | "react-router" | "hydrogen" => {
+        "remix" | "react-router" => {
             if let Some(ref ssr) = detection.metadata.ssr_analysis
                 && ssr.is_static_compatible
             {
@@ -308,7 +308,18 @@ fn compute_aware_output_dirs(
             }
             vec!["build"]
         }
-        "tanstack-start" => vec!["dist"],
+        "hydrogen" => {
+            // Oxygen (default) emits dist/*, Express recipe emits build/*.
+            // Try dist first — when it exists, the workers-runtime detector fires
+            // with a clear error; otherwise we fall through to build/.
+            if let Some(ref ssr) = detection.metadata.ssr_analysis
+                && ssr.is_static_compatible
+            {
+                return vec!["dist/client", "build/client", "build"];
+            }
+            vec!["dist", "build"]
+        }
+        "tanstack-start" => vec![".output", "dist"],
         slug => crate::detect::presets::framework_output_dirs(slug).to_vec(),
     }
 }
@@ -322,8 +333,11 @@ fn ssr_expected_entry(framework: &str) -> Option<&'static str> {
         "nextjs" | "blitzjs" | "payload" => Some("server.js"),
         "nuxt" => Some("server/index.mjs"),
         "sveltekit" => Some("index.js"),
-        "remix" | "react-router" | "hydrogen" => Some("server/index.js"),
-        "tanstack-start" => Some("server/server.js"),
+        "remix" | "react-router" => Some("server/index.js"),
+        // Hydrogen: no shared entry — Oxygen bundles to dist/server/index.js as a
+        // workers module, Express recipe uses server.mjs at project root.
+        "hydrogen" => None,
+        "tanstack-start" => Some("server/index.mjs"),
         "astro" => Some("server/entry.mjs"),
         _ => None,
     }

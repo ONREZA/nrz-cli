@@ -1275,16 +1275,17 @@ fn framework_entry_point_payload() {
 fn framework_entry_point_tanstack_start() {
     assert_eq!(
         framework_entry_point("tanstack-start"),
-        Some("server/server.js".into())
+        Some("server/index.mjs".into())
     );
 }
 
 #[test]
 fn framework_entry_point_hydrogen() {
-    assert_eq!(
-        framework_entry_point("hydrogen"),
-        Some("server/index.js".into())
-    );
+    // Hydrogen's two layouts (Oxygen workers vs Express recipe) have different
+    // entries (dist/server/index.js vs project-root server.mjs), so no single
+    // FrameworkHint is correct. Generic resolver handles the Express case via
+    // package.json `start` script; Oxygen is caught earlier by the workers check.
+    assert_eq!(framework_entry_point("hydrogen"), None);
 }
 
 #[test]
@@ -1562,10 +1563,11 @@ fn framework_entry_point_solidstart() {
 
 #[test]
 fn framework_entry_point_qwik() {
-    assert_eq!(
-        framework_entry_point("qwik"),
-        Some("server/entry.qwik-city.mjs".into())
-    );
+    // Qwik City's entry depends on the selected adapter (entry.express.js,
+    // entry.fastify.js, or edge-specific files). No shared FrameworkHint is
+    // correct — the generic resolver picks the adapter-specific entry via
+    // package.json scripts or `main`.
+    assert_eq!(framework_entry_point("qwik"), None);
 }
 
 #[test]
@@ -1681,7 +1683,7 @@ fn resolve_entry_point_fallback_server_js() {
 fn resolve_entry_point_fallback_src_index() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("src")).unwrap();
-    std::fs::write(dir.path().join("src/index.ts"), "").unwrap();
+    std::fs::write(dir.path().join("src/index.ts"), "x".repeat(600)).unwrap();
 
     let result = resolve_entry_point("other", dir.path(), dir.path());
     assert_eq!(result, Some("src/index.ts".into()));
@@ -1805,8 +1807,8 @@ fn resolve_entry_point_root_prefers_server_over_main() {
 fn resolve_entry_point_detailed_reports_ambiguity() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("runtime")).unwrap();
-    std::fs::write(dir.path().join("runtime/foo.mjs"), "").unwrap();
-    std::fs::write(dir.path().join("runtime/bar.mjs"), "").unwrap();
+    std::fs::write(dir.path().join("runtime/foo.mjs"), "x".repeat(600)).unwrap();
+    std::fs::write(dir.path().join("runtime/bar.mjs"), "x".repeat(600)).unwrap();
 
     let result = resolve_entry_point_detailed("other", dir.path(), dir.path());
     assert!(matches!(result, EntryPointResolution::Ambiguous(_)));
@@ -1816,8 +1818,8 @@ fn resolve_entry_point_detailed_reports_ambiguity() {
 fn resolve_entry_point_heuristic_ambiguity_returns_none() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("runtime")).unwrap();
-    std::fs::write(dir.path().join("runtime/foo.mjs"), "").unwrap();
-    std::fs::write(dir.path().join("runtime/bar.mjs"), "").unwrap();
+    std::fs::write(dir.path().join("runtime/foo.mjs"), "x".repeat(600)).unwrap();
+    std::fs::write(dir.path().join("runtime/bar.mjs"), "x".repeat(600)).unwrap();
 
     let result = resolve_entry_point("other", dir.path(), dir.path());
     assert_eq!(result, None);
@@ -1827,10 +1829,91 @@ fn resolve_entry_point_heuristic_ambiguity_returns_none() {
 fn resolve_entry_point_heuristic_finds_nested_server_file() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("runtime")).unwrap();
-    std::fs::write(dir.path().join("runtime/bootstrap.mjs"), "").unwrap();
+    std::fs::write(dir.path().join("runtime/bootstrap.mjs"), "x".repeat(600)).unwrap();
 
     let result = resolve_entry_point("other", dir.path(), dir.path());
     assert_eq!(result, Some("runtime/bootstrap.mjs".into()));
+}
+
+#[test]
+fn resolve_entry_point_tanstack_start_uses_nitro_output() {
+    // Guards the core TSS fix: when .output/server/index.mjs exists, the
+    // FrameworkHint must resolve to it. If the constant regresses (e.g. back
+    // to server/server.js), HeuristicScan would silently pick something else —
+    // this test short-circuits that regression.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("server")).unwrap();
+    std::fs::write(dir.path().join("server/index.mjs"), "x".repeat(600)).unwrap();
+
+    let detailed = resolve_entry_point_detailed("tanstack-start", dir.path(), dir.path());
+    match detailed {
+        EntryPointResolution::Found(ref r) => {
+            assert_eq!(r.path, "server/index.mjs");
+            assert_eq!(r.source, EntryPointSource::FrameworkHint);
+        }
+        other => panic!("expected FrameworkHint Found, got {other:?}"),
+    }
+    assert_eq!(
+        resolve_entry_point("tanstack-start", dir.path(), dir.path()),
+        Some("server/index.mjs".into())
+    );
+}
+
+#[test]
+fn heuristic_scan_min_size_boundary_just_below() {
+    // 511 bytes (one byte below threshold) must be skipped.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
+    std::fs::write(dir.path().join("dist/stub.mjs"), "x".repeat(511)).unwrap();
+    assert_eq!(resolve_entry_point("other", dir.path(), dir.path()), None);
+}
+
+#[test]
+fn heuristic_scan_min_size_boundary_exact() {
+    // Exactly 512 bytes must be accepted (condition is `>=`).
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
+    std::fs::write(dir.path().join("dist/entry.mjs"), "x".repeat(512)).unwrap();
+    assert_eq!(
+        resolve_entry_point("other", dir.path(), dir.path()),
+        Some("dist/entry.mjs".into())
+    );
+}
+
+#[test]
+fn heuristic_scan_min_size_zero_byte_skipped() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
+    std::fs::write(dir.path().join("dist/empty.mjs"), "").unwrap();
+    assert_eq!(resolve_entry_point("other", dir.path(), dir.path()), None);
+}
+
+#[test]
+fn heuristic_scan_skips_sub_threshold_stub() {
+    // Mimics the @cloudflare/vite-plugin layout: a tiny ESM re-export stub at
+    // dist/server/index.js that would otherwise outrank the real bundle.
+    // HeuristicScan must skip it, otherwise PROCESS deploys silently land on
+    // a file that can't actually serve requests.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("dist/server/assets")).unwrap();
+    std::fs::write(
+        dir.path().join("dist/server/index.js"),
+        "export { default } from './assets/worker.js'\n", // ~47 bytes
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("dist/server/assets/worker.js"),
+        "x".repeat(800),
+    )
+    .unwrap();
+
+    // Only the stub is under the threshold; the worker file is eligible.
+    let result = resolve_entry_point("other", dir.path(), dir.path());
+    assert_eq!(
+        result,
+        Some("dist/server/assets/worker.js".into()),
+        "stub should be skipped, real bundle should win"
+    );
 }
 
 #[test]

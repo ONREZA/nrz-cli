@@ -1331,9 +1331,13 @@ fn framework_static_hint(framework: &str) -> &'static str {
 /// expensive operations (entry resolution, bundling, upload).
 fn validate_process_output(
     output_dir: &Path,
-    _project_dir: &Path,
+    project_dir: &Path,
     detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<()> {
+    if let Some(msg) = detect_workers_runtime_target(project_dir, output_dir) {
+        bail!("{msg}");
+    }
+
     match detection.framework.as_str() {
         "nextjs" | "blitzjs" | "payload" => {
             let has_standalone = detection
@@ -1396,6 +1400,80 @@ fn validate_process_output(
         _ => {}
     }
     Ok(())
+}
+
+/// Detect projects targeting a Workers-style runtime (Cloudflare workerd,
+/// Shopify Oxygen) whose build output cannot execute on Node/Bun.
+///
+/// These outputs export an ESM module with a `fetch` handler instead of
+/// listening on a port, so PROCESS compute would silently 404 every route.
+/// We fail fast with framework-specific guidance on how to switch.
+///
+/// Signals, in order of preference (most specific first):
+/// - `@cloudflare/vite-plugin` in package.json → Cloudflare Workers
+/// - `@shopify/mini-oxygen` in package.json → Shopify Oxygen
+/// - `server/wrangler.json` in build output → Cloudflare Workers (fallback)
+/// - `server/oxygen.json` in build output → Shopify Oxygen (fallback)
+fn detect_workers_runtime_target(project_dir: &Path, output_dir: &Path) -> Option<String> {
+    let pkg = crate::detect::package_json::PackageJson::load(project_dir);
+    let has_cf_plugin = pkg
+        .as_ref()
+        .is_some_and(|p| p.has_dependency("@cloudflare/vite-plugin"));
+    let has_mini_oxygen = pkg
+        .as_ref()
+        .is_some_and(|p| p.has_dependency("@shopify/mini-oxygen"));
+    let has_wrangler_output = output_dir.join("server/wrangler.json").is_file();
+    let has_oxygen_output = output_dir.join("server/oxygen.json").is_file();
+
+    if !has_cf_plugin && !has_mini_oxygen && !has_wrangler_output && !has_oxygen_output {
+        return None;
+    }
+
+    let (runtime, trigger, remedy) = if has_cf_plugin {
+        (
+            "Cloudflare Workers",
+            "@cloudflare/vite-plugin is in your package.json",
+            "Replace @cloudflare/vite-plugin with Nitro in vite.config.ts:\n\
+             \x20      import { nitro } from 'nitro/vite'\n\
+             \x20      // plugins: [tanstackStart(), nitro(), viteReact()]\n\
+             \x20    Nitro's default `node-server` preset emits .output/server/index.mjs, \
+             which PROCESS can run directly.",
+        )
+    } else if has_mini_oxygen {
+        (
+            "Shopify Oxygen (Cloudflare Workers)",
+            "@shopify/mini-oxygen is in your package.json",
+            "Apply the Hydrogen Express recipe to switch to a Node runtime:\n\
+             \x20    https://github.com/Shopify/hydrogen/tree/main/cookbook/recipes/express\n\
+             \x20    It replaces the Oxygen server with Express and emits build/server/index.js \
+             plus a server.mjs entry at the project root.",
+        )
+    } else if has_wrangler_output {
+        (
+            "Cloudflare Workers",
+            "server/wrangler.json was emitted into the build output",
+            "Remove the Cloudflare Vite plugin from vite.config.ts and rebuild with \
+             a Node-compatible preset (e.g. Nitro's node-server).",
+        )
+    } else {
+        (
+            "Shopify Oxygen (Cloudflare Workers)",
+            "server/oxygen.json was emitted into the build output",
+            "Apply the Hydrogen Express recipe to rebuild for Node:\n\
+             \x20    https://github.com/Shopify/hydrogen/tree/main/cookbook/recipes/express",
+        )
+    };
+
+    Some(format!(
+        "{runtime} target detected ({trigger}).\n\n\
+         ONREZA PROCESS compute runs Node/Bun servers, not the Workers runtime (workerd), \
+         so this build cannot be deployed as-is.\n\n\
+         Pick one:\n\
+         \x20 1. Deploy as static (if your app has no server functions):\n\
+         \x20    nrz deploy --compute static\n\n\
+         \x20 2. Switch to a Node server build.\n\
+         \x20    {remedy}"
+    ))
 }
 
 /// Framework-specific diagnostic when entry point resolution fails.
@@ -1514,15 +1592,26 @@ fn framework_process_diagnostic(
                 .to_string(),
         ),
         "tanstack-start" => Some(format!(
-            "TanStack Start PROCESS deployment expects server/server.js in {}.\n\n\
+            "TanStack Start PROCESS deployment expects server/index.mjs in {}.\n\n\
              Make sure you ran `npm run build` and the output \
-             contains dist/server/server.js.",
+             contains .output/server/index.mjs (Nitro default preset).\n\n\
+             If you see `dist/server/` with a worker-entry-*.js instead, your project is \
+             configured for Cloudflare Workers via @cloudflare/vite-plugin, which is not \
+             supported by PROCESS. Either remove that plugin and use Nitro's default \
+             node-server preset, or deploy with --compute static.",
             output_dir.display()
         )),
         "hydrogen" => Some(format!(
-            "Hydrogen PROCESS deployment expects server/index.js in {}.\n\n\
-             Make sure you ran `npm run build` and the output \
-             contains build/server/index.js.",
+            "Hydrogen PROCESS deployment could not resolve a runnable entry in {}.\n\n\
+             Hydrogen has two build layouts:\n\
+             \x20 - Oxygen (default): emits dist/server/index.js as a Workers bundle — \
+             not executable by PROCESS. Apply the Hydrogen Express recipe \
+             (https://github.com/Shopify/hydrogen/tree/main/cookbook/recipes/express) \
+             to switch to Node.\n\
+             \x20 - Express recipe: emits build/server/index.js plus a server.mjs at the \
+             project root; the `start` script runs `node server.mjs`.\n\n\
+             If you used the Express recipe, make sure `npm run build` completed and the \
+             `start` script or package.json `main` points to server.mjs.",
             output_dir.display()
         )),
         _ => None,

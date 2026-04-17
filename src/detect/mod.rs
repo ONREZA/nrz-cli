@@ -343,7 +343,7 @@ fn resolve_framework_output_dir(
             }
             ".output".to_string()
         }
-        "react-router" | "remix" | "hydrogen" => {
+        "react-router" | "remix" => {
             if let Some(ssr) = ssr
                 && ssr.is_static_compatible
             {
@@ -351,7 +351,17 @@ fn resolve_framework_output_dir(
             }
             "build".to_string()
         }
-        "tanstack-start" => "dist".to_string(),
+        "hydrogen" => {
+            // Oxygen default → `dist/`, Express recipe → `build/`. Prefer dist so
+            // the workers-runtime detector catches Oxygen builds up front.
+            if let Some(ssr) = ssr
+                && ssr.is_static_compatible
+            {
+                return "dist/client".to_string();
+            }
+            "dist".to_string()
+        }
+        "tanstack-start" => ".output".to_string(),
         _ => {
             // For non-SSR, non-server frameworks with a vite config, check outDir override
             if !presets::is_ssr_framework(preset.slug)
@@ -505,12 +515,25 @@ fn framework_entry_point(slug: &str) -> Option<String> {
         "react-router" => Some("server/index.js".into()),
         "remix" => Some("server/index.js".into()),
         "solidstart" => Some("server/index.mjs".into()),
-        "qwik" => Some("server/entry.qwik-city.mjs".into()),
+        // Qwik City produces adapter-specific entries:
+        //  - node adapter → server/entry.express.js or server/entry.fastify.js
+        //  - cloudflare adapter → caught by the workers-runtime detector
+        //  - vercel/netlify edge adapters → currently not detected; fall through
+        //    to generic resolution and will likely surface as "entry not found"
+        // No single FrameworkHint fits. Let the generic resolver walk package.json
+        // scripts / `main` to find the adapter-specific entry.
+        "qwik" => None,
         "analog" => Some("server/index.mjs".into()),
         "nestjs" => Some("main.js".into()),
         "adonis" => Some("bin/server.js".into()),
-        "tanstack-start" => Some("server/server.js".into()),
-        "hydrogen" => Some("server/index.js".into()),
+        "tanstack-start" => Some("server/index.mjs".into()),
+        // Hydrogen has two layouts and no single correct FrameworkHint:
+        //  - Oxygen (default) → dist/server/index.js is a workers bundle; we detect
+        //    that upstream via the workers-runtime target check and bail.
+        //  - Express recipe → the runnable entry is server.mjs at the project root,
+        //    not inside the output dir. Let the generic resolver pick it up via
+        //    `start` script or package.json `main`.
+        "hydrogen" => None,
         "nitro" => Some("server/index.mjs".into()),
         "keystone" => Some("keystone.js".into()),
         "redwoodjs" => Some("server.js".into()),
@@ -609,6 +632,10 @@ const SCRIPT_EXECUTOR_MODULE_TOKENS: &[&str] = &[
 ];
 const ENTRY_SCAN_SKIP_DIRS: &[&str] = &["node_modules", ".git", ".onreza"];
 const ENTRY_SCAN_LIMIT: usize = 4096;
+/// Files smaller than this are ESM re-export stubs (e.g. `@cloudflare/vite-plugin`
+/// emits a 0.19 kB `dist/server/index.js` that just re-exports the real worker bundle
+/// from `assets/worker-entry-*.js`). Real entry points almost always exceed this.
+const ENTRY_SCAN_MIN_SIZE: u64 = 512;
 
 fn stringify_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
@@ -982,6 +1009,8 @@ fn collect_runnable_files_recursive(
         let path = entry.path();
         if ft.is_file() {
             if is_runnable_file(&path)
+                && let Ok(meta) = entry.metadata()
+                && meta.len() >= ENTRY_SCAN_MIN_SIZE
                 && let Ok(rel) = path.strip_prefix(base)
             {
                 out.push(rel.to_path_buf());
