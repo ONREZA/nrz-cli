@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.24.1] - 2026-04-17
+
+### 🐛 Bug Fixes
+
+- **deploy:** enforce strict entry validation for all SSR frameworks ([32a521a](https://github.com/ONREZA/nrz-cli/commit/32a521a099c2c7e6f06fdb0f27426be5f573f542))
+- **deploy:** surface silent failures in entry detection ([4e39fbf](https://github.com/ONREZA/nrz-cli/commit/4e39fbf84038f92f92ce3af8f24a5b71b40a9593))
+- **deploy:** detect Workers/Oxygen target and fix TSS/Hydrogen paths ([b0e49d5](https://github.com/ONREZA/nrz-cli/commit/b0e49d598c5cb767fb64462754341b10c3d7db75))
+
 ## [0.24.0] - 2026-04-12
 
 ### ✨ Features
