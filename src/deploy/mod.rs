@@ -1847,18 +1847,31 @@ fn maybe_create_bundle(
         "Creating tar.zst bundle (PROCESS deployment)...",
         output::Phase::Deploy,
     );
-    let (bytes, sha) =
-        bundle::create_bundle(output_dir).context("failed to create tar.zst bundle")?;
-    output::success(
-        json,
-        format!(
-            "Bundle created ({}, sha256: {}…)",
-            format_bytes(bytes.len()),
-            &sha[..12]
-        ),
-        output::Phase::Deploy,
+    let stats = bundle::create_bundle(output_dir).context("failed to create tar.zst bundle")?;
+
+    let mut summary = format!(
+        "Bundle created ({}, {} files",
+        format_bytes(stats.bytes.len()),
+        stats.files
     );
-    Ok(Some((bytes, sha)))
+    if stats.symlinks_preserved > 0 {
+        summary.push_str(&format!(", {} symlinks", stats.symlinks_preserved));
+    }
+    summary.push_str(&format!(", sha256: {}…)", &stats.sha256_hex[..12]));
+    output::success(json, summary, output::Phase::Deploy);
+
+    if stats.symlinks_skipped > 0 {
+        output::warn(
+            json,
+            format!(
+                "Skipped {} symlink(s) that resolve outside the bundle root (see warnings above).",
+                stats.symlinks_skipped
+            ),
+            output::Phase::Deploy,
+        );
+    }
+
+    Ok(Some((stats.bytes, stats.sha256_hex)))
 }
 
 fn resolve_bundle_upload(
