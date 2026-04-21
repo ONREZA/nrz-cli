@@ -30,7 +30,11 @@ fn produces_valid_tar_zst() {
 
     assert!(found.contains("index.html"));
     assert!(found.contains("assets/app.js"));
-    assert_eq!(found.len(), 2);
+    assert!(
+        found.contains("assets"),
+        "directory entry should be emitted"
+    );
+    assert_eq!(found.len(), 3);
 }
 
 #[test]
@@ -136,7 +140,10 @@ fn deeply_nested_directory() {
 
     assert!(paths.contains(&"a/b/c/d/e/deep.js".to_string()));
     assert!(paths.contains(&"root.txt".to_string()));
-    assert_eq!(paths.len(), 2);
+    // Intermediate directory entries are emitted so empty dirs survive extraction.
+    assert!(paths.contains(&"a".to_string()));
+    assert!(paths.contains(&"a/b/c/d/e".to_string()));
+    assert_eq!(paths.len(), 7);
 }
 
 #[test]
@@ -310,4 +317,32 @@ fn sha256_deterministic_with_symlink() {
     let stats2 = bundle::create_bundle(dir.path()).unwrap();
 
     assert_eq!(stats1.sha256_hex, stats2.sha256_hex);
+}
+
+#[test]
+fn preserves_empty_directories() {
+    // Runtime code often expects dirs like `logs/`, `tmp/`, `data/` to exist
+    // before writing to them; if the bundle drops empty dirs, the first write
+    // on the compute node hits ENOENT with no obvious cause.
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("logs")).unwrap();
+    fs::create_dir(dir.path().join("data")).unwrap();
+    fs::write(dir.path().join("app.js"), "console.log('ok')").unwrap();
+
+    let stats = bundle::create_bundle(dir.path()).unwrap();
+
+    let out = tempdir().unwrap();
+    let decoder = zstd::Decoder::new(stats.bytes.as_slice()).unwrap();
+    let mut archive = tar::Archive::new(decoder);
+    archive.unpack(out.path()).unwrap();
+
+    assert!(
+        out.path().join("logs").is_dir(),
+        "empty logs/ should exist after extraction"
+    );
+    assert!(
+        out.path().join("data").is_dir(),
+        "empty data/ should exist after extraction"
+    );
+    assert!(out.path().join("app.js").is_file());
 }

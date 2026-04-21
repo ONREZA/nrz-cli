@@ -99,6 +99,10 @@ fn append_dir_recursive<W: Write>(
         if ft.is_symlink() {
             append_symlink(builder, &path, rel, canonical_base, counters)?;
         } else if ft.is_dir() {
+            // Emit a directory entry before recursing so empty dirs survive extraction
+            // (runtime code that expects `logs/`, `tmp/`, etc. to exist would otherwise
+            // get an ENOENT on first access — a silent skip class we already fixed for symlinks).
+            append_dir_entry(builder, rel)?;
             append_dir_recursive(builder, base, &path, canonical_base, counters)?;
         } else if ft.is_file() {
             builder
@@ -173,6 +177,25 @@ fn append_symlink<W: Write>(
         .append_link(&mut header, rel, &target)
         .with_context(|| format!("failed to add symlink {} to tar", rel.display()))?;
     counters.symlinks_preserved += 1;
+
+    Ok(())
+}
+
+/// Emit a deterministic directory entry so empty dirs survive extraction.
+///
+/// Uses fixed mode 0o755 and mtime 0 to keep bundle sha256 reproducible;
+/// without this, an empty `logs/` or `data/` dir in the build output would
+/// silently vanish from the archive.
+fn append_dir_entry<W: Write>(builder: &mut tar::Builder<W>, rel: &Path) -> anyhow::Result<()> {
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::Directory);
+    header.set_size(0);
+    header.set_mode(0o755);
+    header.set_mtime(0);
+
+    builder
+        .append_data(&mut header, rel, std::io::empty())
+        .with_context(|| format!("failed to add directory {} to tar", rel.display()))?;
 
     Ok(())
 }
