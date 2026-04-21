@@ -36,6 +36,9 @@ axum = "0.8"
 # reqwest 0.13 uses rustls by default — no native-tls/OpenSSL dependency
 reqwest = { version = "0.13", features = ["json"] }
 
+# Arc-backed byte buffers (cheap clone across S3 upload retries)
+bytes = "1"
+
 # Colors / UI
 console = "0.16"
 indicatif = "0.18"

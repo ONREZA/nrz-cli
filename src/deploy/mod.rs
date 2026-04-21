@@ -1027,7 +1027,7 @@ async fn upload_and_activate(
             output::Phase::Deploy,
         );
         client
-            .put_bytes(bundle_url, bundle_bytes, "application/zstd")
+            .put_bytes(bundle_url, bundle_bytes.into(), "application/zstd")
             .await
             .context("failed to upload tar.zst bundle")?;
         output::success(
@@ -1066,7 +1066,7 @@ async fn upload_and_activate(
                     let content_type = guess_content_type(&file_url.path);
 
                     client
-                        .put_bytes(&file_url.url, data, content_type)
+                        .put_bytes(&file_url.url, data.into(), content_type)
                         .await
                         .with_context(|| format!("failed to upload {}", file_url.path))?;
 

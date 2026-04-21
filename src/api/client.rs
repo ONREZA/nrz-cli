@@ -1,4 +1,8 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
 use anyhow::{Context, bail};
+use bytes::Bytes;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -92,7 +96,7 @@ impl ApiClient {
             .build()
             .context("failed to create HTTP client")?;
 
-        let upload_client = reqwest::Client::new();
+        let upload_client = build_upload_client()?;
 
         Ok(Self {
             client,
@@ -118,7 +122,7 @@ impl ApiClient {
             .build()
             .context("failed to create HTTP client")?;
 
-        let upload_client = reqwest::Client::new();
+        let upload_client = build_upload_client()?;
 
         Ok(Self {
             client,
@@ -253,32 +257,239 @@ impl ApiClient {
 
     /// PUT raw bytes to an absolute URL (for presigned S3 uploads).
     /// Uses a separate client without auth headers to avoid leaking credentials.
+    ///
+    /// Retries transient failures (429, 408, 5xx, network errors) with exponential
+    /// backoff + full jitter, honoring `Retry-After` when provided. The retry policy
+    /// is provider-agnostic — parallel upload throughput self-regulates against any
+    /// rate-limited S3 gateway without needing client-side concurrency tuning.
     pub async fn put_bytes(
         &self,
         url: &str,
-        data: Vec<u8>,
+        data: Bytes,
         content_type: &str,
     ) -> anyhow::Result<()> {
-        let resp = self
-            .upload_client
-            .put(url)
-            .header("Content-Type", content_type)
-            .body(data)
-            .send()
+        self.put_bytes_with_policy(url, data, content_type, &UploadRetryPolicy::production())
             .await
-            .context("S3 upload failed")?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp
-                .text()
-                .await
-                .unwrap_or_else(|e| format!("<failed to read response: {e}>"));
-            bail!("S3 upload failed ({}): {}", status, body);
-        }
-
-        Ok(())
     }
+
+    pub(crate) async fn put_bytes_with_policy(
+        &self,
+        url: &str,
+        data: Bytes,
+        content_type: &str,
+        policy: &UploadRetryPolicy,
+    ) -> anyhow::Result<()> {
+        let started = Instant::now();
+        let mut attempt: u32 = 0;
+        let mut last_err: Option<anyhow::Error> = None;
+
+        loop {
+            attempt += 1;
+            let send_result = self
+                .upload_client
+                .put(url)
+                .header("Content-Type", content_type)
+                .body(data.clone())
+                .send()
+                .await;
+
+            let (reason, retry_after) = match send_result {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status.is_success() {
+                        return Ok(());
+                    }
+                    let retry_after = parse_retry_after(resp.headers());
+                    let body = resp
+                        .text()
+                        .await
+                        .unwrap_or_else(|e| format!("<failed to read response: {e}>"));
+                    if !is_transient_status(status) {
+                        bail!("S3 upload failed ({}): {}", status, body);
+                    }
+                    (
+                        format!("HTTP {}: {}", status, truncate(&body, 200)),
+                        retry_after,
+                    )
+                }
+                Err(err) => {
+                    if !is_transient_reqwest_err(&err) {
+                        return Err(anyhow::Error::new(err).context("S3 upload failed (permanent)"));
+                    }
+                    let reason = format!("network error: {err}");
+                    last_err = Some(anyhow::Error::new(err));
+                    (reason, None)
+                }
+            };
+
+            let elapsed = started.elapsed();
+            let remaining = policy.budget.saturating_sub(elapsed);
+
+            // Server asked us to wait longer than we have — retrying is pointless,
+            // fail fast with a clear reason instead of sleeping the rest of the budget.
+            if let Some(ra) = retry_after
+                && ra > remaining
+            {
+                return Err(exhaustion_error(
+                    attempt,
+                    elapsed,
+                    format!("{reason}; Retry-After {ra:?} exceeds remaining budget {remaining:?}"),
+                    last_err,
+                ));
+            }
+
+            if attempt >= policy.max_attempts || remaining.is_zero() {
+                return Err(exhaustion_error(attempt, elapsed, reason, last_err));
+            }
+
+            let delay = next_delay(attempt, retry_after, policy).min(remaining);
+            tracing::warn!(
+                attempt,
+                delay_ms = delay.as_millis() as u64,
+                %reason,
+                "S3 upload retrying"
+            );
+            tokio::time::sleep(delay).await;
+        }
+    }
+}
+
+// ── Retry policy (S3 uploads) ────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub(crate) struct UploadRetryPolicy {
+    max_attempts: u32,
+    budget: Duration,
+    base: Duration,
+    cap: Duration,
+}
+
+impl UploadRetryPolicy {
+    pub(crate) const fn production() -> Self {
+        Self {
+            max_attempts: 8,
+            budget: Duration::from_secs(180),
+            base: Duration::from_millis(500),
+            cap: Duration::from_secs(30),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn fast_for_tests() -> Self {
+        Self {
+            max_attempts: 5,
+            budget: Duration::from_secs(10),
+            base: Duration::from_millis(10),
+            cap: Duration::from_millis(80),
+        }
+    }
+
+    /// Policy crafted so the budget expires before max_attempts: the exponential
+    /// sleep exceeds budget well before the 100-attempt ceiling is reached.
+    #[cfg(test)]
+    pub(crate) const fn budget_exhaust_for_tests() -> Self {
+        Self {
+            max_attempts: 100,
+            budget: Duration::from_millis(250),
+            base: Duration::from_millis(50),
+            cap: Duration::from_millis(200),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn max_attempts(&self) -> u32 {
+        self.max_attempts
+    }
+}
+
+fn is_transient_status(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || status == reqwest::StatusCode::REQUEST_TIMEOUT
+        || status.is_server_error()
+}
+
+fn is_transient_reqwest_err(err: &reqwest::Error) -> bool {
+    // No response received (transport-level) => transient. Builder/decode errors
+    // are permanent: retrying won't rescue a malformed URL or a truncated response
+    // from an otherwise-successful handshake.
+    err.status().is_none() && !err.is_builder() && !err.is_decode()
+}
+
+fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let raw = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
+    // S3-compatible providers emit seconds; HTTP-date form is allowed by RFC 7231
+    // but not used for rate-limit responses in practice. Non-numeric values fall
+    // through to plain exponential backoff.
+    raw.trim().parse::<u64>().ok().map(Duration::from_secs)
+}
+
+fn next_delay(attempt: u32, retry_after: Option<Duration>, policy: &UploadRetryPolicy) -> Duration {
+    // AWS-style "full jitter": uniform in [0, capped_exp). Decorrelates concurrent
+    // retries maximally and keeps `policy.cap` as the actual per-sleep ceiling.
+    let exp_ms = (policy.base.as_millis() as u64)
+        .saturating_mul(2u64.saturating_pow(attempt.saturating_sub(1)));
+    let capped_ms = exp_ms.min(policy.cap.as_millis() as u64);
+    let backoff = Duration::from_millis(jitter(capped_ms));
+
+    match retry_after {
+        Some(ra) => backoff.max(ra),
+        None => backoff,
+    }
+}
+
+/// Decorrelated jitter via SplitMix64 over a process-wide atomic counter.
+///
+/// `SystemTime::now()` was rejected here because tasks woken from a shared
+/// `tokio::time::sleep` after a common 429 read wall-clock within the same µs
+/// window, producing correlated modulo results. SplitMix64 guarantees every
+/// call gets a distinct mix regardless of wake timing.
+fn jitter(max_ms: u64) -> u64 {
+    if max_ms == 0 {
+        return 0;
+    }
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let n = SEQ.fetch_add(0x9e3779b97f4a7c15, Ordering::Relaxed);
+    let mut z = n;
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+    z ^= z >> 31;
+    z % max_ms
+}
+
+fn exhaustion_error(
+    attempt: u32,
+    elapsed: Duration,
+    reason: String,
+    last_err: Option<anyhow::Error>,
+) -> anyhow::Error {
+    let msg = format!("S3 upload failed after {attempt} attempt(s) in {elapsed:?}: {reason}");
+    match last_err {
+        Some(e) => e.context(msg),
+        None => anyhow::anyhow!("{msg}"),
+    }
+}
+
+fn truncate(s: &str, n: usize) -> String {
+    if s.len() <= n {
+        s.to_string()
+    } else {
+        let mut end = n;
+        while !s.is_char_boundary(end) && end > 0 {
+            end -= 1;
+        }
+        format!("{}…", &s[..end])
+    }
+}
+
+fn build_upload_client() -> anyhow::Result<reqwest::Client> {
+    // Per-request timeout must be < UploadRetryPolicy::production().budget so that
+    // a hung connection gets cut and the retry loop can progress before the overall
+    // budget expires. connect_timeout is separate so we fail fast on unreachable hosts.
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(120))
+        .build()
+        .context("failed to create upload HTTP client")
 }
 
 fn resolve_base_url() -> String {
