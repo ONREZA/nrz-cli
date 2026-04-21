@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.26.0] - 2026-04-21
+
+### ✨ Features
+
+- **deploy:** preserve empty directories in bundle ([3463aee](https://github.com/ONREZA/nrz-cli/commit/3463aee74ace468b6c5877ee37f720d1b466c285))
+
+### 🐛 Bug Fixes
+
+- **deploy:** make broken-symlink error message generic ([86bc690](https://github.com/ONREZA/nrz-cli/commit/86bc6900902b677024df514f93589e79987c978f))
+
 ## [0.25.0] - 2026-04-21
 
 ### ✨ Features
