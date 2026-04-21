@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.25.0] - 2026-04-21
+
+### ✨ Features
+
+- **deploy:** preserve relative symlinks in bundle for pnpm layouts ([2c877f7](https://github.com/ONREZA/nrz-cli/commit/2c877f797199d18e21123b7be718c97eaeb8cfa8))
+
 ## [0.24.1] - 2026-04-17
 
 ### 🐛 Bug Fixes
