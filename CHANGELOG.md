@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.27.0] - 2026-04-21
+
+### ✨ Features
+
+- **deploy:** retry S3 uploads on transient failures ([3119290](https://github.com/ONREZA/nrz-cli/commit/311929012fb373853a5d1fbcc9dd1ae37e5a9917))
+
 ## [0.26.0] - 2026-04-21
 
 ### ✨ Features
