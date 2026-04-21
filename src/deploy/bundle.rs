@@ -155,7 +155,7 @@ fn append_symlink<W: Write>(
         }
         Err(e) => {
             bail!(
-                "broken symlink {} -> {} ({}). This usually means a corrupt dependency install — try `rm -rf node_modules && <pkg-manager> install`.",
+                "broken symlink {} -> {} ({}). If this is inside node_modules, try reinstalling dependencies; otherwise, check where the symlink target should live.",
                 path.display(),
                 target.display(),
                 e
