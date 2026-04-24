@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.28.0] - 2026-04-24
+
+### ✨ Features
+
+- **deploy:** emit structured error_code for user-fault failures ([201f6c6](https://github.com/ONREZA/nrz-cli/commit/201f6c604689ff0612b0a5a165c01d1490247714))
+
 ## [0.27.0] - 2026-04-21
 
 ### ✨ Features
