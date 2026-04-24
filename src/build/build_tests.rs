@@ -49,6 +49,11 @@ fn error_lists_all_checked_dirs() {
     assert!(msg.contains(".next/"), "error should list .next: {msg}");
     assert!(msg.contains("out/"), "error should list out: {msg}");
     assert!(msg.contains("build/"), "error should list build: {msg}");
+    let coded = err
+        .chain()
+        .find_map(|c| c.downcast_ref::<crate::output::CodedError>())
+        .expect("missing-output error must carry a CodedError for Builder classification");
+    assert_eq!(coded.code, "MISSING_BUILD_OUTPUT");
 }
 
 #[test]

@@ -809,7 +809,8 @@ fn validate_cloudflare_vite_plugin_dep_bails() {
     let detection = make_detection("tanstack-start", None);
     let result = validate_process_output(&output_dir, dir.path(), &detection);
     assert!(result.is_err());
-    let msg = result.unwrap_err().to_string();
+    let err = result.unwrap_err();
+    let msg = err.to_string();
     assert!(
         msg.contains("Cloudflare Workers target detected")
             && msg.contains("@cloudflare/vite-plugin"),
@@ -819,6 +820,11 @@ fn validate_cloudflare_vite_plugin_dep_bails() {
         msg.contains("--compute static") && msg.contains("nitro"),
         "should offer both escape hatches: {msg}"
     );
+    let coded = err
+        .chain()
+        .find_map(|c| c.downcast_ref::<crate::output::CodedError>())
+        .expect("error must carry a CodedError so Builder classifies it as user-fault");
+    assert_eq!(coded.code, "FRAMEWORK_UNSUPPORTED");
 }
 
 #[test]
@@ -1968,4 +1974,184 @@ fn diagnostic_payload_mentions_standalone() {
     let msg = framework_process_diagnostic("payload", &detection, dir.path());
     assert!(msg.is_some());
     assert!(msg.as_ref().unwrap().contains("standalone"));
+}
+
+#[cfg(unix)]
+#[test]
+fn run_command_streaming_emits_coded_error_on_nonzero_exit() {
+    let dir = tempdir().unwrap();
+    let err = run_command_streaming(
+        "exit 2",
+        dir.path(),
+        false,
+        crate::output::Phase::Build,
+        "debug",
+        &[],
+    )
+    .expect_err("non-zero exit must fail");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("exit code 2"),
+        "human message should keep the exit code detail: {msg}"
+    );
+    let coded = err
+        .chain()
+        .find_map(|c| c.downcast_ref::<crate::output::CodedError>())
+        .expect("non-zero exit must carry a CodedError so Builder classifies it as user-fault");
+    assert_eq!(coded.code, "BUILD_EXIT_CODE");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_command_streaming_emits_phase_specific_code_for_install() {
+    let dir = tempdir().unwrap();
+    let err = run_command_streaming(
+        "exit 1",
+        dir.path(),
+        true, // JSON mode: exercises the second bail! site
+        crate::output::Phase::Install,
+        "user",
+        &[],
+    )
+    .expect_err("non-zero exit must fail");
+    let coded = err
+        .chain()
+        .find_map(|c| c.downcast_ref::<crate::output::CodedError>())
+        .expect("CodedError expected in JSON-mode path as well");
+    assert_eq!(coded.code, "INSTALL_EXIT_CODE");
+}
+
+// ── Error-code contract (user-fault failures carry CodedError) ───────
+
+fn expect_code(err: &anyhow::Error, expected: &str) {
+    let coded = err
+        .chain()
+        .find_map(|c| c.downcast_ref::<crate::output::CodedError>())
+        .unwrap_or_else(|| panic!("expected CodedError({expected}) in chain: {err:#}"));
+    assert_eq!(
+        coded.code, expected,
+        "wrong code in chain for error: {err:#}"
+    );
+}
+
+#[test]
+fn boundary_wrap_nuxt_missing_server_is_missing_process_entry() {
+    // validate_process_output is an internal helper; the boundary wrap that
+    // tags its failures with MISSING_PROCESS_ENTRY lives at the call site in
+    // deploy::run (`with_default_code(..., "MISSING_PROCESS_ENTRY")`). We
+    // simulate that wrap here so the full user-visible classification path is
+    // exercised end-to-end.
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join("dist");
+    fs::create_dir(&output_dir).unwrap();
+
+    let detection = make_detection("nuxt", None);
+    let raw = validate_process_output(&output_dir, dir.path(), &detection)
+        .expect_err("nuxt without server/index.mjs must fail");
+    let wrapped = crate::output::with_default_code(raw, "MISSING_PROCESS_ENTRY");
+    expect_code(&wrapped, "MISSING_PROCESS_ENTRY");
+}
+
+#[test]
+fn boundary_wrap_preserves_more_specific_framework_unsupported() {
+    // CF Workers detection is tagged FRAMEWORK_UNSUPPORTED deeper in the stack;
+    // the outer boundary wrap (MISSING_PROCESS_ENTRY) must NOT clobber it.
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join("dist");
+    fs::create_dir(&output_dir).unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies":{"@cloudflare/vite-plugin":"^1.0.0"}}"#,
+    )
+    .unwrap();
+
+    let detection = make_detection("tanstack-start", None);
+    let raw = validate_process_output(&output_dir, dir.path(), &detection)
+        .expect_err("CF workers detection must fail");
+    let wrapped = crate::output::with_default_code(raw, "MISSING_PROCESS_ENTRY");
+    expect_code(&wrapped, "FRAMEWORK_UNSUPPORTED");
+}
+
+#[test]
+fn ensure_process_entry_missing_user_entry_is_invalid_deploy_entry() {
+    // User set [deploy] entry in onreza.toml but the file isn't in the build
+    // output — the point-coded INVALID_DEPLOY_ENTRY must win over the outer
+    // MISSING_PROCESS_ENTRY wrap, so users see the specific diagnosis.
+    let dir = tempdir().unwrap();
+    let detection = make_detection("nuxt", None);
+    let err = ensure_process_entry(dir.path(), dir.path(), Some("server.mjs"), &detection, true)
+        .expect_err("user entry missing on disk must fail");
+    let wrapped = crate::output::with_default_code(err, "MISSING_PROCESS_ENTRY");
+    expect_code(&wrapped, "INVALID_DEPLOY_ENTRY");
+}
+
+#[test]
+fn parse_compute_type_rejects_unknown_value_with_code() {
+    let err = parse_compute_type("lambda").expect_err("unknown compute must fail");
+    expect_code(&err, "INVALID_COMPUTE_TYPE");
+}
+
+#[test]
+fn validate_health_path_rejects_query_string_with_code() {
+    let err =
+        validate_health_path("/health?x=1", "--health-check-path").expect_err("query must fail");
+    expect_code(&err, "INVALID_ARGUMENT");
+}
+
+#[test]
+fn validate_compute_manifest_contract_isolate_without_manifest_is_missing_manifest() {
+    let detection = make_detection("remix", None);
+    let err = validate_compute_manifest_contract(ComputeType::Isolate, false, &detection)
+        .expect_err("ISOLATE without manifest must fail");
+    expect_code(&err, "MISSING_MANIFEST");
+}
+
+#[test]
+fn platform_fault_errors_do_not_carry_coded_error() {
+    // Negative coverage: uncoded `anyhow!` / `?` on I/O errors must leave the
+    // chain free of CodedError, so the builder routes them to Sentry. If this
+    // test ever goes green with a CodedError present, the contract "empty code
+    // = platform-fault" has been silently eroded.
+    let err = anyhow::anyhow!("simulated platform-fault");
+    assert!(
+        err.chain()
+            .find_map(|c| c.downcast_ref::<crate::output::CodedError>())
+            .is_none(),
+        "plain anyhow errors must not carry CodedError — got: {err:#}"
+    );
+}
+
+#[test]
+fn with_default_code_attaches_code_and_preserves_source_chain() {
+    // A semantic (non-I/O) error walked through .context(..) and then
+    // with_default_code must gain a CodedError AND keep the earlier context
+    // reachable through the chain for downstream tooling.
+    let err = anyhow::anyhow!("field \"entry\" missing").context("validating manifest");
+    let wrapped = crate::output::with_default_code(err, "INVALID_MANIFEST");
+    expect_code(&wrapped, "INVALID_MANIFEST");
+    let rendered = format!("{wrapped:#}");
+    assert!(
+        rendered.contains("validating manifest") && rendered.contains("field \"entry\" missing"),
+        "source chain must survive through CodedError wrapping: {rendered}"
+    );
+}
+
+#[test]
+fn with_default_code_skips_io_errors_so_platform_faults_reach_sentry() {
+    // Guard against accidentally classifying a platform-fault I/O failure
+    // (permission denied, TOCTOU, EIO) as user-fault just because the outer
+    // boundary wrap fires on every error. io::Error anywhere in the chain must
+    // keep the error uncoded so the builder routes it to Sentry.
+    use std::io;
+    let io_err: anyhow::Error =
+        anyhow::Error::new(io::Error::other("perm")).context("canonicalizing entry");
+    let result = crate::output::with_default_code(io_err, "MISSING_PROCESS_ENTRY");
+    assert!(
+        result
+            .chain()
+            .find_map(|c| c.downcast_ref::<crate::output::CodedError>())
+            .is_none(),
+        "io::Error paths must stay uncoded: {result:#}"
+    );
 }

@@ -80,10 +80,12 @@ pub async fn run_with_hint(
 
     let loaded_manifest = if has_manifest {
         let manifest_path = output_dir.join(".onreza/manifest.json");
-        let manifest = manifest::load_and_validate(&manifest_path)?;
+        let manifest = manifest::load_and_validate(&manifest_path)
+            .map_err(|e| output::with_default_code(e, "INVALID_MANIFEST"))?;
 
         if !args.skip_validation {
-            manifest::verify_files(&output_dir, &manifest)?;
+            manifest::verify_files(&output_dir, &manifest)
+                .map_err(|e| output::with_default_code(e, "INVALID_MANIFEST"))?;
         }
 
         let framework = manifest
@@ -152,12 +154,15 @@ pub async fn run_with_hint(
             || output_dir.join("server.js").is_file())
     {
         if !output_dir.join("server.js").is_file() {
-            anyhow::bail!(
-                "server.js not found in standalone output {}. \
-                 Ensure `output: 'standalone'` is set in next.config.js \
-                 and `next build` completed successfully.",
-                output_dir.display()
-            );
+            return Err(output::coded_error(
+                "MISSING_BUILD_OUTPUT",
+                format!(
+                    "server.js not found in standalone output {}. \
+                     Ensure `output: 'standalone'` is set in next.config.js \
+                     and `next build` completed successfully.",
+                    output_dir.display()
+                ),
+            ));
         }
         prepare_nextjs_standalone(&project_dir, &output_dir, json)?;
         let has_public = output_dir.join("public").is_dir();
@@ -169,7 +174,8 @@ pub async fn run_with_hint(
             output::Phase::Build,
         );
         if !args.skip_validation {
-            manifest::verify_files(&output_dir, &auto)?;
+            manifest::verify_files(&output_dir, &auto)
+                .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
         emit_build_output(json, &auto, &output_dir, Some(detection));
         Some(auto)
@@ -184,7 +190,8 @@ pub async fn run_with_hint(
             output::Phase::Build,
         );
         if !args.skip_validation {
-            manifest::verify_files(&output_dir, &auto)?;
+            manifest::verify_files(&output_dir, &auto)
+                .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
         emit_build_output(json, &auto, &output_dir, Some(detection));
         Some(auto)
@@ -437,11 +444,14 @@ fn detect_output_dir(
     }
 
     let dirs_display: Vec<_> = all_dirs.iter().map(|d| format!("{d}/")).collect();
-    anyhow::bail!(
-        "no output directory found in {}. Expected one of: {}",
-        project_dir.display(),
-        dirs_display.join(", ")
-    );
+    Err(output::coded_error(
+        "MISSING_BUILD_OUTPUT",
+        format!(
+            "no output directory found in {}. Expected one of: {}",
+            project_dir.display(),
+            dirs_display.join(", ")
+        ),
+    ))
 }
 
 /// Prepare Next.js standalone output by copying static assets and public files

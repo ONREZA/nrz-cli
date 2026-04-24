@@ -1,8 +1,10 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 use sha2::{Digest, Sha256};
+
+use crate::output;
 
 const ZSTD_LEVEL: i32 = 3;
 
@@ -57,7 +59,10 @@ pub fn create_bundle(output_dir: &Path) -> anyhow::Result<BundleStats> {
     let compressed = encoder.finish().context("failed to finalize zstd stream")?;
 
     if compressed.is_empty() {
-        bail!("tar.zst bundle is empty");
+        return Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            "tar.zst bundle is empty",
+        ));
     }
 
     let mut hasher = Sha256::new();
@@ -136,11 +141,14 @@ fn append_symlink<W: Write>(
         .with_context(|| format!("failed to read symlink {}", path.display()))?;
 
     if target.is_absolute() {
-        bail!(
-            "symlink {} has absolute target {} — absolute symlinks cannot survive extraction on the compute node. Check your build output for an upstream bug.",
-            path.display(),
-            target.display()
-        );
+        return Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!(
+                "symlink {} has absolute target {} — absolute symlinks cannot survive extraction on the compute node. Check your build output for an upstream bug.",
+                path.display(),
+                target.display()
+            ),
+        ));
     }
 
     // canonicalize() follows the link and collapses `..`, so comparing against
@@ -158,12 +166,15 @@ fn append_symlink<W: Write>(
             return Ok(());
         }
         Err(e) => {
-            bail!(
-                "broken symlink {} -> {} ({}). If this is inside node_modules, try reinstalling dependencies; otherwise, check where the symlink target should live.",
-                path.display(),
-                target.display(),
-                e
-            );
+            return Err(output::coded_error(
+                "INVALID_BUILD_OUTPUT",
+                format!(
+                    "broken symlink {} -> {} ({}). If this is inside node_modules, try reinstalling dependencies; otherwise, check where the symlink target should live.",
+                    path.display(),
+                    target.display(),
+                    e
+                ),
+            ));
         }
     }
 

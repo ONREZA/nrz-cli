@@ -267,10 +267,13 @@ pub async fn run(
                 Some(app_path) => {
                     let resolved = project_dir.join(&app_path);
                     if !resolved.is_dir() {
-                        bail!(
-                            "resolved app directory does not exist: {}",
-                            resolved.display()
-                        );
+                        return Err(output::coded_error(
+                            "MONOREPO_APP_NOT_FOUND",
+                            format!(
+                                "resolved app directory does not exist: {}",
+                                resolved.display()
+                            ),
+                        ));
                     }
                     output::status(
                         json,
@@ -288,15 +291,18 @@ pub async fn run(
                         .iter()
                         .map(|p| p.name.as_deref().unwrap_or(&p.path).to_string())
                         .collect();
-                    bail!(
-                        "app \"{app_name}\" not found in monorepo workspaces.\n\
-                         Available packages: {}",
-                        if available.is_empty() {
-                            "(none resolved)".to_string()
-                        } else {
-                            available.join(", ")
-                        }
-                    );
+                    return Err(output::coded_error(
+                        "MONOREPO_APP_NOT_FOUND",
+                        format!(
+                            "app \"{app_name}\" not found in monorepo workspaces.\n\
+                             Available packages: {}",
+                            if available.is_empty() {
+                                "(none resolved)".to_string()
+                            } else {
+                                available.join(", ")
+                            }
+                        ),
+                    ));
                 }
             },
             None => {
@@ -305,10 +311,13 @@ pub async fn run(
                 } else {
                     "[deploy] app in onreza.toml"
                 };
-                bail!(
-                    "{source} was specified but no monorepo detected in {}",
-                    project_dir.display()
-                );
+                return Err(output::coded_error(
+                    "MONOREPO_APP_NOT_FOUND",
+                    format!(
+                        "{source} was specified but no monorepo detected in {}",
+                        project_dir.display()
+                    ),
+                ));
             }
         }
     }
@@ -464,7 +473,10 @@ pub async fn run(
     .await
     .context("file scan task failed (panic or runtime shutdown)")??;
     if files.is_empty() {
-        bail!("output directory is empty: {}", output_dir.display());
+        return Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!("output directory is empty: {}", output_dir.display()),
+        ));
     }
     if !compressed_map.is_empty() {
         output::status(
@@ -554,14 +566,16 @@ pub async fn run(
     // skip pre-flight validation and auto-detection.
     // When no manifest: find entry and auto-generate COMPUTE manifest.
     if is_process && !has_manifest {
-        validate_process_output(&output_dir, &project_dir, &detection)?;
+        validate_process_output(&output_dir, &project_dir, &detection)
+            .map_err(|e| output::with_default_code(e, "MISSING_PROCESS_ENTRY"))?;
         let (entry, warning) = ensure_process_entry(
             &output_dir,
             &project_dir,
             config.deploy_entry(),
             &detection,
             json,
-        )?;
+        )
+        .map_err(|e| output::with_default_code(e, "MISSING_PROCESS_ENTRY"))?;
         if let Some(ref w) = warning {
             output::warn(json, w, output::Phase::Deploy);
             warnings.push(w.clone());
@@ -581,12 +595,15 @@ pub async fn run(
                 );
             }
             None => {
-                bail!(
-                    "Cannot auto-generate COMPUTE manifest: entry point not detected in {}.\n\n\
-                     Create .onreza/manifest.json manually.\n\
-                     See: docs.onreza.ru/manifest",
-                    output_dir.display()
-                );
+                return Err(output::coded_error(
+                    "MISSING_PROCESS_ENTRY",
+                    format!(
+                        "Cannot auto-generate COMPUTE manifest: entry point not detected in {}.\n\n\
+                         Create .onreza/manifest.json manually.\n\
+                         See: docs.onreza.ru/manifest",
+                        output_dir.display()
+                    ),
+                ));
             }
         }
     }
@@ -611,7 +628,10 @@ pub async fn run(
     if let Some(deployment_id) = &args.resume_deployment {
         let deployment_id = deployment_id.trim();
         if deployment_id.is_empty() {
-            bail!("--resume-deployment requires a non-empty deployment ID");
+            return Err(output::coded_error(
+                "INVALID_ARGUMENT",
+                "--resume-deployment requires a non-empty deployment ID".to_string(),
+            ));
         }
         return resume_deploy(
             &client,
@@ -962,13 +982,22 @@ fn resolve_health_check(
 /// Validate an HTTP health check path.
 fn validate_health_path(path: &str, source: &str) -> anyhow::Result<()> {
     if !path.starts_with('/') {
-        bail!("{source} must start with '/', got: \"{path}\"");
+        return Err(output::coded_error(
+            "INVALID_ARGUMENT",
+            format!("{source} must start with '/', got: \"{path}\""),
+        ));
     }
     if path.contains("..") {
-        bail!("{source} must not contain '..', got: \"{path}\"");
+        return Err(output::coded_error(
+            "INVALID_ARGUMENT",
+            format!("{source} must not contain '..', got: \"{path}\""),
+        ));
     }
     if path.contains('?') || path.contains('#') {
-        bail!("{source} must not contain query or fragment, got: \"{path}\"");
+        return Err(output::coded_error(
+            "INVALID_ARGUMENT",
+            format!("{source} must not contain query or fragment, got: \"{path}\""),
+        ));
     }
     Ok(())
 }
@@ -1281,14 +1310,17 @@ fn validate_compute_manifest_contract(
     // ISOLATE without a manifest is always an error — it requires a pre-built manifest.
     if compute == ComputeType::Isolate && !has_manifest {
         let framework = &detection.name;
-        bail!(
-            "{framework} project detected but no .onreza/manifest.json found.\n\n\
-             ISOLATE compute requires a manifest with ISOLATE layers.\n\n\
-             Options:\n\
-             \x20 1. Create .onreza/manifest.json manually\n\
-             \x20 2. Use --compute static if your build output is static files only\n\
-             \x20 3. Use --compute process for standalone server deployment"
-        );
+        return Err(output::coded_error(
+            "MISSING_MANIFEST",
+            format!(
+                "{framework} project detected but no .onreza/manifest.json found.\n\n\
+                 ISOLATE compute requires a manifest with ISOLATE layers.\n\n\
+                 Options:\n\
+                 \x20 1. Create .onreza/manifest.json manually\n\
+                 \x20 2. Use --compute static if your build output is static files only\n\
+                 \x20 3. Use --compute process for standalone server deployment"
+            ),
+        ));
     }
 
     // Safety net: PROCESS auto-generation should have produced a manifest
@@ -1335,7 +1367,7 @@ fn validate_process_output(
     detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<()> {
     if let Some(msg) = detect_workers_runtime_target(project_dir, output_dir)? {
-        bail!("{msg}");
+        return Err(output::coded_error("FRAMEWORK_UNSUPPORTED", msg));
     }
 
     match detection.framework.as_str() {
@@ -1710,7 +1742,10 @@ fn ensure_process_entry(
 ) -> anyhow::Result<(Option<String>, Option<String>)> {
     // 1. Resolve entry point
     let entry = if let Some(e) = config_entry {
-        Some(sanitize_config_entry(e)?)
+        Some(
+            sanitize_config_entry(e)
+                .map_err(|err| output::with_default_code(err, "INVALID_DEPLOY_ENTRY"))?,
+        )
     } else {
         match crate::detect::resolve_entry_point_detailed(
             &detection.framework,
@@ -1731,18 +1766,21 @@ fn ensure_process_entry(
             }
             crate::detect::EntryPointResolution::Ambiguous(candidates) => {
                 if is_strict_process_framework(&detection.framework) {
-                    bail!(
-                        "Cannot determine entry point for PROCESS deployment: multiple candidates found.\n\n\
-                         Candidates in {}:\n\
-                         {}\n\n\
-                         Set [deploy] entry in onreza.toml to pick one explicitly.",
-                        output_dir.display(),
-                        candidates
-                            .iter()
-                            .map(|c| format!("  - {c}"))
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    );
+                    return Err(output::coded_error(
+                        "ENTRY_POINT_AMBIGUOUS",
+                        format!(
+                            "Cannot determine entry point for PROCESS deployment: multiple candidates found.\n\n\
+                             Candidates in {}:\n\
+                             {}\n\n\
+                             Set [deploy] entry in onreza.toml to pick one explicitly.",
+                            output_dir.display(),
+                            candidates
+                                .iter()
+                                .map(|c| format!("  - {c}"))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        ),
+                    ));
                 }
 
                 let warning = format!(
@@ -1794,11 +1832,14 @@ fn ensure_process_entry(
     if let Some(ref entry) = entry {
         let entry_path = output_dir.join(entry);
         if !entry_path.is_file() {
-            bail!(
-                "Entry point \"{entry}\" not found in output directory: {}\n\n\
-                 Make sure the file exists after running your build command.",
-                output_dir.display()
-            );
+            return Err(output::coded_error(
+                "INVALID_DEPLOY_ENTRY",
+                format!(
+                    "Entry point \"{entry}\" not found in output directory: {}\n\n\
+                     Make sure the file exists after running your build command.",
+                    output_dir.display()
+                ),
+            ));
         }
         let canonical_entry = entry_path
             .canonicalize()
@@ -1807,7 +1848,10 @@ fn ensure_process_entry(
             .canonicalize()
             .context("failed to resolve output directory path")?;
         if !canonical_entry.starts_with(&canonical_output) {
-            bail!("entry point must be inside the output directory, got: \"{entry}\"");
+            return Err(output::coded_error(
+                "INVALID_DEPLOY_ENTRY",
+                format!("entry point must be inside the output directory, got: \"{entry}\""),
+            ));
         }
 
         output::status(
@@ -1983,8 +2027,18 @@ fn run_command_streaming(
             .with_context(|| format!("failed to start command: {cmd}"))?;
         if !status.success() {
             match status.code() {
-                Some(code) => anyhow::bail!("{phase} command `{cmd}` failed with exit code {code}"),
-                None => anyhow::bail!("{phase} process `{cmd}` was killed by signal"),
+                Some(code) => {
+                    return Err(output::coded_error(
+                        format!("{}_EXIT_CODE", phase.as_str().to_uppercase()),
+                        format!("{phase} command `{cmd}` failed with exit code {code}"),
+                    ));
+                }
+                None => {
+                    return Err(output::coded_error(
+                        format!("{}_SIGNAL_KILLED", phase.as_str().to_uppercase()),
+                        format!("{phase} process `{cmd}` was killed by signal"),
+                    ));
+                }
             }
         }
         return Ok(());
@@ -2068,8 +2122,18 @@ fn run_command_streaming(
 
     if !status.success() {
         match status.code() {
-            Some(code) => anyhow::bail!("{phase} command failed with exit code {code}"),
-            None => anyhow::bail!("{phase} process was killed by signal"),
+            Some(code) => {
+                return Err(output::coded_error(
+                    format!("{}_EXIT_CODE", phase.as_str().to_uppercase()),
+                    format!("{phase} command failed with exit code {code}"),
+                ));
+            }
+            None => {
+                return Err(output::coded_error(
+                    format!("{}_SIGNAL_KILLED", phase.as_str().to_uppercase()),
+                    format!("{phase} process was killed by signal"),
+                ));
+            }
         }
     }
     Ok(())
@@ -2123,7 +2187,10 @@ fn run_build_step(
     extra_env: &[(&str, &str)],
 ) -> anyhow::Result<()> {
     if cmd.trim().is_empty() {
-        anyhow::bail!("empty build command");
+        return Err(output::coded_error(
+            "INVALID_CONFIG",
+            "empty build command".to_string(),
+        ));
     }
 
     output::status(json, ">", format!("Building: {cmd}"), output::Phase::Deploy);
@@ -2385,7 +2452,10 @@ fn parse_compute_type(s: &str) -> anyhow::Result<ComputeType> {
         "static" => Ok(ComputeType::Static),
         "isolate" => Ok(ComputeType::Isolate),
         "process" => Ok(ComputeType::Process),
-        _ => bail!("invalid compute type: \"{s}\". Must be one of: static, isolate, process"),
+        _ => Err(output::coded_error(
+            "INVALID_COMPUTE_TYPE",
+            format!("invalid compute type: \"{s}\". Must be one of: static, isolate, process"),
+        )),
     }
 }
 

@@ -42,11 +42,8 @@ async fn main() {
     let config = match nrz::config::load(&project_dir) {
         Ok(c) => c,
         Err(e) => {
-            if json {
-                output::log_line("user", "error", "error", &format!("{e:#}"));
-            } else {
-                eprintln!("Error: {e:#}");
-            }
+            let coded = output::coded_error("INVALID_CONFIG", format!("{e:#}"));
+            emit_terminal_error(json, &coded);
             std::process::exit(1);
         }
     };
@@ -62,13 +59,23 @@ async fn main() {
     .await;
 
     if let Err(ref e) = result {
-        if json {
-            output::log_line("user", "error", "error", &format!("{e:#}"));
-            std::process::exit(1);
-        } else {
-            eprintln!("Error: {e:#}");
-            std::process::exit(1);
-        }
+        emit_terminal_error(json, e);
+        std::process::exit(1);
+    }
+}
+
+fn emit_terminal_error(json: bool, err: &anyhow::Error) {
+    if !json {
+        eprintln!("Error: {err:#}");
+        return;
+    }
+    let message = format!("{err:#}");
+    let coded = err
+        .chain()
+        .find_map(|c| c.downcast_ref::<output::CodedError>());
+    match coded {
+        Some(c) => output::log_error_structured("error", &message, &c.code, None),
+        None => output::log_line("user", "error", "error", &message),
     }
 }
 

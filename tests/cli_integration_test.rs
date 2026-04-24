@@ -431,3 +431,23 @@ fn detect_nonexistent_directory_returns_error() {
         "should return JSON error for nonexistent dir: {stdout}"
     );
 }
+
+#[test]
+fn broken_onreza_toml_emits_invalid_config_code() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("onreza.toml"),
+        "[deploy]\nentry = \"/abs/path\"\n",
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["detect", "--json"]);
+    cmd.assert().failure();
+    let output = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\"code\":\"INVALID_CONFIG\""),
+        "config load fault must surface as structured error with code=INVALID_CONFIG, got: {stdout}"
+    );
+}
