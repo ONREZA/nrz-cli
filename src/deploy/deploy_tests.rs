@@ -4,13 +4,21 @@ use tempfile::tempdir;
 
 use super::*;
 
+fn fe(path: &str, size: u64, content_hash: &str) -> FileEntry {
+    FileEntry {
+        path: path.into(),
+        size,
+        content_hash: content_hash.into(),
+    }
+}
+
 #[test]
 fn scan_files_flat_directory() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("index.html"), "<h1>hi</h1>").unwrap();
     fs::write(dir.path().join("style.css"), "body{}").unwrap();
 
-    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
 
     assert_eq!(files.len(), 2);
     assert_eq!(files[0].path, "index.html");
@@ -25,7 +33,7 @@ fn scan_files_nested_directory() {
     fs::write(dir.path().join("assets/app.js"), "js").unwrap();
     fs::write(dir.path().join("assets/images/logo.png"), "png").unwrap();
 
-    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
 
     assert_eq!(files.len(), 3);
     let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
@@ -40,7 +48,7 @@ fn scan_files_records_correct_sizes() {
     let content = "hello world";
     fs::write(dir.path().join("file.txt"), content).unwrap();
 
-    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
 
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].size, content.len() as u64);
@@ -52,17 +60,15 @@ fn scan_files_computes_sha256_from_original_content() {
     let content = "hello world";
     fs::write(dir.path().join("file.txt"), content).unwrap();
 
-    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
 
     assert_eq!(files.len(), 1);
-    let hash = files[0]
-        .sha256
-        .as_deref()
-        .expect("sha256 should be present");
+    let hash = files[0].content_hash.as_str();
     assert_eq!(hash.len(), 64);
     assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
 
-    // Known SHA-256 of "hello world"
+    // Known SHA-256 of "hello world" — guards against accidental hashing of
+    // anything other than identity bytes (RFC: blob CAS addresses raw content).
     assert_eq!(
         hash,
         "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
@@ -70,14 +76,30 @@ fn scan_files_computes_sha256_from_original_content() {
 }
 
 #[test]
+fn scan_files_handles_file_larger_than_chunk() {
+    // Stream-hash path covers a file that needs multiple read() calls — guards
+    // against an off-by-one that would only hash the first chunk.
+    let dir = tempdir().unwrap();
+    let content = vec![0xABu8; 200 * 1024]; // 200 KiB > 64 KiB SCAN_HASH_CHUNK_BYTES
+    fs::write(dir.path().join("big.bin"), &content).unwrap();
+
+    let files = scan_dir(dir.path()).unwrap();
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].size, content.len() as u64);
+    let expected = format!("{:x}", sha2::Sha256::digest(&content));
+    assert_eq!(files[0].content_hash, expected);
+}
+
+#[test]
 fn scan_files_sha256_deterministic_across_calls() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("a.txt"), "same content").unwrap();
 
-    let (files1, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
-    let (files2, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+    let files1 = scan_dir(dir.path()).unwrap();
+    let files2 = scan_dir(dir.path()).unwrap();
 
-    assert_eq!(files1[0].sha256, files2[0].sha256);
+    assert_eq!(files1[0].content_hash, files2[0].content_hash);
 }
 
 #[test]
@@ -86,15 +108,15 @@ fn scan_files_sha256_differs_for_different_content() {
     fs::write(dir.path().join("a.txt"), "content A").unwrap();
     fs::write(dir.path().join("b.txt"), "content B").unwrap();
 
-    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
 
-    assert_ne!(files[0].sha256, files[1].sha256);
+    assert_ne!(files[0].content_hash, files[1].content_hash);
 }
 
 #[test]
 fn scan_files_empty_directory() {
     let dir = tempdir().unwrap();
-    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
     assert!(files.is_empty());
 }
 
@@ -105,7 +127,7 @@ fn scan_files_sorted_alphabetically() {
     fs::write(dir.path().join("a.txt"), "a").unwrap();
     fs::write(dir.path().join("m.txt"), "m").unwrap();
 
-    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
 
     assert_eq!(files[0].path, "a.txt");
     assert_eq!(files[1].path, "m.txt");
@@ -117,7 +139,7 @@ fn scan_files_allows_double_dots_in_filename() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("file..backup.js"), "x").unwrap();
 
-    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].path, "file..backup.js");
 }
@@ -129,7 +151,7 @@ fn scan_files_skips_symlinks() {
     fs::write(dir.path().join("real.txt"), "real").unwrap();
     std::os::unix::fs::symlink(dir.path().join("real.txt"), dir.path().join("link.txt")).unwrap();
 
-    let (files, _) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].path, "real.txt");
 }
@@ -138,19 +160,7 @@ fn scan_files_skips_symlinks() {
 
 #[test]
 fn synthetic_sha_deterministic() {
-    let files = vec![
-        FileEntry {
-            path: "a.js".into(),
-            size: 100,
-            sha256: None,
-        },
-        FileEntry {
-            path: "b.css".into(),
-            size: 200,
-            sha256: None,
-        },
-    ];
-
+    let files = vec![fe("a.js", 100, "aa"), fe("b.css", 200, "bb")];
     let sha1 = synthetic_sha(&files);
     let sha2 = synthetic_sha(&files);
     assert_eq!(sha1, sha2);
@@ -158,27 +168,25 @@ fn synthetic_sha_deterministic() {
 
 #[test]
 fn synthetic_sha_differs_for_different_files() {
-    let files_a = vec![FileEntry {
-        path: "a.js".into(),
-        size: 100,
-        sha256: None,
-    }];
-    let files_b = vec![FileEntry {
-        path: "b.js".into(),
-        size: 100,
-        sha256: None,
-    }];
+    let files_a = vec![fe("a.js", 100, "aa")];
+    let files_b = vec![fe("b.js", 100, "aa")];
+    assert_ne!(synthetic_sha(&files_a), synthetic_sha(&files_b));
+}
 
+#[test]
+fn synthetic_sha_differs_for_same_path_different_hash() {
+    // Now that synthetic_sha mixes content_hash into the digest, two deploys
+    // of the same paths but mutated bytes produce distinct synthetic SHAs.
+    // This is what makes the synthetic SHA a valid commit-SHA fallback for
+    // cross-deploy CAS dedup keying.
+    let files_a = vec![fe("a.js", 100, "aaaa")];
+    let files_b = vec![fe("a.js", 100, "bbbb")];
     assert_ne!(synthetic_sha(&files_a), synthetic_sha(&files_b));
 }
 
 #[test]
 fn synthetic_sha_is_64_hex_chars() {
-    let files = vec![FileEntry {
-        path: "x.txt".into(),
-        size: 1,
-        sha256: None,
-    }];
+    let files = vec![fe("x.txt", 1, "ff")];
     let sha = synthetic_sha(&files);
     assert_eq!(sha.len(), 64);
     assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
@@ -584,67 +592,9 @@ fn project_info_optional_fields_default_to_none() {
     assert!(info.output_directory_source.is_none());
 }
 
-// ── guess_content_type tests ────────────────────────────────
-
-#[test]
-fn content_type_html() {
-    assert_eq!(guess_content_type("index.html"), "text/html");
-    assert_eq!(guess_content_type("page.htm"), "text/html");
-}
-
-#[test]
-fn content_type_js() {
-    assert_eq!(guess_content_type("app.js"), "application/javascript");
-    assert_eq!(guess_content_type("entry.mjs"), "application/javascript");
-    assert_eq!(guess_content_type("lib.cjs"), "application/javascript");
-}
-
-#[test]
-fn content_type_css() {
-    assert_eq!(guess_content_type("style.css"), "text/css");
-}
-
-#[test]
-fn content_type_images() {
-    assert_eq!(guess_content_type("logo.png"), "image/png");
-    assert_eq!(guess_content_type("photo.jpg"), "image/jpeg");
-    assert_eq!(guess_content_type("photo.jpeg"), "image/jpeg");
-    assert_eq!(guess_content_type("hero.webp"), "image/webp");
-    assert_eq!(guess_content_type("icon.svg"), "image/svg+xml");
-    assert_eq!(guess_content_type("icon.ico"), "image/x-icon");
-}
-
-#[test]
-fn content_type_fonts() {
-    assert_eq!(guess_content_type("font.woff2"), "font/woff2");
-    assert_eq!(guess_content_type("font.woff"), "font/woff");
-    assert_eq!(guess_content_type("font.ttf"), "font/ttf");
-}
-
-#[test]
-fn content_type_data() {
-    assert_eq!(guess_content_type("data.json"), "application/json");
-    assert_eq!(guess_content_type("app.d4e5f6.js.map"), "application/json");
-    assert_eq!(guess_content_type("app.wasm"), "application/wasm");
-}
-
-#[test]
-fn content_type_nested_path() {
-    assert_eq!(
-        guess_content_type("_astro/app.d4e5f6.js"),
-        "application/javascript"
-    );
-    assert_eq!(
-        guess_content_type("server/entry.mjs"),
-        "application/javascript"
-    );
-}
-
-#[test]
-fn content_type_unknown_fallback() {
-    assert_eq!(guess_content_type("file.xyz"), "application/octet-stream");
-    assert_eq!(guess_content_type("noext"), "application/octet-stream");
-}
+// (Content-Type guessing tests removed: blob/bundle PUTs go through `put_blob`,
+// which omits Content-Type so the SigV4 signature stays valid — the helper
+// `guess_content_type` is no longer in the codebase.)
 
 // ── framework_static_hint tests ──────────────────────────────
 
@@ -777,27 +727,24 @@ fn prepare_upload_body_serializes_without_deprecated_fields() {
 }
 
 #[test]
-fn file_entry_serializes_sha256_when_present() {
+fn file_entry_serializes_with_camel_case_content_hash() {
     let entry = FileEntry {
         path: "a.js".into(),
         size: 42,
-        sha256: Some("abc123".into()),
+        content_hash: "abc123".into(),
     };
     let json = serde_json::to_value(&entry).unwrap();
-    assert_eq!(json["sha256"], "abc123");
+    assert_eq!(json["contentHash"], "abc123");
     assert_eq!(json["path"], "a.js");
     assert_eq!(json["size"], 42);
-}
-
-#[test]
-fn file_entry_omits_sha256_when_none() {
-    let entry = FileEntry {
-        path: "b.js".into(),
-        size: 10,
-        sha256: None,
-    };
-    let json = serde_json::to_value(&entry).unwrap();
-    assert!(json.get("sha256").is_none());
+    // Server schema (FileEntrySchema) is `.strict()`, so any stray key would
+    // make the deployment-create POST fail validation.
+    let obj = json.as_object().unwrap();
+    assert_eq!(
+        obj.len(),
+        3,
+        "expected exactly path/size/contentHash, got {obj:?}"
+    );
 }
 
 // ── manifest → compute type mapping tests ────────────────────
@@ -1448,29 +1395,55 @@ fn diagnostic_elysia_mentions_bun() {
 
 // ── resolve_bundle_upload tests ──────────────────────────────
 
+fn make_bundle_target(sha256: &str, content_length: u64) -> BundleUpload {
+    BundleUpload {
+        key: format!("bundles/{sha256}.tar.zst"),
+        url: "https://s3.example.com/bundle".to_string(),
+        sha256: sha256.into(),
+        content_length,
+    }
+}
+
 #[test]
-fn resolve_bundle_upload_with_url() {
+fn resolve_bundle_upload_with_target() {
     let data = Some((vec![1, 2, 3], "abc123".to_string()));
-    let result = resolve_bundle_upload(data, Some("https://s3.example.com/bundle")).unwrap();
-    assert!(result.is_some());
-    let (bytes, url) = result.unwrap();
+    let target = make_bundle_target("abc123", 3);
+    let (bytes, t) = resolve_bundle_upload(data, Some(target)).unwrap().unwrap();
     assert_eq!(bytes, vec![1, 2, 3]);
-    assert_eq!(url, "https://s3.example.com/bundle");
+    assert_eq!(t.url, "https://s3.example.com/bundle");
+    assert_eq!(t.sha256, "abc123");
 }
 
 #[test]
-fn resolve_bundle_upload_no_bundle_data() {
-    let result = resolve_bundle_upload(None, Some("https://s3.example.com/bundle")).unwrap();
-    assert!(result.is_none());
+fn resolve_bundle_upload_target_without_bundle_bails() {
+    // Asymmetric with the (Some, None) case — both signal a server/CLI contract
+    // mismatch and should fail loudly rather than silently dropping work.
+    let target = make_bundle_target("abc123", 3);
+    let err = resolve_bundle_upload(None, Some(target)).unwrap_err();
+    assert!(err.to_string().contains("API version mismatch"), "{err}");
 }
 
 #[test]
-fn resolve_bundle_upload_no_url_bails() {
+fn resolve_bundle_upload_no_target_bails() {
     let data = Some((vec![1, 2, 3], "abc123".to_string()));
     let result = resolve_bundle_upload(data, None);
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
-    assert!(msg.contains("bundle upload URL"), "unexpected error: {msg}");
+    assert!(
+        msg.contains("bundle upload target"),
+        "unexpected error: {msg}"
+    );
+}
+
+#[test]
+fn resolve_bundle_upload_sha_mismatch_bails() {
+    // Defense-in-depth: if the server signed for a different SHA than we
+    // built (stale presign, race), fail locally — otherwise S3 would 400
+    // BadDigest with no clue why.
+    let data = Some((vec![1, 2, 3], "aaa".to_string()));
+    let target = make_bundle_target("bbb", 3);
+    let err = resolve_bundle_upload(data, Some(target)).unwrap_err();
+    assert!(err.to_string().contains("SHA mismatch"), "{err}");
 }
 
 #[test]
@@ -1675,287 +1648,6 @@ fn compute_config_body_without_path_omits_field() {
     assert!(value.get("healthCheckPath").is_none());
 }
 
-// ── precompressed_dirs / scan_and_maybe_compress ─────────────
-
-#[test]
-fn precompressed_dirs_empty_when_no_manifest() {
-    let dirs = precompressed_dirs(None);
-    assert!(dirs.is_empty());
-}
-
-#[test]
-fn precompressed_dirs_empty_when_no_static_precompressed() {
-    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
-        r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#,
-    )
-    .unwrap();
-    let dirs = precompressed_dirs(Some(&manifest));
-    assert!(dirs.is_empty());
-}
-
-#[test]
-fn precompressed_dirs_includes_precompressed_static() {
-    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
-        r#"{
-        "version": 1,
-        "layers": [
-            { "name": "assets", "target": "STATIC", "directory": "client",
-              "isPrecompressed": true },
-            { "name": "server", "target": "ISOLATE", "directory": "server",
-              "entry": "e.mjs", "export": "fetch" }
-        ],
-        "routes": [{ "pattern": "^/.*$", "layer": "server" }]
-    }"#,
-    )
-    .unwrap();
-    let dirs = precompressed_dirs(Some(&manifest));
-    assert_eq!(dirs, vec!["client/"]);
-}
-
-#[test]
-fn precompressed_dirs_root_dot_gives_dot() {
-    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
-        r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": ".",
-                     "isPrecompressed": true }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#,
-    )
-    .unwrap();
-    let dirs = precompressed_dirs(Some(&manifest));
-    assert_eq!(dirs, vec!["."]);
-}
-
-#[test]
-fn scan_and_compress_compresses_precompressed_files() {
-    let dir = tempfile::tempdir().unwrap();
-    let content = "Hello, world! This is a test file with some content to compress.";
-    fs::write(dir.path().join("index.html"), content).unwrap();
-
-    let pc_dirs = vec![".".to_string()];
-    let (entries, compressed) = scan_and_maybe_compress(dir.path(), &pc_dirs).unwrap();
-
-    assert_eq!(entries.len(), 1);
-    assert!(compressed.contains_key("index.html"));
-
-    let br_bytes = compressed.get("index.html").unwrap();
-    // Compressed size is reported in the entry
-    assert_eq!(entries[0].size, br_bytes.len() as u64);
-    // Compressed bytes differ from original
-    assert_ne!(br_bytes.as_slice(), content.as_bytes());
-    // Verify output differs from raw input (brotli has no magic bytes, but the stream is structurally different)
-    assert_ne!(&br_bytes[..4], &content.as_bytes()[..4]);
-    // SHA-256 is computed from the original content, not from compressed
-    let expected_hash = format!("{:x}", sha2::Sha256::digest(content.as_bytes()));
-    assert_eq!(entries[0].sha256.as_deref(), Some(expected_hash.as_str()));
-}
-
-#[test]
-fn scan_and_compress_leaves_other_dirs_uncompressed() {
-    let dir = tempfile::tempdir().unwrap();
-    fs::create_dir_all(dir.path().join("client")).unwrap();
-    fs::create_dir_all(dir.path().join("server")).unwrap();
-    // Use repetitive content that brotli will reliably compress
-    let content = "function hello(){return 42;} ".repeat(20);
-    let content = content.as_str();
-    fs::write(dir.path().join("client/app.js"), content).unwrap();
-    fs::write(dir.path().join("server/entry.mjs"), content).unwrap();
-
-    // Only "client/" is precompressed
-    let pc_dirs = vec!["client/".to_string()];
-    let (entries, compressed) = scan_and_maybe_compress(dir.path(), &pc_dirs).unwrap();
-
-    assert_eq!(entries.len(), 2);
-    assert!(
-        compressed.contains_key("client/app.js"),
-        "client/app.js should be compressed"
-    );
-    assert!(
-        !compressed.contains_key("server/entry.mjs"),
-        "server/entry.mjs should not be compressed"
-    );
-
-    // server file size matches original raw bytes (not compressed)
-    let server_entry = entries
-        .iter()
-        .find(|e| e.path == "server/entry.mjs")
-        .unwrap();
-    assert_eq!(
-        server_entry.size,
-        content.len() as u64,
-        "server file should report raw size"
-    );
-}
-
-#[test]
-fn scan_and_compress_empty_precompressed_list_behaves_like_scan_files() {
-    let dir = tempfile::tempdir().unwrap();
-    let content = "body { color: red; }";
-    fs::write(dir.path().join("style.css"), content).unwrap();
-
-    let (entries, compressed) = scan_and_maybe_compress(dir.path(), &[]).unwrap();
-
-    assert_eq!(entries.len(), 1);
-    assert!(compressed.is_empty());
-    assert_eq!(entries[0].size, content.len() as u64);
-}
-
-#[test]
-fn is_precompressed_path_root_dot_matches_all() {
-    assert!(is_precompressed_path("index.html", &[".".to_string()]));
-    assert!(is_precompressed_path("assets/app.js", &[".".to_string()]));
-    assert!(is_precompressed_path(
-        "deep/nested/file.css",
-        &[".".to_string()]
-    ));
-}
-
-#[test]
-fn is_precompressed_path_prefix_matches_only_subtree() {
-    let dirs = vec!["client/".to_string()];
-    assert!(is_precompressed_path("client/app.js", &dirs));
-    assert!(is_precompressed_path("client/sub/deep.css", &dirs));
-    assert!(!is_precompressed_path("server/entry.mjs", &dirs));
-    assert!(!is_precompressed_path("index.html", &dirs));
-}
-
-#[test]
-fn is_precompressed_path_false_prefix_not_matched() {
-    let dirs = vec!["client/".to_string()];
-    // "clientsecrets/" shares the "client" prefix but must NOT match "client/"
-    assert!(!is_precompressed_path("clientsecrets/key.pem", &dirs));
-    assert!(!is_precompressed_path("client-extra/file.js", &dirs));
-    assert!(!is_precompressed_path("clientx", &dirs));
-}
-
-#[test]
-fn precompressed_dirs_only_precompressed_layers_included() {
-    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
-        r#"{
-        "version": 1,
-        "layers": [
-            { "name": "assets", "target": "STATIC", "directory": "client",
-              "isPrecompressed": true },
-            { "name": "public", "target": "STATIC", "directory": "public" }
-        ],
-        "routes": [{ "pattern": "^/.*$", "layer": "assets" }]
-    }"#,
-    )
-    .unwrap();
-    let dirs = precompressed_dirs(Some(&manifest));
-    assert_eq!(dirs, vec!["client/"]);
-    assert!(
-        !dirs.iter().any(|d| d == "public/"),
-        "public/ should not appear"
-    );
-}
-
-#[test]
-fn precompressed_dirs_excludes_explicit_false() {
-    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
-        r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist",
-                     "isPrecompressed": false }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#,
-    )
-    .unwrap();
-    let dirs = precompressed_dirs(Some(&manifest));
-    assert!(dirs.is_empty());
-}
-
-#[test]
-fn precompressed_dirs_trailing_slash_not_doubled() {
-    // directory value already has trailing slash in manifest — must not produce "client//"
-    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
-        r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "client/",
-                     "isPrecompressed": true }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#,
-    )
-    .unwrap();
-    let dirs = precompressed_dirs(Some(&manifest));
-    assert_eq!(dirs, vec!["client/"]);
-}
-
-fn decompress_brotli(data: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    brotli::BrotliDecompress(&mut std::io::Cursor::new(data), &mut out)
-        .expect("brotli decompression failed");
-    out
-}
-
-#[test]
-fn brotli_compress_roundtrip() {
-    let original = b"Hello, world! This is test data for brotli roundtrip verification.";
-    let compressed = brotli_compress(original).unwrap();
-    let decompressed = decompress_brotli(&compressed);
-    assert_eq!(decompressed, original);
-}
-
-#[test]
-fn brotli_compress_empty_roundtrip() {
-    let original: &[u8] = &[];
-    let compressed = brotli_compress(original).unwrap();
-    let decompressed = decompress_brotli(&compressed);
-    assert_eq!(decompressed, original);
-}
-
-#[test]
-fn scan_and_compress_skips_brotli_when_expansion() {
-    let dir = tempfile::tempdir().unwrap();
-    // 1 byte: brotli stream overhead always exceeds 1 byte, so expansion is guaranteed
-    let content = b"x";
-    fs::write(dir.path().join("tiny.js"), content).unwrap();
-
-    let pc_dirs = vec![".".to_string()];
-    let (entries, compressed) = scan_and_maybe_compress(dir.path(), &pc_dirs).unwrap();
-
-    assert_eq!(entries.len(), 1);
-    assert!(
-        !compressed.contains_key("tiny.js"),
-        "tiny file must not be pre-compressed when brotli expands it"
-    );
-    assert_eq!(
-        entries[0].size,
-        content.len() as u64,
-        "raw size must be reported"
-    );
-    // SHA-256 must be computed from the original content even when brotli expands
-    let expected_hash = format!("{:x}", sha2::Sha256::digest(content));
-    assert_eq!(entries[0].sha256.as_deref(), Some(expected_hash.as_str()));
-}
-
-#[test]
-fn scan_and_compress_empty_file_not_compressed() {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("empty.html"), b"").unwrap();
-
-    let pc_dirs = vec![".".to_string()];
-    let (entries, compressed) = scan_and_maybe_compress(dir.path(), &pc_dirs).unwrap();
-
-    assert_eq!(entries.len(), 1);
-    // Empty file: any brotli stream is larger than 0 bytes, so falls back to raw
-    assert!(
-        !compressed.contains_key("empty.html"),
-        "empty file should not be in compressed_map"
-    );
-    assert_eq!(entries[0].size, 0, "empty file size must be 0");
-    // SHA-256 of empty content is a well-known constant
-    assert_eq!(
-        entries[0].sha256.as_deref(),
-        Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
-    );
-}
-
 // ── static_layer_dirs / is_in_layer_dirs ────────────────────
 
 #[test]
@@ -2010,31 +1702,11 @@ fn file_list_filtered_for_process_with_manifest() {
     // Simulate what happens in run(): scan produces all files, then STATIC filter
     // keeps only files belonging to STATIC layer directories.
     let all_files = vec![
-        FileEntry {
-            path: "_static/_next/static/chunks/main.js".into(),
-            size: 100,
-            sha256: None,
-        },
-        FileEntry {
-            path: "public/favicon.ico".into(),
-            size: 50,
-            sha256: None,
-        },
-        FileEntry {
-            path: "server.js".into(),
-            size: 200,
-            sha256: None,
-        },
-        FileEntry {
-            path: "node_modules/react/index.js".into(),
-            size: 300,
-            sha256: None,
-        },
-        FileEntry {
-            path: ".next/server/app/page.js".into(),
-            size: 400,
-            sha256: None,
-        },
+        fe("_static/_next/static/chunks/main.js", 100, "11"),
+        fe("public/favicon.ico", 50, "22"),
+        fe("server.js", 200, "33"),
+        fe("node_modules/react/index.js", 300, "44"),
+        fe(".next/server/app/page.js", 400, "55"),
     ];
     let sd = vec!["_static/".to_string(), "public/".to_string()];
     let filtered: Vec<_> = all_files

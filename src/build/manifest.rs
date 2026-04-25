@@ -68,8 +68,6 @@ pub struct Layer {
     pub export_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeConfig>,
-    #[serde(rename = "isPrecompressed", skip_serializing_if = "Option::is_none")]
-    pub is_precompressed: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
@@ -277,12 +275,6 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                 }
             }
             LayerTarget::Isolate => {
-                if layer.is_precompressed.is_some() {
-                    anyhow::bail!(
-                        "ISOLATE layer '{}' must not have 'isPrecompressed'",
-                        layer.name
-                    );
-                }
                 let entry = layer.entry.as_deref().ok_or_else(|| {
                     anyhow::anyhow!("layer '{}' (target=ISOLATE) requires 'entry'", layer.name)
                 })?;
@@ -316,12 +308,6 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                 }
             }
             LayerTarget::Compute => {
-                if layer.is_precompressed.is_some() {
-                    anyhow::bail!(
-                        "COMPUTE layer '{}' must not have 'isPrecompressed'",
-                        layer.name
-                    );
-                }
                 let entry = layer.entry.as_deref().ok_or_else(|| {
                     anyhow::anyhow!("layer '{}' (target=COMPUTE) requires 'entry'", layer.name)
                 })?;
@@ -607,7 +593,6 @@ pub fn generate_static_manifest() -> Manifest {
             entry: None,
             export_format: None,
             runtime: None,
-            is_precompressed: None,
         }],
         routes: vec![Route {
             pattern: "^/.*$".to_string(),
@@ -635,7 +620,6 @@ pub fn generate_compute_manifest(entry: &str) -> Manifest {
             entry: Some(entry.to_string()),
             export_format: None,
             runtime: None,
-            is_precompressed: None,
         }],
         routes: vec![Route {
             pattern: "^/.*$".to_string(),
@@ -676,7 +660,6 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         entry: None,
         export_format: None,
         runtime: None,
-        is_precompressed: None,
     }];
 
     if has_public {
@@ -687,7 +670,6 @@ pub fn generate_nextjs_standalone_manifest_for_server(
             entry: None,
             export_format: None,
             runtime: None,
-            is_precompressed: None,
         });
     }
 
@@ -698,7 +680,6 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         entry: Some(server_entry.to_string()),
         export_format: None,
         runtime: None,
-        is_precompressed: None,
     });
 
     let mut routes = vec![Route {
@@ -781,7 +762,6 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
             entry: None,
             export_format: None,
             runtime: None,
-            is_precompressed: None,
         });
         routes.push(Route {
             pattern: pattern.to_string(),
@@ -800,7 +780,6 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
         entry: Some(config.server_entry.to_string()),
         export_format: None,
         runtime: None,
-        is_precompressed: None,
     });
     routes.push(Route {
         pattern: "^/.*$".to_string(),

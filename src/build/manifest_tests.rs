@@ -1750,10 +1750,14 @@ fn generate_astro_ssr_manifest_without_client_is_valid() {
     assert_eq!(m.layers.len(), 1);
 }
 
-// ── isPrecompressed ────────────────────────────────────────────
+// ── isPrecompressed (deprecated, ignored) ─────────────────────
 
 #[test]
-fn static_layer_is_precompressed_true_parses() {
+fn legacy_is_precompressed_is_silently_ignored() {
+    // After EDGE_DYNAMIC_ENCODING the CLI no longer pre-compresses; on-disk
+    // manifests with the deprecated `isPrecompressed` flag must still parse
+    // (no `deny_unknown_fields`) and the Layer struct no longer carries the
+    // field, so it's dropped on round-trip.
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
         "version": 1,
@@ -1763,92 +1767,11 @@ fn static_layer_is_precompressed_true_parses() {
     }"#;
     let path = write_manifest(dir.path(), json);
     let m = load_and_validate(&path).unwrap();
-    assert_eq!(m.layers[0].is_precompressed, Some(true));
-}
-
-#[test]
-fn static_layer_is_precompressed_false_parses() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist",
-                     "isPrecompressed": false }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let m = load_and_validate(&path).unwrap();
-    assert_eq!(m.layers[0].is_precompressed, Some(false));
-}
-
-#[test]
-fn static_layer_is_precompressed_absent_is_none() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = write_manifest(dir.path(), STATIC_MANIFEST);
-    let m = load_and_validate(&path).unwrap();
-    assert!(m.layers[0].is_precompressed.is_none());
-}
-
-#[test]
-fn isolate_layer_is_precompressed_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "ISOLATE", "directory": "server",
-                     "entry": "e.mjs", "export": "fetch", "isPrecompressed": true }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("ISOLATE layer 's' must not have 'isPrecompressed'"),
-        "{err}"
-    );
-}
-
-#[test]
-fn compute_layer_is_precompressed_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "dist",
-                     "entry": "server.js", "isPrecompressed": true }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("COMPUTE layer 's' must not have 'isPrecompressed'"),
-        "{err}"
-    );
-}
-
-#[test]
-fn is_precompressed_serializes_as_camel_case() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist",
-                     "isPrecompressed": true }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let m = load_and_validate(&path).unwrap();
-    let serialized = serde_json::to_value(&m).unwrap();
-    let layer = &serialized["layers"][0];
-    assert_eq!(layer["isPrecompressed"], serde_json::json!(true));
-    assert!(layer.get("is_precompressed").is_none());
-}
-
-#[test]
-fn is_precompressed_none_omitted_from_serialization() {
-    let m = generate_static_manifest();
     let serialized = serde_json::to_value(&m).unwrap();
     let layer = &serialized["layers"][0];
     assert!(
         layer.get("isPrecompressed").is_none(),
-        "isPrecompressed should be omitted when None"
+        "isPrecompressed must not survive serialization"
     );
 }
 
@@ -1885,8 +1808,6 @@ fn nextjs_standalone_manifest_directories() {
     assert_eq!(m.layers[1].directory, "public");
     assert_eq!(m.layers[2].directory, ".");
     assert_eq!(m.layers[2].entry.as_deref(), Some("server.js"));
-    // Generated layers must not set is_precompressed (deploy handles compression separately)
-    assert!(m.layers.iter().all(|l| l.is_precompressed.is_none()));
 }
 
 #[test]

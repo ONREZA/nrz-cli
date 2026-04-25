@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
+use base64::Engine;
 use bytes::Bytes;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -255,30 +256,39 @@ impl ApiClient {
         check_response(resp).await
     }
 
-    /// PUT raw bytes to an absolute URL (for presigned S3 uploads).
-    /// Uses a separate client without auth headers to avoid leaking credentials.
+    /// PUT a content-addressable blob to a server-issued conditioned presigned URL.
+    ///
+    /// The presign signature binds **both** `Content-Length` and `x-amz-checksum-sha256`
+    /// (RFC: `SECURE_ARCHIVE_INGEST.md` §"Conditioned presigned PUT"). The CLI must
+    /// match exactly:
+    /// - `Content-Length` is set automatically by reqwest from `data.len()`.
+    /// - `x-amz-checksum-sha256` is the base64 of the SHA-256's raw 32 bytes
+    ///   (NOT base64 of the hex string — common foot-gun).
+    ///
+    /// Content-Type is intentionally **not** sent: the server doesn't sign it for
+    /// blob/bundle PUTs, and any Content-Type header reqwest *did* attach would
+    /// also need to match the signature, breaking unconditioned blob uploads.
+    /// reqwest 0.13 + `body(Bytes)` does not auto-set Content-Type, so leaving
+    /// the call free of `.header("Content-Type", …)` is safe.
     ///
     /// Retries transient failures (429, 408, 5xx, network errors) with exponential
-    /// backoff + full jitter, honoring `Retry-After` when provided. The retry policy
-    /// is provider-agnostic — parallel upload throughput self-regulates against any
-    /// rate-limited S3 gateway without needing client-side concurrency tuning.
-    pub async fn put_bytes(
-        &self,
-        url: &str,
-        data: Bytes,
-        content_type: &str,
-    ) -> anyhow::Result<()> {
-        self.put_bytes_with_policy(url, data, content_type, &UploadRetryPolicy::production())
+    /// backoff + full jitter, honoring `Retry-After`. Permanent 4xx integrity
+    /// rejects (400 BadDigest / 403 SignatureDoesNotMatch) propagate immediately.
+    pub async fn put_blob(&self, url: &str, data: Bytes, sha256_hex: &str) -> anyhow::Result<()> {
+        self.put_blob_with_policy(url, data, sha256_hex, &UploadRetryPolicy::production())
             .await
     }
 
-    pub(crate) async fn put_bytes_with_policy(
+    pub(crate) async fn put_blob_with_policy(
         &self,
         url: &str,
         data: Bytes,
-        content_type: &str,
+        sha256_hex: &str,
         policy: &UploadRetryPolicy,
     ) -> anyhow::Result<()> {
+        let checksum_b64 = sha256_hex_to_base64(sha256_hex)
+            .with_context(|| format!("invalid SHA-256 for blob upload: {sha256_hex}"))?;
+
         let started = Instant::now();
         let mut attempt: u32 = 0;
         let mut last_err: Option<anyhow::Error> = None;
@@ -288,7 +298,7 @@ impl ApiClient {
             let send_result = self
                 .upload_client
                 .put(url)
-                .header("Content-Type", content_type)
+                .header("x-amz-checksum-sha256", &checksum_b64)
                 .body(data.clone())
                 .send()
                 .await;
@@ -305,7 +315,7 @@ impl ApiClient {
                         .await
                         .unwrap_or_else(|e| format!("<failed to read response: {e}>"));
                     if !is_transient_status(status) {
-                        bail!("S3 upload failed ({}): {}", status, body);
+                        bail!("{}", explain_s3_failure(status, &body));
                     }
                     (
                         format!("HTTP {}: {}", status, truncate(&body, 200)),
@@ -479,6 +489,60 @@ fn truncate(s: &str, n: usize) -> String {
         }
         format!("{}…", &s[..end])
     }
+}
+
+/// Translate a permanent S3 failure into an actionable CLI message.
+///
+/// S3 returns failures as XML like `<Error><Code>BadDigest</Code>...</Error>`.
+/// The raw body dumped verbatim is opaque to users — the two codes specific to
+/// the conditioned-PUT contract (`BadDigest`, `SignatureDoesNotMatch`) get
+/// bespoke hints; everything else falls back to the truncated body so we never
+/// hide diagnostic information.
+pub(crate) fn explain_s3_failure(status: reqwest::StatusCode, body: &str) -> String {
+    match parse_s3_error_code(body).as_deref() {
+        Some("BadDigest") => format!(
+            "S3 rejected the upload with BadDigest ({status}): the body's SHA-256 didn't match \
+             the signed `x-amz-checksum-sha256`. The file likely changed between scan and upload, \
+             or its content drifted. Rebuild and redeploy."
+        ),
+        Some("SignatureDoesNotMatch") => format!(
+            "S3 rejected the upload with SignatureDoesNotMatch ({status}): Content-Length or the \
+             SHA-256 header didn't match the presigned signature. Rebuild and redeploy."
+        ),
+        _ => format!("S3 upload failed ({status}): {}", truncate(body, 200)),
+    }
+}
+
+/// Hand-rolled extractor for `<Code>...</Code>` from an S3 error XML body.
+/// The body is small (<1 KB) and well-shaped; pulling in a real XML parser
+/// would be overkill for one tag, and a stray "<Code" inside `<Message>` is
+/// not a concern S3 produces in practice.
+fn parse_s3_error_code(body: &str) -> Option<String> {
+    let start = body.find("<Code>")? + "<Code>".len();
+    let end = body[start..].find("</Code>")?;
+    Some(body[start..start + end].trim().to_string())
+}
+
+/// Convert a 64-char lowercase hex SHA-256 into the base64 form S3 expects in
+/// `x-amz-checksum-sha256`.
+///
+/// The checksum is base64 of the **raw 32 bytes**, not base64 of the hex
+/// string. Mixing those up was the entire reason this helper exists in its own
+/// function: a wrong encoding would just make every PUT 400 with no clue why.
+pub(crate) fn sha256_hex_to_base64(hex: &str) -> anyhow::Result<String> {
+    if hex.len() != 64
+        || !hex
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        bail!("expected 64 lowercase hex chars, got {} chars", hex.len());
+    }
+    let mut bytes = [0u8; 32];
+    for i in 0..32 {
+        bytes[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
+            .with_context(|| format!("invalid hex byte at offset {}", i * 2))?;
+    }
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 fn build_upload_client() -> anyhow::Result<reqwest::Client> {

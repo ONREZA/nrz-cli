@@ -7,6 +7,7 @@ pub(crate) mod health_check;
 #[cfg(test)]
 mod health_check_tests;
 
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -130,13 +131,18 @@ async fn fetch_project_settings(
 
 // ── API structs ──────────────────────────────────────────────
 
+/// Per-file manifest entry sent to the server.
+///
+/// Wire schema: `{ path, size, contentHash }`. `contentHash` is the lowercase
+/// hex SHA-256 of the original (identity) bytes — required since the
+/// blob-CAS RFC made it the addressing key for `blobs/{sha}` and the value
+/// bound into the SigV4 PUT signature via `x-amz-checksum-sha256`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FileEntry {
     path: String,
     size: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sha256: Option<String>,
+    content_hash: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -164,16 +170,38 @@ struct CreateDeploymentResponse {
     #[allow(dead_code)]
     artifact_prefix: String,
     upload_urls: Vec<FileUploadUrl>,
-    bundle_upload_url: Option<String>,
+    bundle_upload: Option<BundleUpload>,
     #[allow(dead_code)]
     expires_in: u64,
 }
 
+/// Presigned PUT target returned by the server for a single blob or ISOLATE module.
+///
+/// `path` is the on-disk relative path (used to locate bytes on the CLI side).
+/// `sha256` and `contentLength` are bound into the SigV4 signature — the CLI
+/// MUST send `x-amz-checksum-sha256: base64(<sha256>)` and `Content-Length` to
+/// match, or S3 rejects with `400 BadDigest` / `403 SignatureDoesNotMatch`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FileUploadUrl {
     path: String,
     url: String,
+    sha256: String,
+    content_length: u64,
+    #[allow(dead_code)]
+    key: String,
+}
+
+/// Presigned PUT for the COMPUTE bundle (`bundles/{sha}.tar.zst`). Same SigV4
+/// integrity contract as `FileUploadUrl`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BundleUpload {
+    #[allow(dead_code)]
+    key: String,
+    url: String,
+    sha256: String,
+    content_length: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -515,38 +543,25 @@ pub async fn run(
     let loaded_manifest = build_result.manifest;
     let has_manifest = loaded_manifest.is_some();
 
-    // Scan output directory recursively into a flat file list, pre-compressing files
-    // in STATIC layers marked isPrecompressed.
-    // Run in a blocking task: combines filesystem I/O and CPU-bound brotli compression.
+    // Scan output directory into a flat file list with streaming SHA-256 + size per
+    // file. Pre-compression is gone (RFC: EDGE_DYNAMIC_ENCODING) — the edge serves
+    // identity bytes and compresses on the fly, so the CLI only ships raw content
+    // addressed by sha256. Run in a blocking task: filesystem I/O + CPU-bound hashing.
     output::status(
         json,
         "~",
         "Scanning output directory...",
         output::Phase::Deploy,
     );
-    let pc_dirs = precompressed_dirs(loaded_manifest.as_ref());
     let output_dir_for_scan = output_dir.clone();
-    let (mut files, compressed_map) = tokio::task::spawn_blocking(move || {
-        scan_and_maybe_compress(&output_dir_for_scan, &pc_dirs)
-    })
-    .await
-    .context("file scan task failed (panic or runtime shutdown)")??;
+    let mut files = tokio::task::spawn_blocking(move || scan_dir(&output_dir_for_scan))
+        .await
+        .context("file scan task failed (panic or runtime shutdown)")??;
     if files.is_empty() {
         return Err(output::coded_error(
             "INVALID_BUILD_OUTPUT",
             format!("output directory is empty: {}", output_dir.display()),
         ));
-    }
-    if !compressed_map.is_empty() {
-        output::status(
-            json,
-            "~",
-            format!(
-                "Pre-compressed {} file(s) with brotli",
-                compressed_map.len()
-            ),
-            output::Phase::Deploy,
-        );
     }
 
     // Resolve compute type: CLI flag > config > manifest layers > detect
@@ -701,7 +716,6 @@ pub async fn run(
             json,
             compute,
             warnings,
-            compressed_map,
         )
         .await;
     }
@@ -847,25 +861,16 @@ pub async fn run(
         commit_sha,
         bundle_sha256: bundle_data.as_ref().map(|(_, sha)| sha.clone()),
     };
-    let file_count = body.files.len();
 
     let deployment: CreateDeploymentResponse = client
         .post(&format!("/v1/projects/{}/deployments", project_id), &body)
         .await
         .context("failed to create deployment")?;
 
-    // Validate server returned correct number of upload URLs (PROCESS skips individual files)
-    if deployment.bundle_upload_url.is_none() && deployment.upload_urls.len() != file_count {
-        bail!(
-            "server returned {} upload URLs, but {} files were sent. \
-             This may indicate an API version mismatch.",
-            deployment.upload_urls.len(),
-            file_count
-        );
-    }
+    // No length-equality check: with blob CAS dedup the server returns presigns
+    // only for *missing* blobs, so `upload_urls.len() <= files.len()` is normal.
 
-    let bundle_upload =
-        resolve_bundle_upload(bundle_data, deployment.bundle_upload_url.as_deref())?;
+    let bundle_upload = resolve_bundle_upload(bundle_data, deployment.bundle_upload)?;
 
     upload_and_activate(
         &client,
@@ -875,7 +880,6 @@ pub async fn run(
         total_size,
         json,
         bundle_upload,
-        &compressed_map,
     )
     .await?;
 
@@ -1102,12 +1106,22 @@ async fn upload_and_activate(
     output_dir: &Path,
     total_size: u64,
     json: bool,
-    bundle_upload: Option<(Vec<u8>, &str)>, // (bundle_bytes, presigned_url)
-    compressed_data: &CompressedMap,
+    bundle_upload: Option<(Vec<u8>, BundleUpload)>,
 ) -> anyhow::Result<()> {
-    // Upload bundle first if present
-    if let Some((bundle_bytes, bundle_url)) = bundle_upload {
+    // Upload bundle first if present (PROCESS deployments).
+    // The presign signature locks Content-Length + x-amz-checksum-sha256, so the
+    // exact bytes hashed at bundle creation time MUST be the bytes we PUT here —
+    // any divergence is a 400/403 from S3.
+    if let Some((bundle_bytes, target)) = bundle_upload {
         let bundle_size = bundle_bytes.len();
+        if bundle_size as u64 != target.content_length {
+            bail!(
+                "bundle size drifted between build and upload (built {}, server signed {}) — \
+                 retry the deploy",
+                bundle_size,
+                target.content_length
+            );
+        }
         output::status(
             json,
             "~",
@@ -1115,7 +1129,7 @@ async fn upload_and_activate(
             output::Phase::Deploy,
         );
         client
-            .put_bytes(bundle_url, bundle_bytes.into(), "application/zstd")
+            .put_blob(&target.url, bundle_bytes.into(), &target.sha256)
             .await
             .context("failed to upload tar.zst bundle")?;
         output::success(
@@ -1131,8 +1145,8 @@ async fn upload_and_activate(
         let spinner = make_spinner(
             json,
             &format!(
-                "Uploading {file_count} files ({})...",
-                format_bytes(total_size as usize)
+                "Uploading {file_count} blobs ({})...",
+                format_bytes(missing_total_size(upload_urls) as usize)
             ),
         );
 
@@ -1142,19 +1156,23 @@ async fn upload_and_activate(
                 let spinner = &spinner;
                 let uploaded = &uploaded;
                 async move {
-                    let data = if let Some(br_bytes) = compressed_data.get(&file_url.path) {
-                        br_bytes.clone()
-                    } else {
-                        let file_path = output_dir.join(&file_url.path);
-                        tokio::fs::read(&file_path)
-                            .await
-                            .with_context(|| format!("failed to read {}", file_path.display()))?
-                    };
+                    let file_path = output_dir.join(&file_url.path);
+                    let data = tokio::fs::read(&file_path)
+                        .await
+                        .with_context(|| format!("failed to read {}", file_path.display()))?;
 
-                    let content_type = guess_content_type(&file_url.path);
+                    if data.len() as u64 != file_url.content_length {
+                        bail!(
+                            "size drifted between scan and upload for {} (scanned {} bytes, now {} bytes) — \
+                             rebuild and redeploy",
+                            file_url.path,
+                            file_url.content_length,
+                            data.len()
+                        );
+                    }
 
                     client
-                        .put_bytes(&file_url.url, data.into(), content_type)
+                        .put_blob(&file_url.url, data.into(), &file_url.sha256)
                         .await
                         .with_context(|| format!("failed to upload {}", file_url.path))?;
 
@@ -1166,44 +1184,51 @@ async fn upload_and_activate(
                     Ok(())
                 }
             }))
-            .buffer_unordered(20)
+            .buffer_unordered(16)
             .collect()
             .await;
 
-        // Check for upload errors
-        let errors: Vec<_> = upload_results.into_iter().filter_map(|r| r.err()).collect();
+        let mut errors: Vec<anyhow::Error> =
+            upload_results.into_iter().filter_map(|r| r.err()).collect();
         if !errors.is_empty() {
             finish_spinner(spinner, "");
-            let error_details: Vec<String> = errors.iter().map(|e| format!("{e:#}")).collect();
+            let failed = errors.len();
 
-            if json {
-                output::log_line(
-                    "user",
-                    "error",
-                    "deploy",
-                    &format!(
-                        "{} of {file_count} file uploads failed: {}",
-                        errors.len(),
-                        error_details.join("; ")
-                    ),
-                );
-                std::process::exit(1);
+            // Surface every per-file failure to the user in non-JSON mode; in
+            // JSON mode the structured error line carries the first chain and
+            // any additional details get folded into the summary.
+            if !json {
+                for err in &errors {
+                    output::warn(
+                        false,
+                        format!("upload error: {err:#}"),
+                        output::Phase::Deploy,
+                    );
+                }
             }
 
-            for detail in &error_details {
-                output::warn(
-                    false,
-                    format!("upload error: {detail}"),
-                    output::Phase::Deploy,
-                );
-            }
-            bail!("{} of {file_count} file uploads failed", errors.len());
+            // Wrap as `CodedError("UPLOAD_FAILED", ...)` with the first error
+            // attached as `source` — main.rs::emit_terminal_error walks the
+            // chain to print S3 reasons and reads `code` for Builder routing.
+            // Without the code here Builder treats user-fault drift errors
+            // (400 BadDigest, 403 SignatureDoesNotMatch) as platform-fault
+            // and pages through Sentry.
+            let primary = errors.remove(0);
+            let summary = if failed == 1 {
+                "1 blob upload failed".to_string()
+            } else {
+                format!("{failed} of {file_count} blob uploads failed")
+            };
+            return Err(
+                output::CodedError::with_source("UPLOAD_FAILED", summary, primary.into()).into(),
+            );
         }
 
         finish_spinner(
             spinner,
             &format!(
-                "Uploaded {file_count} files ({})",
+                "Uploaded {file_count} blobs ({}); manifest total {}",
+                format_bytes(missing_total_size(upload_urls) as usize),
                 format_bytes(total_size as usize)
             ),
         );
@@ -1240,7 +1265,7 @@ struct PrepareUploadBody {
 #[serde(rename_all = "camelCase")]
 struct PrepareUploadResponse {
     upload_urls: Vec<FileUploadUrl>,
-    bundle_upload_url: Option<String>,
+    bundle_upload: Option<BundleUpload>,
     #[allow(dead_code)]
     artifact_prefix: String,
     #[allow(dead_code)]
@@ -1265,7 +1290,6 @@ async fn resume_deploy(
     json: bool,
     compute: ComputeType,
     warnings: Vec<String>,
-    compressed_map: CompressedMap,
 ) -> anyhow::Result<()> {
     let is_process = compute == ComputeType::Process;
 
@@ -1279,8 +1303,9 @@ async fn resume_deploy(
     // Create bundle for PROCESS deployments
     let bundle_data = maybe_create_bundle(output_dir, is_process, json)?;
 
-    // Prepare upload: server returns presigned URLs for this deployment
-    let file_count = files.len();
+    // Prepare upload: server returns presigned URLs for the missing blobs of
+    // this deployment. With CAS dedup the count can be < files.len() — that's
+    // expected, not an API mismatch — so we no longer guard on equality.
     let total_size: u64 = files.iter().map(|f| f.size).sum();
 
     let body = PrepareUploadBody {
@@ -1313,16 +1338,7 @@ async fn resume_deploy(
         }
     };
 
-    // PROCESS skips individual file uploads — only bundle.tar.zst is uploaded
-    if prepared.bundle_upload_url.is_none() && prepared.upload_urls.len() != file_count {
-        bail!(
-            "server returned {} upload URLs, but {} files were sent",
-            prepared.upload_urls.len(),
-            file_count
-        );
-    }
-
-    let bundle_upload = resolve_bundle_upload(bundle_data, prepared.bundle_upload_url.as_deref())?;
+    let bundle_upload = resolve_bundle_upload(bundle_data, prepared.bundle_upload)?;
 
     upload_and_activate(
         client,
@@ -1332,7 +1348,6 @@ async fn resume_deploy(
         total_size,
         json,
         bundle_upload,
-        &compressed_map,
     )
     .await?;
 
@@ -1979,17 +1994,36 @@ fn maybe_create_bundle(
 
 fn resolve_bundle_upload(
     bundle_data: Option<(Vec<u8>, String)>,
-    upload_url: Option<&str>,
-) -> anyhow::Result<Option<(Vec<u8>, &str)>> {
-    match (bundle_data, upload_url) {
-        (Some((bytes, _)), Some(url)) => Ok(Some((bytes, url))),
+    server_target: Option<BundleUpload>,
+) -> anyhow::Result<Option<(Vec<u8>, BundleUpload)>> {
+    match (bundle_data, server_target) {
+        (Some((bytes, sha)), Some(target)) => {
+            // Defense-in-depth: server signed a presign for *this* bundle SHA.
+            // If it ever returns a target for a different SHA we'd silently
+            // PUT bytes whose checksum can't match, getting a confusing
+            // 400 BadDigest from S3 instead of a clear local error.
+            if target.sha256 != sha {
+                bail!(
+                    "bundle SHA mismatch: built {} but server presigned {}",
+                    sha,
+                    target.sha256
+                );
+            }
+            Ok(Some((bytes, target)))
+        }
         (Some(_), None) => {
             bail!(
-                "Server did not return a bundle upload URL for PROCESS deployment. \
+                "Server did not return a bundle upload target for PROCESS deployment. \
                  This may indicate an API version mismatch. Try upgrading: nrz upgrade"
             );
         }
-        _ => Ok(None),
+        (None, Some(_)) => {
+            bail!(
+                "Server returned a bundle upload target but no bundle was built locally. \
+                 This may indicate an API version mismatch. Try upgrading: nrz upgrade"
+            );
+        }
+        (None, None) => Ok(None),
     }
 }
 
@@ -2312,86 +2346,43 @@ fn is_in_layer_dirs(rel_path: &str, dirs: &[String]) -> bool {
     })
 }
 
-fn precompressed_dirs(manifest: Option<&build_manifest::Manifest>) -> Vec<String> {
-    let Some(m) = manifest else {
-        return Vec::new();
-    };
-    m.layers
-        .iter()
-        .filter(|l| {
-            l.target == build_manifest::LayerTarget::Static && l.is_precompressed == Some(true)
-        })
-        .map(|l| {
-            if l.directory == "." {
-                ".".to_string()
-            } else {
-                // Normalise so we can use starts_with on relative file paths
-                format!("{}/", l.directory.trim_end_matches('/'))
-            }
-        })
-        .collect()
-}
+// ── Output scan ──────────────────────────────────────────────
 
-/// Returns `true` if the file at `rel_path` belongs to one of the precompressed layer dirs.
-fn is_precompressed_path(rel_path: &str, dirs: &[String]) -> bool {
-    dirs.iter().any(|d| {
-        if d == "." {
-            true
-        } else {
-            rel_path.starts_with(d.as_str())
-        }
-    })
-}
+/// Read buffer for streaming SHA-256. Sized to match a single page-cache
+/// readahead window — small enough to stay in L2 cache, large enough that the
+/// per-file read overhead doesn't dominate hashing throughput on big assets.
+const SCAN_HASH_CHUNK_BYTES: usize = 64 * 1024;
 
-/// Compress `data` with brotli at quality 6 (balances ratio and speed for deploy-time).
+/// Recursively scan `dir` and return a sorted list of `FileEntry { path, size, content_hash }`.
 ///
-/// Uses `BrotliCompress` (not `CompressorWriter`) so that finalization errors
-/// are surfaced as a `Result` rather than silently dropped on `Drop`.
-/// `lgwin=22` (4 MB window) is the brotli default.
-fn brotli_compress(data: &[u8]) -> anyhow::Result<Vec<u8>> {
-    let mut out = Vec::with_capacity(data.len() / 2 + 64);
-    let params = brotli::enc::BrotliEncoderParams {
-        quality: 6,
-        lgwin: 22,
-        ..Default::default()
-    };
-    brotli::BrotliCompress(&mut std::io::Cursor::new(data), &mut out, &params)
-        .map_err(|e| anyhow::anyhow!("brotli compression failed: {e}"))?;
-    Ok(out)
-}
-
-/// Maps relative file path → brotli-compressed bytes for files in precompressed STATIC layers.
-type CompressedMap = std::collections::HashMap<String, Vec<u8>>;
-
-/// Scans `dir` for files. For files matching a precompressed layer dir, compresses with brotli
-/// and records the compressed size. Returns `(entries, compressed_data)` where
-/// `compressed_data` maps relative path → brotli bytes for files that were compressed.
-fn scan_and_maybe_compress(
-    dir: &Path,
-    precompressed: &[String],
-) -> anyhow::Result<(Vec<FileEntry>, CompressedMap)> {
+/// SHA-256 and size are computed **streaming**: the file is read in
+/// `SCAN_HASH_CHUNK_BYTES` chunks and fed into the hasher, never buffered into
+/// memory. Bytes are re-read from disk at upload time (page cache absorbs the
+/// second read on any reasonable build host).
+///
+/// Symlinks are skipped to avoid loops and traversal escapes.
+fn scan_dir(dir: &Path) -> anyhow::Result<Vec<FileEntry>> {
     let mut files = Vec::new();
-    let mut compressed_data: CompressedMap = CompressedMap::new();
-
-    scan_dir_recursive_compress(dir, dir, precompressed, &mut files, &mut compressed_data)?;
+    scan_dir_recursive(dir, dir, &mut files)?;
     files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
-    Ok((files, compressed_data))
+    Ok(files)
 }
 
-fn scan_dir_recursive_compress(
+fn scan_dir_recursive(
     base: &Path,
     current: &Path,
-    precompressed: &[String],
     files: &mut Vec<FileEntry>,
-    compressed_data: &mut CompressedMap,
 ) -> anyhow::Result<()> {
     let entries = std::fs::read_dir(current)
         .with_context(|| format!("failed to read directory {}", current.display()))?;
 
     for entry in entries {
-        let entry = entry?;
-        let ft = entry.file_type()?;
+        let entry =
+            entry.with_context(|| format!("failed to read entry under {}", current.display()))?;
         let path = entry.path();
+        let ft = entry
+            .file_type()
+            .with_context(|| format!("failed to stat {}", path.display()))?;
 
         // Skip symlinks to avoid loops and directory traversal
         if ft.is_symlink() {
@@ -2399,109 +2390,65 @@ fn scan_dir_recursive_compress(
         }
 
         if ft.is_dir() {
-            scan_dir_recursive_compress(base, &path, precompressed, files, compressed_data)?;
+            scan_dir_recursive(base, &path, files)?;
         } else if ft.is_file() {
             let rel = path
                 .strip_prefix(base)
                 .context("failed to compute relative path")?;
             let rel_str = rel.to_string_lossy().replace('\\', "/");
-
-            if !precompressed.is_empty() && is_precompressed_path(&rel_str, precompressed) {
-                let raw = std::fs::read(&path)
-                    .with_context(|| format!("failed to read {}", path.display()))?;
-                let hash = Some(format!("{:x}", Sha256::digest(&raw)));
-                let compressed = brotli_compress(&raw)
-                    .with_context(|| format!("failed to compress {}", rel_str))?;
-                if compressed.len() < raw.len() {
-                    let compressed_size = compressed.len() as u64;
-                    compressed_data.insert(rel_str.clone(), compressed);
-                    files.push(FileEntry {
-                        path: rel_str,
-                        size: compressed_size,
-                        sha256: hash,
-                    });
-                } else {
-                    // Brotli expanded the file — upload raw bytes instead.
-                    // The layer's isPrecompressed flag stays true; the server
-                    // handles mixed raw/compressed files within the same layer.
-                    tracing::warn!(
-                        path = %rel_str,
-                        raw_bytes = raw.len(),
-                        compressed_bytes = compressed.len(),
-                        "brotli expanded file, uploading raw bytes for precompressed layer"
-                    );
-                    files.push(FileEntry {
-                        path: rel_str,
-                        size: raw.len() as u64,
-                        sha256: hash,
-                    });
-                }
-            } else {
-                let (size, hash) = match std::fs::read(&path) {
-                    Ok(raw) => {
-                        let h = format!("{:x}", Sha256::digest(&raw));
-                        (raw.len() as u64, Some(h))
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            path = %rel_str,
-                            error = %e,
-                            "failed to read file for hashing, skipping sha256"
-                        );
-                        (entry.metadata()?.len(), None)
-                    }
-                };
-                files.push(FileEntry {
-                    path: rel_str,
-                    size,
-                    sha256: hash,
-                });
-            }
+            let (size, content_hash) = hash_file_streaming(&path)
+                .with_context(|| format!("failed to hash {}", rel_str))?;
+            files.push(FileEntry {
+                path: rel_str,
+                size,
+                content_hash,
+            });
         }
     }
 
     Ok(())
 }
 
+/// Streaming SHA-256 + size for a single file. Returns `(size, lowercase_hex_sha256)`.
+fn hash_file_streaming(path: &Path) -> anyhow::Result<(u64, String)> {
+    let mut file =
+        std::fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; SCAN_HASH_CHUNK_BYTES];
+    let mut size: u64 = 0;
+    loop {
+        let n = file
+            .read(&mut buf)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        size += n as u64;
+    }
+    Ok((size, format!("{:x}", hasher.finalize())))
+}
+
+fn missing_total_size(urls: &[FileUploadUrl]) -> u64 {
+    urls.iter().map(|u| u.content_length).sum()
+}
+
 // ── Synthetic commit SHA ─────────────────────────────────────
 
+/// Stable per-deployment commit SHA derived from the file manifest. Used as a
+/// fallback when `git rev-parse HEAD` is unavailable. Includes per-file content
+/// hashes so two deploys of byte-identical bundles produce the same synthetic
+/// SHA — which is exactly what cross-deploy CAS dedup keys off.
 fn synthetic_sha(files: &[FileEntry]) -> String {
     let mut hasher = Sha256::new();
     for f in files {
-        hasher.update(format!("{}:{}\n", f.path, f.size).as_bytes());
+        hasher.update(f.path.as_bytes());
+        hasher.update(b":");
+        hasher.update(f.content_hash.as_bytes());
+        hasher.update(b"\n");
     }
     format!("{:x}", hasher.finalize())
 }
-
-// ── Content-Type guessing ────────────────────────────────────
-
-fn guess_content_type(path: &str) -> &'static str {
-    match path.rsplit('.').next().unwrap_or("") {
-        "html" | "htm" => "text/html",
-        "js" | "mjs" | "cjs" => "application/javascript",
-        "css" => "text/css",
-        "json" => "application/json",
-        "svg" => "image/svg+xml",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "avif" => "image/avif",
-        "woff2" => "font/woff2",
-        "woff" => "font/woff",
-        "ttf" => "font/ttf",
-        "otf" => "font/otf",
-        "wasm" => "application/wasm",
-        "txt" => "text/plain",
-        "xml" => "application/xml",
-        "ico" => "image/x-icon",
-        "map" => "application/json",
-        "webmanifest" => "application/manifest+json",
-        _ => "application/octet-stream",
-    }
-}
-
-// ── Helpers ──────────────────────────────────────────────────
 
 // ── Compute type resolution ──────────────────────────────────
 
