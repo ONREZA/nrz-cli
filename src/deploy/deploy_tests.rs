@@ -673,56 +673,78 @@ fn process_without_manifest_is_error() {
 }
 
 #[test]
-fn create_deployment_body_with_manifest_serializes_correctly() {
+fn create_deployment_body_serializes_required_fields() {
     let body = CreateDeploymentBody {
-        manifest: Some(serde_json::json!({ "version": 1 })),
+        manifest: serde_json::json!({ "version": 1 }),
         files: vec![],
         production: false,
         branch: None,
-        commit_sha: None,
+        commit_sha: "deadbeef".into(),
+        bundle: None,
+    };
 
-        bundle_sha256: None,
+    let value = serde_json::to_value(&body).unwrap();
+    assert!(value.get("manifest").is_some());
+    assert_eq!(
+        value.get("commitSha").and_then(|v| v.as_str()),
+        Some("deadbeef")
+    );
+    assert!(value.get("computeType").is_none());
+    assert!(value.get("processEntry").is_none());
+}
+
+#[test]
+fn create_deployment_body_with_bundle_serializes_object() {
+    // Server expects `bundle: { sha256, size }` (RFC: SECURE_ARCHIVE_INGEST §"Conditioned
+    // presigned PUT" — both fields are bound into the SigV4 signature for `bundles/{sha}.tar.zst`).
+    // The CLI used to send a flat `bundleSha256: <hex>` which zod silently dropped, leaving
+    // the server with `body.bundle === undefined` — no bundle presign for PROCESS deployments.
+    let body = CreateDeploymentBody {
+        manifest: serde_json::json!({}),
+        files: vec![],
+        production: false,
+        branch: None,
+        commit_sha: "deadbeef".into(),
+        bundle: Some(BundleManifest {
+            sha256: "abc123".into(),
+            size: 4096,
+        }),
+    };
+    let value = serde_json::to_value(&body).unwrap();
+    let bundle = value
+        .get("bundle")
+        .expect("bundle field must be serialized");
+    assert_eq!(bundle["sha256"], "abc123");
+    assert_eq!(bundle["size"], 4096);
+    assert!(
+        value.get("bundleSha256").is_none(),
+        "legacy bundleSha256 must not be sent"
+    );
+}
+
+#[test]
+fn prepare_upload_body_serializes_bundle_object() {
+    let body = PrepareUploadBody {
+        manifest: serde_json::json!({}),
+        files: vec![],
+        bundle: Some(BundleManifest {
+            sha256: "abc123".into(),
+            size: 1024,
+        }),
     };
 
     let value = serde_json::to_value(&body).unwrap();
     assert!(value.get("manifest").is_some());
     assert!(value.get("computeType").is_none());
     assert!(value.get("processEntry").is_none());
-}
-
-#[test]
-fn create_deployment_body_without_manifest_omits_manifest_field() {
-    let body = CreateDeploymentBody {
-        manifest: None,
-        files: vec![],
-        production: false,
-        branch: None,
-        commit_sha: None,
-
-        bundle_sha256: None,
-    };
-
-    let value = serde_json::to_value(&body).unwrap();
-    assert!(value.get("manifest").is_none());
-    assert!(value.get("computeType").is_none());
-    assert!(value.get("processEntry").is_none());
-}
-
-#[test]
-fn prepare_upload_body_serializes_without_deprecated_fields() {
-    let body = PrepareUploadBody {
-        manifest: None,
-        files: vec![],
-        bundle_sha256: Some("abc123".to_string()),
-    };
-
-    let value = serde_json::to_value(&body).unwrap();
-    assert!(value.get("manifest").is_none());
-    assert!(value.get("computeType").is_none());
-    assert!(value.get("processEntry").is_none());
-    assert_eq!(
-        value.get("bundleSha256").and_then(|v| v.as_str()),
-        Some("abc123")
+    let bundle = value
+        .get("bundle")
+        .expect("bundle field must be serialized");
+    assert_eq!(bundle["sha256"], "abc123");
+    assert_eq!(bundle["size"], 1024);
+    assert!(
+        value.get("bundleSha256").is_none(),
+        "legacy bundleSha256 must not be sent"
     );
 }
 

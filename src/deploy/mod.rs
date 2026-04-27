@@ -145,19 +145,35 @@ struct FileEntry {
     content_hash: String,
 }
 
+/// COMPUTE bundle descriptor sent in the deployment-create / prepare-upload body.
+///
+/// Wire schema: `{ sha256, size }`. The server binds both into the conditioned
+/// SigV4 PUT for `bundles/{sha}.tar.zst` (RFC: `SECURE_ARCHIVE_INGEST.md`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BundleManifest {
+    sha256: String,
+    size: u64,
+}
+
+/// Body for `POST /v1/projects/:id/deployments`.
+///
+/// `manifest` and `commitSha` are required by the server (`deployments.ts` body schema:
+/// `manifest: ManifestSchema`, `commitSha: z.string().min(1)`). We mirror that on the
+/// CLI side so a missing value fails Rust type checks instead of producing a cryptic
+/// 400 from zod. `manifest` is filled by the build step (or the auto-gen fallbacks
+/// in `run`); `commitSha` falls back to `synthetic_sha(&files)` when git isn't available.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateDeploymentBody {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    manifest: Option<serde_json::Value>,
+    manifest: serde_json::Value,
     files: Vec<FileEntry>,
     production: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     branch: Option<String>,
+    commit_sha: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    commit_sha: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    bundle_sha256: Option<String>,
+    bundle: Option<BundleManifest>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,8 +183,6 @@ struct CreateDeploymentResponse {
     #[allow(dead_code)]
     status: String,
     url: String,
-    #[allow(dead_code)]
-    artifact_prefix: String,
     upload_urls: Vec<FileUploadUrl>,
     bundle_upload: Option<BundleUpload>,
     #[allow(dead_code)]
@@ -218,12 +232,6 @@ struct DeploymentStatusResponse {
     created_at: Option<String>,
     #[allow(dead_code)]
     ready_at: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ActivateResponse {
-    #[allow(dead_code)]
-    status: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -682,7 +690,28 @@ pub async fn run(
         }
     }
 
+    // Server now requires `manifest` on POST /deployments (DEP-326). The build step
+    // auto-generates a STATIC manifest only when detection suggested Static; if the user
+    // forces `--compute static` for a project whose detection suggested Process/Isolate
+    // (e.g. a Next.js repo exporting plain HTML), `manifest_raw` would otherwise stay
+    // `None` and zod rejects the create with a cryptic "manifest required".
+    if compute == ComputeType::Static && manifest_raw.is_none() {
+        let auto = build_manifest::generate_static_manifest();
+        manifest_raw = Some(
+            serde_json::to_value(&auto)
+                .context("failed to serialize auto-generated STATIC manifest")?,
+        );
+    }
+
     validate_compute_manifest_contract(compute, manifest_raw.is_some(), &detection)?;
+
+    // Past validate_compute_manifest_contract: ISOLATE/PROCESS without manifest already
+    // bailed; STATIC has the auto-gen fallback above. So `manifest_raw` is always Some
+    // here — extract it once so the wire body and the resume branch both take a
+    // non-Option `serde_json::Value` (matches server's required `manifest: ManifestSchema`).
+    let manifest_raw = manifest_raw.expect(
+        "invariant: manifest_raw is Some after auto-gen + validate_compute_manifest_contract",
+    );
 
     // Resolve health check path (PROCESS only)
     let health_check = if is_process {
@@ -813,17 +842,14 @@ pub async fn run(
 
     // Git info
     let branch = git_cmd(&["rev-parse", "--abbrev-ref", "HEAD"]);
-    let commit_sha = match git_cmd(&["rev-parse", "HEAD"]) {
-        Some(sha) => Some(sha),
-        None => {
-            output::warn(
-                json,
-                "git not available, using synthetic commit SHA",
-                output::Phase::Deploy,
-            );
-            Some(synthetic_sha(&files))
-        }
-    };
+    let commit_sha = git_cmd(&["rev-parse", "HEAD"]).unwrap_or_else(|| {
+        output::warn(
+            json,
+            "git not available, using synthetic commit SHA",
+            output::Phase::Deploy,
+        );
+        synthetic_sha(&files)
+    });
 
     // Validate required env vars from [env] declarations
     if !args.skip_env_check {
@@ -859,7 +885,10 @@ pub async fn run(
         production: args.prod,
         branch,
         commit_sha,
-        bundle_sha256: bundle_data.as_ref().map(|(_, sha)| sha.clone()),
+        bundle: bundle_data.as_ref().map(|(bytes, sha)| BundleManifest {
+            sha256: sha.clone(),
+            size: bytes.len() as u64,
+        }),
     };
 
     let deployment: CreateDeploymentResponse = client
@@ -872,7 +901,7 @@ pub async fn run(
 
     let bundle_upload = resolve_bundle_upload(bundle_data, deployment.bundle_upload)?;
 
-    upload_and_activate(
+    upload_and_complete(
         &client,
         &deployment.id,
         &deployment.upload_urls,
@@ -1096,10 +1125,18 @@ async fn sync_compute_config(
     }
 }
 
-// ── Shared upload + activate ─────────────────────────────────
+// ── Shared upload step ───────────────────────────────────────
 
+/// Upload all missing blobs (and the optional COMPUTE bundle) for a deployment,
+/// then signal `upload-complete`.
+///
+/// In the blob-CAS model `upload-complete` performs the `UPLOADING → SMOKE_TESTING`
+/// transition atomically and publishes `onreza.deploy.warm` for edge prefetch
+/// (RFC: `SECURE_ARCHIVE_INGEST.md` §"upload-complete transaction"). The legacy
+/// `/activate` endpoint is now a no-op shim kept on the server only so an older
+/// CLI hitting a new server doesn't 404 — the new CLI doesn't call it.
 #[allow(clippy::too_many_arguments)]
-async fn upload_and_activate(
+async fn upload_and_complete(
     client: &ApiClient,
     deployment_id: &str,
     upload_urls: &[FileUploadUrl],
@@ -1234,31 +1271,28 @@ async fn upload_and_activate(
         );
     }
 
-    // Signal upload complete
     let _: UploadCompleteResponse = client
         .post_empty(&format!("/v1/deployments/{deployment_id}/upload-complete"))
         .await
         .context("failed to signal upload complete")?;
-
-    // Activate deployment
-    let _: ActivateResponse = client
-        .post_empty(&format!("/v1/deployments/{deployment_id}/activate"))
-        .await
-        .context("failed to activate deployment")?;
 
     Ok(())
 }
 
 // ── Resume deploy flow ───────────────────────────────────────
 
+/// Body for `POST /v1/deployments/:id/prepare-upload` (resume flow).
+///
+/// `manifest` is required by the server. The CLI ensures `manifest_raw` is populated
+/// before calling `resume_deploy` via the same auto-gen + validate path as the
+/// create-deployment flow.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PrepareUploadBody {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    manifest: Option<serde_json::Value>,
+    manifest: serde_json::Value,
     files: Vec<FileEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    bundle_sha256: Option<String>,
+    bundle: Option<BundleManifest>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1266,8 +1300,6 @@ struct PrepareUploadBody {
 struct PrepareUploadResponse {
     upload_urls: Vec<FileUploadUrl>,
     bundle_upload: Option<BundleUpload>,
-    #[allow(dead_code)]
-    artifact_prefix: String,
     #[allow(dead_code)]
     expires_in: u64,
 }
@@ -1284,7 +1316,7 @@ struct ResumeDeployOutput {
 async fn resume_deploy(
     client: &ApiClient,
     deployment_id: &str,
-    manifest: Option<serde_json::Value>,
+    manifest: serde_json::Value,
     files: Vec<FileEntry>,
     output_dir: &Path,
     json: bool,
@@ -1311,7 +1343,10 @@ async fn resume_deploy(
     let body = PrepareUploadBody {
         manifest,
         files,
-        bundle_sha256: bundle_data.as_ref().map(|(_, sha)| sha.clone()),
+        bundle: bundle_data.as_ref().map(|(bytes, sha)| BundleManifest {
+            sha256: sha.clone(),
+            size: bytes.len() as u64,
+        }),
     };
 
     let prepared: PrepareUploadResponse = match client
@@ -1340,7 +1375,7 @@ async fn resume_deploy(
 
     let bundle_upload = resolve_bundle_upload(bundle_data, prepared.bundle_upload)?;
 
-    upload_and_activate(
+    upload_and_complete(
         client,
         deployment_id,
         &prepared.upload_urls,
