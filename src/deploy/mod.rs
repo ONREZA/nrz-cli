@@ -149,11 +149,23 @@ struct FileEntry {
 ///
 /// Wire schema: `{ sha256, size }`. The server binds both into the conditioned
 /// SigV4 PUT for `bundles/{sha}.tar.zst` (RFC: `SECURE_ARCHIVE_INGEST.md`).
+///
+/// `size` is invariably `bytes.len()` of the same buffer hashed into `sha256`;
+/// construct via `BundleManifest::of` to keep the two in sync.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BundleManifest {
     sha256: String,
     size: u64,
+}
+
+impl BundleManifest {
+    fn of(bytes: &[u8], sha256_hex: &str) -> Self {
+        Self {
+            sha256: sha256_hex.to_string(),
+            size: bytes.len() as u64,
+        }
+    }
 }
 
 /// Body for `POST /v1/projects/:id/deployments`.
@@ -690,28 +702,7 @@ pub async fn run(
         }
     }
 
-    // Server now requires `manifest` on POST /deployments (DEP-326). The build step
-    // auto-generates a STATIC manifest only when detection suggested Static; if the user
-    // forces `--compute static` for a project whose detection suggested Process/Isolate
-    // (e.g. a Next.js repo exporting plain HTML), `manifest_raw` would otherwise stay
-    // `None` and zod rejects the create with a cryptic "manifest required".
-    if compute == ComputeType::Static && manifest_raw.is_none() {
-        let auto = build_manifest::generate_static_manifest();
-        manifest_raw = Some(
-            serde_json::to_value(&auto)
-                .context("failed to serialize auto-generated STATIC manifest")?,
-        );
-    }
-
-    validate_compute_manifest_contract(compute, manifest_raw.is_some(), &detection)?;
-
-    // Past validate_compute_manifest_contract: ISOLATE/PROCESS without manifest already
-    // bailed; STATIC has the auto-gen fallback above. So `manifest_raw` is always Some
-    // here — extract it once so the wire body and the resume branch both take a
-    // non-Option `serde_json::Value` (matches server's required `manifest: ManifestSchema`).
-    let manifest_raw = manifest_raw.expect(
-        "invariant: manifest_raw is Some after auto-gen + validate_compute_manifest_contract",
-    );
+    let manifest_raw = resolve_manifest_for_compute(compute, manifest_raw, &detection)?;
 
     // Resolve health check path (PROCESS only)
     let health_check = if is_process {
@@ -885,10 +876,9 @@ pub async fn run(
         production: args.prod,
         branch,
         commit_sha,
-        bundle: bundle_data.as_ref().map(|(bytes, sha)| BundleManifest {
-            sha256: sha.clone(),
-            size: bytes.len() as u64,
-        }),
+        bundle: bundle_data
+            .as_ref()
+            .map(|(bytes, sha)| BundleManifest::of(bytes, sha)),
     };
 
     let deployment: CreateDeploymentResponse = client
@@ -1343,10 +1333,9 @@ async fn resume_deploy(
     let body = PrepareUploadBody {
         manifest,
         files,
-        bundle: bundle_data.as_ref().map(|(bytes, sha)| BundleManifest {
-            sha256: sha.clone(),
-            size: bytes.len() as u64,
-        }),
+        bundle: bundle_data
+            .as_ref()
+            .map(|(bytes, sha)| BundleManifest::of(bytes, sha)),
     };
 
     let prepared: PrepareUploadResponse = match client
@@ -1410,6 +1399,48 @@ async fn resume_deploy(
 }
 
 // ── PROCESS validation ───────────────────────────────────────
+
+/// Resolve a guaranteed-present manifest for the given compute mode.
+///
+/// Returns `Value` (not `Option<Value>`) because the server requires `manifest`
+/// on `POST /v1/projects/:id/deployments` (DEP-326 schema). Three cases:
+///
+/// - manifest already present → passes through `validate_compute_manifest_contract`
+///   (guards compute/manifest combinations) and is returned as-is.
+/// - STATIC without manifest → auto-gen via `generate_static_manifest()`. The
+///   build step auto-gens this only when detection suggested Static; this branch
+///   covers `--compute static` overrides for projects detected as Process/Isolate.
+/// - ISOLATE/PROCESS without manifest → `validate_compute_manifest_contract`
+///   bails with a user-facing error (PROCESS auto-gen runs earlier in `run()`,
+///   so this case here means PROCESS auto-gen failed somewhere upstream).
+///
+/// Replaces the `manifest_raw.expect(...)` runtime invariant with a typed
+/// signature, so missing-manifest bugs surface at type-check time on call-sites.
+fn resolve_manifest_for_compute(
+    compute: ComputeType,
+    manifest_raw: Option<serde_json::Value>,
+    detection: &crate::detect::types::DetectionResult,
+) -> anyhow::Result<serde_json::Value> {
+    if let Some(manifest) = manifest_raw {
+        validate_compute_manifest_contract(compute, true, detection)?;
+        return Ok(manifest);
+    }
+
+    if compute == ComputeType::Static {
+        let auto = build_manifest::generate_static_manifest();
+        return serde_json::to_value(&auto)
+            .context("failed to serialize auto-generated STATIC manifest");
+    }
+
+    // ISOLATE/PROCESS without manifest: defer to validate for the user-facing message.
+    validate_compute_manifest_contract(compute, false, detection)?;
+    // validate_compute_manifest_contract must return Err for these; reaching here
+    // means its contract was changed. Surface as a bug, not a panic.
+    bail!(
+        "Internal error: validate_compute_manifest_contract accepted {compute:?} without a manifest.\n\
+         This is a CLI bug — please report at github.com/onreza/nrz-cli/issues."
+    );
+}
 
 fn validate_compute_manifest_contract(
     compute: ComputeType,
