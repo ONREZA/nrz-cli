@@ -1,11 +1,11 @@
 use super::{
-    OutputDirectoryHint, OutputDirectorySource, collect_body_files, compute_aware_output_dirs,
+    BuildSettingSource, OutputDirectoryHint, collect_body_files, compute_aware_output_dirs,
     copy_dir_recursive, copy_missing_prisma_packages, detect_output_dir, prepare_nextjs_standalone,
     run_with_hint, try_generate_ssr_manifest,
 };
 use crate::cli::BuildArgs;
 
-fn output_hint(path: &str, source: OutputDirectorySource) -> OutputDirectoryHint<'_> {
+fn output_hint(path: &str, source: BuildSettingSource) -> OutputDirectoryHint<'_> {
     OutputDirectoryHint { path, source }
 }
 
@@ -104,7 +104,7 @@ fn server_output_dir_used_when_no_framework_or_config_match() {
         dir.path(),
         &["dist"],
         &[],
-        Some(output_hint("server-out", OutputDirectorySource::Preset)),
+        Some(output_hint("server-out", BuildSettingSource::Preset)),
     )
     .unwrap();
     assert_eq!(found.file_name().unwrap(), "server-out");
@@ -120,7 +120,7 @@ fn framework_dir_wins_over_server_output_dir() {
         dir.path(),
         &["dist"],
         &[".next"],
-        Some(output_hint("server-out", OutputDirectorySource::Preset)),
+        Some(output_hint("server-out", BuildSettingSource::Preset)),
     )
     .unwrap();
     assert_eq!(found.file_name().unwrap(), ".next");
@@ -137,7 +137,7 @@ fn server_output_dir_wins_over_config_dir() {
         dir.path(),
         &["dist"],
         &[],
-        Some(output_hint("server-out", OutputDirectorySource::Preset)),
+        Some(output_hint("server-out", BuildSettingSource::Preset)),
     )
     .unwrap();
     assert_eq!(found.file_name().unwrap(), "server-out");
@@ -150,7 +150,7 @@ fn server_output_dir_appears_in_error_when_not_found() {
         dir.path(),
         &["dist"],
         &[".next"],
-        Some(output_hint("server-out", OutputDirectorySource::Preset)),
+        Some(output_hint("server-out", BuildSettingSource::Preset)),
     )
     .unwrap_err();
     let msg = err.to_string();
@@ -170,7 +170,7 @@ fn explicit_output_dir_missing_fails_without_fallback() {
         dir.path(),
         &["dist"],
         &[".next/standalone", ".next"],
-        Some(output_hint("custom-out", OutputDirectorySource::User)),
+        Some(output_hint("custom-out", BuildSettingSource::User)),
     )
     .unwrap_err();
     let msg = err.to_string();
@@ -191,7 +191,7 @@ fn explicit_output_dir_wins_over_framework_and_config_dirs() {
         dir.path(),
         &["dist"],
         &[".next/standalone", ".next"],
-        Some(output_hint("server-out", OutputDirectorySource::User)),
+        Some(output_hint("server-out", BuildSettingSource::User)),
     )
     .unwrap();
 
@@ -209,7 +209,7 @@ fn detected_output_dir_wins_over_framework_dir_without_being_strict() {
         dir.path(),
         &["build"],
         &["dist"],
-        Some(output_hint("custom-dist", OutputDirectorySource::Detected)),
+        Some(output_hint("custom-dist", BuildSettingSource::Detected)),
     )
     .unwrap();
 
@@ -221,7 +221,7 @@ fn detected_output_dir_wins_over_framework_dir_without_being_strict() {
         &["dist"],
         Some(output_hint(
             "missing-custom-dist",
-            OutputDirectorySource::Detected,
+            BuildSettingSource::Detected,
         )),
     )
     .unwrap();
@@ -239,7 +239,7 @@ fn detected_output_dir_wins_over_lower_priority_manifest_dir() {
         dir.path(),
         &["build"],
         &["dist"],
-        Some(output_hint("custom-dist", OutputDirectorySource::Detected)),
+        Some(output_hint("custom-dist", BuildSettingSource::Detected)),
     )
     .unwrap();
 
@@ -342,7 +342,7 @@ fn nextjs_preset_output_dir_allows_standalone_refinement() {
         dir.path(),
         &["dist"],
         &[".next/standalone", ".next"],
-        Some(output_hint(".next", OutputDirectorySource::Preset)),
+        Some(output_hint(".next", BuildSettingSource::Preset)),
     )
     .unwrap();
 
@@ -359,7 +359,7 @@ fn nextjs_static_export_prefers_out_over_preset_dot_next() {
         dir.path(),
         &["dist"],
         &["out"],
-        Some(output_hint(".next", OutputDirectorySource::Preset)),
+        Some(output_hint(".next", BuildSettingSource::Preset)),
     )
     .unwrap();
 
@@ -375,7 +375,7 @@ fn generic_process_user_output_dir_wins_over_root_framework_dir() {
         dir.path(),
         &["dist"],
         &["."],
-        Some(output_hint("server-out", OutputDirectorySource::User)),
+        Some(output_hint("server-out", BuildSettingSource::User)),
     )
     .unwrap();
 
@@ -475,7 +475,7 @@ async fn configured_vite_static_output_generates_static_manifest_even_with_serve
         true,
         &config,
         None,
-        Some(output_hint("dist", OutputDirectorySource::Preset)),
+        Some(output_hint("dist", BuildSettingSource::Preset)),
     )
     .await
     .unwrap();

@@ -317,7 +317,12 @@ fn build_command_server_wins_over_auto_detect() {
     fs::write(dir.path().join("package.json"), "{}").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config, Some("server build cmd"));
+    let result = resolve_build_command(
+        None,
+        dir.path(),
+        &config,
+        command_hint(Some("server build cmd"), None),
+    );
     assert_eq!(result.unwrap(), "server build cmd");
 }
 
@@ -328,7 +333,12 @@ fn build_command_config_wins_over_server() {
     let mut config = nrz::config::ProjectConfig::default();
     config.build.command = Some("config cmd".into());
 
-    let result = resolve_build_command(None, dir.path(), &config, Some("server cmd"));
+    let result = resolve_build_command(
+        None,
+        dir.path(),
+        &config,
+        command_hint(Some("server cmd"), None),
+    );
     assert_eq!(result.unwrap(), "config cmd");
 }
 
@@ -337,7 +347,12 @@ fn build_command_explicit_wins_over_server() {
     let dir = tempdir().unwrap();
     let config = nrz::config::ProjectConfig::default();
 
-    let result = resolve_build_command(Some("explicit"), dir.path(), &config, Some("server cmd"));
+    let result = resolve_build_command(
+        Some("explicit"),
+        dir.path(),
+        &config,
+        command_hint(Some("server cmd"), None),
+    );
     assert_eq!(result.unwrap(), "explicit");
 }
 
@@ -346,8 +361,51 @@ fn build_command_server_used_without_package_json() {
     let dir = tempdir().unwrap();
     // No package.json — auto-detect would return None, but server command should still work
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config, Some("make build"));
+    let result = resolve_build_command(
+        None,
+        dir.path(),
+        &config,
+        command_hint(Some("make build"), None),
+    );
     assert_eq!(result.unwrap(), "make build");
+}
+
+#[test]
+fn build_command_detected_empty_suppresses_auto_detect() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(
+        None,
+        dir.path(),
+        &config,
+        command_hint(None, Some(crate::build::BuildSettingSource::Detected)),
+    );
+    assert!(result.is_none());
+}
+
+#[test]
+fn build_command_preset_empty_keeps_auto_detect_fallback() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(
+        None,
+        dir.path(),
+        &config,
+        command_hint(None, Some(crate::build::BuildSettingSource::Preset)),
+    );
+    assert_eq!(result.unwrap(), "npm run build");
 }
 
 // ── ProjectInfo deserialization ──────────────────────────────
@@ -358,18 +416,28 @@ fn project_info_deserializes_camel_case() {
         "id": "proj_123",
         "frameworkPreset": "vite",
         "installCommand": "npm ci",
+        "installCommandSource": "DETECTED",
         "buildCommand": "npm run build",
+        "buildCommandSource": "USER",
         "outputDirectory": "dist",
         "outputDirectorySource": "USER"
     }"#;
     let info: ProjectInfo = serde_json::from_str(json).unwrap();
     assert_eq!(info.framework_preset.unwrap(), "vite");
     assert_eq!(info.install_command.unwrap(), "npm ci");
+    assert_eq!(
+        info.install_command_source.unwrap(),
+        crate::build::BuildSettingSource::Detected
+    );
     assert_eq!(info.build_command.unwrap(), "npm run build");
+    assert_eq!(
+        info.build_command_source.unwrap(),
+        crate::build::BuildSettingSource::User
+    );
     assert_eq!(info.output_directory.unwrap(), "dist");
     assert_eq!(
         info.output_directory_source.unwrap(),
-        crate::build::OutputDirectorySource::User
+        crate::build::BuildSettingSource::User
     );
 }
 
@@ -378,7 +446,9 @@ fn project_info_optional_fields_default_to_none() {
     let json = r#"{"id": "proj_123"}"#;
     let info: ProjectInfo = serde_json::from_str(json).unwrap();
     assert!(info.install_command.is_none());
+    assert!(info.install_command_source.is_none());
     assert!(info.build_command.is_none());
+    assert!(info.build_command_source.is_none());
     assert!(info.output_directory.is_none());
     assert!(info.output_directory_source.is_none());
 }

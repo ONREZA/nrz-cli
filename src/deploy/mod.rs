@@ -71,9 +71,29 @@ fn plan_limits(workspace: &WorkspaceInfo) -> (usize, u64) {
 struct ProjectInfo {
     framework_preset: Option<String>,
     install_command: Option<String>,
+    install_command_source: Option<build::BuildSettingSource>,
     build_command: Option<String>,
+    build_command_source: Option<build::BuildSettingSource>,
     output_directory: Option<String>,
-    output_directory_source: Option<build::OutputDirectorySource>,
+    output_directory_source: Option<build::BuildSettingSource>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CommandHint<'a> {
+    command: Option<&'a str>,
+}
+
+fn command_hint<'a>(
+    command: Option<&'a str>,
+    source: Option<build::BuildSettingSource>,
+) -> Option<CommandHint<'a>> {
+    let source = source.unwrap_or(build::BuildSettingSource::Preset);
+    let command = command.filter(|v| !v.trim().is_empty());
+    if command.is_some() || source.is_authoritative_command_absence() {
+        Some(CommandHint { command })
+    } else {
+        None
+    }
 }
 
 async fn fetch_project_settings(
@@ -341,7 +361,9 @@ pub async fn run(
             Ok(info) => {
                 tracing::info!(
                     ?info.build_command,
+                    ?info.build_command_source,
                     ?info.install_command,
+                    ?info.install_command_source,
                     ?info.output_directory,
                     ?info.output_directory_source,
                     ?info.framework_preset,
@@ -374,12 +396,10 @@ pub async fn run(
 
     let server_install_cmd = server_settings
         .as_ref()
-        .and_then(|s| s.install_command.as_deref())
-        .filter(|v| !v.trim().is_empty());
+        .and_then(|s| command_hint(s.install_command.as_deref(), s.install_command_source));
     let server_build_cmd = server_settings
         .as_ref()
-        .and_then(|s| s.build_command.as_deref())
-        .filter(|v| !v.trim().is_empty());
+        .and_then(|s| command_hint(s.build_command.as_deref(), s.build_command_source));
     let server_output_dir = server_settings
         .as_ref()
         .and_then(|s| s.output_directory.as_deref())
@@ -389,7 +409,7 @@ pub async fn run(
         source: server_settings
             .as_ref()
             .and_then(|s| s.output_directory_source)
-            .unwrap_or(build::OutputDirectorySource::Preset),
+            .unwrap_or(build::BuildSettingSource::Preset),
     });
     let server_framework_preset = server_settings
         .as_ref()
@@ -1959,7 +1979,7 @@ fn resolve_build_command(
     explicit: Option<&str>,
     project_dir: &Path,
     config: &ProjectConfig,
-    server_command: Option<&str>,
+    server_command: Option<CommandHint<'_>>,
 ) -> Option<String> {
     if let Some(cmd) = explicit {
         return Some(cmd.to_string());
@@ -1967,8 +1987,8 @@ fn resolve_build_command(
     if let Some(cmd) = config.build_command() {
         return Some(cmd.to_string());
     }
-    if let Some(cmd) = server_command {
-        return Some(cmd.to_string());
+    if let Some(hint) = server_command {
+        return hint.command.map(str::to_string);
     }
     // Only auto-detect if package.json has a "build" script
     let pkg = crate::detect::package_json::PackageJson::load(project_dir)?;
@@ -2160,12 +2180,15 @@ fn run_command_streaming(
 fn run_install_step(
     project_dir: &Path,
     json: bool,
-    server_command: Option<&str>,
+    server_command: Option<CommandHint<'_>>,
 ) -> anyhow::Result<()> {
     // Priority: server command > auto-detect from package manager.
     // (No CLI flag or config field exists for install command.)
     let cmd = if let Some(server_cmd) = server_command {
-        server_cmd.to_string()
+        match server_cmd.command {
+            Some(command) => command.to_string(),
+            None => return Ok(()),
+        }
     } else if !project_dir.join("package.json").exists() {
         return Ok(());
     } else {

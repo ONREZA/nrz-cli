@@ -44,22 +44,26 @@ pub struct BuildResult {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub(crate) enum OutputDirectorySource {
+pub(crate) enum BuildSettingSource {
     Preset,
     Detected,
     User,
 }
 
-impl OutputDirectorySource {
+impl BuildSettingSource {
     fn is_user_explicit(self) -> bool {
         self == Self::User
+    }
+
+    pub(crate) fn is_authoritative_command_absence(self) -> bool {
+        matches!(self, Self::Detected | Self::User)
     }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct OutputDirectoryHint<'a> {
     pub path: &'a str,
-    pub source: OutputDirectorySource,
+    pub source: BuildSettingSource,
 }
 
 pub async fn run(
@@ -472,7 +476,7 @@ fn detect_output_dir(
     let mut tiers = Vec::<Vec<String>>::new();
     let server_path = server_output_dir.map(|hint| (hint.path, hint.source));
 
-    if let Some((path, OutputDirectorySource::Detected)) = server_path {
+    if let Some((path, BuildSettingSource::Detected)) = server_path {
         push_output_dir_tier(&mut tiers, &mut all_dirs, &mut seen, std::iter::once(path));
     }
 
@@ -483,7 +487,7 @@ fn detect_output_dir(
         framework_dirs.iter().copied(),
     );
 
-    if let Some((path, OutputDirectorySource::Preset)) = server_path {
+    if let Some((path, BuildSettingSource::Preset)) = server_path {
         push_output_dir_tier(&mut tiers, &mut all_dirs, &mut seen, std::iter::once(path));
     }
 
