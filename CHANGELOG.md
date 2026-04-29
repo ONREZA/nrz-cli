@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.29.0] - 2026-04-29
+
+### ✨ Features
+
+- **deploy:** respect build setting source metadata ([06691d2](https://github.com/ONREZA/nrz-cli/commit/06691d282d81957409d9d4fbe3a78a519f0cdced))
+
+### 🐛 Bug Fixes
+
+- **build:** honor output directory source precedence ([f1e526d](https://github.com/ONREZA/nrz-cli/commit/f1e526dd19cb68f4dbec430a9657d9dacea4b617))
+
 ## [0.28.1] - 2026-04-29
 
 ### 🐛 Bug Fixes
