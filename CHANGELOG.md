@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.28.1] - 2026-04-29
+
+### 🐛 Bug Fixes
+
+- **deploy:** respect configured framework preset ([8eb20b7](https://github.com/ONREZA/nrz-cli/commit/8eb20b7e83f58d42314eb9d3a0da2cf973d301a8))
+
 ## [0.28.0] - 2026-04-24
 
 ### ✨ Features
