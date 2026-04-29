@@ -9,7 +9,7 @@ mod build_tests;
 use std::path::Path;
 
 use anyhow::Context;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::cli::BuildArgs;
 use crate::output;
@@ -42,6 +42,26 @@ pub struct BuildResult {
     pub manifest: Option<manifest::Manifest>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum OutputDirectorySource {
+    Preset,
+    Detected,
+    User,
+}
+
+impl OutputDirectorySource {
+    fn is_user_explicit(self) -> bool {
+        self == Self::User
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct OutputDirectoryHint<'a> {
+    pub path: &'a str,
+    pub source: OutputDirectorySource,
+}
+
 pub async fn run(
     args: BuildArgs,
     json: bool,
@@ -55,7 +75,7 @@ pub async fn run_with_hint(
     json: bool,
     config: &ProjectConfig,
     detection: Option<&crate::detect::types::DetectionResult>,
-    server_output_dir: Option<&str>,
+    server_output_dir: Option<OutputDirectoryHint<'_>>,
 ) -> anyhow::Result<BuildResult> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
@@ -401,48 +421,82 @@ fn try_generate_ssr_manifest(
 }
 
 /// Try framework-specific and configured output directory names.
-/// Returns `(path, has_manifest)` — first prefers dirs with `.onreza/`, then any existing dir.
+/// Returns `(path, has_manifest)` — first selects a precedence tier, then prefers dirs
+/// with `.onreza/` within that tier before plain existing dirs.
 ///
-/// Priority: `framework_dirs` > `server_output_dir` > `config_dirs`.
+/// Priority:
+/// - USER outputDirectory: exact directory only; never falls back.
+/// - DETECTED outputDirectory: detected path > framework dirs > config dirs.
+/// - PRESET/default outputDirectory: framework dirs > preset path > config dirs.
 fn detect_output_dir(
     project_dir: &Path,
     config_dirs: &[&str],
     framework_dirs: &[&str],
-    server_output_dir: Option<&str>,
+    server_output_dir: Option<OutputDirectoryHint<'_>>,
 ) -> anyhow::Result<(std::path::PathBuf, bool)> {
-    // Log when server-provided directory doesn't exist on disk
-    if let Some(sod) = server_output_dir
-        && !project_dir.join(sod).is_dir()
+    if let Some(hint) = server_output_dir
+        && hint.source.is_user_explicit()
+    {
+        let candidate = project_dir.join(hint.path);
+        if candidate.is_dir() {
+            return Ok((candidate.clone(), candidate.join(".onreza").is_dir()));
+        }
+
+        return Err(output::coded_error(
+            "MISSING_BUILD_OUTPUT",
+            format!(
+                "explicit outputDirectory '{}' was not found in {}. \
+                 User-configured outputDirectory is authoritative, so no fallback output directory was used.",
+                hint.path,
+                project_dir.display()
+            ),
+        ));
+    }
+
+    // Log when non-explicit server-provided directory doesn't exist on disk.
+    if let Some(hint) = server_output_dir
+        && !project_dir.join(hint.path).is_dir()
     {
         tracing::debug!(
-            server_output_dir = sod,
+            server_output_dir = hint.path,
+            source = ?hint.source,
             "server-configured output directory not found on disk, will try other candidates"
         );
     }
 
-    // Merge: framework-specific dirs first, then server output dir, then config defaults (dedup preserving order)
-    let mut seen = std::collections::HashSet::new();
-    let all_dirs: Vec<&str> = framework_dirs
-        .iter()
-        .copied()
-        .chain(server_output_dir)
-        .chain(config_dirs.iter().copied())
-        .filter(|d| seen.insert(*d))
-        .collect();
+    // Build candidate tiers according to the source-aware precedence matrix.
+    // Manifest preference applies within a tier only; it must not let stale
+    // lower-priority outputs outrank a higher-priority existing directory.
+    let mut seen = std::collections::HashSet::<String>::new();
+    let mut all_dirs = Vec::<String>::new();
+    let mut tiers = Vec::<Vec<String>>::new();
+    let server_path = server_output_dir.map(|hint| (hint.path, hint.source));
 
-    // Phase 1: prefer dir with .onreza/ (pre-existing manifest)
-    for name in &all_dirs {
-        let candidate = project_dir.join(name);
-        if candidate.is_dir() && candidate.join(".onreza").is_dir() {
-            return Ok((candidate, true));
-        }
+    if let Some((path, OutputDirectorySource::Detected)) = server_path {
+        push_output_dir_tier(&mut tiers, &mut all_dirs, &mut seen, std::iter::once(path));
     }
 
-    // Phase 2: any existing output dir (static/process deploy)
-    for name in &all_dirs {
-        let candidate = project_dir.join(name);
-        if candidate.is_dir() {
-            return Ok((candidate, false));
+    push_output_dir_tier(
+        &mut tiers,
+        &mut all_dirs,
+        &mut seen,
+        framework_dirs.iter().copied(),
+    );
+
+    if let Some((path, OutputDirectorySource::Preset)) = server_path {
+        push_output_dir_tier(&mut tiers, &mut all_dirs, &mut seen, std::iter::once(path));
+    }
+
+    push_output_dir_tier(
+        &mut tiers,
+        &mut all_dirs,
+        &mut seen,
+        config_dirs.iter().copied(),
+    );
+
+    for tier in &tiers {
+        if let Some(found) = select_output_dir_from_tier(project_dir, tier) {
+            return Ok(found);
         }
     }
 
@@ -455,6 +509,48 @@ fn detect_output_dir(
             dirs_display.join(", ")
         ),
     ))
+}
+
+fn push_output_dir_tier<'a>(
+    tiers: &mut Vec<Vec<String>>,
+    all_dirs: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+    candidates: impl IntoIterator<Item = &'a str>,
+) {
+    let mut tier = Vec::new();
+
+    for candidate in candidates {
+        let candidate = candidate.to_string();
+        if seen.insert(candidate.clone()) {
+            all_dirs.push(candidate.clone());
+            tier.push(candidate);
+        }
+    }
+
+    if !tier.is_empty() {
+        tiers.push(tier);
+    }
+}
+
+fn select_output_dir_from_tier(
+    project_dir: &Path,
+    tier: &[String],
+) -> Option<(std::path::PathBuf, bool)> {
+    for name in tier {
+        let candidate = project_dir.join(name);
+        if candidate.is_dir() && candidate.join(".onreza").is_dir() {
+            return Some((candidate, true));
+        }
+    }
+
+    for name in tier {
+        let candidate = project_dir.join(name);
+        if candidate.is_dir() {
+            return Some((candidate, false));
+        }
+    }
+
+    None
 }
 
 /// Prepare Next.js standalone output by copying static assets and public files

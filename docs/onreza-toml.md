@@ -108,6 +108,11 @@ output_dirs = ["dist"]
 | `isolate` | Edge-функции через @onreza адаптер (Next.js Edge, Nuxt с адаптером) |
 | `process` | Полноценный Node.js/Bun сервер (Next.js standalone, Hono, Elysia, кастомный сервер) |
 
+Матрица приоритетов `frameworkPreset`/`compute`/`outputDirectory` описана в
+[output-directory-contract.md](./output-directory-contract.md). Ключевое правило:
+пользовательский `outputDirectory` из server settings является authoritative и
+не допускает silent fallback; preset/default значения могут уточняться SSR-анализом.
+
 `.onreza/manifest.json` поддерживается только для `isolate`:
 - `compute = "isolate"` требует manifest в build output
 - `compute = "process"` и `compute = "static"` выполняются без manifest

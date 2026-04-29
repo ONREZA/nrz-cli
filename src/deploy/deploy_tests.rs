@@ -359,13 +359,18 @@ fn project_info_deserializes_camel_case() {
         "frameworkPreset": "vite",
         "installCommand": "npm ci",
         "buildCommand": "npm run build",
-        "outputDirectory": "dist"
+        "outputDirectory": "dist",
+        "outputDirectorySource": "USER"
     }"#;
     let info: ProjectInfo = serde_json::from_str(json).unwrap();
     assert_eq!(info.framework_preset.unwrap(), "vite");
     assert_eq!(info.install_command.unwrap(), "npm ci");
     assert_eq!(info.build_command.unwrap(), "npm run build");
     assert_eq!(info.output_directory.unwrap(), "dist");
+    assert_eq!(
+        info.output_directory_source.unwrap(),
+        crate::build::OutputDirectorySource::User
+    );
 }
 
 #[test]
@@ -375,6 +380,7 @@ fn project_info_optional_fields_default_to_none() {
     assert!(info.install_command.is_none());
     assert!(info.build_command.is_none());
     assert!(info.output_directory.is_none());
+    assert!(info.output_directory_source.is_none());
 }
 
 // ── guess_content_type tests ────────────────────────────────

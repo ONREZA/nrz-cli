@@ -73,6 +73,7 @@ struct ProjectInfo {
     install_command: Option<String>,
     build_command: Option<String>,
     output_directory: Option<String>,
+    output_directory_source: Option<build::OutputDirectorySource>,
 }
 
 async fn fetch_project_settings(
@@ -342,6 +343,7 @@ pub async fn run(
                     ?info.build_command,
                     ?info.install_command,
                     ?info.output_directory,
+                    ?info.output_directory_source,
                     ?info.framework_preset,
                     "fetched project settings from server"
                 );
@@ -382,6 +384,13 @@ pub async fn run(
         .as_ref()
         .and_then(|s| s.output_directory.as_deref())
         .filter(|v| !v.trim().is_empty());
+    let server_output_dir_hint = server_output_dir.map(|path| build::OutputDirectoryHint {
+        path,
+        source: server_settings
+            .as_ref()
+            .and_then(|s| s.output_directory_source)
+            .unwrap_or(build::OutputDirectorySource::Preset),
+    });
     let server_framework_preset = server_settings
         .as_ref()
         .and_then(|s| s.framework_preset.as_deref())
@@ -457,7 +466,7 @@ pub async fn run(
         json,
         config,
         Some(&detection),
-        server_output_dir,
+        server_output_dir_hint,
     )
     .await?;
 

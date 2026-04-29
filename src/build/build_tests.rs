@@ -1,9 +1,13 @@
 use super::{
-    collect_body_files, compute_aware_output_dirs, copy_dir_recursive,
-    copy_missing_prisma_packages, detect_output_dir, prepare_nextjs_standalone, run_with_hint,
-    try_generate_ssr_manifest,
+    OutputDirectoryHint, OutputDirectorySource, collect_body_files, compute_aware_output_dirs,
+    copy_dir_recursive, copy_missing_prisma_packages, detect_output_dir, prepare_nextjs_standalone,
+    run_with_hint, try_generate_ssr_manifest,
 };
 use crate::cli::BuildArgs;
+
+fn output_hint(path: &str, source: OutputDirectorySource) -> OutputDirectoryHint<'_> {
+    OutputDirectoryHint { path, source }
+}
 
 #[test]
 fn framework_dirs_checked_before_config_dirs() {
@@ -77,6 +81,18 @@ fn framework_manifest_dir_wins_over_config_manifest_dir() {
     assert!(has_manifest);
 }
 
+#[test]
+fn framework_existing_dir_wins_over_config_manifest_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join(".next")).unwrap();
+    std::fs::create_dir_all(dir.path().join("dist/.onreza")).unwrap();
+
+    let (found, has_manifest) = detect_output_dir(dir.path(), &["dist"], &[".next"], None).unwrap();
+
+    assert_eq!(found.file_name().unwrap(), ".next");
+    assert!(!has_manifest);
+}
+
 // ── detect_output_dir with server_output_dir ─────────────────
 
 #[test]
@@ -84,7 +100,13 @@ fn server_output_dir_used_when_no_framework_or_config_match() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("server-out")).unwrap();
 
-    let (found, _) = detect_output_dir(dir.path(), &["dist"], &[], Some("server-out")).unwrap();
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &[],
+        Some(output_hint("server-out", OutputDirectorySource::Preset)),
+    )
+    .unwrap();
     assert_eq!(found.file_name().unwrap(), "server-out");
 }
 
@@ -94,8 +116,13 @@ fn framework_dir_wins_over_server_output_dir() {
     std::fs::create_dir(dir.path().join(".next")).unwrap();
     std::fs::create_dir(dir.path().join("server-out")).unwrap();
 
-    let (found, _) =
-        detect_output_dir(dir.path(), &["dist"], &[".next"], Some("server-out")).unwrap();
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &[".next"],
+        Some(output_hint("server-out", OutputDirectorySource::Preset)),
+    )
+    .unwrap();
     assert_eq!(found.file_name().unwrap(), ".next");
 }
 
@@ -106,19 +133,118 @@ fn server_output_dir_wins_over_config_dir() {
     std::fs::create_dir(dir.path().join("dist")).unwrap();
 
     // server-out is checked before config "dist"
-    let (found, _) = detect_output_dir(dir.path(), &["dist"], &[], Some("server-out")).unwrap();
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &[],
+        Some(output_hint("server-out", OutputDirectorySource::Preset)),
+    )
+    .unwrap();
     assert_eq!(found.file_name().unwrap(), "server-out");
 }
 
 #[test]
 fn server_output_dir_appears_in_error_when_not_found() {
     let dir = tempfile::tempdir().unwrap();
-    let err = detect_output_dir(dir.path(), &["dist"], &[".next"], Some("server-out")).unwrap_err();
+    let err = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &[".next"],
+        Some(output_hint("server-out", OutputDirectorySource::Preset)),
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("server-out/"),
         "error should list server-out: {msg}"
     );
+}
+
+#[test]
+fn explicit_output_dir_missing_fails_without_fallback() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/standalone")).unwrap();
+    std::fs::create_dir(dir.path().join("dist")).unwrap();
+
+    let err = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &[".next/standalone", ".next"],
+        Some(output_hint("custom-out", OutputDirectorySource::User)),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+
+    assert!(msg.contains("explicit outputDirectory"), "{msg}");
+    assert!(msg.contains("custom-out"), "{msg}");
+    assert!(msg.contains("no fallback"), "{msg}");
+}
+
+#[test]
+fn explicit_output_dir_wins_over_framework_and_config_dirs() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/standalone/.onreza")).unwrap();
+    std::fs::create_dir(dir.path().join("dist")).unwrap();
+    std::fs::create_dir(dir.path().join("server-out")).unwrap();
+
+    let (found, has_manifest) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &[".next/standalone", ".next"],
+        Some(output_hint("server-out", OutputDirectorySource::User)),
+    )
+    .unwrap();
+
+    assert_eq!(found.file_name().unwrap(), "server-out");
+    assert!(!has_manifest);
+}
+
+#[test]
+fn detected_output_dir_wins_over_framework_dir_without_being_strict() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("custom-dist")).unwrap();
+    std::fs::create_dir(dir.path().join("dist")).unwrap();
+
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["build"],
+        &["dist"],
+        Some(output_hint("custom-dist", OutputDirectorySource::Detected)),
+    )
+    .unwrap();
+
+    assert_eq!(found.file_name().unwrap(), "custom-dist");
+
+    let (fallback, _) = detect_output_dir(
+        dir.path(),
+        &["build"],
+        &["dist"],
+        Some(output_hint(
+            "missing-custom-dist",
+            OutputDirectorySource::Detected,
+        )),
+    )
+    .unwrap();
+
+    assert_eq!(fallback.file_name().unwrap(), "dist");
+}
+
+#[test]
+fn detected_output_dir_wins_over_lower_priority_manifest_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("custom-dist")).unwrap();
+    std::fs::create_dir_all(dir.path().join("dist/.onreza")).unwrap();
+
+    let (found, has_manifest) = detect_output_dir(
+        dir.path(),
+        &["build"],
+        &["dist"],
+        Some(output_hint("custom-dist", OutputDirectorySource::Detected)),
+    )
+    .unwrap();
+
+    assert_eq!(found.file_name().unwrap(), "custom-dist");
+    assert!(!has_manifest);
 }
 
 // ── compute_aware_output_dirs ────────────────────────────────
@@ -204,6 +330,56 @@ fn nextjs_standalone_found_before_dot_next() {
         "should find standalone first, got: {}",
         found.display()
     );
+}
+
+#[test]
+fn nextjs_preset_output_dir_allows_standalone_refinement() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/standalone")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/server")).unwrap();
+
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &[".next/standalone", ".next"],
+        Some(output_hint(".next", OutputDirectorySource::Preset)),
+    )
+    .unwrap();
+
+    assert!(found.ends_with(".next/standalone"));
+}
+
+#[test]
+fn nextjs_static_export_prefers_out_over_preset_dot_next() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("out")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".next")).unwrap();
+
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &["out"],
+        Some(output_hint(".next", OutputDirectorySource::Preset)),
+    )
+    .unwrap();
+
+    assert_eq!(found.file_name().unwrap(), "out");
+}
+
+#[test]
+fn generic_process_user_output_dir_wins_over_root_framework_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("server-out")).unwrap();
+
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &["."],
+        Some(output_hint("server-out", OutputDirectorySource::User)),
+    )
+    .unwrap();
+
+    assert_eq!(found.file_name().unwrap(), "server-out");
 }
 
 // ── STATIC auto-gen in run_with_hint ─────────────────────────
@@ -294,9 +470,15 @@ async fn configured_vite_static_output_generates_static_manifest_even_with_serve
         skip_validation: true,
     };
 
-    let result = run_with_hint(args, true, &config, None, Some("dist"))
-        .await
-        .unwrap();
+    let result = run_with_hint(
+        args,
+        true,
+        &config,
+        None,
+        Some(output_hint("dist", OutputDirectorySource::Preset)),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(result.output_dir, dir.path().join("dist"));
     let manifest = result
