@@ -356,11 +356,13 @@ fn build_command_server_used_without_package_json() {
 fn project_info_deserializes_camel_case() {
     let json = r#"{
         "id": "proj_123",
+        "frameworkPreset": "vite",
         "installCommand": "npm ci",
         "buildCommand": "npm run build",
         "outputDirectory": "dist"
     }"#;
     let info: ProjectInfo = serde_json::from_str(json).unwrap();
+    assert_eq!(info.framework_preset.unwrap(), "vite");
     assert_eq!(info.install_command.unwrap(), "npm ci");
     assert_eq!(info.build_command.unwrap(), "npm run build");
     assert_eq!(info.output_directory.unwrap(), "dist");

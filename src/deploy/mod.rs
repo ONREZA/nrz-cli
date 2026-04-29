@@ -69,6 +69,7 @@ fn plan_limits(workspace: &WorkspaceInfo) -> (usize, u64) {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProjectInfo {
+    framework_preset: Option<String>,
     install_command: Option<String>,
     build_command: Option<String>,
     output_directory: Option<String>,
@@ -341,6 +342,7 @@ pub async fn run(
                     ?info.build_command,
                     ?info.install_command,
                     ?info.output_directory,
+                    ?info.framework_preset,
                     "fetched project settings from server"
                 );
                 Some(info)
@@ -379,6 +381,10 @@ pub async fn run(
     let server_output_dir = server_settings
         .as_ref()
         .and_then(|s| s.output_directory.as_deref())
+        .filter(|v| !v.trim().is_empty());
+    let server_framework_preset = server_settings
+        .as_ref()
+        .and_then(|s| s.framework_preset.as_deref())
         .filter(|v| !v.trim().is_empty());
 
     // Run install step (default: enabled, skip with --skip-install or --skip-build)
@@ -430,8 +436,11 @@ pub async fn run(
         run_build_step(&cmd, &project_dir, json, &build_env)?;
     }
 
-    // Detect framework once — shared by build (output dir search) and deploy (compute type)
-    let detection = crate::detect::detect(&project_dir);
+    // Detect framework once — shared by build (output dir search) and deploy (compute type).
+    // Server project settings are authoritative for builder-driven deploys;
+    // local onreza.toml is the fallback for direct CLI deploys.
+    let framework_override = server_framework_preset.or(config.project.framework.as_deref());
+    let detection = crate::detect::detect_with_framework_override(&project_dir, framework_override);
 
     // Validate build output
     output::status(

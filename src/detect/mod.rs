@@ -43,6 +43,19 @@ pub fn detect(project_dir: &Path) -> DetectionResult {
     detect_with_fs(&LocalFs::new(project_dir))
 }
 
+/// Full framework detection with an explicit framework preset override.
+///
+/// Used by deploy/build when the platform or `onreza.toml` already carries the
+/// user's framework choice. The override only applies to known presets; unknown
+/// values fall back to normal autodetection so newer server-side presets do not
+/// break older CLI binaries.
+pub fn detect_with_framework_override(
+    project_dir: &Path,
+    framework_override: Option<&str>,
+) -> DetectionResult {
+    detect_with_fs_and_framework_override(&LocalFs::new(project_dir), framework_override)
+}
+
 /// Full framework detection from an abstract filesystem.
 ///
 /// Used by `nrz detect --stdin` with a `VirtualFs` manifest.
@@ -120,6 +133,111 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
             structure: detect_structure(fs),
         },
         reason,
+    }
+}
+
+fn detect_with_fs_and_framework_override(
+    fs: &dyn Fs,
+    framework_override: Option<&str>,
+) -> DetectionResult {
+    let detected = detect_with_fs(fs);
+    let Some(slug) = normalize_framework_slug(framework_override) else {
+        return detected;
+    };
+
+    if detected.framework == slug {
+        return detected;
+    }
+
+    let Some(preset) = preset_for_slug(&slug) else {
+        tracing::warn!(
+            framework_override = %slug,
+            detected = %detected.framework,
+            "configured framework preset is unknown to this CLI; using autodetection"
+        );
+        return detected;
+    };
+
+    detection_from_configured_preset(fs, preset, &detected)
+}
+
+fn normalize_framework_slug(framework_override: Option<&str>) -> Option<String> {
+    let raw = framework_override?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    let normalized = match raw.to_ascii_lowercase().as_str() {
+        "next" => "nextjs".to_string(),
+        "static" | "html" => "static-html".to_string(),
+        other => other.to_string(),
+    };
+    Some(normalized)
+}
+
+fn preset_for_slug(slug: &str) -> Option<&'static FrameworkPreset> {
+    if slug == "static-html" {
+        return Some(presets::get_static_html_preset());
+    }
+    presets::get_preset_by_slug(slug)
+}
+
+fn detection_from_configured_preset(
+    fs: &dyn Fs,
+    preset: &'static FrameworkPreset,
+    autodetected: &DetectionResult,
+) -> DetectionResult {
+    let pkg = PackageJson::load_from_fs(fs);
+    let pm_info = package_manager::detect_package_manager(fs, pkg.as_ref());
+    let pm_type = pm_info
+        .as_ref()
+        .map(|pm| pm.pm_type)
+        .unwrap_or(PackageManagerType::Npm);
+    let version = pkg.as_ref().and_then(|pkg| {
+        preset
+            .dependencies
+            .iter()
+            .find_map(|dep| pkg.dependency_version(dep).map(str::to_string))
+    });
+    let ssr_analysis = ssr::analyze_ssr(fs, preset.slug);
+    let output_dir = resolve_framework_output_dir(preset, ssr_analysis.as_ref(), fs);
+    let suggested_compute = if preset.slug == "other" {
+        infer_unknown_compute_type(fs, pkg.as_ref())
+    } else {
+        infer_compute_type(preset.runtime, preset.slug, ssr_analysis.as_ref())
+    };
+    let build_cmd = preset
+        .build_script
+        .map(|script| package_manager::build_command(pm_type, script));
+    let monorepo = detect_monorepo_info(fs, pkg.as_ref(), pm_info.as_ref());
+
+    DetectionResult {
+        framework: preset.slug.to_string(),
+        name: preset.name.to_string(),
+        version,
+        suggested_compute,
+        metadata: DetectionMetadata {
+            uses_typescript: detect_typescript(fs),
+            config_files: detect_config_files(fs, preset.slug),
+            runtime: RuntimeInfo {
+                runtime_type: infer_runtime(preset.runtime, &pm_info),
+                version: None,
+            },
+            package_manager: pm_info,
+            build_info: Some(BuildInfo {
+                build_command: build_cmd,
+                install_command: Some(package_manager::install_command(pm_type).to_string()),
+                output_dir: Some(output_dir),
+                entry_point: framework_entry_point(preset.slug),
+            }),
+            monorepo,
+            ssr_analysis,
+            structure: detect_structure(fs),
+        },
+        reason: format!(
+            "Configured framework preset: {} (autodetected {})",
+            preset.slug, autodetected.framework
+        ),
     }
 }
 
@@ -863,7 +981,7 @@ fn resolve_from_scripts(
         .filter(|(name, _)| !SCRIPT_HINT_PRIORITY.contains(&name.as_str()))
         .filter(|(name, _)| is_runtime_script_name(name))
         .collect();
-    rest.sort_by(|(a, _), (b, _)| a.cmp(b));
+    rest.sort_by_key(|(name, _)| *name);
 
     for (_, script) in rest {
         for token in extract_script_path_tokens(script) {
@@ -974,6 +1092,39 @@ fn is_runnable_file(path: &Path) -> bool {
         .is_some_and(|ext| RUNNABLE_EXTENSIONS.contains(&ext))
 }
 
+fn is_entry_scan_config_file(path: &Path) -> bool {
+    let rel = stringify_path(path).to_ascii_lowercase();
+    if crate::detect::fs::DETECTION_CONTENT_FILES
+        .iter()
+        .any(|known| rel == known.to_ascii_lowercase())
+    {
+        return true;
+    }
+
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let file_name = file_name.to_ascii_lowercase();
+    file_name.contains(".config.")
+        || matches!(
+            file_name.as_str(),
+            "gatsby-config.js"
+                | "gatsby-config.ts"
+                | "nuxt.config.js"
+                | "nuxt.config.ts"
+                | "svelte.config.js"
+                | "svelte.config.ts"
+                | "next.config.js"
+                | "next.config.mjs"
+                | "next.config.ts"
+                | "next.config.mts"
+                | "vite.config.js"
+                | "vite.config.mjs"
+                | "vite.config.ts"
+                | "vite.config.mts"
+        )
+}
+
 fn collect_runnable_files_recursive(
     base: &Path,
     current: &Path,
@@ -1014,6 +1165,7 @@ fn collect_runnable_files_recursive(
                     .with_context(|| format!("failed to read metadata: {}", path.display()))?;
                 if meta.len() >= ENTRY_SCAN_MIN_SIZE
                     && let Ok(rel) = path.strip_prefix(base)
+                    && !is_entry_scan_config_file(rel)
                 {
                     out.push(rel.to_path_buf());
                 }

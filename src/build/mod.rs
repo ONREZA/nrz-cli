@@ -65,7 +65,10 @@ pub async fn run_with_hint(
     let detection = match detection {
         Some(d) => d,
         None => {
-            internal_detection = crate::detect::detect(&project_dir);
+            internal_detection = crate::detect::detect_with_framework_override(
+                &project_dir,
+                config.project.framework.as_deref(),
+            );
             &internal_detection
         }
     };

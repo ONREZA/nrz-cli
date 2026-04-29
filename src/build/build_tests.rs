@@ -263,6 +263,54 @@ async fn static_project_without_adapter_auto_generates_manifest() {
 }
 
 #[tokio::test]
+async fn configured_vite_static_output_generates_static_manifest_even_with_server_dep() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{
+          "scripts": {"build": "vite build"},
+          "dependencies": {"express": "^4.19.0", "react": "^18.3.0"},
+          "devDependencies": {"vite": "^5.0.0", "@vitejs/plugin-react": "^4.0.0"}
+        }"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("vite.config.js"), "x".repeat(600)).unwrap();
+    std::fs::create_dir_all(dir.path().join("dist/assets")).unwrap();
+    std::fs::write(
+        dir.path().join("dist/index.html"),
+        "<div id=\"root\"></div>",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("dist/assets/index.js"),
+        "console.log('app')",
+    )
+    .unwrap();
+
+    let mut config = nrz::config::ProjectConfig::default();
+    config.project.framework = Some("vite".into());
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: true,
+    };
+
+    let result = run_with_hint(args, true, &config, None, Some("dist"))
+        .await
+        .unwrap();
+
+    assert_eq!(result.output_dir, dir.path().join("dist"));
+    let manifest = result
+        .manifest
+        .expect("Vite static output should auto-generate STATIC manifest");
+    assert_eq!(manifest.layers.len(), 1);
+    assert_eq!(
+        manifest.layers[0].target,
+        super::manifest::LayerTarget::Static
+    );
+    assert!(manifest.layers[0].entry.is_none());
+}
+
+#[tokio::test]
 async fn process_project_without_adapter_returns_no_manifest_from_build() {
     let dir = tempfile::tempdir().unwrap();
     // Create a "dist" output dir — no .onreza/ subdir, non-static detection

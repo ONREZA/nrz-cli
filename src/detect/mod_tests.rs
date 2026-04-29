@@ -28,6 +28,56 @@ fn non_ssr_framework_always_static() {
 }
 
 #[test]
+fn configured_vite_framework_overrides_server_dependency_autodetect() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{
+          "scripts": {"build": "vite build"},
+          "dependencies": {"express": "^4.19.0", "react": "^18.3.0"},
+          "devDependencies": {"vite": "^5.0.0", "@vitejs/plugin-react": "^4.0.0"}
+        }"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("vite.config.js"), "x".repeat(600)).unwrap();
+
+    let autodetected = detect(dir.path());
+    assert_eq!(autodetected.framework, "express");
+    assert_eq!(autodetected.suggested_compute, ComputeType::Process);
+
+    let overridden = detect_with_framework_override(dir.path(), Some("vite"));
+    assert_eq!(overridden.framework, "vite");
+    assert_eq!(overridden.suggested_compute, ComputeType::Static);
+    assert_eq!(
+        overridden
+            .metadata
+            .build_info
+            .as_ref()
+            .and_then(|info| info.output_dir.as_deref()),
+        Some("dist")
+    );
+    assert!(
+        overridden.reason.contains("Configured framework preset"),
+        "reason should explain override, got: {}",
+        overridden.reason
+    );
+}
+
+#[test]
+fn configured_other_framework_preserves_unknown_runtime_signals() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"main": "server.js", "scripts": {"start": "node server.js"}}"#,
+    )
+    .unwrap();
+
+    let overridden = detect_with_framework_override(dir.path(), Some("other"));
+    assert_eq!(overridden.framework, "other");
+    assert_eq!(overridden.suggested_compute, ComputeType::Process);
+}
+
+#[test]
 fn ssr_framework_explicit_static_export_is_static() {
     let ssr = SsrAnalysis {
         is_static_compatible: true,
@@ -1833,6 +1883,17 @@ fn resolve_entry_point_heuristic_finds_nested_server_file() {
 
     let result = resolve_entry_point("other", dir.path(), dir.path());
     assert_eq!(result, Some("runtime/bootstrap.mjs".into()));
+}
+
+#[test]
+fn resolve_entry_point_heuristic_skips_framework_config_files() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("vite.config.js"), "x".repeat(600)).unwrap();
+    std::fs::write(dir.path().join("next.config.mjs"), "x".repeat(600)).unwrap();
+
+    let detailed = resolve_entry_point_detailed("other", dir.path(), dir.path());
+    assert_eq!(detailed, EntryPointResolution::NotFound);
+    assert_eq!(resolve_entry_point("other", dir.path(), dir.path()), None);
 }
 
 #[test]
