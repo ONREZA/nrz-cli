@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.29.1] - 2026-04-30
+
+### 🐛 Bug Fixes
+
+- **build:** handle nested Next standalone bundles ([f7eca76](https://github.com/ONREZA/nrz-cli/commit/f7eca76f7729b0287d196d6d5555bc737fc8055b))
+
 ## [0.29.0] - 2026-04-29
 
 ### ✨ Features
