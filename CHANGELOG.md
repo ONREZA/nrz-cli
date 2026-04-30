@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.29.3] - 2026-04-30
+
+### 🐛 Bug Fixes
+
+- **build:** refine Next user output artifacts ([777e97e](https://github.com/ONREZA/nrz-cli/commit/777e97e3dc2342d48527fbe3afafbc0bec759e7c))
+
 ## [0.29.2] - 2026-04-30
 
 ### 🐛 Bug Fixes
