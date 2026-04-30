@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.29.2] - 2026-04-30
+
+### 🐛 Bug Fixes
+
+- **deploy:** restore source-aware build detection ([de0bf33](https://github.com/ONREZA/nrz-cli/commit/de0bf335f043fe9cb842f15a216fd1f653a1fd81))
+
 ## [0.29.1] - 2026-04-30
 
 ### 🐛 Bug Fixes
