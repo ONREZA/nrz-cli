@@ -87,13 +87,35 @@ fn command_hint<'a>(
     command: Option<&'a str>,
     source: Option<build::BuildSettingSource>,
 ) -> Option<CommandHint<'a>> {
-    let source = source.unwrap_or(build::BuildSettingSource::Preset);
     let command = command.filter(|v| !v.trim().is_empty());
-    if command.is_some() || source.is_authoritative_command_absence() {
-        Some(CommandHint { command })
-    } else {
-        None
+
+    match source {
+        // PRESET is a fallback/default from the platform, not a user intent.
+        // Let local package-manager/script detection decide whether there is
+        // anything to run, otherwise static/non-JS repos fail on npm ENOENT.
+        Some(build::BuildSettingSource::Preset) => None,
+        Some(source) => {
+            if command.is_some() || source.is_authoritative_command_absence() {
+                Some(CommandHint { command })
+            } else {
+                None
+            }
+        }
+        // Older APIs did not expose source metadata. Preserve compatibility
+        // for explicit command values, but do not treat missing fields as an
+        // authoritative absence.
+        None => command.map(|command| CommandHint {
+            command: Some(command),
+        }),
     }
+}
+
+fn authoritative_server_framework_preset(preset: Option<&str>) -> Option<&str> {
+    let preset = preset?.trim();
+    if preset.is_empty() || preset.eq_ignore_ascii_case("other") {
+        return None;
+    }
+    Some(preset)
 }
 
 async fn fetch_project_settings(
@@ -413,8 +435,7 @@ pub async fn run(
     });
     let server_framework_preset = server_settings
         .as_ref()
-        .and_then(|s| s.framework_preset.as_deref())
-        .filter(|v| !v.trim().is_empty());
+        .and_then(|s| authoritative_server_framework_preset(s.framework_preset.as_deref()));
 
     // Run install step (default: enabled, skip with --skip-install or --skip-build)
     if !args.skip_build && !args.skip_install {
@@ -2182,24 +2203,8 @@ fn run_install_step(
     json: bool,
     server_command: Option<CommandHint<'_>>,
 ) -> anyhow::Result<()> {
-    // Priority: server command > auto-detect from package manager.
-    // (No CLI flag or config field exists for install command.)
-    let cmd = if let Some(server_cmd) = server_command {
-        match server_cmd.command {
-            Some(command) => command.to_string(),
-            None => return Ok(()),
-        }
-    } else if !project_dir.join("package.json").exists() {
+    let Some(cmd) = resolve_install_command(project_dir, server_command) else {
         return Ok(());
-    } else {
-        let local_fs = crate::detect::fs::LocalFs::new(project_dir);
-        let pkg = crate::detect::package_json::PackageJson::load_from_fs(&local_fs);
-        let pm_info =
-            crate::detect::package_manager::detect_package_manager(&local_fs, pkg.as_ref());
-        match pm_info {
-            Some(info) => crate::detect::package_manager::install_command(info.pm_type).to_string(),
-            None => "npm install".to_string(),
-        }
     };
 
     output::status(
@@ -2219,6 +2224,30 @@ fn run_install_step(
     )?;
     output::success(json, "Dependencies installed", output::Phase::Deploy);
     Ok(())
+}
+
+fn resolve_install_command(
+    project_dir: &Path,
+    server_command: Option<CommandHint<'_>>,
+) -> Option<String> {
+    // Priority: authoritative server command > auto-detect from package manager.
+    // PRESET server commands are filtered out by command_hint().
+    if let Some(server_cmd) = server_command {
+        return server_cmd.command.map(str::to_string);
+    }
+    if !project_dir.join("package.json").exists() {
+        return None;
+    }
+
+    let local_fs = crate::detect::fs::LocalFs::new(project_dir);
+    let pkg = crate::detect::package_json::PackageJson::load_from_fs(&local_fs);
+    let pm_info = crate::detect::package_manager::detect_package_manager(&local_fs, pkg.as_ref());
+    match pm_info {
+        Some(info) => {
+            Some(crate::detect::package_manager::install_command(info.pm_type).to_string())
+        }
+        None => Some("npm install".to_string()),
+    }
 }
 
 fn run_build_step(

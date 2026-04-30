@@ -71,6 +71,12 @@ catch {
 # Find extracted binary
 $BinaryPath = Join-Path $TmpDir $BinaryName
 if (!(Test-Path $BinaryPath)) {
+    $FoundBinary = Get-ChildItem -Path $TmpDir -Recurse -File -Filter $BinaryName | Select-Object -First 1
+    if ($FoundBinary) {
+        $BinaryPath = $FoundBinary.FullName
+    }
+}
+if (!(Test-Path $BinaryPath)) {
     Write-Host "❌ Binary not found in archive" -ForegroundColor Red
     exit 1
 }

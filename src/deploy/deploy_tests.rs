@@ -371,6 +371,61 @@ fn build_command_server_used_without_package_json() {
 }
 
 #[test]
+fn build_command_user_source_used_without_package_json() {
+    let dir = tempdir().unwrap();
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(
+        None,
+        dir.path(),
+        &config,
+        command_hint(
+            Some("make build"),
+            Some(crate::build::BuildSettingSource::User),
+        ),
+    );
+    assert_eq!(result.unwrap(), "make build");
+}
+
+#[test]
+fn build_command_preset_source_without_package_json_skips() {
+    let dir = tempdir().unwrap();
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(
+        None,
+        dir.path(),
+        &config,
+        command_hint(
+            Some("npm run build"),
+            Some(crate::build::BuildSettingSource::Preset),
+        ),
+    );
+    assert!(result.is_none());
+}
+
+#[test]
+fn build_command_preset_source_uses_local_package_manager() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let result = resolve_build_command(
+        None,
+        dir.path(),
+        &config,
+        command_hint(
+            Some("npm run build"),
+            Some(crate::build::BuildSettingSource::Preset),
+        ),
+    );
+    assert_eq!(result.unwrap(), "pnpm run build");
+}
+
+#[test]
 fn build_command_detected_empty_suppresses_auto_detect() {
     let dir = tempdir().unwrap();
     fs::write(
@@ -406,6 +461,82 @@ fn build_command_preset_empty_keeps_auto_detect_fallback() {
         command_hint(None, Some(crate::build::BuildSettingSource::Preset)),
     );
     assert_eq!(result.unwrap(), "npm run build");
+}
+
+// ── install command source handling ──────────────────────────
+
+#[test]
+fn install_command_preset_source_without_package_json_skips() {
+    let dir = tempdir().unwrap();
+    let result = resolve_install_command(
+        dir.path(),
+        command_hint(
+            Some("npm install"),
+            Some(crate::build::BuildSettingSource::Preset),
+        ),
+    );
+    assert!(result.is_none());
+}
+
+#[test]
+fn install_command_preset_source_uses_local_package_manager() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+
+    let result = resolve_install_command(
+        dir.path(),
+        command_hint(
+            Some("npm install"),
+            Some(crate::build::BuildSettingSource::Preset),
+        ),
+    );
+    assert_eq!(result.unwrap(), "pnpm install");
+}
+
+#[test]
+fn install_command_user_source_used_without_package_json() {
+    let dir = tempdir().unwrap();
+    let result = resolve_install_command(
+        dir.path(),
+        command_hint(
+            Some("make deps"),
+            Some(crate::build::BuildSettingSource::User),
+        ),
+    );
+    assert_eq!(result.unwrap(), "make deps");
+}
+
+// ── framework preset source handling ─────────────────────────
+
+#[test]
+fn server_framework_other_does_not_mask_local_vite_detection() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"vite":"^5.0.0"},"scripts":{"start":"vite --host","build":"vite build"}}"#,
+    )
+    .unwrap();
+
+    let detection = crate::detect::detect_with_framework_override(
+        dir.path(),
+        authoritative_server_framework_preset(Some("other")),
+    );
+
+    assert_eq!(detection.framework, "vite");
+    assert_eq!(
+        detection.suggested_compute,
+        crate::detect::types::ComputeType::Static
+    );
+}
+
+#[test]
+fn server_framework_specific_preset_remains_authoritative() {
+    assert_eq!(
+        authoritative_server_framework_preset(Some("vite")),
+        Some("vite")
+    );
+    assert_eq!(authoritative_server_framework_preset(Some("other")), None);
 }
 
 // ── ProjectInfo deserialization ──────────────────────────────

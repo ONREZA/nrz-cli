@@ -86,9 +86,15 @@ fi
 
 # Find extracted binary
 if [[ "$PLATFORM" == "win32-x64" ]]; then
-    BINARY_PATH="${TMP_DIR}/${BINARY_NAME}.exe"
+    BINARY_FILE="${BINARY_NAME}.exe"
 else
-    BINARY_PATH="${TMP_DIR}/${BINARY_NAME}"
+    BINARY_FILE="${BINARY_NAME}"
+fi
+
+if [ -f "${TMP_DIR}/${BINARY_FILE}" ]; then
+    BINARY_PATH="${TMP_DIR}/${BINARY_FILE}"
+else
+    BINARY_PATH=$(find "$TMP_DIR" -type f -name "$BINARY_FILE" -print -quit)
 fi
 
 if [ ! -f "$BINARY_PATH" ]; then
