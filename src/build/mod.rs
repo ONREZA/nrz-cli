@@ -6,7 +6,7 @@ mod manifest_tests;
 #[cfg(test)]
 mod build_tests;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -64,6 +64,33 @@ impl BuildSettingSource {
 pub(crate) struct OutputDirectoryHint<'a> {
     pub path: &'a str,
     pub source: BuildSettingSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedOutputDirectory {
+    path: PathBuf,
+    has_manifest: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputCandidateRole {
+    DetectedFrameworkRefinement,
+    DetectedHint,
+    Framework,
+    PresetHint,
+    ConfigDefault,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OutputCandidate {
+    path: String,
+    role: OutputCandidateRole,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OutputCandidateTier {
+    role: OutputCandidateRole,
+    candidates: Vec<OutputCandidate>,
 }
 
 pub async fn run(
@@ -172,15 +199,15 @@ pub async fn run_with_hint(
             );
         }
         Some(manifest)
-    } else if detection.framework == "nextjs"
+    } else if is_nextjs_standalone_framework(&detection.framework)
         && (detection
             .metadata
             .ssr_analysis
             .as_ref()
             .is_some_and(|ssr| ssr.has_standalone_output())
-            || output_dir.join("server.js").is_file())
+            || resolve_nextjs_standalone_server(&project_dir, &output_dir).is_some())
     {
-        if !output_dir.join("server.js").is_file() {
+        let Some(standalone) = resolve_nextjs_standalone_server(&project_dir, &output_dir) else {
             return Err(output::coded_error(
                 "MISSING_BUILD_OUTPUT",
                 format!(
@@ -190,10 +217,20 @@ pub async fn run_with_hint(
                     output_dir.display()
                 ),
             ));
-        }
-        prepare_nextjs_standalone(&project_dir, &output_dir, json)?;
-        let has_public = output_dir.join("public").is_dir();
-        let auto = manifest::generate_nextjs_standalone_manifest(has_public);
+        };
+
+        prepare_nextjs_standalone_for_server(
+            &project_dir,
+            &output_dir,
+            &standalone.server_dir,
+            json,
+        )?;
+        let has_public = standalone.server_dir.join("public").is_dir();
+        let auto = manifest::generate_nextjs_standalone_manifest_for_server(
+            has_public,
+            standalone.server_dir_relative.as_deref().unwrap_or(""),
+            &standalone.entry,
+        );
         output::status(
             json,
             "~",
@@ -430,7 +467,8 @@ fn try_generate_ssr_manifest(
 ///
 /// Priority:
 /// - USER outputDirectory: exact directory only; never falls back.
-/// - DETECTED outputDirectory: detected path > framework dirs > config dirs.
+/// - DETECTED outputDirectory: current framework refinements of the detected hint,
+///   then detected path, then framework dirs, then config dirs.
 /// - PRESET/default outputDirectory: framework dirs > preset path > config dirs.
 fn detect_output_dir(
     project_dir: &Path,
@@ -438,12 +476,26 @@ fn detect_output_dir(
     framework_dirs: &[&str],
     server_output_dir: Option<OutputDirectoryHint<'_>>,
 ) -> anyhow::Result<(std::path::PathBuf, bool)> {
+    let resolved =
+        resolve_output_directory(project_dir, config_dirs, framework_dirs, server_output_dir)?;
+    Ok((resolved.path, resolved.has_manifest))
+}
+
+fn resolve_output_directory(
+    project_dir: &Path,
+    config_dirs: &[&str],
+    framework_dirs: &[&str],
+    server_output_dir: Option<OutputDirectoryHint<'_>>,
+) -> anyhow::Result<ResolvedOutputDirectory> {
     if let Some(hint) = server_output_dir
         && hint.source.is_user_explicit()
     {
         let candidate = project_dir.join(hint.path);
         if candidate.is_dir() {
-            return Ok((candidate.clone(), candidate.join(".onreza").is_dir()));
+            return Ok(ResolvedOutputDirectory {
+                has_manifest: candidate.join(".onreza").is_dir(),
+                path: candidate,
+            });
         }
 
         return Err(output::coded_error(
@@ -473,28 +525,55 @@ fn detect_output_dir(
     // lower-priority outputs outrank a higher-priority existing directory.
     let mut seen = std::collections::HashSet::<String>::new();
     let mut all_dirs = Vec::<String>::new();
-    let mut tiers = Vec::<Vec<String>>::new();
+    let mut tiers = Vec::<OutputCandidateTier>::new();
     let server_path = server_output_dir.map(|hint| (hint.path, hint.source));
 
     if let Some((path, BuildSettingSource::Detected)) = server_path {
-        push_output_dir_tier(&mut tiers, &mut all_dirs, &mut seen, std::iter::once(path));
+        // A detected framework container like `.next` is a pre-build hint. If current
+        // framework analysis has a more precise artifact root, prefer that refinement
+        // over the generic container.
+        push_output_candidate_tier(
+            &mut tiers,
+            &mut all_dirs,
+            &mut seen,
+            OutputCandidateRole::DetectedFrameworkRefinement,
+            framework_dirs
+                .iter()
+                .copied()
+                .filter(|candidate| is_framework_refinement_of_detected_hint(path, candidate)),
+        );
+        push_output_candidate_tier(
+            &mut tiers,
+            &mut all_dirs,
+            &mut seen,
+            OutputCandidateRole::DetectedHint,
+            std::iter::once(path),
+        );
     }
 
-    push_output_dir_tier(
+    push_output_candidate_tier(
         &mut tiers,
         &mut all_dirs,
         &mut seen,
+        OutputCandidateRole::Framework,
         framework_dirs.iter().copied(),
     );
 
     if let Some((path, BuildSettingSource::Preset)) = server_path {
-        push_output_dir_tier(&mut tiers, &mut all_dirs, &mut seen, std::iter::once(path));
+        push_output_candidate_tier(
+            &mut tiers,
+            &mut all_dirs,
+            &mut seen,
+            OutputCandidateRole::PresetHint,
+            std::iter::once(path),
+        );
     }
 
-    push_output_dir_tier(
+    push_output_candidate_tier(
         &mut tiers,
         &mut all_dirs,
         &mut seen,
+        OutputCandidateRole::ConfigDefault,
         config_dirs.iter().copied(),
     );
 
@@ -515,10 +594,11 @@ fn detect_output_dir(
     ))
 }
 
-fn push_output_dir_tier<'a>(
-    tiers: &mut Vec<Vec<String>>,
+fn push_output_candidate_tier<'a>(
+    tiers: &mut Vec<OutputCandidateTier>,
     all_dirs: &mut Vec<String>,
     seen: &mut std::collections::HashSet<String>,
+    role: OutputCandidateRole,
     candidates: impl IntoIterator<Item = &'a str>,
 ) {
     let mut tier = Vec::new();
@@ -527,43 +607,308 @@ fn push_output_dir_tier<'a>(
         let candidate = candidate.to_string();
         if seen.insert(candidate.clone()) {
             all_dirs.push(candidate.clone());
-            tier.push(candidate);
+            tier.push(OutputCandidate {
+                path: candidate,
+                role,
+            });
         }
     }
 
     if !tier.is_empty() {
-        tiers.push(tier);
+        tiers.push(OutputCandidateTier {
+            role,
+            candidates: tier,
+        });
     }
 }
 
 fn select_output_dir_from_tier(
     project_dir: &Path,
-    tier: &[String],
-) -> Option<(std::path::PathBuf, bool)> {
-    for name in tier {
-        let candidate = project_dir.join(name);
-        if candidate.is_dir() && candidate.join(".onreza").is_dir() {
-            return Some((candidate, true));
+    tier: &OutputCandidateTier,
+) -> Option<ResolvedOutputDirectory> {
+    for candidate in &tier.candidates {
+        debug_assert_eq!(candidate.role, tier.role);
+        let path = project_dir.join(&candidate.path);
+        if path.is_dir() && path.join(".onreza").is_dir() {
+            return Some(ResolvedOutputDirectory {
+                path,
+                has_manifest: true,
+            });
         }
     }
 
-    for name in tier {
-        let candidate = project_dir.join(name);
-        if candidate.is_dir() {
-            return Some((candidate, false));
+    for candidate in &tier.candidates {
+        debug_assert_eq!(candidate.role, tier.role);
+        let path = project_dir.join(&candidate.path);
+        if path.is_dir() {
+            return Some(ResolvedOutputDirectory {
+                path,
+                has_manifest: false,
+            });
         }
     }
 
     None
 }
 
+fn is_framework_refinement_of_detected_hint(hint: &str, candidate: &str) -> bool {
+    is_project_root_output_dir(hint) && !is_project_root_output_dir(candidate)
+        || is_nested_output_dir(hint, candidate)
+        || is_nextjs_export_refinement(hint, candidate)
+}
+
+fn is_project_root_output_dir(path: &str) -> bool {
+    matches!(path.trim_matches('/'), "." | "./")
+}
+
+fn is_nested_output_dir(parent: &str, candidate: &str) -> bool {
+    let parent = parent.trim_end_matches('/');
+    let candidate = candidate.trim_end_matches('/');
+    candidate
+        .strip_prefix(parent)
+        .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn is_nextjs_export_refinement(hint: &str, candidate: &str) -> bool {
+    let hint = hint.trim_end_matches('/');
+    let candidate = candidate.trim_end_matches('/');
+    matches!(
+        (hint, candidate),
+        (".next", "out") | (".next/standalone", "out")
+    )
+}
+
+fn is_nextjs_standalone_framework(framework: &str) -> bool {
+    matches!(framework, "nextjs" | "blitzjs" | "payload")
+}
+
+#[derive(Debug, Clone)]
+struct NextStandaloneServer {
+    server_dir: std::path::PathBuf,
+    server_dir_relative: Option<String>,
+    entry: String,
+}
+
+#[derive(Debug)]
+struct NextStandaloneServerCandidate {
+    dir: std::path::PathBuf,
+    is_generated_entry: bool,
+    has_next_runtime: bool,
+    matches_project_name: bool,
+}
+
+fn resolve_nextjs_standalone_server(
+    project_dir: &Path,
+    output_dir: &Path,
+) -> Option<NextStandaloneServer> {
+    let root_server = output_dir.join("server.js");
+    if root_server.is_file() {
+        return Some(NextStandaloneServer {
+            server_dir: output_dir.to_path_buf(),
+            server_dir_relative: None,
+            entry: "server.js".to_string(),
+        });
+    }
+
+    if !is_nextjs_standalone_dir(output_dir) {
+        return None;
+    }
+
+    let server_dir = find_nested_standalone_server_dir(project_dir, output_dir)?;
+    let server_dir_relative = relative_manifest_path(output_dir, &server_dir)?;
+    let entry = join_manifest_path(&server_dir_relative, "server.js");
+
+    tracing::info!(
+        output_dir = %output_dir.display(),
+        server_dir = %server_dir.display(),
+        entry,
+        "using nested Next.js standalone server entry"
+    );
+
+    Some(NextStandaloneServer {
+        server_dir,
+        server_dir_relative: Some(server_dir_relative),
+        entry,
+    })
+}
+
+fn relative_manifest_path(root: &Path, path: &Path) -> Option<String> {
+    path.strip_prefix(root)
+        .ok()
+        .map(path_to_manifest_string)
+        .filter(|path| !path.is_empty())
+}
+
+fn path_to_manifest_string(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn join_manifest_path(prefix: &str, path: &str) -> String {
+    let prefix = prefix.trim_matches('/');
+    let path = path.trim_matches('/');
+    if prefix.is_empty() {
+        path.to_string()
+    } else if path.is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix}/{path}")
+    }
+}
+
+fn is_nextjs_standalone_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "standalone")
+        && path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == ".next")
+}
+
+fn find_nested_standalone_server_dir(
+    project_dir: &Path,
+    output_dir: &Path,
+) -> Option<std::path::PathBuf> {
+    let mut matches = Vec::new();
+    collect_nested_standalone_server_dirs(project_dir, output_dir, 0, &mut matches);
+
+    let generated_app_dirs = matches
+        .iter()
+        .filter(|candidate| candidate.is_generated_entry && candidate.has_next_runtime)
+        .collect::<Vec<_>>();
+    if let [single] = generated_app_dirs.as_slice() {
+        return Some(single.dir.clone());
+    }
+
+    let app_dirs = matches
+        .iter()
+        .filter(|candidate| candidate.has_next_runtime)
+        .collect::<Vec<_>>();
+    if let [single] = app_dirs.as_slice() {
+        return Some(single.dir.clone());
+    }
+
+    let generated = matches
+        .iter()
+        .filter(|candidate| candidate.is_generated_entry)
+        .collect::<Vec<_>>();
+    if let [single] = generated.as_slice() {
+        return Some(single.dir.clone());
+    }
+
+    let project_named = matches
+        .iter()
+        .filter(|candidate| candidate.matches_project_name)
+        .collect::<Vec<_>>();
+    if let [single] = project_named.as_slice() {
+        return Some(single.dir.clone());
+    }
+
+    match matches.as_slice() {
+        [single] => Some(single.dir.clone()),
+        multiple => {
+            if !multiple.is_empty() {
+                tracing::warn!(
+                    output_dir = %output_dir.display(),
+                    count = multiple.len(),
+                    "multiple nested Next.js standalone server.js files found; cannot infer entry"
+                );
+            }
+            None
+        }
+    }
+}
+
+fn collect_nested_standalone_server_dirs(
+    project_dir: &Path,
+    dir: &Path,
+    depth: usize,
+    matches: &mut Vec<NextStandaloneServerCandidate>,
+) {
+    if depth > 8 {
+        return;
+    }
+
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+
+        if file_type.is_dir() {
+            if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| matches!(name, "node_modules" | ".next" | ".onreza"))
+            {
+                continue;
+            }
+            collect_nested_standalone_server_dirs(project_dir, &path, depth + 1, matches);
+            continue;
+        }
+
+        if file_type.is_file()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "server.js")
+            && let Some(parent) = path.parent()
+        {
+            matches.push(NextStandaloneServerCandidate {
+                dir: parent.to_path_buf(),
+                is_generated_entry: looks_like_nextjs_standalone_server(&path),
+                has_next_runtime: parent.join(".next").is_dir(),
+                matches_project_name: path_file_name_matches(parent, project_dir),
+            });
+        }
+    }
+}
+
+fn looks_like_nextjs_standalone_server(path: &Path) -> bool {
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return false;
+    };
+
+    contents.contains("__NEXT_PRIVATE_STANDALONE_CONFIG")
+        || contents.contains("next/dist/server/lib/start-server")
+}
+
+fn path_file_name_matches(path: &Path, expected: &Path) -> bool {
+    let Some(path_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let Some(expected_name) = expected.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+
+    path_name == expected_name
+}
+
 /// Prepare Next.js standalone output by copying static assets and public files
 /// into the correct directory structure for STATIC + COMPUTE layers.
 ///
 /// Safe to call after a partial run: skips copy steps when the destination directory already exists.
+#[cfg(test)]
 fn prepare_nextjs_standalone(
     project_dir: &Path,
     output_dir: &Path,
+    json: bool,
+) -> anyhow::Result<()> {
+    prepare_nextjs_standalone_for_server(project_dir, output_dir, output_dir, json)
+}
+
+fn prepare_nextjs_standalone_for_server(
+    project_dir: &Path,
+    bundle_root: &Path,
+    server_dir: &Path,
     json: bool,
 ) -> anyhow::Result<()> {
     let next_static_src = project_dir.join(".next/static");
@@ -576,8 +921,8 @@ fn prepare_nextjs_standalone(
             output::Phase::Build,
         );
     } else {
-        // 1. Copy .next/static/ → {output}/.next/static/ (for server.js)
-        let server_static_dst = output_dir.join(".next/static");
+        // 1. Copy .next/static/ → {server}/.next/static/ (for server.js)
+        let server_static_dst = server_dir.join(".next/static");
         if !server_static_dst.is_dir() {
             output::status(
                 json,
@@ -595,8 +940,8 @@ fn prepare_nextjs_standalone(
             );
         }
 
-        // 2. Copy .next/static/ → {output}/_static/_next/static/ (for CDN STATIC layer)
-        let cdn_static_dst = output_dir.join("_static/_next/static");
+        // 2. Copy .next/static/ → {server}/_static/_next/static/ (for CDN STATIC layer)
+        let cdn_static_dst = server_dir.join("_static/_next/static");
         if !cdn_static_dst.is_dir() {
             output::status(
                 json,
@@ -615,10 +960,10 @@ fn prepare_nextjs_standalone(
         }
     }
 
-    // 3. Copy public/ → {output}/public/ (STATIC layer for root-level assets)
+    // 3. Copy public/ → {server}/public/ (STATIC layer for root-level assets)
     let public_src = project_dir.join("public");
     if public_src.is_dir() {
-        let public_dst = output_dir.join("public");
+        let public_dst = server_dir.join("public");
         if !public_dst.is_dir() {
             output::status(json, "+", "Copying public/ assets", output::Phase::Build);
             copy_dir_recursive(&public_src, &public_dst)?;
@@ -632,23 +977,23 @@ fn prepare_nextjs_standalone(
         }
     }
 
-    // 4. Copy metadata route .body files → {output}/public/<name>
+    // 4. Copy metadata route .body files → {server}/public/<name>
     //
     // Next.js App Router compiles static metadata files (favicon.ico, robots.txt,
     // opengraph-image.png, etc.) into .next/server/app/**/*.body. In standalone mode,
     // server.js may return 404 for these routes because it expects a reverse proxy to
     // serve them. Copying the .body files into the STATIC public/ layer ensures they
     // are served from CDN without hitting the COMPUTE layer.
-    copy_metadata_routes(output_dir, json)?;
+    copy_metadata_routes(server_dir, json)?;
 
-    // 5. Copy missing Prisma external packages into standalone node_modules.
+    // 5. Copy missing Prisma external packages into the standalone bundle root node_modules.
     //
     // Prisma 6+ generates a client into `@prisma/client-<hash>` (a content-addressed
     // package). Next.js standalone file tracing may not include these dynamically-named
     // packages, causing runtime "Cannot find module" errors. We detect any `@prisma/client-*`
     // directories in the project's node_modules that are absent from the standalone output
     // and copy them over.
-    copy_missing_prisma_packages(project_dir, output_dir, json)?;
+    copy_missing_prisma_packages(project_dir, bundle_root, json)?;
 
     Ok(())
 }

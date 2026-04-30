@@ -200,6 +200,40 @@ fn explicit_output_dir_wins_over_framework_and_config_dirs() {
 }
 
 #[test]
+fn user_output_dir_does_not_refine_to_nested_framework_output() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("build/client/.onreza")).unwrap();
+
+    let (found, has_manifest) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &["build/client", "build"],
+        Some(output_hint("build", BuildSettingSource::User)),
+    )
+    .unwrap();
+
+    assert!(found.ends_with("build"));
+    assert!(!has_manifest);
+}
+
+#[test]
+fn user_root_output_dir_does_not_refine_to_framework_output() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("dist/.onreza")).unwrap();
+
+    let (found, has_manifest) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &["dist"],
+        Some(output_hint(".", BuildSettingSource::User)),
+    )
+    .unwrap();
+
+    assert_eq!(found, dir.path().join("."));
+    assert!(!has_manifest);
+}
+
+#[test]
 fn detected_output_dir_wins_over_framework_dir_without_being_strict() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("custom-dist")).unwrap();
@@ -245,6 +279,68 @@ fn detected_output_dir_wins_over_lower_priority_manifest_dir() {
 
     assert_eq!(found.file_name().unwrap(), "custom-dist");
     assert!(!has_manifest);
+}
+
+#[test]
+fn detected_root_allows_framework_refinement() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("dist")).unwrap();
+
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["fallback"],
+        &["dist"],
+        Some(output_hint(".", BuildSettingSource::Detected)),
+    )
+    .unwrap();
+
+    assert_eq!(found.file_name().unwrap(), "dist");
+}
+
+#[test]
+fn detected_root_stays_root_when_framework_root_is_current_output() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("dist")).unwrap();
+
+    let (found, has_manifest) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &["."],
+        Some(output_hint(".", BuildSettingSource::Detected)),
+    )
+    .unwrap();
+
+    assert_eq!(found, dir.path().join("."));
+    assert!(!has_manifest);
+}
+
+#[test]
+fn detected_parent_allows_framework_refinement_matrix() {
+    let cases = [
+        (".next", ".next/standalone"),
+        (".output", ".output/public"),
+        ("build", "build/client"),
+        ("dist", "dist/client"),
+    ];
+
+    for (parent, child) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(child)).unwrap();
+
+        let (found, _) = detect_output_dir(
+            dir.path(),
+            &["fallback"],
+            &[child, parent],
+            Some(output_hint(parent, BuildSettingSource::Detected)),
+        )
+        .unwrap();
+
+        assert!(
+            found.ends_with(child),
+            "detected {parent} should refine to {child}, got {}",
+            found.display()
+        );
+    }
 }
 
 // ── compute_aware_output_dirs ────────────────────────────────
@@ -347,6 +443,40 @@ fn nextjs_preset_output_dir_allows_standalone_refinement() {
     .unwrap();
 
     assert!(found.ends_with(".next/standalone"));
+}
+
+#[test]
+fn nextjs_detected_dot_next_allows_standalone_refinement() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/standalone")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/server")).unwrap();
+
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &[".next/standalone", ".next"],
+        Some(output_hint(".next", BuildSettingSource::Detected)),
+    )
+    .unwrap();
+
+    assert!(found.ends_with(".next/standalone"));
+}
+
+#[test]
+fn detected_nextjs_dot_next_allows_static_export_refinement() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("out")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".next")).unwrap();
+
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &["out"],
+        Some(output_hint(".next", BuildSettingSource::Detected)),
+    )
+    .unwrap();
+
+    assert_eq!(found.file_name().unwrap(), "out");
 }
 
 #[test]
@@ -699,6 +829,316 @@ async fn nextjs_standalone_run_with_hint_generates_manifest() {
     assert!(output.join("_static/_next/static/chunks/main.js").is_file());
     assert!(output.join(".next/static/chunks/main.js").is_file());
     assert!(output.join("public/favicon.ico").is_file());
+}
+
+#[tokio::test]
+async fn nextjs_detected_monorepo_standalone_keeps_bundle_root_and_nested_entry() {
+    let project = tempfile::tempdir().unwrap();
+
+    let root = project.path().join(".next/standalone");
+    let app = root.join("peerpulse");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(app.join("server.js"), "// server").unwrap();
+    std::fs::create_dir_all(root.join("node_modules/shared")).unwrap();
+    std::fs::write(root.join("node_modules/shared/index.js"), "// shared").unwrap();
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(
+        args,
+        true,
+        &config,
+        Some(&detection),
+        Some(output_hint(".next", BuildSettingSource::Detected)),
+    )
+    .await
+    .unwrap();
+
+    assert!(result.output_dir.ends_with(".next/standalone"));
+    assert!(
+        result
+            .output_dir
+            .join("node_modules/shared/index.js")
+            .is_file()
+    );
+    let manifest = result
+        .manifest
+        .expect("nested Next.js standalone output should produce a manifest");
+    assert_eq!(
+        manifest.layers.last().unwrap().entry.as_deref(),
+        Some("peerpulse/server.js")
+    );
+    assert!(
+        result
+            .output_dir
+            .join("peerpulse/_static/_next/static/chunks/main.js")
+            .is_file()
+    );
+}
+
+#[tokio::test]
+async fn nextjs_nested_standalone_copies_prisma_to_bundle_root() {
+    let project = tempfile::tempdir().unwrap();
+
+    let root = project.path().join(".next/standalone");
+    let app = root.join("peerpulse");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(app.join("server.js"), "// server").unwrap();
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+
+    let prisma = project.path().join("node_modules/@prisma/client-root");
+    std::fs::create_dir_all(&prisma).unwrap();
+    std::fs::write(prisma.join("index.js"), "// prisma").unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(
+        args,
+        true,
+        &config,
+        Some(&detection),
+        Some(output_hint(".next", BuildSettingSource::Detected)),
+    )
+    .await
+    .unwrap();
+
+    assert!(result.output_dir.ends_with(".next/standalone"));
+    assert!(
+        root.join("node_modules/@prisma/client-root/index.js")
+            .is_file()
+    );
+    assert!(
+        !app.join("node_modules/@prisma/client-root/index.js")
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn nextjs_nested_standalone_ignores_traced_server_js_files_when_selecting_entry() {
+    let project = tempfile::tempdir().unwrap();
+
+    let root = project.path().join(".next/standalone");
+    let app = root.join("apps/web");
+    let traced_package = root.join("packages/api");
+    std::fs::create_dir_all(app.join(".next/server")).unwrap();
+    std::fs::create_dir_all(&traced_package).unwrap();
+    std::fs::write(
+        app.join("server.js"),
+        "process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = '{}'; require('next/dist/server/lib/start-server');",
+    )
+    .unwrap();
+    std::fs::write(
+        traced_package.join("server.js"),
+        "// traced workspace helper",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(
+        args,
+        true,
+        &config,
+        Some(&detection),
+        Some(output_hint(".next", BuildSettingSource::Detected)),
+    )
+    .await
+    .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("nested Next.js standalone output should produce a manifest");
+    assert_eq!(
+        manifest.layers.last().unwrap().entry.as_deref(),
+        Some("apps/web/server.js")
+    );
+}
+
+#[tokio::test]
+async fn nextjs_nested_standalone_prefers_app_shape_over_generated_traced_file() {
+    let project = tempfile::tempdir().unwrap();
+
+    let root = project.path().join(".next/standalone");
+    let app = root.join("apps/web");
+    let traced_package = root.join("packages/api");
+    std::fs::create_dir_all(app.join(".next/server")).unwrap();
+    std::fs::create_dir_all(&traced_package).unwrap();
+    std::fs::write(app.join("server.js"), "// app server").unwrap();
+    std::fs::write(
+        traced_package.join("server.js"),
+        "process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = '{}'; require('next/dist/server/lib/start-server');",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(
+        args,
+        true,
+        &config,
+        Some(&detection),
+        Some(output_hint(".next", BuildSettingSource::Detected)),
+    )
+    .await
+    .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("nested Next.js standalone output should produce a manifest");
+    assert_eq!(
+        manifest.layers.last().unwrap().entry.as_deref(),
+        Some("apps/web/server.js")
+    );
+}
+
+#[tokio::test]
+async fn nextjs_monorepo_standalone_nested_server_generates_manifest() {
+    let project = tempfile::tempdir().unwrap();
+
+    std::fs::create_dir_all(project.path().join(".next/standalone/peerpulse")).unwrap();
+    std::fs::write(
+        project.path().join(".next/standalone/peerpulse/server.js"),
+        "// server",
+    )
+    .unwrap();
+    std::fs::create_dir_all(
+        project
+            .path()
+            .join(".next/standalone/peerpulse/node_modules/next/dist/server/typescript/rules"),
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join(
+            ".next/standalone/peerpulse/node_modules/next/dist/server/typescript/rules/server.js",
+        ),
+        "// not the app entry",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(
+        args,
+        true,
+        &config,
+        Some(&detection),
+        Some(output_hint(".next", BuildSettingSource::Detected)),
+    )
+    .await
+    .unwrap();
+
+    assert!(result.output_dir.ends_with(".next/standalone"));
+    let manifest = result
+        .manifest
+        .expect("nested Next.js standalone output should produce a manifest");
+    assert_eq!(
+        manifest.layers.last().unwrap().entry.as_deref(),
+        Some("peerpulse/server.js")
+    );
+    assert!(
+        result
+            .output_dir
+            .join("peerpulse/_static/_next/static/chunks/main.js")
+            .is_file()
+    );
+}
+
+#[tokio::test]
+async fn nextjs_user_standalone_output_dir_is_not_rewritten() {
+    let project = tempfile::tempdir().unwrap();
+
+    std::fs::create_dir_all(project.path().join(".next/standalone/peerpulse")).unwrap();
+    std::fs::write(
+        project.path().join(".next/standalone/peerpulse/server.js"),
+        "// server",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(
+        args,
+        true,
+        &config,
+        Some(&detection),
+        Some(output_hint(".next/standalone", BuildSettingSource::User)),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.output_dir, project.path().join(".next/standalone"));
+    let manifest = result
+        .manifest
+        .expect("USER standalone output should produce a manifest");
+    assert_eq!(
+        manifest.layers.last().unwrap().entry.as_deref(),
+        Some("peerpulse/server.js")
+    );
 }
 
 #[tokio::test]

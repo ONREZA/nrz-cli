@@ -17,13 +17,26 @@ All three settings use the same source enum:
 | Source | Meaning | CLI precedence | Missing path |
 | --- | --- | --- | --- |
 | `USER` | User-entered override in UI/API | exactly `outputDirectory` only | fail fast with `MISSING_BUILD_OUTPUT` |
-| `DETECTED` | Derived from repository/framework config | detected path, then framework/SSR candidates, then local config defaults | fall back to other non-user candidates |
+| `DETECTED` | Derived from repository/framework config | current framework/SSR refinements of the detected hint, then detected path, then framework/SSR candidates, then local config defaults | fall back to other non-user candidates |
 | `PRESET` | Framework preset/default | framework/SSR candidates, then preset path, then local config defaults | fall back to other non-user candidates |
 
 The CLI evaluates this as ordered precedence tiers. A `.onreza/` manifest is
 preferred only within the first tier that contains an existing directory; a
 manifest in a lower-priority fallback directory must not override a higher-
 priority existing output.
+
+`USER` is the only exact output path. `DETECTED` is a pre-build hint, so a
+generic framework container may be narrowed or superseded by the current
+framework artifact analysis. Examples include `.next` refining to
+`.next/standalone/` or `out/`, `.output` refining to `.output/public/`, and
+framework client subdirectories such as `build/client/` or `dist/client/`.
+For monorepo Next.js standalone builds, `.next/standalone/` remains the artifact
+root even when `server.js` lives in a nested app directory; only the generated
+manifest entry is nested. Preparation keeps the same split: static/public assets
+are copied beside the app server, while root-level runtime dependencies such as
+missing Prisma client hash packages are copied into the standalone bundle root.
+Nested server inference must prefer the generated Next.js entry or app-shaped
+directory and ignore traced support files named `server.js`.
 
 `frameworkPreset` selects the framework detector and compute heuristics. It does
 not make the preset `outputDirectory` authoritative unless the source is `USER`.

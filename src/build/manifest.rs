@@ -657,12 +657,22 @@ pub fn generate_compute_manifest(entry: &str) -> Manifest {
 /// - `public/` layer (optional) serves root-level assets; lower-priority server route handles misses
 /// - COMPUTE layer runs `server.js`
 ///
+/// Auto-generate a Next.js standalone manifest for a server entry that may live
+/// below the standalone bundle root in monorepos.
+///
 /// Routes use priority-based routing: static(100) > public(50) > server(0).
-pub fn generate_nextjs_standalone_manifest(has_public: bool) -> Manifest {
+pub fn generate_nextjs_standalone_manifest_for_server(
+    has_public: bool,
+    server_dir: &str,
+    server_entry: &str,
+) -> Manifest {
+    let static_dir = join_manifest_path(server_dir, "_static");
+    let public_dir = join_manifest_path(server_dir, "public");
+
     let mut layers = vec![Layer {
         name: "static-assets".to_string(),
         target: LayerTarget::Static,
-        directory: "_static".to_string(),
+        directory: static_dir,
         entry: None,
         export_format: None,
         runtime: None,
@@ -673,7 +683,7 @@ pub fn generate_nextjs_standalone_manifest(has_public: bool) -> Manifest {
         layers.push(Layer {
             name: "public-assets".to_string(),
             target: LayerTarget::Static,
-            directory: "public".to_string(),
+            directory: public_dir,
             entry: None,
             export_format: None,
             runtime: None,
@@ -685,7 +695,7 @@ pub fn generate_nextjs_standalone_manifest(has_public: bool) -> Manifest {
         name: "server".to_string(),
         target: LayerTarget::Compute,
         directory: ".".to_string(),
-        entry: Some("server.js".to_string()),
+        entry: Some(server_entry.to_string()),
         export_format: None,
         runtime: None,
         is_precompressed: None,
@@ -727,6 +737,18 @@ pub fn generate_nextjs_standalone_manifest(has_public: bool) -> Manifest {
         prerender: None,
         middleware: None,
         meta: None,
+    }
+}
+
+fn join_manifest_path(prefix: &str, path: &str) -> String {
+    let prefix = prefix.trim_matches('/');
+    let path = path.trim_matches('/');
+    if prefix.is_empty() {
+        path.to_string()
+    } else if path.is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix}/{path}")
     }
 }
 

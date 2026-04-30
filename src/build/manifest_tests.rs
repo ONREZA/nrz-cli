@@ -4,9 +4,9 @@ use std::path::Path;
 
 use super::manifest::{
     LayerTarget, generate_astro_ssr_manifest, generate_compute_manifest,
-    generate_nextjs_standalone_manifest, generate_nuxt_manifest, generate_remix_manifest,
-    generate_static_manifest, generate_sveltekit_manifest, load_and_validate,
-    primary_compute_target, validate, verify_files,
+    generate_nextjs_standalone_manifest_for_server, generate_nuxt_manifest,
+    generate_remix_manifest, generate_static_manifest, generate_sveltekit_manifest,
+    load_and_validate, primary_compute_target, validate, verify_files,
 };
 
 // ── Fixtures ─────────────────────────────────────────────────
@@ -1856,7 +1856,7 @@ fn is_precompressed_none_omitted_from_serialization() {
 
 #[test]
 fn nextjs_standalone_manifest_with_public_is_valid() {
-    let m = generate_nextjs_standalone_manifest(true);
+    let m = generate_nextjs_standalone_manifest_for_server(true, "", "server.js");
     validate(&m).unwrap();
     assert_eq!(m.layers.len(), 3);
     assert_eq!(m.routes.len(), 3);
@@ -1870,7 +1870,7 @@ fn nextjs_standalone_manifest_with_public_is_valid() {
 
 #[test]
 fn nextjs_standalone_manifest_without_public_is_valid() {
-    let m = generate_nextjs_standalone_manifest(false);
+    let m = generate_nextjs_standalone_manifest_for_server(false, "", "server.js");
     validate(&m).unwrap();
     assert_eq!(m.layers.len(), 2);
     assert_eq!(m.routes.len(), 2);
@@ -1880,7 +1880,7 @@ fn nextjs_standalone_manifest_without_public_is_valid() {
 
 #[test]
 fn nextjs_standalone_manifest_directories() {
-    let m = generate_nextjs_standalone_manifest(true);
+    let m = generate_nextjs_standalone_manifest_for_server(true, "", "server.js");
     assert_eq!(m.layers[0].directory, "_static");
     assert_eq!(m.layers[1].directory, "public");
     assert_eq!(m.layers[2].directory, ".");
@@ -1890,8 +1890,20 @@ fn nextjs_standalone_manifest_directories() {
 }
 
 #[test]
+fn nextjs_standalone_manifest_nested_server_keeps_compute_root() {
+    let m =
+        generate_nextjs_standalone_manifest_for_server(true, "peerpulse", "peerpulse/server.js");
+    validate(&m).unwrap();
+
+    assert_eq!(m.layers[0].directory, "peerpulse/_static");
+    assert_eq!(m.layers[1].directory, "peerpulse/public");
+    assert_eq!(m.layers[2].directory, ".");
+    assert_eq!(m.layers[2].entry.as_deref(), Some("peerpulse/server.js"));
+}
+
+#[test]
 fn nextjs_standalone_manifest_route_priorities() {
-    let m = generate_nextjs_standalone_manifest(true);
+    let m = generate_nextjs_standalone_manifest_for_server(true, "", "server.js");
     assert_eq!(m.routes[0].priority, Some(100));
     assert_eq!(m.routes[0].pattern, "^/_next/static/.*$");
     assert_eq!(m.routes[1].priority, Some(50));
