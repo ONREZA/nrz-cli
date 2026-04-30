@@ -463,6 +463,40 @@ fn nextjs_detected_dot_next_allows_standalone_refinement() {
 }
 
 #[test]
+fn nextjs_user_dot_next_allows_standalone_refinement() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/standalone")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/server")).unwrap();
+
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &[".next/standalone", ".next"],
+        Some(output_hint(".next", BuildSettingSource::User)),
+    )
+    .unwrap();
+
+    assert!(found.ends_with(".next/standalone"));
+}
+
+#[test]
+fn nextjs_user_dot_next_allows_static_export_refinement() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("out")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".next")).unwrap();
+
+    let (found, _) = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &["out"],
+        Some(output_hint(".next", BuildSettingSource::User)),
+    )
+    .unwrap();
+
+    assert_eq!(found.file_name().unwrap(), "out");
+}
+
+#[test]
 fn detected_nextjs_dot_next_allows_static_export_refinement() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("out")).unwrap();
@@ -1138,6 +1172,50 @@ async fn nextjs_user_standalone_output_dir_is_not_rewritten() {
     assert_eq!(
         manifest.layers.last().unwrap().entry.as_deref(),
         Some("peerpulse/server.js")
+    );
+}
+
+#[tokio::test]
+async fn nextjs_user_dot_next_run_with_hint_uses_standalone_artifact() {
+    let project = tempfile::tempdir().unwrap();
+
+    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
+    std::fs::write(
+        project.path().join(".next/standalone/server.js"),
+        "// server",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(
+        args,
+        true,
+        &config,
+        Some(&detection),
+        Some(output_hint(".next", BuildSettingSource::User)),
+    )
+    .await
+    .unwrap();
+
+    assert!(result.output_dir.ends_with(".next/standalone"));
+    let manifest = result
+        .manifest
+        .expect("USER .next should use Next.js standalone artifact when present");
+    assert_eq!(
+        manifest.layers.last().unwrap().entry.as_deref(),
+        Some("server.js")
     );
 }
 

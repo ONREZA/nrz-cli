@@ -490,6 +490,12 @@ fn resolve_output_directory(
     if let Some(hint) = server_output_dir
         && hint.source.is_user_explicit()
     {
+        if let Some(refined) =
+            resolve_user_framework_container_artifact(project_dir, hint.path, framework_dirs)
+        {
+            return Ok(refined);
+        }
+
         let candidate = project_dir.join(hint.path);
         if candidate.is_dir() {
             return Ok(ResolvedOutputDirectory {
@@ -592,6 +598,36 @@ fn resolve_output_directory(
             dirs_display.join(", ")
         ),
     ))
+}
+
+fn resolve_user_framework_container_artifact(
+    project_dir: &Path,
+    hint_path: &str,
+    framework_dirs: &[&str],
+) -> Option<ResolvedOutputDirectory> {
+    // Some historic/server-side settings store the framework container as a
+    // USER value. For Next.js, `.next` is that container; the deployable
+    // artifact is mode-specific (`.next/standalone` for PROCESS or `out` for
+    // static export). Keep arbitrary USER paths exact, but resolve known
+    // framework containers through the same adapter-derived candidates.
+    if hint_path.trim_matches('/') != ".next" {
+        return None;
+    }
+
+    framework_dirs
+        .iter()
+        .copied()
+        .filter(|candidate| {
+            matches!(candidate.trim_matches('/'), ".next/standalone" | "out")
+                && is_framework_refinement_of_detected_hint(".next", candidate)
+        })
+        .find_map(|candidate| {
+            let path = project_dir.join(candidate);
+            path.is_dir().then(|| ResolvedOutputDirectory {
+                has_manifest: path.join(".onreza").is_dir(),
+                path,
+            })
+        })
 }
 
 fn push_output_candidate_tier<'a>(

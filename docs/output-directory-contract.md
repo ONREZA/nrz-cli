@@ -30,6 +30,10 @@ generic framework container may be narrowed or superseded by the current
 framework artifact analysis. Examples include `.next` refining to
 `.next/standalone/` or `out/`, `.output` refining to `.output/public/`, and
 framework client subdirectories such as `build/client/` or `dist/client/`.
+As a compatibility exception, a user-sourced Next.js `.next` setting also
+uses the concrete Next artifact when it exists (`.next/standalone/` for
+PROCESS or `out/` for static export), because `.next` is the framework
+container rather than a stable deploy root.
 For monorepo Next.js standalone builds, `.next/standalone/` remains the artifact
 root even when `server.js` lives in a nested app directory; only the generated
 manifest entry is nested. Preparation keeps the same split: static/public assets
