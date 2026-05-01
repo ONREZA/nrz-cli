@@ -4,12 +4,14 @@ use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::put;
 use bytes::Bytes;
 
-use super::client::{ApiClient, UploadRetryPolicy, explain_s3_failure, sha256_hex_to_base64};
+use super::client::{
+    ApiClient, PresignedPutHeaders, UploadRetryPolicy, explain_s3_failure, sha256_hex_to_base64,
+};
 
 #[derive(Clone)]
 struct MockState {
@@ -34,10 +36,30 @@ async fn handler(State(state): State<MockState>) -> impl IntoResponse {
     }
 }
 
+async fn conditional_header_handler(headers: HeaderMap) -> impl IntoResponse {
+    match headers
+        .get("if-none-match")
+        .and_then(|value| value.to_str().ok())
+    {
+        Some("*") => (StatusCode::OK, "ok"),
+        _ => (StatusCode::BAD_REQUEST, "missing if-none-match"),
+    }
+}
+
 async fn spawn_mock(state: MockState) -> (String, tokio::task::JoinHandle<()>) {
     let app = Router::new()
         .route("/upload", put(handler))
         .with_state(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/upload"), handle)
+}
+
+async fn spawn_conditional_header_mock() -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new().route("/upload", put(conditional_header_handler));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let handle = tokio::spawn(async move {
@@ -82,6 +104,73 @@ async fn succeeds_on_first_attempt() {
         .expect("upload should succeed");
 
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn sends_required_presigned_put_headers() {
+    let (url, _h) = spawn_conditional_header_mock().await;
+
+    let client = test_client();
+    client
+        .put_blob_with_headers(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &PresignedPutHeaders::if_none_match_any(),
+        )
+        .await
+        .expect("conditional upload should send If-None-Match");
+}
+
+#[tokio::test]
+async fn conditional_precondition_failed_is_idempotent_success() {
+    let attempts = Arc::new(AtomicU32::new(0));
+    let (url, _h) = spawn_mock(MockState {
+        attempts: attempts.clone(),
+        fail_times: u32::MAX,
+        fail_status: StatusCode::PRECONDITION_FAILED,
+        retry_after: None,
+    })
+    .await;
+
+    let client = test_client();
+    client
+        .put_blob_with_headers(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &PresignedPutHeaders::if_none_match_any(),
+        )
+        .await
+        .expect("conditional 412 should mean the write-once object already exists");
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn precondition_failed_without_conditional_header_is_error() {
+    let attempts = Arc::new(AtomicU32::new(0));
+    let (url, _h) = spawn_mock(MockState {
+        attempts: attempts.clone(),
+        fail_times: u32::MAX,
+        fail_status: StatusCode::PRECONDITION_FAILED,
+        retry_after: None,
+    })
+    .await;
+
+    let client = test_client();
+    let err = client
+        .put_blob_with_policy(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &UploadRetryPolicy::fast_for_tests(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert!(err.to_string().contains("412"), "{err}");
 }
 
 #[tokio::test]

@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, bail};
 use base64::Engine;
 use bytes::Bytes;
-use reqwest::header::{HeaderMap, HeaderValue};
+use reqwest::header::{ETAG, HeaderMap, HeaderValue, IF_NONE_MATCH};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Deserialize)]
@@ -81,6 +81,55 @@ pub struct ApiClient {
     /// Plain client without auth headers, reused for presigned S3 uploads.
     upload_client: reqwest::Client,
     base_url: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PresignedPutResult {
+    pub(crate) e_tag: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "kebab-case")]
+pub(crate) struct PresignedPutHeaders {
+    pub(crate) if_none_match: Option<String>,
+}
+
+impl PresignedPutHeaders {
+    pub(crate) fn empty() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn if_none_match_any() -> Self {
+        Self {
+            if_none_match: Some("*".to_string()),
+        }
+    }
+
+    pub(crate) fn require_if_none_match_any(&self) -> anyhow::Result<Self> {
+        match self.if_none_match.as_deref() {
+            Some("*") => Ok(self.clone()),
+            Some(value) => bail!(
+                "server returned unsupported If-None-Match value for conditional presigned PUT: {value}"
+            ),
+            None => Ok(Self::if_none_match_any()),
+        }
+    }
+
+    fn is_conditional_create(&self) -> bool {
+        self.if_none_match.as_deref() == Some("*")
+    }
+
+    fn to_header_map(&self) -> anyhow::Result<HeaderMap> {
+        let mut headers = HeaderMap::new();
+        if let Some(value) = &self.if_none_match {
+            headers.insert(
+                IF_NONE_MATCH,
+                HeaderValue::from_str(value)
+                    .with_context(|| format!("invalid If-None-Match header value: {value}"))?,
+            );
+        }
+        Ok(headers)
+    }
 }
 
 impl ApiClient {
@@ -264,6 +313,9 @@ impl ApiClient {
     /// - `Content-Length` is set automatically by reqwest from `data.len()`.
     /// - `x-amz-checksum-sha256` is the base64 of the SHA-256's raw 32 bytes
     ///   (NOT base64 of the hex string — common foot-gun).
+    /// - Additional signed headers from the upload target, such as
+    ///   `If-None-Match: *` for PACK_V1 write-once pack parts, must be sent
+    ///   verbatim.
     ///
     /// Content-Type is intentionally **not** sent: the server doesn't sign it for
     /// blob/bundle PUTs, and any Content-Type header reqwest *did* attach would
@@ -274,11 +326,22 @@ impl ApiClient {
     /// Retries transient failures (429, 408, 5xx, network errors) with exponential
     /// backoff + full jitter, honoring `Retry-After`. Permanent 4xx integrity
     /// rejects (400 BadDigest / 403 SignatureDoesNotMatch) propagate immediately.
-    pub async fn put_blob(&self, url: &str, data: Bytes, sha256_hex: &str) -> anyhow::Result<()> {
-        self.put_blob_with_policy(url, data, sha256_hex, &UploadRetryPolicy::production())
+    /// `412 Precondition Failed` is accepted only for conditional create PUTs:
+    /// that means the write-once object already exists after a lost response or
+    /// a competing writer, so the idempotent upload goal is already satisfied.
+    pub(crate) async fn put_blob_with_headers(
+        &self,
+        url: &str,
+        data: Bytes,
+        sha256_hex: &str,
+        headers: &PresignedPutHeaders,
+    ) -> anyhow::Result<()> {
+        self.put_blob_capture_with_headers(url, data, sha256_hex, headers)
             .await
+            .map(|_| ())
     }
 
+    #[cfg(test)]
     pub(crate) async fn put_blob_with_policy(
         &self,
         url: &str,
@@ -286,8 +349,55 @@ impl ApiClient {
         sha256_hex: &str,
         policy: &UploadRetryPolicy,
     ) -> anyhow::Result<()> {
+        self.put_blob_capture_with_policy_and_headers(
+            url,
+            data,
+            sha256_hex,
+            policy,
+            &PresignedPutHeaders::empty(),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub(crate) async fn put_blob_capture(
+        &self,
+        url: &str,
+        data: Bytes,
+        sha256_hex: &str,
+    ) -> anyhow::Result<PresignedPutResult> {
+        self.put_blob_capture_with_headers(url, data, sha256_hex, &PresignedPutHeaders::empty())
+            .await
+    }
+
+    pub(crate) async fn put_blob_capture_with_headers(
+        &self,
+        url: &str,
+        data: Bytes,
+        sha256_hex: &str,
+        headers: &PresignedPutHeaders,
+    ) -> anyhow::Result<PresignedPutResult> {
+        self.put_blob_capture_with_policy_and_headers(
+            url,
+            data,
+            sha256_hex,
+            &UploadRetryPolicy::production(),
+            headers,
+        )
+        .await
+    }
+
+    async fn put_blob_capture_with_policy_and_headers(
+        &self,
+        url: &str,
+        data: Bytes,
+        sha256_hex: &str,
+        policy: &UploadRetryPolicy,
+        headers: &PresignedPutHeaders,
+    ) -> anyhow::Result<PresignedPutResult> {
         let checksum_b64 = sha256_hex_to_base64(sha256_hex)
             .with_context(|| format!("invalid SHA-256 for blob upload: {sha256_hex}"))?;
+        let signed_headers = headers.to_header_map()?;
 
         let started = Instant::now();
         let mut attempt: u32 = 0;
@@ -295,19 +405,30 @@ impl ApiClient {
 
         loop {
             attempt += 1;
-            let send_result = self
+            let mut request = self
                 .upload_client
                 .put(url)
-                .header("x-amz-checksum-sha256", &checksum_b64)
-                .body(data.clone())
-                .send()
-                .await;
+                .header("x-amz-checksum-sha256", &checksum_b64);
+            for (name, value) in &signed_headers {
+                request = request.header(name, value);
+            }
+            let send_result = request.body(data.clone()).send().await;
 
             let (reason, retry_after) = match send_result {
                 Ok(resp) => {
                     let status = resp.status();
                     if status.is_success() {
-                        return Ok(());
+                        let e_tag = resp
+                            .headers()
+                            .get(ETAG)
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_string);
+                        return Ok(PresignedPutResult { e_tag });
+                    }
+                    if status == reqwest::StatusCode::PRECONDITION_FAILED
+                        && headers.is_conditional_create()
+                    {
+                        return Ok(PresignedPutResult { e_tag: None });
                     }
                     let retry_after = parse_retry_after(resp.headers());
                     let body = resp

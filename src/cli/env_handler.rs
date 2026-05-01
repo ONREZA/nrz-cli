@@ -30,7 +30,7 @@ struct EnvListResponse {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EnvVar {
+pub(crate) struct EnvVar {
     key: String,
     #[serde(default)]
     value: Option<String>,
@@ -51,7 +51,7 @@ struct EnvVar {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EnvVarEnvironment {
+pub(crate) struct EnvVarEnvironment {
     id: String,
     name: String,
     #[serde(rename = "type")]
@@ -195,16 +195,15 @@ async fn list(
     targets: &[String],
     json: bool,
 ) -> anyhow::Result<()> {
-    let mut url = format!("/v1/projects/{}/env", project_id);
-    if !targets.is_empty() {
-        let params: Vec<String> = targets.iter().map(|t| format!("target={t}")).collect();
-        url = format!("{}?{}", url, params.join("&"));
-    }
-
-    let resp: EnvListResponse = client
-        .get(&url)
+    let mut resp: EnvListResponse = client
+        .get(&env_list_url(project_id, targets, None))
         .await
         .context("failed to fetch environment variables")?;
+    if targets.len() > 1 {
+        resp.env_vars
+            .retain(|v| env_var_matches_targets(v, targets));
+        resp.total = resp.env_vars.len() as u64;
+    }
 
     if json {
         output::json_output(&resp);
@@ -234,6 +233,36 @@ async fn list(
     }
 
     Ok(())
+}
+
+pub(crate) fn env_list_url(project_id: &str, targets: &[String], keys: Option<&str>) -> String {
+    let mut params = Vec::new();
+    if let [target] = targets {
+        params.push(format!("target={target}"));
+    }
+    if let Some(keys) = keys {
+        params.push(format!("keys={keys}"));
+    }
+
+    if params.is_empty() {
+        format!("/v1/projects/{project_id}/env")
+    } else {
+        format!("/v1/projects/{project_id}/env?{}", params.join("&"))
+    }
+}
+
+pub(crate) fn env_var_matches_targets(v: &EnvVar, targets: &[String]) -> bool {
+    if targets.is_empty() {
+        return true;
+    }
+    match v.scope_type.as_deref() {
+        Some("SELECTED") => v.environments.iter().any(|e| {
+            targets
+                .iter()
+                .any(|target| e.env_type.eq_ignore_ascii_case(target))
+        }),
+        _ => true,
+    }
 }
 
 fn format_scope(v: &EnvVar) -> String {

@@ -40,27 +40,62 @@ pub struct Deployment {
     pub finished_at: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DeploymentStatus {
+    Pending,
+    Queued,
+    Building,
+    Uploading,
+    Ingesting,
+    Skipped,
+    SmokeTesting,
     Live,
+    Stopped,
     Failed,
     Deploying,
-    Building,
-    Queued,
     Cancelled,
-    #[serde(other)]
     Unknown,
+}
+
+impl<'de> Deserialize<'de> for DeploymentStatus {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Ok(match raw.to_ascii_lowercase().as_str() {
+            "pending" => Self::Pending,
+            "queued" => Self::Queued,
+            "building" => Self::Building,
+            "uploading" => Self::Uploading,
+            "ingesting" => Self::Ingesting,
+            "skipped" => Self::Skipped,
+            "smoke_testing" => Self::SmokeTesting,
+            "live" => Self::Live,
+            "stopped" => Self::Stopped,
+            "failed" => Self::Failed,
+            "deploying" => Self::Deploying,
+            "cancelled" => Self::Cancelled,
+            _ => Self::Unknown,
+        })
+    }
 }
 
 impl std::fmt::Display for DeploymentStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Pending => write!(f, "pending"),
+            Self::Queued => write!(f, "queued"),
+            Self::Building => write!(f, "building"),
+            Self::Uploading => write!(f, "uploading"),
+            Self::Ingesting => write!(f, "ingesting"),
+            Self::Skipped => write!(f, "skipped"),
+            Self::SmokeTesting => write!(f, "smoke_testing"),
             Self::Live => write!(f, "live"),
+            Self::Stopped => write!(f, "stopped"),
             Self::Failed => write!(f, "failed"),
             Self::Deploying => write!(f, "deploying"),
-            Self::Building => write!(f, "building"),
-            Self::Queued => write!(f, "queued"),
             Self::Cancelled => write!(f, "cancelled"),
             Self::Unknown => write!(f, "unknown"),
         }

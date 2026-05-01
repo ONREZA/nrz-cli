@@ -1,5 +1,10 @@
 use std::fs;
 
+use axum::Router;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::IntoResponse;
+use axum::routing::put;
+use sha2::Digest;
 use tempfile::tempdir;
 
 use super::*;
@@ -10,6 +15,26 @@ fn fe(path: &str, size: u64, content_hash: &str) -> FileEntry {
         size,
         content_hash: content_hash.into(),
     }
+}
+
+async fn conditional_pack_put(headers: HeaderMap) -> impl IntoResponse {
+    match headers
+        .get("if-none-match")
+        .and_then(|value| value.to_str().ok())
+    {
+        Some("*") => (StatusCode::OK, "ok"),
+        _ => (StatusCode::BAD_REQUEST, "missing if-none-match"),
+    }
+}
+
+async fn spawn_conditional_pack_put_mock() -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new().route("/upload", put(conditional_pack_put));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/upload"), handle)
 }
 
 #[test]
@@ -68,7 +93,7 @@ fn scan_files_computes_sha256_from_original_content() {
     assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
 
     // Known SHA-256 of "hello world" — guards against accidental hashing of
-    // anything other than identity bytes (RFC: blob CAS addresses raw content).
+    // anything other than the identity bytes PACK_V1 declares in its summary.
     assert_eq!(
         hash,
         "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
@@ -718,33 +743,136 @@ fn create_deployment_body_with_bundle_serializes_object() {
     assert_eq!(bundle["size"], 4096);
     assert!(
         value.get("bundleSha256").is_none(),
-        "legacy bundleSha256 must not be sent"
+        "obsolete flat bundleSha256 must not be sent"
     );
 }
 
 #[test]
-fn prepare_upload_body_serializes_bundle_object() {
+fn prepare_upload_body_serializes_pack_v1_contract() {
+    let bundle_sha = "a".repeat(64);
     let body = PrepareUploadBody {
-        manifest: serde_json::json!({}),
-        files: vec![],
-        bundle: Some(BundleManifest {
-            sha256: "abc123".into(),
-            size: 1024,
-        }),
+        deployment_id: Uuid::now_v7().to_string(),
+        workspace_id: Uuid::now_v7().to_string(),
+        project_id: Uuid::now_v7().to_string(),
+        deployment_attempt_id: Uuid::now_v7().to_string(),
+        operation_id: Uuid::now_v7().to_string(),
+        manifest: Some(serde_json::json!({ "version": 1, "layers": [], "routes": [] })),
+        manifest_summary: pack_v1::ManifestSummary {
+            file_count: 0,
+            total_logical_bytes: "0".into(),
+            paths: vec![],
+            pack_parts: vec![pack_v1::PackPartDescriptor {
+                part_index: 0,
+                size: 0,
+                sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
+                chunks: None,
+            }],
+        },
+        compute_bundles: vec![pack_v1::ComputeBundleUpload {
+            layer_name: "server".into(),
+            bundle_sha256: bundle_sha.clone(),
+            size: "1024".into(),
+            chunks: None,
+        }],
+        isolate_modules: vec![],
     };
 
     let value = serde_json::to_value(&body).unwrap();
     assert!(value.get("manifest").is_some());
-    assert!(value.get("computeType").is_none());
-    assert!(value.get("processEntry").is_none());
-    let bundle = value
-        .get("bundle")
-        .expect("bundle field must be serialized");
-    assert_eq!(bundle["sha256"], "abc123");
-    assert_eq!(bundle["size"], 1024);
+    assert!(value.get("manifestSummary").is_some());
+    assert_eq!(value["manifestSummary"]["packParts"][0]["partIndex"], 0);
+    assert_eq!(value["computeBundles"][0]["bundleSha256"], bundle_sha);
+    assert!(value.get("uploadUrls").is_none());
+    assert!(value.get("files").is_none());
     assert!(
-        value.get("bundleSha256").is_none(),
-        "legacy bundleSha256 must not be sent"
+        value.get("bundle").is_none(),
+        "obsolete prepare-upload bundle object must not be sent"
+    );
+}
+
+#[tokio::test]
+async fn single_pack_part_upload_sends_conditional_header_without_wire_hint() {
+    let dir = tempdir().unwrap();
+    let content = b"hello pack";
+    fs::write(dir.path().join("index.html"), content).unwrap();
+    let file_hash = format!("{:x}", sha2::Sha256::digest(content));
+    let files = vec![fe("index.html", content.len() as u64, &file_hash)];
+    let plan = pack_v1::build_static_pack_plan(dir.path(), &files).unwrap();
+    let part = &plan.parts[0];
+    let (url, _server) = spawn_conditional_pack_put_mock().await;
+    let targets: Vec<PackPartUploadTarget> = serde_json::from_value(serde_json::json!([
+        {
+            "partIndex": part.part_index,
+            "objectKey": "pack/part-0",
+            "bucket": "test-bucket",
+            "upload": {
+                "mode": "single",
+                "url": url,
+                "contentLength": part.size,
+                "sha256": part.sha256.clone()
+            }
+        }
+    ]))
+    .unwrap();
+    let client = ApiClient::anonymous().unwrap();
+    let mut multipart_targets = Vec::new();
+
+    upload_pack_parts(
+        &client,
+        dir.path(),
+        &plan,
+        &targets,
+        true,
+        &mut multipart_targets,
+    )
+    .await
+    .expect("single PACK PUT should include If-None-Match");
+
+    assert!(multipart_targets.is_empty());
+}
+
+#[test]
+fn upload_complete_incomplete_response_is_retryable() {
+    let attempt = classify_upload_complete_response(UploadCompleteResponse::Incomplete {
+        missing_part_indexes: vec![0, 1],
+    })
+    .unwrap();
+
+    assert_eq!(
+        attempt,
+        UploadCompleteAttempt::Retry(UploadCompleteRetryReason::S3Visibility)
+    );
+}
+
+#[test]
+fn upload_complete_operation_in_progress_error_is_retryable() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: reqwest::StatusCode::CONFLICT,
+        code: "OPERATION_IN_PROGRESS".into(),
+        message: "upload-complete: waiting on owner verify".into(),
+        details: None,
+    }
+    .into();
+
+    assert_eq!(
+        classify_upload_complete_retry_error(&error),
+        Some(UploadCompleteRetryReason::OwnerVerifyInProgress)
+    );
+}
+
+#[test]
+fn upload_complete_legacy_incomplete_error_is_retryable() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: reqwest::StatusCode::BAD_REQUEST,
+        code: "VALIDATION_ERROR".into(),
+        message: "Upload is incomplete: pack parts 0 missing in S3.".into(),
+        details: Some(serde_json::json!({ "field": "packParts" })),
+    }
+    .into();
+
+    assert_eq!(
+        classify_upload_complete_retry_error(&error),
+        Some(UploadCompleteRetryReason::S3Visibility)
     );
 }
 
@@ -1415,63 +1543,41 @@ fn diagnostic_elysia_mentions_bun() {
     assert!(msg.as_ref().unwrap().contains("Bun"));
 }
 
-// ── resolve_bundle_upload tests ──────────────────────────────
+// ── canonical manifest bundle binding ────────────────────────
 
-fn make_bundle_target(sha256: &str, content_length: u64) -> BundleUpload {
-    BundleUpload {
-        key: format!("bundles/{sha256}.tar.zst"),
-        url: "https://s3.example.com/bundle".to_string(),
-        sha256: sha256.into(),
-        content_length,
-    }
+#[test]
+fn bind_compute_bundle_to_manifest_value_injects_sha() {
+    let sha = "a".repeat(64);
+    let manifest = serde_json::json!({
+        "version": 1,
+        "layers": [
+            { "name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js" }
+        ],
+        "routes": []
+    });
+
+    let bound = bind_compute_bundle_to_manifest_value(manifest, Some(&sha)).unwrap();
+    assert_eq!(bound["layers"][0]["bundleSha256"], sha);
 }
 
 #[test]
-fn resolve_bundle_upload_with_target() {
-    let data = Some((vec![1, 2, 3], "abc123".to_string()));
-    let target = make_bundle_target("abc123", 3);
-    let (bytes, t) = resolve_bundle_upload(data, Some(target)).unwrap().unwrap();
-    assert_eq!(bytes, vec![1, 2, 3]);
-    assert_eq!(t.url, "https://s3.example.com/bundle");
-    assert_eq!(t.sha256, "abc123");
-}
+fn bind_compute_bundle_to_manifest_value_rejects_mismatch() {
+    let manifest = serde_json::json!({
+        "version": 1,
+        "layers": [
+            {
+                "name": "server",
+                "target": "COMPUTE",
+                "directory": ".",
+                "entry": "server.js",
+                "bundleSha256": "a".repeat(64)
+            }
+        ],
+        "routes": []
+    });
 
-#[test]
-fn resolve_bundle_upload_target_without_bundle_bails() {
-    // Asymmetric with the (Some, None) case — both signal a server/CLI contract
-    // mismatch and should fail loudly rather than silently dropping work.
-    let target = make_bundle_target("abc123", 3);
-    let err = resolve_bundle_upload(None, Some(target)).unwrap_err();
-    assert!(err.to_string().contains("API version mismatch"), "{err}");
-}
-
-#[test]
-fn resolve_bundle_upload_no_target_bails() {
-    let data = Some((vec![1, 2, 3], "abc123".to_string()));
-    let result = resolve_bundle_upload(data, None);
-    assert!(result.is_err());
-    let msg = result.unwrap_err().to_string();
-    assert!(
-        msg.contains("bundle upload target"),
-        "unexpected error: {msg}"
-    );
-}
-
-#[test]
-fn resolve_bundle_upload_sha_mismatch_bails() {
-    // Defense-in-depth: if the server signed for a different SHA than we
-    // built (stale presign, race), fail locally — otherwise S3 would 400
-    // BadDigest with no clue why.
-    let data = Some((vec![1, 2, 3], "aaa".to_string()));
-    let target = make_bundle_target("bbb", 3);
-    let err = resolve_bundle_upload(data, Some(target)).unwrap_err();
-    assert!(err.to_string().contains("SHA mismatch"), "{err}");
-}
-
-#[test]
-fn resolve_bundle_upload_both_none() {
-    let result = resolve_bundle_upload(None, None).unwrap();
-    assert!(result.is_none());
+    let err = bind_compute_bundle_to_manifest_value(manifest, Some(&"b".repeat(64))).unwrap_err();
+    assert!(err.to_string().contains("does not match"), "{err}");
 }
 
 // ── resolve_health_check ─────────────────────────────────────
@@ -1670,7 +1776,7 @@ fn compute_config_body_without_path_omits_field() {
     assert!(value.get("healthCheckPath").is_none());
 }
 
-// ── static_layer_dirs / is_in_layer_dirs ────────────────────
+// ── PACK_V1 static layer selection ───────────────────────────
 
 #[test]
 fn static_layer_dirs_returns_only_static_layers() {
@@ -1690,39 +1796,37 @@ fn static_layer_dirs_returns_only_static_layers() {
     }"#,
     )
     .unwrap();
-    let dirs = static_layer_dirs(Some(&manifest));
+    let dirs = pack_v1::static_layer_dirs(&manifest);
     assert_eq!(dirs, vec!["_static/", "public/"]);
 }
 
 #[test]
-fn static_layer_dirs_none_manifest_returns_empty() {
-    assert!(static_layer_dirs(None).is_empty());
-}
-
-#[test]
-fn is_in_layer_dirs_matches_prefix() {
+fn files_in_dirs_matches_static_prefixes() {
     let dirs = vec!["_static/".to_string(), "public/".to_string()];
-    assert!(is_in_layer_dirs(
-        "_static/_next/static/chunks/main.js",
-        &dirs
-    ));
-    assert!(is_in_layer_dirs("public/favicon.ico", &dirs));
-    assert!(!is_in_layer_dirs("node_modules/react/index.js", &dirs));
-    assert!(!is_in_layer_dirs("server.js", &dirs));
-    assert!(!is_in_layer_dirs(".next/server/app/page.js", &dirs));
+    let files = vec![
+        fe("_static/_next/static/chunks/main.js", 100, "11"),
+        fe("public/favicon.ico", 50, "22"),
+        fe("server.js", 200, "33"),
+    ];
+    let filtered = pack_v1::files_in_dirs(&files, &dirs);
+    assert_eq!(filtered.len(), 2);
+    assert_eq!(filtered[0].path, "_static/_next/static/chunks/main.js");
+    assert_eq!(filtered[1].path, "public/favicon.ico");
 }
 
 #[test]
-fn is_in_layer_dirs_root_dir_matches_all() {
+fn files_in_dirs_root_dir_matches_all() {
     let dirs = vec![".".to_string()];
-    assert!(is_in_layer_dirs("anything.js", &dirs));
-    assert!(is_in_layer_dirs("deep/nested/file.txt", &dirs));
+    let files = vec![
+        fe("anything.js", 1, "11"),
+        fe("deep/nested/file.txt", 2, "22"),
+    ];
+    let filtered = pack_v1::files_in_dirs(&files, &dirs);
+    assert_eq!(filtered.len(), 2);
 }
 
 #[test]
-fn file_list_filtered_for_process_with_manifest() {
-    // Simulate what happens in run(): scan produces all files, then STATIC filter
-    // keeps only files belonging to STATIC layer directories.
+fn pack_v1_static_plan_uses_only_static_layer_files() {
     let all_files = vec![
         fe("_static/_next/static/chunks/main.js", 100, "11"),
         fe("public/favicon.ico", 50, "22"),
@@ -1731,10 +1835,7 @@ fn file_list_filtered_for_process_with_manifest() {
         fe(".next/server/app/page.js", 400, "55"),
     ];
     let sd = vec!["_static/".to_string(), "public/".to_string()];
-    let filtered: Vec<_> = all_files
-        .into_iter()
-        .filter(|f| is_in_layer_dirs(&f.path, &sd))
-        .collect();
+    let filtered = pack_v1::files_in_dirs(&all_files, &sd);
     assert_eq!(filtered.len(), 2);
     assert_eq!(filtered[0].path, "_static/_next/static/chunks/main.js");
     assert_eq!(filtered[1].path, "public/favicon.ico");

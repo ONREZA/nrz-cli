@@ -6,63 +6,49 @@ mod deploy_tests;
 pub(crate) mod health_check;
 #[cfg(test)]
 mod health_check_tests;
+pub(crate) mod pack_v1;
+#[cfg(test)]
+mod pack_v1_tests;
 
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
-use futures::stream::{self, StreamExt};
+use bytes::Bytes;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const MAX_FILES_HOBBY: usize = 500;
-const MAX_FILES_PAID: usize = 2_000;
-const MAX_SIZE_HOBBY: u64 = 100 * 1024 * 1024; // 100 MB
-const MAX_SIZE_PAID: u64 = 1024 * 1024 * 1024; // 1 GB
-
-use crate::api::ApiClient;
+use crate::api::{ApiClient, PresignedPutHeaders};
 use crate::auth;
 use crate::build;
 use crate::build::manifest as build_manifest;
 use crate::cli::{BuildArgs, DeployArgs};
+use crate::deploy::pack_v1::{
+    CompletedMultipartPart, ComputeBundleUpload, IsolateUploadPlan, MultipartCompleteTarget,
+    PackPlan, PresignedUpload, build_compute_bundle_uploads, build_isolate_upload_plan,
+    build_static_pack_plan, files_in_dirs, read_file_slice, read_pack_part_bytes,
+    read_pack_part_chunk_bytes, static_layer_dirs,
+};
 use crate::detect::types::ComputeType;
 use crate::link;
 use crate::output;
 use nrz::config::{HealthCheckPathConfig, ProjectConfig};
+use uuid::Uuid;
+
+const UPLOAD_COMPLETE_RETRY_BUDGET: Duration = Duration::from_secs(30 * 60);
+const UPLOAD_COMPLETE_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
+const UPLOAD_COMPLETE_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 
 // ── Workspace / plan ─────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceInfo {
-    #[allow(dead_code)]
     id: String,
     #[allow(dead_code)]
     slug: String,
-    subscription: Option<SubscriptionInfo>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SubscriptionInfo {
-    plan_slug: String,
-}
-
-fn is_paid_plan(workspace: &WorkspaceInfo) -> bool {
-    workspace
-        .subscription
-        .as_ref()
-        .is_some_and(|s| s.plan_slug == "PRO" || s.plan_slug == "ENTERPRISE")
-}
-
-fn plan_limits(workspace: &WorkspaceInfo) -> (usize, u64) {
-    if is_paid_plan(workspace) {
-        (MAX_FILES_PAID, MAX_SIZE_PAID)
-    } else {
-        (MAX_FILES_HOBBY, MAX_SIZE_HOBBY)
-    }
 }
 
 // ── Project settings from server ─────────────────────────────
@@ -131,24 +117,21 @@ async fn fetch_project_settings(
 
 // ── API structs ──────────────────────────────────────────────
 
-/// Per-file manifest entry sent to the server.
-///
-/// Wire schema: `{ path, size, contentHash }`. `contentHash` is the lowercase
-/// hex SHA-256 of the original (identity) bytes — required since the
-/// blob-CAS RFC made it the addressing key for `blobs/{sha}` and the value
-/// bound into the SigV4 PUT signature via `x-amz-checksum-sha256`.
-#[derive(Debug, Serialize)]
+/// Per-file identity entry used by local PACK_V1 planning and by the
+/// deployment-create body. PACK_V1 upload planning converts these files into
+/// pack ranges before calling `prepare-upload`.
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct FileEntry {
+pub(crate) struct FileEntry {
     path: String,
     size: u64,
     content_hash: String,
 }
 
-/// COMPUTE bundle descriptor sent in the deployment-create / prepare-upload body.
+/// COMPUTE bundle descriptor sent in the deployment-create body.
 ///
-/// Wire schema: `{ sha256, size }`. The server binds both into the conditioned
-/// SigV4 PUT for `bundles/{sha}.tar.zst` (RFC: `SECURE_ARCHIVE_INGEST.md`).
+/// Wire schema: `{ sha256, size }`. PACK_V1 prepare-upload later receives the
+/// per-COMPUTE-layer `computeBundles[]` plan and issues the conditioned PUTs.
 ///
 /// `size` is invariably `bytes.len()` of the same buffer hashed into `sha256`;
 /// construct via `BundleManifest::of` to keep the two in sync.
@@ -195,39 +178,48 @@ struct CreateDeploymentResponse {
     #[allow(dead_code)]
     status: String,
     url: String,
-    upload_urls: Vec<FileUploadUrl>,
-    bundle_upload: Option<BundleUpload>,
-    #[allow(dead_code)]
-    expires_in: u64,
 }
 
-/// Presigned PUT target returned by the server for a single blob or ISOLATE module.
-///
-/// `path` is the on-disk relative path (used to locate bytes on the CLI side).
-/// `sha256` and `contentLength` are bound into the SigV4 signature — the CLI
-/// MUST send `x-amz-checksum-sha256: base64(<sha256>)` and `Content-Length` to
-/// match, or S3 rejects with `400 BadDigest` / `403 SignatureDoesNotMatch`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FileUploadUrl {
+struct PackPartUploadTarget {
+    part_index: u32,
+    #[allow(dead_code)]
+    object_key: String,
+    #[allow(dead_code)]
+    bucket: String,
+    upload: PresignedUpload,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ComputeBundleUploadTarget {
+    layer_name: String,
+    bundle_sha256: String,
+    #[allow(dead_code)]
+    bucket: String,
+    #[allow(dead_code)]
+    object_key: String,
+    upload: Option<PresignedUpload>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IsolateModuleUploadTarget {
+    layer_name: String,
+    files: Vec<IsolateModuleFileTarget>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IsolateModuleFileTarget {
     path: String,
-    url: String,
     sha256: String,
-    content_length: u64,
     #[allow(dead_code)]
-    key: String,
-}
-
-/// Presigned PUT for the COMPUTE bundle (`bundles/{sha}.tar.zst`). Same SigV4
-/// integrity contract as `FileUploadUrl`.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BundleUpload {
+    bucket: String,
     #[allow(dead_code)]
-    key: String,
-    url: String,
-    sha256: String,
-    content_length: u64,
+    object_key: String,
+    upload: Option<PresignedUpload>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -244,12 +236,6 @@ struct DeploymentStatusResponse {
     created_at: Option<String>,
     #[allow(dead_code)]
     ready_at: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct UploadCompleteResponse {
-    #[allow(dead_code)]
-    status: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -574,7 +560,7 @@ pub async fn run(
         output::Phase::Deploy,
     );
     let output_dir_for_scan = output_dir.clone();
-    let mut files = tokio::task::spawn_blocking(move || scan_dir(&output_dir_for_scan))
+    let files = tokio::task::spawn_blocking(move || scan_dir(&output_dir_for_scan))
         .await
         .context("file scan task failed (panic or runtime shutdown)")??;
     if files.is_empty() {
@@ -630,25 +616,6 @@ pub async fn run(
 
     let is_process = compute == ComputeType::Process;
 
-    // For PROCESS deployments with a manifest, only STATIC-layer files need individual
-    // presigned URL uploads. COMPUTE/ISOLATE files are delivered via tar.zst bundle,
-    // so they don't count against the per-file upload limit.
-    if is_process && loaded_manifest.is_some() {
-        let sd = static_layer_dirs(loaded_manifest.as_ref());
-        if !sd.is_empty() {
-            let before = files.len();
-            files.retain(|f| is_in_layer_dirs(&f.path, &sd));
-            let after = files.len();
-            if before != after {
-                tracing::info!(
-                    before,
-                    after,
-                    "filtered file list to STATIC layers only (COMPUTE files go via bundle)"
-                );
-            }
-        }
-    }
-
     // manifest_raw starts from build result (may already be Some for STATIC auto-gen)
     let mut manifest_raw: Option<serde_json::Value> = loaded_manifest
         .as_ref()
@@ -703,9 +670,13 @@ pub async fn run(
     }
 
     let manifest_raw = resolve_manifest_for_compute(compute, manifest_raw, &detection)?;
+    let manifest_for_planning: build_manifest::Manifest =
+        serde_json::from_value(manifest_raw.clone())
+            .context("failed to parse resolved deployment manifest")?;
+    let has_compute_layer = manifest_has_compute_layer(&manifest_for_planning);
 
     // Resolve health check path (PROCESS only)
-    let health_check = if is_process {
+    let health_check = if has_compute_layer {
         Some(resolve_health_check(
             args.health_check_path.as_deref(),
             config,
@@ -718,6 +689,14 @@ pub async fn run(
         None
     };
 
+    // PACK_V1 prepare-upload needs the authenticated workspace ID for all entry
+    // points (direct CLI deploy and builder resume). Admission/limits are enforced
+    // server-side from the complete STATIC + COMPUTE + ISOLATE upload plan.
+    let ws_info: WorkspaceInfo = client
+        .get("/v1/workspace")
+        .await
+        .context("failed to fetch workspace info")?;
+
     // ── Resume mode: builder calls us with an existing deployment ID ──
     if let Some(deployment_id) = &args.resume_deployment {
         let deployment_id = deployment_id.trim();
@@ -727,26 +706,29 @@ pub async fn run(
                 "--resume-deployment requires a non-empty deployment ID".to_string(),
             ));
         }
+        let project_id = resolve_project_id_for_resume(
+            &client,
+            deployment_id,
+            args.project_id.as_deref(),
+            config,
+        )
+        .await?;
         return resume_deploy(
             &client,
             deployment_id,
+            &ws_info.id,
+            &project_id,
             manifest_raw,
+            manifest_for_planning,
             files,
             &output_dir,
             json,
-            compute,
             warnings,
         )
         .await;
     }
 
     // ── Normal flow continues below ─────────────────────────────────
-
-    // Fetch workspace info for plan-based limits
-    let ws_info: WorkspaceInfo = client
-        .get("/v1/workspace")
-        .await
-        .context("failed to fetch workspace info")?;
 
     // Resolve project: --project-id > onreza.toml > interactive
     let project_id = if let Some(pid) = &args.project_id {
@@ -783,54 +765,6 @@ pub async fn run(
         selected.project_id
     };
 
-    // Validate plan-based limits
-    let (max_files, max_size) = plan_limits(&ws_info);
-    if files.len() > max_files {
-        let msg = format!(
-            "Deployment exceeds maximum file count ({} / {}). \
-             Consider using blob storage for large assets. \
-             For higher limits contact support@onreza.ru",
-            files.len(),
-            max_files
-        );
-        if json {
-            output::log_error_structured(
-                "deploy",
-                &msg,
-                "LIMIT_EXCEEDED",
-                Some(&serde_json::json!({
-                    "limitType": "artifactFileCount",
-                    "current": files.len(),
-                    "limit": max_files,
-                })),
-            );
-        }
-        bail!("{msg}");
-    }
-    let total_size: u64 = files.iter().map(|f| f.size).sum();
-    if total_size > max_size {
-        let total_mb = total_size / (1024 * 1024);
-        let limit_mb = max_size / (1024 * 1024);
-        let msg = format!(
-            "Deployment artifact size ({total_mb} MB) exceeds the {limit_mb} MB limit \
-             for your plan. Use blob storage for large assets. \
-             For higher limits contact support@onreza.ru"
-        );
-        if json {
-            output::log_error_structured(
-                "deploy",
-                &msg,
-                "LIMIT_EXCEEDED",
-                Some(&serde_json::json!({
-                    "limitType": "artifactSizeMb",
-                    "current": total_mb,
-                    "limit": limit_mb,
-                })),
-            );
-        }
-        bail!("{msg}");
-    }
-
     // Git info
     let branch = git_cmd(&["rev-parse", "--abbrev-ref", "HEAD"]);
     let commit_sha = git_cmd(&["rev-parse", "HEAD"]).unwrap_or_else(|| {
@@ -865,14 +799,28 @@ pub async fn run(
         });
     }
 
-    // Create bundle for PROCESS deployments
-    let bundle_data = maybe_create_bundle(&output_dir, is_process, json)?;
+    // Create artifact plan for PACK_V1. STATIC content is packed into ordered
+    // pack parts; COMPUTE and ISOLATE targets are first-class upload targets in
+    // the same prepare-upload session.
+    let bundle_data = maybe_create_bundle(&output_dir, has_compute_layer, json)?;
+    let manifest_for_api = bind_compute_bundle_to_manifest_value(
+        manifest_raw,
+        bundle_data.as_ref().map(|(_, sha)| sha.as_str()),
+    )?;
+    let upload_plan = build_pack_v1_upload_plan(
+        &output_dir,
+        &manifest_for_planning,
+        &files,
+        bundle_data.as_ref(),
+    )
+    .context("failed to prepare PACK_V1 upload plan")?;
+    let deployment_attempt_id = Uuid::now_v7().to_string();
 
     // Create deployment
     output::status(json, "~", "Creating deployment...", output::Phase::Deploy);
     let body = CreateDeploymentBody {
-        manifest: manifest_raw,
-        files,
+        manifest: manifest_for_api.clone(),
+        files: files.clone(),
         production: args.prod,
         branch,
         commit_sha,
@@ -886,19 +834,17 @@ pub async fn run(
         .await
         .context("failed to create deployment")?;
 
-    // No length-equality check: with blob CAS dedup the server returns presigns
-    // only for *missing* blobs, so `upload_urls.len() <= files.len()` is normal.
-
-    let bundle_upload = resolve_bundle_upload(bundle_data, deployment.bundle_upload)?;
-
-    upload_and_complete(
+    prepare_upload_and_complete(
         &client,
         &deployment.id,
-        &deployment.upload_urls,
+        &ws_info.id,
+        &project_id,
+        &deployment_attempt_id,
+        Some(manifest_for_api),
         &output_dir,
-        total_size,
         json,
-        bundle_upload,
+        upload_plan,
+        bundle_data.as_ref(),
     )
     .await?;
 
@@ -1117,225 +1063,71 @@ async fn sync_compute_config(
 
 // ── Shared upload step ───────────────────────────────────────
 
-/// Upload all missing blobs (and the optional COMPUTE bundle) for a deployment,
-/// then signal `upload-complete`.
-///
-/// In the blob-CAS model `upload-complete` performs the `UPLOADING → SMOKE_TESTING`
-/// transition atomically and publishes `onreza.deploy.warm` for edge prefetch
-/// (RFC: `SECURE_ARCHIVE_INGEST.md` §"upload-complete transaction"). The legacy
-/// `/activate` endpoint is now a no-op shim kept on the server only so an older
-/// CLI hitting a new server doesn't 404 — the new CLI doesn't call it.
+struct PackV1UploadPlan {
+    static_pack: PackPlan,
+    compute_bundles: Vec<ComputeBundleUpload>,
+    isolate: IsolateUploadPlan,
+}
+
+fn build_pack_v1_upload_plan(
+    output_dir: &Path,
+    manifest: &build_manifest::Manifest,
+    files: &[FileEntry],
+    bundle_data: Option<&(Vec<u8>, String)>,
+) -> anyhow::Result<PackV1UploadPlan> {
+    let static_dirs = static_layer_dirs(manifest);
+    let static_files = files_in_dirs(files, &static_dirs);
+    let static_pack = build_static_pack_plan(output_dir, &static_files)?;
+    let isolate = build_isolate_upload_plan(output_dir, manifest, files)?;
+
+    let compute_bundles = if let Some((bytes, sha)) = bundle_data {
+        build_compute_bundle_uploads(manifest, sha, bytes.len() as u64, Some(bytes))?
+    } else {
+        if manifest_has_compute_layer(manifest) {
+            bail!("COMPUTE manifest requires a tar.zst bundle upload plan");
+        }
+        Vec::new()
+    };
+
+    Ok(PackV1UploadPlan {
+        static_pack,
+        compute_bundles,
+        isolate,
+    })
+}
+
+/// Drive the PACK_V1 upload protocol:
+/// prepare-upload → S3 PUTs → multipart-complete (if needed) → upload-complete.
 #[allow(clippy::too_many_arguments)]
-async fn upload_and_complete(
+async fn prepare_upload_and_complete(
     client: &ApiClient,
     deployment_id: &str,
-    upload_urls: &[FileUploadUrl],
-    output_dir: &Path,
-    total_size: u64,
-    json: bool,
-    bundle_upload: Option<(Vec<u8>, BundleUpload)>,
-) -> anyhow::Result<()> {
-    // Upload bundle first if present (PROCESS deployments).
-    // The presign signature locks Content-Length + x-amz-checksum-sha256, so the
-    // exact bytes hashed at bundle creation time MUST be the bytes we PUT here —
-    // any divergence is a 400/403 from S3.
-    if let Some((bundle_bytes, target)) = bundle_upload {
-        let bundle_size = bundle_bytes.len();
-        if bundle_size as u64 != target.content_length {
-            bail!(
-                "bundle size drifted between build and upload (built {}, server signed {}) — \
-                 retry the deploy",
-                bundle_size,
-                target.content_length
-            );
-        }
-        output::status(
-            json,
-            "~",
-            format!("Uploading bundle ({})...", format_bytes(bundle_size)),
-            output::Phase::Deploy,
-        );
-        client
-            .put_blob(&target.url, bundle_bytes.into(), &target.sha256)
-            .await
-            .context("failed to upload tar.zst bundle")?;
-        output::success(
-            json,
-            format!("Bundle uploaded ({})", format_bytes(bundle_size)),
-            output::Phase::Deploy,
-        );
-    }
-
-    if !upload_urls.is_empty() {
-        let file_count = upload_urls.len();
-
-        let spinner = make_spinner(
-            json,
-            &format!(
-                "Uploading {file_count} blobs ({})...",
-                format_bytes(missing_total_size(upload_urls) as usize)
-            ),
-        );
-
-        let uploaded = AtomicUsize::new(0);
-        let upload_results: Vec<anyhow::Result<()>> =
-            stream::iter(upload_urls.iter().map(|file_url| {
-                let spinner = &spinner;
-                let uploaded = &uploaded;
-                async move {
-                    let file_path = output_dir.join(&file_url.path);
-                    let data = tokio::fs::read(&file_path)
-                        .await
-                        .with_context(|| format!("failed to read {}", file_path.display()))?;
-
-                    if data.len() as u64 != file_url.content_length {
-                        bail!(
-                            "size drifted between scan and upload for {} (scanned {} bytes, now {} bytes) — \
-                             rebuild and redeploy",
-                            file_url.path,
-                            file_url.content_length,
-                            data.len()
-                        );
-                    }
-
-                    client
-                        .put_blob(&file_url.url, data.into(), &file_url.sha256)
-                        .await
-                        .with_context(|| format!("failed to upload {}", file_url.path))?;
-
-                    let done = uploaded.fetch_add(1, Ordering::Relaxed) + 1;
-                    if let Some(s) = spinner {
-                        s.set_message(format!("[{done}/{file_count}] {}", file_url.path));
-                    }
-
-                    Ok(())
-                }
-            }))
-            .buffer_unordered(16)
-            .collect()
-            .await;
-
-        let mut errors: Vec<anyhow::Error> =
-            upload_results.into_iter().filter_map(|r| r.err()).collect();
-        if !errors.is_empty() {
-            finish_spinner(spinner, "");
-            let failed = errors.len();
-
-            // Surface every per-file failure to the user in non-JSON mode; in
-            // JSON mode the structured error line carries the first chain and
-            // any additional details get folded into the summary.
-            if !json {
-                for err in &errors {
-                    output::warn(
-                        false,
-                        format!("upload error: {err:#}"),
-                        output::Phase::Deploy,
-                    );
-                }
-            }
-
-            // Wrap as `CodedError("UPLOAD_FAILED", ...)` with the first error
-            // attached as `source` — main.rs::emit_terminal_error walks the
-            // chain to print S3 reasons and reads `code` for Builder routing.
-            // Without the code here Builder treats user-fault drift errors
-            // (400 BadDigest, 403 SignatureDoesNotMatch) as platform-fault
-            // and pages through Sentry.
-            let primary = errors.remove(0);
-            let summary = if failed == 1 {
-                "1 blob upload failed".to_string()
-            } else {
-                format!("{failed} of {file_count} blob uploads failed")
-            };
-            return Err(
-                output::CodedError::with_source("UPLOAD_FAILED", summary, primary.into()).into(),
-            );
-        }
-
-        finish_spinner(
-            spinner,
-            &format!(
-                "Uploaded {file_count} blobs ({}); manifest total {}",
-                format_bytes(missing_total_size(upload_urls) as usize),
-                format_bytes(total_size as usize)
-            ),
-        );
-    }
-
-    let _: UploadCompleteResponse = client
-        .post_empty(&format!("/v1/deployments/{deployment_id}/upload-complete"))
-        .await
-        .context("failed to signal upload complete")?;
-
-    Ok(())
-}
-
-// ── Resume deploy flow ───────────────────────────────────────
-
-/// Body for `POST /v1/deployments/:id/prepare-upload` (resume flow).
-///
-/// `manifest` is required by the server. The CLI ensures `manifest_raw` is populated
-/// before calling `resume_deploy` via the same auto-gen + validate path as the
-/// create-deployment flow.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PrepareUploadBody {
-    manifest: serde_json::Value,
-    files: Vec<FileEntry>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    bundle: Option<BundleManifest>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PrepareUploadResponse {
-    upload_urls: Vec<FileUploadUrl>,
-    bundle_upload: Option<BundleUpload>,
-    #[allow(dead_code)]
-    expires_in: u64,
-}
-
-#[derive(Debug, Serialize)]
-struct ResumeDeployOutput {
-    deployment_id: String,
-    status: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    warnings: Vec<String>,
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn resume_deploy(
-    client: &ApiClient,
-    deployment_id: &str,
-    manifest: serde_json::Value,
-    files: Vec<FileEntry>,
+    workspace_id: &str,
+    project_id: &str,
+    deployment_attempt_id: &str,
+    manifest: Option<serde_json::Value>,
     output_dir: &Path,
     json: bool,
-    compute: ComputeType,
-    warnings: Vec<String>,
+    plan: PackV1UploadPlan,
+    bundle_data: Option<&(Vec<u8>, String)>,
 ) -> anyhow::Result<()> {
-    let is_process = compute == ComputeType::Process;
-
     output::status(
         json,
         "~",
-        format!("Resuming deployment {deployment_id} (compute: {compute})"),
+        "Preparing PACK_V1 upload...",
         output::Phase::Deploy,
     );
 
-    // Create bundle for PROCESS deployments
-    let bundle_data = maybe_create_bundle(output_dir, is_process, json)?;
-
-    // Prepare upload: server returns presigned URLs for the missing blobs of
-    // this deployment. With CAS dedup the count can be < files.len() — that's
-    // expected, not an API mismatch — so we no longer guard on equality.
-    let total_size: u64 = files.iter().map(|f| f.size).sum();
-
     let body = PrepareUploadBody {
+        deployment_id: deployment_id.to_string(),
+        workspace_id: workspace_id.to_string(),
+        project_id: project_id.to_string(),
+        deployment_attempt_id: deployment_attempt_id.to_string(),
+        operation_id: Uuid::now_v7().to_string(),
         manifest,
-        files,
-        bundle: bundle_data
-            .as_ref()
-            .map(|(bytes, sha)| BundleManifest::of(bytes, sha)),
+        manifest_summary: plan.static_pack.summary.clone(),
+        compute_bundles: plan.compute_bundles.clone(),
+        isolate_modules: plan.isolate.modules.clone(),
     };
 
     let prepared: PrepareUploadResponse = match client
@@ -1362,16 +1154,880 @@ async fn resume_deploy(
         }
     };
 
-    let bundle_upload = resolve_bundle_upload(bundle_data, prepared.bundle_upload)?;
+    let mut multipart_targets = Vec::new();
 
-    upload_and_complete(
+    if let PrepareUploadResponse::ColdPath { pack_parts, .. } = &prepared {
+        upload_pack_parts(
+            client,
+            output_dir,
+            &plan.static_pack,
+            pack_parts,
+            json,
+            &mut multipart_targets,
+        )
+        .await?;
+    }
+
+    upload_compute_bundle_targets(
+        client,
+        prepared.compute_bundle_targets(),
+        bundle_data,
+        json,
+        &mut multipart_targets,
+    )
+    .await?;
+    upload_isolate_module_targets(
+        client,
+        output_dir,
+        &plan.isolate,
+        prepared.isolate_module_targets(),
+        json,
+        &mut multipart_targets,
+    )
+    .await?;
+
+    if !multipart_targets.is_empty() {
+        let body = MultipartCompleteBody {
+            deployment_id: deployment_id.to_string(),
+            upload_session_id: prepared.upload_session_id().to_string(),
+            deployment_attempt_id: deployment_attempt_id.to_string(),
+            operation_id: Uuid::now_v7().to_string(),
+            targets: multipart_targets,
+        };
+        let _: MultipartCompleteResponse = client
+            .post(
+                &format!("/v1/deployments/{deployment_id}/multipart-complete"),
+                &body,
+            )
+            .await
+            .context("failed to complete multipart uploads")?;
+    }
+
+    complete_upload_with_retry(
         client,
         deployment_id,
-        &prepared.upload_urls,
-        output_dir,
-        total_size,
+        prepared.upload_session_id(),
+        deployment_attempt_id,
         json,
-        bundle_upload,
+    )
+    .await?;
+
+    Ok(())
+}
+
+// ── Resume deploy flow ───────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrepareUploadBody {
+    deployment_id: String,
+    workspace_id: String,
+    project_id: String,
+    deployment_attempt_id: String,
+    operation_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    manifest: Option<serde_json::Value>,
+    manifest_summary: pack_v1::ManifestSummary,
+    compute_bundles: Vec<ComputeBundleUpload>,
+    isolate_modules: Vec<pack_v1::IsolateModuleUpload>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+enum PrepareUploadResponse {
+    FastPath {
+        upload_session_id: String,
+        #[allow(dead_code)]
+        manifest_key: String,
+        #[allow(dead_code)]
+        manifest_sha256: String,
+        #[allow(dead_code)]
+        logical_bytes_reserved: String,
+        compute_bundle_targets: Vec<ComputeBundleUploadTarget>,
+        isolate_module_targets: Vec<IsolateModuleUploadTarget>,
+    },
+    Waiting {
+        upload_session_id: String,
+        #[allow(dead_code)]
+        owner_session_id: String,
+        #[allow(dead_code)]
+        expires_at: String,
+        compute_bundle_targets: Vec<ComputeBundleUploadTarget>,
+        isolate_module_targets: Vec<IsolateModuleUploadTarget>,
+    },
+    ColdPath {
+        upload_session_id: String,
+        #[allow(dead_code)]
+        expires_at: String,
+        #[allow(dead_code)]
+        manifest_key: String,
+        #[allow(dead_code)]
+        manifest_sha256: String,
+        #[allow(dead_code)]
+        bucket: String,
+        pack_parts: Vec<PackPartUploadTarget>,
+        compute_bundle_targets: Vec<ComputeBundleUploadTarget>,
+        isolate_module_targets: Vec<IsolateModuleUploadTarget>,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadCompleteBody {
+    deployment_id: String,
+    upload_session_id: String,
+    deployment_attempt_id: String,
+    operation_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+enum UploadCompleteResponse {
+    IngestStarted {
+        #[allow(dead_code)]
+        deployment_id: String,
+        #[allow(dead_code)]
+        upload_session_id: String,
+    },
+    FastPathCompleted {
+        #[allow(dead_code)]
+        deployment_id: String,
+        #[allow(dead_code)]
+        upload_session_id: String,
+    },
+    Expired {
+        #[allow(dead_code)]
+        deployment_id: String,
+        #[allow(dead_code)]
+        expired_at: String,
+    },
+    Incomplete {
+        #[allow(dead_code)]
+        missing_part_indexes: Vec<u32>,
+    },
+    #[serde(rename = "noop_already_completed")]
+    NoopAlreadyCompleted {
+        #[allow(dead_code)]
+        deployment_id: String,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MultipartCompleteBody {
+    deployment_id: String,
+    upload_session_id: String,
+    deployment_attempt_id: String,
+    operation_id: String,
+    targets: Vec<MultipartCompleteTarget>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+enum MultipartCompleteResponse {
+    Completed {
+        #[allow(dead_code)]
+        deployment_id: String,
+        #[allow(dead_code)]
+        upload_session_id: String,
+        #[allow(dead_code)]
+        completed_targets: u32,
+    },
+    #[serde(rename = "noop_already_completed")]
+    NoopAlreadyCompleted {
+        #[allow(dead_code)]
+        deployment_id: String,
+    },
+}
+
+impl PrepareUploadResponse {
+    fn upload_session_id(&self) -> &str {
+        match self {
+            Self::FastPath {
+                upload_session_id, ..
+            }
+            | Self::Waiting {
+                upload_session_id, ..
+            }
+            | Self::ColdPath {
+                upload_session_id, ..
+            } => upload_session_id,
+        }
+    }
+
+    fn compute_bundle_targets(&self) -> &[ComputeBundleUploadTarget] {
+        match self {
+            Self::FastPath {
+                compute_bundle_targets,
+                ..
+            }
+            | Self::Waiting {
+                compute_bundle_targets,
+                ..
+            }
+            | Self::ColdPath {
+                compute_bundle_targets,
+                ..
+            } => compute_bundle_targets,
+        }
+    }
+
+    fn isolate_module_targets(&self) -> &[IsolateModuleUploadTarget] {
+        match self {
+            Self::FastPath {
+                isolate_module_targets,
+                ..
+            }
+            | Self::Waiting {
+                isolate_module_targets,
+                ..
+            }
+            | Self::ColdPath {
+                isolate_module_targets,
+                ..
+            } => isolate_module_targets,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UploadCompleteRetryReason {
+    S3Visibility,
+    OwnerVerifyInProgress,
+}
+
+impl UploadCompleteRetryReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::S3Visibility => "S3 objects are not visible yet",
+            Self::OwnerVerifyInProgress => "owner verification is still in progress",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UploadCompleteAttempt {
+    Terminal,
+    Retry(UploadCompleteRetryReason),
+}
+
+async fn complete_upload_with_retry(
+    client: &ApiClient,
+    deployment_id: &str,
+    upload_session_id: &str,
+    deployment_attempt_id: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    let started = Instant::now();
+    let mut delay = UPLOAD_COMPLETE_INITIAL_RETRY_DELAY;
+    let mut attempts = 0u32;
+
+    loop {
+        attempts += 1;
+        match post_upload_complete_once(
+            client,
+            deployment_id,
+            upload_session_id,
+            deployment_attempt_id,
+        )
+        .await?
+        {
+            UploadCompleteAttempt::Terminal => return Ok(()),
+            UploadCompleteAttempt::Retry(reason) => {
+                let elapsed = started.elapsed();
+                if elapsed >= UPLOAD_COMPLETE_RETRY_BUDGET {
+                    bail!(
+                        "upload-complete did not reach a terminal state after {:?} (last state: {})",
+                        UPLOAD_COMPLETE_RETRY_BUDGET,
+                        reason.as_str()
+                    );
+                }
+
+                if attempts == 1 {
+                    output::status(
+                        json,
+                        "~",
+                        format!("Waiting for upload-complete ({})...", reason.as_str()),
+                        output::Phase::Deploy,
+                    );
+                }
+
+                let sleep_for = delay.min(UPLOAD_COMPLETE_RETRY_BUDGET.saturating_sub(elapsed));
+                tokio::time::sleep(sleep_for).await;
+                delay = delay.saturating_mul(2).min(UPLOAD_COMPLETE_MAX_RETRY_DELAY);
+            }
+        }
+    }
+}
+
+async fn post_upload_complete_once(
+    client: &ApiClient,
+    deployment_id: &str,
+    upload_session_id: &str,
+    deployment_attempt_id: &str,
+) -> anyhow::Result<UploadCompleteAttempt> {
+    let body = UploadCompleteBody {
+        deployment_id: deployment_id.to_string(),
+        upload_session_id: upload_session_id.to_string(),
+        deployment_attempt_id: deployment_attempt_id.to_string(),
+        operation_id: Uuid::now_v7().to_string(),
+    };
+
+    match client
+        .post::<_, UploadCompleteResponse>(
+            &format!("/v1/deployments/{deployment_id}/upload-complete"),
+            &body,
+        )
+        .await
+    {
+        Ok(response) => classify_upload_complete_response(response),
+        Err(error) => match classify_upload_complete_retry_error(&error) {
+            Some(reason) => Ok(UploadCompleteAttempt::Retry(reason)),
+            None => Err(error.context("failed to signal upload complete")),
+        },
+    }
+}
+
+fn classify_upload_complete_response(
+    response: UploadCompleteResponse,
+) -> anyhow::Result<UploadCompleteAttempt> {
+    match response {
+        UploadCompleteResponse::IngestStarted { .. }
+        | UploadCompleteResponse::FastPathCompleted { .. }
+        | UploadCompleteResponse::NoopAlreadyCompleted { .. } => {
+            Ok(UploadCompleteAttempt::Terminal)
+        }
+        UploadCompleteResponse::Incomplete { .. } => Ok(UploadCompleteAttempt::Retry(
+            UploadCompleteRetryReason::S3Visibility,
+        )),
+        UploadCompleteResponse::Expired { expired_at, .. } => {
+            bail!("upload window expired at {expired_at}; create a new deployment and upload again")
+        }
+    }
+}
+
+fn classify_upload_complete_retry_error(
+    error: &anyhow::Error,
+) -> Option<UploadCompleteRetryReason> {
+    let api_error = error.downcast_ref::<crate::api::StructuredApiError>()?;
+    match api_error.code.as_str() {
+        "OPERATION_IN_PROGRESS" => Some(UploadCompleteRetryReason::OwnerVerifyInProgress),
+        "VALIDATION_ERROR"
+            if api_error
+                .message
+                .to_ascii_lowercase()
+                .contains("upload is incomplete")
+                && api_error
+                    .details
+                    .as_ref()
+                    .and_then(|details| details.get("field"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("packParts") =>
+        {
+            Some(UploadCompleteRetryReason::S3Visibility)
+        }
+        _ => None,
+    }
+}
+
+async fn upload_pack_parts(
+    client: &ApiClient,
+    output_dir: &Path,
+    plan: &PackPlan,
+    targets: &[PackPartUploadTarget],
+    json: bool,
+    multipart_targets: &mut Vec<MultipartCompleteTarget>,
+) -> anyhow::Result<()> {
+    if targets.is_empty() {
+        return Ok(());
+    }
+
+    let spinner = make_spinner(
+        json,
+        &format!(
+            "Uploading {} PACK part(s) ({})...",
+            targets.len(),
+            format_u64_bytes(plan.total_logical_bytes)
+        ),
+    );
+
+    for (idx, target) in targets.iter().enumerate() {
+        let part = plan
+            .parts
+            .iter()
+            .find(|part| part.part_index == target.part_index)
+            .with_context(|| {
+                format!(
+                    "server requested unknown PACK part index {}",
+                    target.part_index
+                )
+            })?;
+        if let Some(s) = &spinner {
+            s.set_message(format!(
+                "[{}/{}] PACK part {}",
+                idx + 1,
+                targets.len(),
+                target.part_index
+            ));
+        }
+
+        match &target.upload {
+            PresignedUpload::Single {
+                url,
+                content_length,
+                sha256,
+                headers,
+            } => {
+                let bytes = read_pack_part_bytes(output_dir, part).await?;
+                let headers = headers.require_if_none_match_any()?;
+                upload_single_put(
+                    client,
+                    url,
+                    bytes,
+                    *content_length,
+                    sha256,
+                    &headers,
+                    &format!("PACK part {}", target.part_index),
+                )
+                .await?;
+            }
+            PresignedUpload::Multipart {
+                upload_id,
+                chunk_size,
+                chunks,
+            } => {
+                let parts = upload_multipart_chunks(
+                    client,
+                    chunks,
+                    *chunk_size,
+                    &format!("PACK part {}", target.part_index),
+                    |offset, size| read_pack_part_chunk_bytes(output_dir, part, offset, size),
+                )
+                .await?;
+                multipart_targets.push(MultipartCompleteTarget::PackPart {
+                    part_index: target.part_index,
+                    upload_id: upload_id.clone(),
+                    parts,
+                });
+            }
+        }
+    }
+
+    finish_spinner(
+        spinner,
+        &format!(
+            "Uploaded {} PACK part(s) ({})",
+            targets.len(),
+            format_u64_bytes(plan.total_logical_bytes)
+        ),
+    );
+    Ok(())
+}
+
+async fn upload_compute_bundle_targets(
+    client: &ApiClient,
+    targets: &[ComputeBundleUploadTarget],
+    bundle_data: Option<&(Vec<u8>, String)>,
+    json: bool,
+    multipart_targets: &mut Vec<MultipartCompleteTarget>,
+) -> anyhow::Result<()> {
+    if targets.is_empty() {
+        return Ok(());
+    }
+    let (bundle_bytes, bundle_sha) = bundle_data
+        .with_context(|| "server returned COMPUTE bundle targets but no local bundle was built")?;
+    let bundle = Bytes::from(bundle_bytes.clone());
+
+    let spinner = make_spinner(
+        json,
+        &format!(
+            "Uploading {} COMPUTE bundle target(s) ({})...",
+            targets.len(),
+            format_bytes(bundle.len())
+        ),
+    );
+
+    for (idx, target) in targets.iter().enumerate() {
+        if target.bundle_sha256 != *bundle_sha {
+            bail!(
+                "server requested bundle SHA {} for layer {}, but local bundle SHA is {}",
+                target.bundle_sha256,
+                target.layer_name,
+                bundle_sha
+            );
+        }
+        if let Some(s) = &spinner {
+            s.set_message(format!(
+                "[{}/{}] COMPUTE bundle {}",
+                idx + 1,
+                targets.len(),
+                target.layer_name
+            ));
+        }
+
+        let Some(upload) = &target.upload else {
+            continue;
+        };
+
+        match upload {
+            PresignedUpload::Single {
+                url,
+                content_length,
+                sha256,
+                headers,
+            } => {
+                upload_single_put(
+                    client,
+                    url,
+                    bundle.clone(),
+                    *content_length,
+                    sha256,
+                    headers,
+                    &format!("COMPUTE bundle {}", target.layer_name),
+                )
+                .await?;
+            }
+            PresignedUpload::Multipart {
+                upload_id,
+                chunk_size,
+                chunks,
+            } => {
+                let parts = upload_multipart_chunks(
+                    client,
+                    chunks,
+                    *chunk_size,
+                    &format!("COMPUTE bundle {}", target.layer_name),
+                    |offset, size| {
+                        let bundle = bundle.clone();
+                        async move {
+                            let start =
+                                usize::try_from(offset).context("bundle chunk offset too large")?;
+                            let end = usize::try_from(offset + size)
+                                .context("bundle chunk end too large")?;
+                            if end > bundle.len() {
+                                bail!(
+                                    "bundle chunk range [{offset}, {}) exceeds bundle size {}",
+                                    offset + size,
+                                    bundle.len()
+                                );
+                            }
+                            Ok(bundle.slice(start..end))
+                        }
+                    },
+                )
+                .await?;
+                multipart_targets.push(MultipartCompleteTarget::ComputeBundle {
+                    layer_name: target.layer_name.clone(),
+                    bundle_sha256: target.bundle_sha256.clone(),
+                    upload_id: upload_id.clone(),
+                    parts,
+                });
+            }
+        }
+    }
+
+    finish_spinner(
+        spinner,
+        &format!(
+            "Uploaded {} COMPUTE bundle target(s)",
+            targets
+                .iter()
+                .filter(|target| target.upload.is_some())
+                .count()
+        ),
+    );
+    Ok(())
+}
+
+async fn upload_isolate_module_targets(
+    client: &ApiClient,
+    output_dir: &Path,
+    plan: &IsolateUploadPlan,
+    targets: &[IsolateModuleUploadTarget],
+    json: bool,
+    multipart_targets: &mut Vec<MultipartCompleteTarget>,
+) -> anyhow::Result<()> {
+    if targets.is_empty() {
+        return Ok(());
+    }
+
+    let file_count: usize = targets.iter().map(|target| target.files.len()).sum();
+    let spinner = make_spinner(
+        json,
+        &format!("Uploading {file_count} ISOLATE module file(s)..."),
+    );
+    let mut uploaded = 0usize;
+
+    for target in targets {
+        for file in &target.files {
+            uploaded += 1;
+            if let Some(s) = &spinner {
+                s.set_message(format!(
+                    "[{uploaded}/{file_count}] ISOLATE {}:{}",
+                    target.layer_name, file.path
+                ));
+            }
+
+            let local_path = plan
+                .local_path_for_target(&target.layer_name, &file.path, &file.sha256)
+                .with_context(|| {
+                    format!(
+                        "server requested unknown ISOLATE module file {}:{} ({})",
+                        target.layer_name, file.path, file.sha256
+                    )
+                })?
+                .to_string();
+            let full_path = output_dir.join(&local_path);
+
+            let Some(upload) = &file.upload else {
+                continue;
+            };
+
+            match upload {
+                PresignedUpload::Single {
+                    url,
+                    content_length,
+                    sha256,
+                    headers,
+                } => {
+                    let bytes = Bytes::from(
+                        tokio::fs::read(&full_path)
+                            .await
+                            .with_context(|| format!("failed to read {}", full_path.display()))?,
+                    );
+                    upload_single_put(
+                        client,
+                        url,
+                        bytes,
+                        *content_length,
+                        sha256,
+                        headers,
+                        &format!("ISOLATE module {}:{}", target.layer_name, file.path),
+                    )
+                    .await?;
+                }
+                PresignedUpload::Multipart {
+                    upload_id,
+                    chunk_size,
+                    chunks,
+                } => {
+                    let parts = upload_multipart_chunks(
+                        client,
+                        chunks,
+                        *chunk_size,
+                        &format!("ISOLATE module {}:{}", target.layer_name, file.path),
+                        |offset, size| read_file_slice(&full_path, offset, size),
+                    )
+                    .await?;
+                    multipart_targets.push(MultipartCompleteTarget::IsolateModule {
+                        layer_name: target.layer_name.clone(),
+                        path: file.path.clone(),
+                        upload_id: upload_id.clone(),
+                        parts,
+                    });
+                }
+            }
+        }
+    }
+
+    finish_spinner(
+        spinner,
+        &format!("Uploaded {file_count} ISOLATE module file(s)"),
+    );
+    Ok(())
+}
+
+async fn upload_single_put(
+    client: &ApiClient,
+    url: &str,
+    bytes: Bytes,
+    content_length: u64,
+    sha256: &str,
+    headers: &PresignedPutHeaders,
+    label: &str,
+) -> anyhow::Result<()> {
+    verify_upload_payload(label, &bytes, content_length, sha256)?;
+    client
+        .put_blob_with_headers(url, bytes, sha256, headers)
+        .await
+        .with_context(|| format!("failed to upload {label}"))?;
+    Ok(())
+}
+
+async fn upload_multipart_chunks<F, Fut>(
+    client: &ApiClient,
+    chunks: &[pack_v1::PresignedMultipartChunk],
+    chunk_size: u64,
+    label: &str,
+    mut read_chunk: F,
+) -> anyhow::Result<Vec<CompletedMultipartPart>>
+where
+    F: FnMut(u64, u64) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<Bytes>>,
+{
+    let mut parts = Vec::with_capacity(chunks.len());
+    for chunk in chunks {
+        let offset = u64::from(chunk.part_number.saturating_sub(1))
+            .checked_mul(chunk_size)
+            .context("multipart chunk offset overflow")?;
+        let bytes = read_chunk(offset, chunk.content_length).await?;
+        verify_upload_payload(
+            &format!("{label} multipart part {}", chunk.part_number),
+            &bytes,
+            chunk.content_length,
+            &chunk.sha256,
+        )?;
+        let result = client
+            .put_blob_capture(&chunk.url, bytes, &chunk.sha256)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to upload {label} multipart part {}",
+                    chunk.part_number
+                )
+            })?;
+        let e_tag = result.e_tag.with_context(|| {
+            format!(
+                "multipart upload for {label} part {} did not return an ETag",
+                chunk.part_number
+            )
+        })?;
+        parts.push(CompletedMultipartPart {
+            part_number: chunk.part_number,
+            e_tag,
+        });
+    }
+    Ok(parts)
+}
+
+fn verify_upload_payload(
+    label: &str,
+    bytes: &[u8],
+    content_length: u64,
+    sha256: &str,
+) -> anyhow::Result<()> {
+    if bytes.len() as u64 != content_length {
+        bail!(
+            "{label} size drifted between prepare-upload and upload (server signed {} bytes, local materialized {} bytes)",
+            content_length,
+            bytes.len()
+        );
+    }
+    let actual_sha = format!("{:x}", Sha256::digest(bytes));
+    if actual_sha != sha256 {
+        bail!(
+            "{label} SHA drifted between prepare-upload and upload (server signed {sha256}, local materialized {actual_sha})"
+        );
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeploymentProjectLookup {
+    project: DeploymentProjectInfo,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeploymentProjectInfo {
+    id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ResumeDeployOutput {
+    deployment_id: String,
+    status: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
+}
+
+async fn resolve_project_id_for_resume(
+    client: &ApiClient,
+    deployment_id: &str,
+    explicit_project_id: Option<&str>,
+    config: &ProjectConfig,
+) -> anyhow::Result<String> {
+    if let Some(project_id) = explicit_project_id.filter(|value| !value.trim().is_empty()) {
+        return Ok(project_id.to_string());
+    }
+    if let Some(project_id) = config
+        .project
+        .id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return Ok(project_id.to_string());
+    }
+
+    let deployment: DeploymentProjectLookup = client
+        .get(&format!("/v1/deployments/{deployment_id}"))
+        .await
+        .context("failed to resolve project for resumed deployment")?;
+    Ok(deployment.project.id)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn resume_deploy(
+    client: &ApiClient,
+    deployment_id: &str,
+    workspace_id: &str,
+    project_id: &str,
+    manifest: serde_json::Value,
+    manifest_for_planning: build_manifest::Manifest,
+    files: Vec<FileEntry>,
+    output_dir: &Path,
+    json: bool,
+    warnings: Vec<String>,
+) -> anyhow::Result<()> {
+    output::status(
+        json,
+        "~",
+        format!("Resuming deployment {deployment_id}"),
+        output::Phase::Deploy,
+    );
+
+    let bundle_data = maybe_create_bundle(
+        output_dir,
+        manifest_has_compute_layer(&manifest_for_planning),
+        json,
+    )?;
+    let manifest_for_api = bind_compute_bundle_to_manifest_value(
+        manifest,
+        bundle_data.as_ref().map(|(_, sha)| sha.as_str()),
+    )?;
+    let upload_plan = build_pack_v1_upload_plan(
+        output_dir,
+        &manifest_for_planning,
+        &files,
+        bundle_data.as_ref(),
+    )
+    .context("failed to prepare PACK_V1 upload plan")?;
+    let deployment_attempt_id = Uuid::now_v7().to_string();
+
+    prepare_upload_and_complete(
+        client,
+        deployment_id,
+        workspace_id,
+        project_id,
+        &deployment_attempt_id,
+        Some(manifest_for_api),
+        output_dir,
+        json,
+        upload_plan,
+        bundle_data.as_ref(),
     )
     .await?;
 
@@ -1379,7 +2035,7 @@ async fn resume_deploy(
     if json {
         let data = ResumeDeployOutput {
             deployment_id: deployment_id.to_string(),
-            status: "activated".into(),
+            status: "upload-complete".into(),
             warnings,
         };
         if let Ok(s) = serde_json::to_string(&data) {
@@ -1388,7 +2044,7 @@ async fn resume_deploy(
     } else {
         eprintln!();
         eprintln!(
-            "  {} Deployment {} activated",
+            "  {} Deployment {} upload completed",
             console::style("✓").green().bold(),
             console::style(deployment_id).bold(),
         );
@@ -1399,6 +2055,57 @@ async fn resume_deploy(
 }
 
 // ── PROCESS validation ───────────────────────────────────────
+
+fn manifest_has_compute_layer(manifest: &build_manifest::Manifest) -> bool {
+    manifest
+        .layers
+        .iter()
+        .any(|layer| layer.target == build_manifest::LayerTarget::Compute)
+}
+
+fn bind_compute_bundle_to_manifest_value(
+    mut manifest: serde_json::Value,
+    bundle_sha: Option<&str>,
+) -> anyhow::Result<serde_json::Value> {
+    let Some(bundle_sha) = bundle_sha else {
+        return Ok(manifest);
+    };
+
+    let layers = manifest
+        .get_mut("layers")
+        .and_then(serde_json::Value::as_array_mut)
+        .context("deployment manifest must contain a layers array")?;
+    let mut bound = false;
+
+    for layer in layers {
+        let Some(object) = layer.as_object_mut() else {
+            continue;
+        };
+        if object.get("target").and_then(serde_json::Value::as_str) != Some("COMPUTE") {
+            continue;
+        }
+        if let Some(existing) = object
+            .get("bundleSha256")
+            .and_then(serde_json::Value::as_str)
+            && existing != bundle_sha
+        {
+            bail!(
+                "COMPUTE layer bundleSha256 ({existing}) does not match built bundle ({bundle_sha})"
+            );
+        }
+        object.insert(
+            "bundleSha256".to_string(),
+            serde_json::Value::String(bundle_sha.to_string()),
+        );
+        bound = true;
+    }
+
+    if !bound {
+        bail!("bundle was built but manifest contains no COMPUTE layer");
+    }
+
+    Ok(manifest)
+}
 
 /// Resolve a guaranteed-present manifest for the given compute mode.
 ///
@@ -2058,41 +2765,6 @@ fn maybe_create_bundle(
     Ok(Some((stats.bytes, stats.sha256_hex)))
 }
 
-fn resolve_bundle_upload(
-    bundle_data: Option<(Vec<u8>, String)>,
-    server_target: Option<BundleUpload>,
-) -> anyhow::Result<Option<(Vec<u8>, BundleUpload)>> {
-    match (bundle_data, server_target) {
-        (Some((bytes, sha)), Some(target)) => {
-            // Defense-in-depth: server signed a presign for *this* bundle SHA.
-            // If it ever returns a target for a different SHA we'd silently
-            // PUT bytes whose checksum can't match, getting a confusing
-            // 400 BadDigest from S3 instead of a clear local error.
-            if target.sha256 != sha {
-                bail!(
-                    "bundle SHA mismatch: built {} but server presigned {}",
-                    sha,
-                    target.sha256
-                );
-            }
-            Ok(Some((bytes, target)))
-        }
-        (Some(_), None) => {
-            bail!(
-                "Server did not return a bundle upload target for PROCESS deployment. \
-                 This may indicate an API version mismatch. Try upgrading: nrz upgrade"
-            );
-        }
-        (None, Some(_)) => {
-            bail!(
-                "Server returned a bundle upload target but no bundle was built locally. \
-                 This may indicate an API version mismatch. Try upgrading: nrz upgrade"
-            );
-        }
-        (None, None) => Ok(None),
-    }
-}
-
 // ── Build step ───────────────────────────────────────────────
 
 /// Resolve build command. Priority: CLI flag > config > server > auto-detect.
@@ -2377,41 +3049,6 @@ fn run_build_step(
     Ok(())
 }
 
-// ── File scanning ────────────────────────────────────────────
-
-/// Returns normalised directory prefixes (trailing `/` or `"."` for root) for all
-/// STATIC-target layers in the manifest.
-///
-/// Used to filter the file list for bundle deployments: only STATIC-layer files
-/// need individual presigned URL uploads; COMPUTE/ISOLATE files go via tar.zst bundle.
-fn static_layer_dirs(manifest: Option<&build_manifest::Manifest>) -> Vec<String> {
-    let Some(m) = manifest else {
-        return Vec::new();
-    };
-    m.layers
-        .iter()
-        .filter(|l| l.target == build_manifest::LayerTarget::Static)
-        .map(|l| {
-            if l.directory == "." {
-                ".".to_string()
-            } else {
-                format!("{}/", l.directory.trim_end_matches('/'))
-            }
-        })
-        .collect()
-}
-
-/// Returns `true` if the file belongs to one of the given layer directories.
-fn is_in_layer_dirs(rel_path: &str, dirs: &[String]) -> bool {
-    dirs.iter().any(|d| {
-        if d == "." {
-            true
-        } else {
-            rel_path.starts_with(d.as_str())
-        }
-    })
-}
-
 // ── Output scan ──────────────────────────────────────────────
 
 /// Read buffer for streaming SHA-256. Sized to match a single page-cache
@@ -2495,10 +3132,6 @@ fn hash_file_streaming(path: &Path) -> anyhow::Result<(u64, String)> {
     Ok((size, format!("{:x}", hasher.finalize())))
 }
 
-fn missing_total_size(urls: &[FileUploadUrl]) -> u64 {
-    urls.iter().map(|u| u.content_length).sum()
-}
-
 // ── Synthetic commit SHA ─────────────────────────────────────
 
 /// Stable per-deployment commit SHA derived from the file manifest. Used as a
@@ -2576,6 +3209,10 @@ fn finish_spinner(spinner: Option<ProgressBar>, msg: &str) {
             s.finish_with_message(msg.to_string());
         }
     }
+}
+
+fn format_u64_bytes(bytes: u64) -> String {
+    format_bytes(usize::try_from(bytes).unwrap_or(usize::MAX))
 }
 
 fn format_bytes(bytes: usize) -> String {

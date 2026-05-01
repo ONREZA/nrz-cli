@@ -33,22 +33,28 @@ struct ProjectSummary {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateProjectBody {
-    name: String,
+pub(crate) struct CreateProjectBody {
+    pub(crate) name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    display_name: Option<String>,
+    pub(crate) display_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    git_url: Option<String>,
+    pub(crate) git_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    branch: Option<String>,
+    pub(crate) branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    framework_preset: Option<String>,
+    pub(crate) framework_preset: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    install_command: Option<String>,
+    pub(crate) install_command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    build_command: Option<String>,
+    pub(crate) install_command_source: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    output_directory: Option<String>,
+    pub(crate) build_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) build_command_source: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) output_directory: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) output_directory_source: Option<&'static str>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -235,8 +241,11 @@ async fn create(
         git_url,
         branch,
         framework_preset: framework,
+        install_command_source: install_command.as_ref().map(|_| "USER"),
         install_command,
+        build_command_source: build_command.as_ref().map(|_| "USER"),
         build_command,
+        output_directory_source: output_directory.as_ref().map(|_| "USER"),
         output_directory,
     };
 
