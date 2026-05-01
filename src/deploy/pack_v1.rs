@@ -9,12 +9,13 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use super::FileEntry;
-use crate::api::PresignedPutHeaders;
+use crate::api::{PresignedHeadVerify, PresignedPutHeaders};
 use crate::build::manifest::{LayerTarget, Manifest};
 
 pub(crate) const PACK_PART_TARGET_BYTES: u64 = 128 * 1024 * 1024;
 pub(crate) const MULTIPART_THRESHOLD_BYTES: u64 = 256 * 1024 * 1024;
 pub(crate) const MULTIPART_CHUNK_BYTES: u64 = 16 * 1024 * 1024;
+pub(crate) const MAX_PACK_PARTS_PER_MANIFEST: usize = 999;
 
 const READ_CHUNK_BYTES: usize = 64 * 1024;
 
@@ -173,8 +174,10 @@ pub(crate) fn build_static_pack_plan(
     let mut stored_ranges: HashMap<(String, u64), StoredPackRange> = HashMap::new();
     let mut summary_paths = Vec::with_capacity(files.len());
     let mut total_logical_bytes = 0u64;
+    let mut ordered_files = files.to_vec();
+    ordered_files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
 
-    for file in files {
+    for file in &ordered_files {
         total_logical_bytes = total_logical_bytes
             .checked_add(file.size)
             .context("static logical size overflow")?;
@@ -246,6 +249,7 @@ pub(crate) fn build_static_pack_plan(
     if !current.is_empty() || parts.is_empty() {
         parts.push(current);
     }
+    ensure_pack_part_count(parts.len())?;
 
     let mut summary_parts = Vec::with_capacity(parts.len());
     let mut part_plans = Vec::with_capacity(parts.len());
@@ -296,6 +300,15 @@ pub(crate) fn build_static_pack_plan(
         parts: part_plans,
         total_logical_bytes,
     })
+}
+
+pub(crate) fn ensure_pack_part_count(part_count: usize) -> anyhow::Result<()> {
+    if part_count > MAX_PACK_PARTS_PER_MANIFEST {
+        bail!(
+            "PACK_V1 plan has {part_count} pack parts, exceeding the manifest limit of {MAX_PACK_PARTS_PER_MANIFEST}"
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn build_isolate_upload_plan(
@@ -660,6 +673,8 @@ pub(crate) enum PresignedUpload {
         #[serde(rename = "contentLength")]
         content_length: u64,
         sha256: String,
+        #[serde(rename = "verifyHead")]
+        verify_head: Option<PresignedHeadVerify>,
         #[serde(default)]
         headers: PresignedPutHeaders,
     },

@@ -720,8 +720,8 @@ fn create_deployment_body_serializes_required_fields() {
 
 #[test]
 fn create_deployment_body_with_bundle_serializes_object() {
-    // Server expects `bundle: { sha256, size }` (RFC: SECURE_ARCHIVE_INGEST §"Conditioned
-    // presigned PUT" — both fields are bound into the SigV4 signature for `bundles/{sha}.tar.zst`).
+    // Server expects `bundle: { sha256, size }` (deployment-artifacts/compute-bundle-lifecycle
+    // binds both fields into the SigV4 signature for `bundles/{sha}.tar.zst`).
     // The CLI used to send a flat `bundleSha256: <hex>` which zod silently dropped, leaving
     // the server with `body.bundle === undefined` — no bundle presign for PROCESS deployments.
     let body = CreateDeploymentBody {

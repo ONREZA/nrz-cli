@@ -73,6 +73,7 @@ struct CreateResponse {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConnectionResponse {
+    #[serde(alias = "connection_uri")]
     connection_uri: String,
 }
 

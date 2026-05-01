@@ -44,3 +44,39 @@ fn branch_list_deserializes_legacy_data_envelope() {
     assert_eq!(list.data[0].id, "branch-2");
     assert_eq!(list.data[0].is_preview_branch, Some(true));
 }
+
+#[test]
+fn connection_response_deserializes_server_snake_case_uri() {
+    let resp: ConnectionResponse = serde_json::from_value(serde_json::json!({
+        "connection_uri": "postgres://user:pass@host/db"
+    }))
+    .expect("server connection response deserializes");
+
+    assert_eq!(resp.connection_uri, "postgres://user:pass@host/db");
+}
+
+#[test]
+fn dev_env_response_deserializes_server_camel_case_env_vars() {
+    let resp: DevEnvResponse = serde_json::from_value(serde_json::json!({
+        "envVars": {
+            "DATABASE_URL": "postgres://user:pass@host/db"
+        },
+        "database": {
+            "id": "db-1",
+            "name": "primary",
+            "status": "ACTIVE"
+        },
+        "branch": {
+            "id": "branch-1",
+            "name": "main"
+        }
+    }))
+    .expect("server dev-env response deserializes");
+
+    assert_eq!(
+        resp.env_vars.get("DATABASE_URL").map(String::as_str),
+        Some("postgres://user:pass@host/db")
+    );
+    assert_eq!(resp.database.id, "db-1");
+    assert_eq!(resp.branch.as_ref().map(|b| b.name.as_str()), Some("main"));
+}

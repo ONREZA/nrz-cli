@@ -4,13 +4,15 @@ use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::header::CONTENT_LENGTH;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::put;
 use bytes::Bytes;
 
 use super::client::{
-    ApiClient, PresignedPutHeaders, UploadRetryPolicy, explain_s3_failure, sha256_hex_to_base64,
+    ApiClient, PresignedHeadVerify, PresignedPutHeaders, UploadRetryPolicy, explain_s3_failure,
+    sha256_hex_to_base64,
 };
 
 #[derive(Clone)]
@@ -46,6 +48,20 @@ async fn conditional_header_handler(headers: HeaderMap) -> impl IntoResponse {
     }
 }
 
+async fn precondition_failed_handler() -> impl IntoResponse {
+    (StatusCode::PRECONDITION_FAILED, "exists")
+}
+
+async fn verify_head_handler() -> impl IntoResponse {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_LENGTH, HeaderValue::from_static("16"));
+    headers.insert(
+        "x-amz-checksum-sha256",
+        HeaderValue::from_str(&sha256_hex_to_base64(FAKE_SHA).unwrap()).unwrap(),
+    );
+    (StatusCode::OK, headers)
+}
+
 async fn spawn_mock(state: MockState) -> (String, tokio::task::JoinHandle<()>) {
     let app = Router::new()
         .route("/upload", put(handler))
@@ -60,6 +76,19 @@ async fn spawn_mock(state: MockState) -> (String, tokio::task::JoinHandle<()>) {
 
 async fn spawn_conditional_header_mock() -> (String, tokio::task::JoinHandle<()>) {
     let app = Router::new().route("/upload", put(conditional_header_handler));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/upload"), handle)
+}
+
+async fn spawn_precondition_with_head_mock() -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new().route(
+        "/upload",
+        put(precondition_failed_handler).head(verify_head_handler),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let handle = tokio::spawn(async move {
@@ -123,7 +152,29 @@ async fn sends_required_presigned_put_headers() {
 }
 
 #[tokio::test]
-async fn conditional_precondition_failed_is_idempotent_success() {
+async fn conditional_precondition_failed_verifies_existing_object() {
+    let (url, _h) = spawn_precondition_with_head_mock().await;
+    let verify_head = PresignedHeadVerify {
+        url: url.clone(),
+        content_length: 16,
+        sha256: FAKE_SHA.to_string(),
+    };
+
+    let client = test_client();
+    client
+        .put_blob_with_headers_and_verify(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &PresignedPutHeaders::if_none_match_any(),
+            Some(&verify_head),
+        )
+        .await
+        .expect("conditional 412 with verified matching object should be idempotent success");
+}
+
+#[tokio::test]
+async fn conditional_precondition_failed_without_verify_head_is_error() {
     let attempts = Arc::new(AtomicU32::new(0));
     let (url, _h) = spawn_mock(MockState {
         attempts: attempts.clone(),
@@ -134,7 +185,7 @@ async fn conditional_precondition_failed_is_idempotent_success() {
     .await;
 
     let client = test_client();
-    client
+    let err = client
         .put_blob_with_headers(
             &url,
             payload(),
@@ -142,9 +193,10 @@ async fn conditional_precondition_failed_is_idempotent_success() {
             &PresignedPutHeaders::if_none_match_any(),
         )
         .await
-        .expect("conditional 412 should mean the write-once object already exists");
+        .unwrap_err();
 
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert!(err.to_string().contains("verifyHead"), "{err}");
 }
 
 #[tokio::test]

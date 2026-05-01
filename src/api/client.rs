@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, bail};
 use base64::Engine;
 use bytes::Bytes;
-use reqwest::header::{ETAG, HeaderMap, HeaderValue, IF_NONE_MATCH};
+use reqwest::header::{CONTENT_LENGTH, ETAG, HeaderMap, HeaderValue, IF_NONE_MATCH};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Deserialize)]
@@ -92,6 +92,14 @@ pub(crate) struct PresignedPutResult {
 #[serde(default, rename_all = "kebab-case")]
 pub(crate) struct PresignedPutHeaders {
     pub(crate) if_none_match: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PresignedHeadVerify {
+    pub(crate) url: String,
+    pub(crate) content_length: u64,
+    pub(crate) sha256: String,
 }
 
 impl PresignedPutHeaders {
@@ -305,10 +313,10 @@ impl ApiClient {
         check_response(resp).await
     }
 
-    /// PUT a content-addressable blob to a server-issued conditioned presigned URL.
+    /// PUT a PACK_V1 artifact object to a server-issued conditioned presigned URL.
     ///
     /// The presign signature binds **both** `Content-Length` and `x-amz-checksum-sha256`
-    /// (RFC: `SECURE_ARCHIVE_INGEST.md` §"Conditioned presigned PUT"). The CLI must
+    /// (RFC: `deployment-artifacts/INDEX.md` "No-overwrite invariant"). The CLI must
     /// match exactly:
     /// - `Content-Length` is set automatically by reqwest from `data.len()`.
     /// - `x-amz-checksum-sha256` is the base64 of the SHA-256's raw 32 bytes
@@ -326,9 +334,9 @@ impl ApiClient {
     /// Retries transient failures (429, 408, 5xx, network errors) with exponential
     /// backoff + full jitter, honoring `Retry-After`. Permanent 4xx integrity
     /// rejects (400 BadDigest / 403 SignatureDoesNotMatch) propagate immediately.
-    /// `412 Precondition Failed` is accepted only for conditional create PUTs:
-    /// that means the write-once object already exists after a lost response or
-    /// a competing writer, so the idempotent upload goal is already satisfied.
+    /// `412 Precondition Failed` is accepted only for conditional create PUTs
+    /// after a presigned HEAD confirms the existing object size and checksum.
+    #[cfg(test)]
     pub(crate) async fn put_blob_with_headers(
         &self,
         url: &str,
@@ -339,6 +347,26 @@ impl ApiClient {
         self.put_blob_capture_with_headers(url, data, sha256_hex, headers)
             .await
             .map(|_| ())
+    }
+
+    pub(crate) async fn put_blob_with_headers_and_verify(
+        &self,
+        url: &str,
+        data: Bytes,
+        sha256_hex: &str,
+        headers: &PresignedPutHeaders,
+        verify_head: Option<&PresignedHeadVerify>,
+    ) -> anyhow::Result<()> {
+        self.put_blob_capture_with_policy_and_headers(
+            url,
+            data,
+            sha256_hex,
+            &UploadRetryPolicy::production(),
+            headers,
+            verify_head,
+        )
+        .await
+        .map(|_| ())
     }
 
     #[cfg(test)]
@@ -355,6 +383,7 @@ impl ApiClient {
             sha256_hex,
             policy,
             &PresignedPutHeaders::empty(),
+            None,
         )
         .await
         .map(|_| ())
@@ -383,6 +412,7 @@ impl ApiClient {
             sha256_hex,
             &UploadRetryPolicy::production(),
             headers,
+            None,
         )
         .await
     }
@@ -394,6 +424,7 @@ impl ApiClient {
         sha256_hex: &str,
         policy: &UploadRetryPolicy,
         headers: &PresignedPutHeaders,
+        verify_head: Option<&PresignedHeadVerify>,
     ) -> anyhow::Result<PresignedPutResult> {
         let checksum_b64 = sha256_hex_to_base64(sha256_hex)
             .with_context(|| format!("invalid SHA-256 for blob upload: {sha256_hex}"))?;
@@ -428,6 +459,10 @@ impl ApiClient {
                     if status == reqwest::StatusCode::PRECONDITION_FAILED
                         && headers.is_conditional_create()
                     {
+                        let verify_head = verify_head.with_context(|| {
+                            "conditional create returned 412 but server did not provide verifyHead"
+                        })?;
+                        self.verify_presigned_head(verify_head).await?;
                         return Ok(PresignedPutResult { e_tag: None });
                     }
                     let retry_after = parse_retry_after(resp.headers());
@@ -482,6 +517,48 @@ impl ApiClient {
             );
             tokio::time::sleep(delay).await;
         }
+    }
+
+    async fn verify_presigned_head(&self, verify: &PresignedHeadVerify) -> anyhow::Result<()> {
+        let expected_checksum_b64 = sha256_hex_to_base64(&verify.sha256)
+            .with_context(|| format!("invalid SHA-256 for HEAD verification: {}", verify.sha256))?;
+        let resp = self
+            .upload_client
+            .head(&verify.url)
+            .send()
+            .await
+            .context("failed to HEAD existing conditional upload target")?;
+        let status = resp.status();
+        if !status.is_success() {
+            bail!("conditional upload target exists but HEAD verification returned {status}");
+        }
+
+        let content_length = resp
+            .headers()
+            .get(CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .with_context(|| "conditional upload HEAD verification returned no Content-Length")?;
+        if content_length != verify.content_length {
+            bail!(
+                "conditional upload HEAD verification size mismatch: expected {}, got {}",
+                verify.content_length,
+                content_length
+            );
+        }
+
+        let checksum = resp
+            .headers()
+            .get("x-amz-checksum-sha256")
+            .and_then(|value| value.to_str().ok())
+            .with_context(
+                || "conditional upload HEAD verification returned no x-amz-checksum-sha256",
+            )?;
+        if checksum != expected_checksum_b64 {
+            bail!("conditional upload HEAD verification SHA-256 mismatch");
+        }
+
+        Ok(())
     }
 }
 

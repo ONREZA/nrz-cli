@@ -20,7 +20,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::api::{ApiClient, PresignedPutHeaders};
+use crate::api::{ApiClient, PresignedHeadVerify, PresignedPutHeaders};
 use crate::auth;
 use crate::build;
 use crate::build::manifest as build_manifest;
@@ -1588,18 +1588,22 @@ async fn upload_pack_parts(
                 url,
                 content_length,
                 sha256,
+                verify_head,
                 headers,
             } => {
                 let bytes = read_pack_part_bytes(output_dir, part).await?;
                 let headers = headers.require_if_none_match_any()?;
                 upload_single_put(
                     client,
-                    url,
-                    bytes,
-                    *content_length,
-                    sha256,
-                    &headers,
-                    &format!("PACK part {}", target.part_index),
+                    SinglePutUpload {
+                        url,
+                        bytes,
+                        content_length: *content_length,
+                        sha256,
+                        headers: &headers,
+                        verify_head: verify_head.as_ref(),
+                        label: format!("PACK part {}", target.part_index),
+                    },
                 )
                 .await?;
             }
@@ -1686,16 +1690,20 @@ async fn upload_compute_bundle_targets(
                 url,
                 content_length,
                 sha256,
+                verify_head,
                 headers,
             } => {
                 upload_single_put(
                     client,
-                    url,
-                    bundle.clone(),
-                    *content_length,
-                    sha256,
-                    headers,
-                    &format!("COMPUTE bundle {}", target.layer_name),
+                    SinglePutUpload {
+                        url,
+                        bytes: bundle.clone(),
+                        content_length: *content_length,
+                        sha256,
+                        headers,
+                        verify_head: verify_head.as_ref(),
+                        label: format!("COMPUTE bundle {}", target.layer_name),
+                    },
                 )
                 .await?;
             }
@@ -1800,6 +1808,7 @@ async fn upload_isolate_module_targets(
                     url,
                     content_length,
                     sha256,
+                    verify_head,
                     headers,
                 } => {
                     let bytes = Bytes::from(
@@ -1809,12 +1818,15 @@ async fn upload_isolate_module_targets(
                     );
                     upload_single_put(
                         client,
-                        url,
-                        bytes,
-                        *content_length,
-                        sha256,
-                        headers,
-                        &format!("ISOLATE module {}:{}", target.layer_name, file.path),
+                        SinglePutUpload {
+                            url,
+                            bytes,
+                            content_length: *content_length,
+                            sha256,
+                            headers,
+                            verify_head: verify_head.as_ref(),
+                            label: format!("ISOLATE module {}:{}", target.layer_name, file.path),
+                        },
                     )
                     .await?;
                 }
@@ -1849,20 +1861,33 @@ async fn upload_isolate_module_targets(
     Ok(())
 }
 
-async fn upload_single_put(
-    client: &ApiClient,
-    url: &str,
+struct SinglePutUpload<'a> {
+    url: &'a str,
     bytes: Bytes,
     content_length: u64,
-    sha256: &str,
-    headers: &PresignedPutHeaders,
-    label: &str,
-) -> anyhow::Result<()> {
-    verify_upload_payload(label, &bytes, content_length, sha256)?;
+    sha256: &'a str,
+    headers: &'a PresignedPutHeaders,
+    verify_head: Option<&'a PresignedHeadVerify>,
+    label: String,
+}
+
+async fn upload_single_put(client: &ApiClient, upload: SinglePutUpload<'_>) -> anyhow::Result<()> {
+    verify_upload_payload(
+        &upload.label,
+        &upload.bytes,
+        upload.content_length,
+        upload.sha256,
+    )?;
     client
-        .put_blob_with_headers(url, bytes, sha256, headers)
+        .put_blob_with_headers_and_verify(
+            upload.url,
+            upload.bytes,
+            upload.sha256,
+            upload.headers,
+            upload.verify_head,
+        )
         .await
-        .with_context(|| format!("failed to upload {label}"))?;
+        .with_context(|| format!("failed to upload {}", upload.label))?;
     Ok(())
 }
 
