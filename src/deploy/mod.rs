@@ -16,10 +16,15 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-const MAX_FILES_HOBBY: usize = 500;
-const MAX_FILES_PAID: usize = 2_000;
+const MAX_FILES_HOBBY: usize = 5_000;
+const MAX_FILES_PRO: usize = 100_000;
+const MAX_FILES_ENTERPRISE: usize = 500_000;
 const MAX_SIZE_HOBBY: u64 = 100 * 1024 * 1024; // 100 MB
-const MAX_SIZE_PAID: u64 = 1024 * 1024 * 1024; // 1 GB
+const MAX_SIZE_PRO: u64 = 1024 * 1024 * 1024; // 1 GB
+const MAX_SIZE_ENTERPRISE: u64 = 5 * 1024 * 1024 * 1024; // 5 GB
+const ROOT_NODE_MODULES_WARNING_MIN_FILES: usize = 1_000;
+const BUILD_SETTINGS_DOCS_URL: &str =
+    "https://docs.onreza.ru/projects/build-settings#process-output-directory";
 
 use crate::api::ApiClient;
 use crate::auth;
@@ -49,18 +54,15 @@ struct SubscriptionInfo {
     plan_slug: String,
 }
 
-fn is_paid_plan(workspace: &WorkspaceInfo) -> bool {
-    workspace
+fn plan_limits(workspace: &WorkspaceInfo) -> (usize, u64) {
+    match workspace
         .subscription
         .as_ref()
-        .is_some_and(|s| s.plan_slug == "PRO" || s.plan_slug == "ENTERPRISE")
-}
-
-fn plan_limits(workspace: &WorkspaceInfo) -> (usize, u64) {
-    if is_paid_plan(workspace) {
-        (MAX_FILES_PAID, MAX_SIZE_PAID)
-    } else {
-        (MAX_FILES_HOBBY, MAX_SIZE_HOBBY)
+        .map(|s| s.plan_slug.as_str())
+    {
+        Some("PRO") => (MAX_FILES_PRO, MAX_SIZE_PRO),
+        Some("ENTERPRISE") => (MAX_FILES_ENTERPRISE, MAX_SIZE_ENTERPRISE),
+        _ => (MAX_FILES_HOBBY, MAX_SIZE_HOBBY),
     }
 }
 
@@ -137,6 +139,135 @@ struct FileEntry {
     size: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ArtifactFileDiagnostics {
+    total_files: usize,
+    output_dir_is_project_root: bool,
+    node_modules_files: usize,
+    top_level_counts: Vec<(String, usize)>,
+}
+
+impl ArtifactFileDiagnostics {
+    fn has_root_node_modules_bloat(&self) -> bool {
+        self.output_dir_is_project_root
+            && self.node_modules_files >= ROOT_NODE_MODULES_WARNING_MIN_FILES
+    }
+
+    fn to_json(&self) -> Option<serde_json::Value> {
+        if !self.has_root_node_modules_bloat() {
+            return None;
+        }
+        Some(serde_json::json!({
+            "outputDirectoryIsProjectRoot": self.output_dir_is_project_root,
+            "nodeModulesFiles": self.node_modules_files,
+            "topLevelFileCounts": self.top_level_counts.iter().map(|(name, count)| {
+                serde_json::json!({ "name": name, "files": count })
+            }).collect::<Vec<_>>(),
+        }))
+    }
+}
+
+fn artifact_file_diagnostics(
+    project_dir: &Path,
+    output_dir: &Path,
+    files: &[FileEntry],
+) -> ArtifactFileDiagnostics {
+    let output_dir_is_project_root = same_path(project_dir, output_dir);
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+
+    for file in files {
+        let top = file
+            .path
+            .split('/')
+            .next()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(".");
+        *counts.entry(top.to_string()).or_default() += 1;
+    }
+
+    let node_modules_files = counts.get("node_modules").copied().unwrap_or(0);
+    let mut top_level_counts: Vec<_> = counts.into_iter().collect();
+    top_level_counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    top_level_counts.truncate(5);
+
+    ArtifactFileDiagnostics {
+        total_files: files.len(),
+        output_dir_is_project_root,
+        node_modules_files,
+        top_level_counts,
+    }
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+fn process_root_node_modules_warning(
+    compute: ComputeType,
+    diagnostics: &ArtifactFileDiagnostics,
+) -> Option<String> {
+    if compute != ComputeType::Process || !diagnostics.has_root_node_modules_bloat() {
+        return None;
+    }
+
+    Some(format!(
+        "PROCESS output directory is the project root and includes node_modules ({} of {} files). \
+         The process bundle will include installed dependencies and may exceed artifact file limits. \
+         Use a dedicated deploy output directory with bundled server files, or deploy only dist/ as STATIC if no server API is required. \
+         See: {BUILD_SETTINGS_DOCS_URL}",
+        diagnostics.node_modules_files, diagnostics.total_files
+    ))
+}
+
+fn enrich_file_count_limit_message(
+    message: impl Into<String>,
+    diagnostics: &ArtifactFileDiagnostics,
+) -> String {
+    let mut message = message.into();
+    if diagnostics.has_root_node_modules_bloat() {
+        message.push_str(&format!(
+            "\n\nDetected PROCESS output directory is the project root and contains node_modules ({} files). \
+             This usually means the deploy artifact includes the install workspace instead of a small production artifact. \
+             Set [build] output_dirs to a dedicated deploy directory, bundle server dependencies there, or deploy dist/ as STATIC if the app does not need a server API.\n\
+             See: {BUILD_SETTINGS_DOCS_URL}",
+            diagnostics.node_modules_files
+        ));
+    }
+    message
+}
+
+fn enrich_limit_details(
+    details: Option<&serde_json::Value>,
+    diagnostics: &ArtifactFileDiagnostics,
+) -> Option<serde_json::Value> {
+    let mut enriched = match details {
+        Some(serde_json::Value::Object(map)) => serde_json::Value::Object(map.clone()),
+        Some(other) => serde_json::json!({ "apiDetails": other }),
+        None => diagnostics
+            .to_json()
+            .map(|artifact_diagnostics| {
+                serde_json::json!({ "artifactDiagnostics": artifact_diagnostics })
+            })?,
+    };
+
+    if let Some(artifact_diagnostics) = diagnostics.to_json()
+        && let serde_json::Value::Object(ref mut map) = enriched
+    {
+        map.insert("artifactDiagnostics".to_string(), artifact_diagnostics);
+    }
+    Some(enriched)
+}
+
+fn is_artifact_file_count_limit(details: &serde_json::Value) -> bool {
+    details
+        .get("limitType")
+        .and_then(|v| v.as_str())
+        .is_some_and(|limit| limit == "artifactFileCount")
 }
 
 #[derive(Debug, Serialize)]
@@ -526,12 +657,12 @@ pub async fn run(
     );
     let pc_dirs = precompressed_dirs(loaded_manifest.as_ref());
     let output_dir_for_scan = output_dir.clone();
-    let (mut files, compressed_map) = tokio::task::spawn_blocking(move || {
+    let (scanned_files, compressed_map) = tokio::task::spawn_blocking(move || {
         scan_and_maybe_compress(&output_dir_for_scan, &pc_dirs)
     })
     .await
     .context("file scan task failed (panic or runtime shutdown)")??;
-    if files.is_empty() {
+    if scanned_files.is_empty() {
         return Err(output::coded_error(
             "INVALID_BUILD_OUTPUT",
             format!("output directory is empty: {}", output_dir.display()),
@@ -594,24 +725,25 @@ pub async fn run(
     }
 
     let is_process = compute == ComputeType::Process;
+    let artifact_diagnostics = artifact_file_diagnostics(&project_dir, &output_dir, &scanned_files);
+    let mut upload_files = scanned_files;
 
     // For PROCESS deployments with a manifest, only STATIC-layer files need individual
     // presigned URL uploads. COMPUTE/ISOLATE files are delivered via tar.zst bundle,
     // so they don't count against the per-file upload limit.
-    if is_process && loaded_manifest.is_some() {
-        let sd = static_layer_dirs(loaded_manifest.as_ref());
-        if !sd.is_empty() {
-            let before = files.len();
-            files.retain(|f| is_in_layer_dirs(&f.path, &sd));
-            let after = files.len();
-            if before != after {
-                tracing::info!(
-                    before,
-                    after,
-                    "filtered file list to STATIC layers only (COMPUTE files go via bundle)"
-                );
-            }
-        }
+    if let Some((before, after)) =
+        retain_static_layer_upload_files(&mut upload_files, compute, loaded_manifest.as_ref())
+    {
+        tracing::info!(
+            before,
+            after,
+            "filtered file list to STATIC layers only (COMPUTE files go via bundle)"
+        );
+    }
+
+    if let Some(warning) = process_root_node_modules_warning(compute, &artifact_diagnostics) {
+        output::warn(json, &warning, output::Phase::Deploy);
+        warnings.push(warning);
     }
 
     // manifest_raw starts from build result (may already be Some for STATIC auto-gen)
@@ -696,12 +828,13 @@ pub async fn run(
             &client,
             deployment_id,
             manifest_raw,
-            files,
+            upload_files,
             &output_dir,
             json,
             compute,
             warnings,
             compressed_map,
+            artifact_diagnostics,
         )
         .await;
     }
@@ -751,29 +884,31 @@ pub async fn run(
 
     // Validate plan-based limits
     let (max_files, max_size) = plan_limits(&ws_info);
-    if files.len() > max_files {
-        let msg = format!(
-            "Deployment exceeds maximum file count ({} / {}). \
+    if upload_files.len() > max_files {
+        let msg = enrich_file_count_limit_message(
+            format!(
+                "Deployment exceeds maximum file count ({} / {}). \
              Consider using blob storage for large assets. \
              For higher limits contact support@onreza.ru",
-            files.len(),
-            max_files
+                upload_files.len(),
+                max_files
+            ),
+            &artifact_diagnostics,
         );
         if json {
-            output::log_error_structured(
-                "deploy",
-                &msg,
-                "LIMIT_EXCEEDED",
+            let details = enrich_limit_details(
                 Some(&serde_json::json!({
                     "limitType": "artifactFileCount",
-                    "current": files.len(),
+                    "current": upload_files.len(),
                     "limit": max_files,
                 })),
+                &artifact_diagnostics,
             );
+            output::log_error_structured("deploy", &msg, "LIMIT_EXCEEDED", details.as_ref());
         }
         bail!("{msg}");
     }
-    let total_size: u64 = files.iter().map(|f| f.size).sum();
+    let total_size: u64 = upload_files.iter().map(|f| f.size).sum();
     if total_size > max_size {
         let total_mb = total_size / (1024 * 1024);
         let limit_mb = max_size / (1024 * 1024);
@@ -807,7 +942,7 @@ pub async fn run(
                 "git not available, using synthetic commit SHA",
                 output::Phase::Deploy,
             );
-            Some(synthetic_sha(&files))
+            Some(synthetic_sha(&upload_files))
         }
     };
 
@@ -841,7 +976,7 @@ pub async fn run(
     output::status(json, "~", "Creating deployment...", output::Phase::Deploy);
     let body = CreateDeploymentBody {
         manifest: manifest_raw,
-        files,
+        files: upload_files,
         production: args.prod,
         branch,
         commit_sha,
@@ -849,10 +984,36 @@ pub async fn run(
     };
     let file_count = body.files.len();
 
-    let deployment: CreateDeploymentResponse = client
+    let deployment: CreateDeploymentResponse = match client
         .post(&format!("/v1/projects/{}/deployments", project_id), &body)
         .await
-        .context("failed to create deployment")?;
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            if json
+                && let Some(api_err) = e.downcast_ref::<crate::api::StructuredApiError>()
+                && (api_err.code == "LIMIT_EXCEEDED" || api_err.code == "SUBSCRIPTION_REQUIRED")
+            {
+                let message = if api_err.code == "LIMIT_EXCEEDED"
+                    && api_err
+                        .details
+                        .as_ref()
+                        .is_some_and(is_artifact_file_count_limit)
+                {
+                    enrich_file_count_limit_message(&api_err.message, &artifact_diagnostics)
+                } else {
+                    api_err.message.clone()
+                };
+                let details = if api_err.code == "LIMIT_EXCEEDED" {
+                    enrich_limit_details(api_err.details.as_ref(), &artifact_diagnostics)
+                } else {
+                    api_err.details.clone()
+                };
+                output::log_error_structured("deploy", &message, &api_err.code, details.as_ref());
+            }
+            return Err(e.context("failed to create deployment"));
+        }
+    };
 
     // Validate server returned correct number of upload URLs (PROCESS skips individual files)
     if deployment.bundle_upload_url.is_none() && deployment.upload_urls.len() != file_count {
@@ -1266,6 +1427,7 @@ async fn resume_deploy(
     compute: ComputeType,
     warnings: Vec<String>,
     compressed_map: CompressedMap,
+    artifact_diagnostics: ArtifactFileDiagnostics,
 ) -> anyhow::Result<()> {
     let is_process = compute == ComputeType::Process;
 
@@ -1302,12 +1464,22 @@ async fn resume_deploy(
                 && let Some(api_err) = e.downcast_ref::<crate::api::StructuredApiError>()
                 && (api_err.code == "LIMIT_EXCEEDED" || api_err.code == "SUBSCRIPTION_REQUIRED")
             {
-                output::log_error_structured(
-                    "deploy",
-                    &api_err.message,
-                    &api_err.code,
-                    api_err.details.as_ref(),
-                );
+                let message = if api_err.code == "LIMIT_EXCEEDED"
+                    && api_err
+                        .details
+                        .as_ref()
+                        .is_some_and(is_artifact_file_count_limit)
+                {
+                    enrich_file_count_limit_message(&api_err.message, &artifact_diagnostics)
+                } else {
+                    api_err.message.clone()
+                };
+                let details = if api_err.code == "LIMIT_EXCEEDED" {
+                    enrich_limit_details(api_err.details.as_ref(), &artifact_diagnostics)
+                } else {
+                    api_err.details.clone()
+                };
+                output::log_error_structured("deploy", &message, &api_err.code, details.as_ref());
             }
             return Err(e.context("failed to prepare upload"));
         }
@@ -2299,6 +2471,28 @@ fn static_layer_dirs(manifest: Option<&build_manifest::Manifest>) -> Vec<String>
             }
         })
         .collect()
+}
+
+/// Narrow the API upload file list for PROCESS+manifest deployments without
+/// changing the full scanned artifact view used by bundle diagnostics.
+fn retain_static_layer_upload_files(
+    files: &mut Vec<FileEntry>,
+    compute: ComputeType,
+    manifest: Option<&build_manifest::Manifest>,
+) -> Option<(usize, usize)> {
+    if compute != ComputeType::Process || manifest.is_none() {
+        return None;
+    }
+
+    let static_dirs = static_layer_dirs(manifest);
+    if static_dirs.is_empty() {
+        return None;
+    }
+
+    let before = files.len();
+    files.retain(|f| is_in_layer_dirs(&f.path, &static_dirs));
+    let after = files.len();
+    (before != after).then_some((before, after))
 }
 
 /// Returns `true` if the file belongs to one of the given layer directories.

@@ -2009,7 +2009,7 @@ fn is_in_layer_dirs_root_dir_matches_all() {
 fn file_list_filtered_for_process_with_manifest() {
     // Simulate what happens in run(): scan produces all files, then STATIC filter
     // keeps only files belonging to STATIC layer directories.
-    let all_files = vec![
+    let mut upload_files = vec![
         FileEntry {
             path: "_static/_next/static/chunks/main.js".into(),
             size: 100,
@@ -2036,14 +2036,192 @@ fn file_list_filtered_for_process_with_manifest() {
             sha256: None,
         },
     ];
-    let sd = vec!["_static/".to_string(), "public/".to_string()];
-    let filtered: Vec<_> = all_files
-        .into_iter()
-        .filter(|f| is_in_layer_dirs(&f.path, &sd))
-        .collect();
-    assert_eq!(filtered.len(), 2);
-    assert_eq!(filtered[0].path, "_static/_next/static/chunks/main.js");
-    assert_eq!(filtered[1].path, "public/favicon.ico");
+    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
+        r#"{
+        "version": 1,
+        "layers": [
+            { "name": "cdn", "target": "STATIC", "directory": "_static" },
+            { "name": "pub", "target": "STATIC", "directory": "public" },
+            { "name": "srv", "target": "COMPUTE", "directory": ".", "entry": "server.js" }
+        ],
+        "routes": [
+            { "pattern": "^/_next/.*$", "layer": "cdn", "priority": 100 },
+            { "pattern": "^/.*$", "layer": "pub", "priority": 50 },
+            { "pattern": "^/.*$", "layer": "srv", "priority": 0 }
+        ]
+    }"#,
+    )
+    .unwrap();
+
+    let changed =
+        retain_static_layer_upload_files(&mut upload_files, ComputeType::Process, Some(&manifest));
+
+    assert_eq!(changed, Some((5, 2)));
+    assert_eq!(upload_files.len(), 2);
+    assert_eq!(upload_files[0].path, "_static/_next/static/chunks/main.js");
+    assert_eq!(upload_files[1].path, "public/favicon.ico");
+}
+
+#[test]
+fn artifact_diagnostics_detects_root_node_modules_bloat() {
+    let project = tempdir().unwrap();
+    let files = vec![
+        FileEntry {
+            path: "node_modules/react/index.js".into(),
+            size: 1,
+            sha256: None,
+        },
+        FileEntry {
+            path: "node_modules/date-fns/a.js".into(),
+            size: 1,
+            sha256: None,
+        },
+        FileEntry {
+            path: "server.ts".into(),
+            size: 1,
+            sha256: None,
+        },
+    ];
+
+    let diagnostics = artifact_file_diagnostics(project.path(), project.path(), &files);
+
+    assert!(diagnostics.output_dir_is_project_root);
+    assert_eq!(diagnostics.node_modules_files, 2);
+    assert_eq!(
+        diagnostics.top_level_counts,
+        vec![
+            ("node_modules".to_string(), 2),
+            ("server.ts".to_string(), 1)
+        ]
+    );
+}
+
+#[test]
+fn artifact_diagnostics_stay_based_on_full_process_bundle_after_static_filtering() {
+    let project = tempdir().unwrap();
+    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
+        r#"{
+        "version": 1,
+        "layers": [
+            { "name": "cdn", "target": "STATIC", "directory": "_static" },
+            { "name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js" }
+        ],
+        "routes": [
+            { "pattern": "^/_next/.*$", "layer": "cdn", "priority": 100 },
+            { "pattern": "^/.*$", "layer": "server", "priority": 0 }
+        ]
+    }"#,
+    )
+    .unwrap();
+    let mut scanned_files = Vec::new();
+    scanned_files.push(FileEntry {
+        path: "_static/_next/static/chunks/main.js".into(),
+        size: 1,
+        sha256: None,
+    });
+    scanned_files.push(FileEntry {
+        path: "server.js".into(),
+        size: 1,
+        sha256: None,
+    });
+    for i in 0..ROOT_NODE_MODULES_WARNING_MIN_FILES {
+        scanned_files.push(FileEntry {
+            path: format!("node_modules/pkg-{i}/index.js"),
+            size: 1,
+            sha256: None,
+        });
+    }
+
+    let diagnostics = artifact_file_diagnostics(project.path(), project.path(), &scanned_files);
+    let mut upload_files = scanned_files;
+    let changed =
+        retain_static_layer_upload_files(&mut upload_files, ComputeType::Process, Some(&manifest));
+
+    assert_eq!(changed, Some((ROOT_NODE_MODULES_WARNING_MIN_FILES + 2, 1)));
+    assert_eq!(upload_files[0].path, "_static/_next/static/chunks/main.js");
+    assert_eq!(
+        diagnostics.node_modules_files,
+        ROOT_NODE_MODULES_WARNING_MIN_FILES
+    );
+    assert_eq!(
+        diagnostics.total_files,
+        ROOT_NODE_MODULES_WARNING_MIN_FILES + 2
+    );
+    assert!(
+        process_root_node_modules_warning(ComputeType::Process, &diagnostics).is_some(),
+        "PROCESS bundle diagnostics must not be narrowed to STATIC upload files"
+    );
+}
+
+#[test]
+fn process_root_node_modules_warning_requires_large_root_process_artifact() {
+    let mut diagnostics = ArtifactFileDiagnostics {
+        total_files: 1_500,
+        output_dir_is_project_root: true,
+        node_modules_files: 1_200,
+        top_level_counts: vec![("node_modules".into(), 1_200)],
+    };
+
+    let warning = process_root_node_modules_warning(ComputeType::Process, &diagnostics)
+        .expect("large root node_modules should warn");
+    assert!(warning.contains("PROCESS output directory is the project root"));
+    assert!(warning.contains("node_modules (1200 of 1500 files)"));
+    assert!(warning.contains(BUILD_SETTINGS_DOCS_URL));
+
+    assert!(process_root_node_modules_warning(ComputeType::Static, &diagnostics).is_none());
+
+    diagnostics.output_dir_is_project_root = false;
+    assert!(process_root_node_modules_warning(ComputeType::Process, &diagnostics).is_none());
+}
+
+#[test]
+fn limit_details_include_artifact_diagnostics_for_root_node_modules() {
+    let diagnostics = ArtifactFileDiagnostics {
+        total_files: 15_503,
+        output_dir_is_project_root: true,
+        node_modules_files: 15_457,
+        top_level_counts: vec![("node_modules".into(), 15_457), ("src".into(), 5)],
+    };
+
+    let details = enrich_limit_details(
+        Some(&serde_json::json!({
+            "limitType": "artifactFileCount",
+            "current": 15503,
+            "limit": 5000,
+        })),
+        &diagnostics,
+    )
+    .expect("details should be enriched");
+
+    assert_eq!(details["limitType"], "artifactFileCount");
+    assert_eq!(details["artifactDiagnostics"]["nodeModulesFiles"], 15457);
+    assert_eq!(
+        details["artifactDiagnostics"]["topLevelFileCounts"][0]["name"],
+        "node_modules"
+    );
+}
+
+#[test]
+fn limit_details_preserve_api_details_without_artifact_diagnostics() {
+    let diagnostics = ArtifactFileDiagnostics {
+        total_files: 10,
+        output_dir_is_project_root: false,
+        node_modules_files: 0,
+        top_level_counts: vec![("dist".into(), 10)],
+    };
+
+    let details = enrich_limit_details(
+        Some(&serde_json::json!({
+            "limitType": "artifactFileCount",
+            "current": 10,
+            "limit": 5,
+        })),
+        &diagnostics,
+    )
+    .expect("api details should be preserved");
+
+    assert_eq!(details["limitType"], "artifactFileCount");
+    assert!(details.get("artifactDiagnostics").is_none());
 }
 
 // ── is_nextjs_project ───────────────────────────────────────
