@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.29.4] - 2026-05-02
+
+### 🐛 Bug Fixes
+
+- **deploy:** keep process artifact diagnostics on full scan ([8ddd2ca](https://github.com/ONREZA/nrz-cli/commit/8ddd2caf6d31253383331a97fa2dbcc37d72dc2b))
+
 ## [0.29.3] - 2026-04-30
 
 ### 🐛 Bug Fixes
