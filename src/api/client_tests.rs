@@ -4,12 +4,16 @@ use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::header::CONTENT_LENGTH;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::put;
 use bytes::Bytes;
 
-use super::client::{ApiClient, UploadRetryPolicy};
+use super::client::{
+    ApiClient, PresignedHeadVerify, PresignedPutHeaders, UploadRetryPolicy, explain_s3_failure,
+    sha256_hex_to_base64,
+};
 
 #[derive(Clone)]
 struct MockState {
@@ -34,10 +38,57 @@ async fn handler(State(state): State<MockState>) -> impl IntoResponse {
     }
 }
 
+async fn conditional_header_handler(headers: HeaderMap) -> impl IntoResponse {
+    match headers
+        .get("if-none-match")
+        .and_then(|value| value.to_str().ok())
+    {
+        Some("*") => (StatusCode::OK, "ok"),
+        _ => (StatusCode::BAD_REQUEST, "missing if-none-match"),
+    }
+}
+
+async fn precondition_failed_handler() -> impl IntoResponse {
+    (StatusCode::PRECONDITION_FAILED, "exists")
+}
+
+async fn verify_head_handler() -> impl IntoResponse {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_LENGTH, HeaderValue::from_static("16"));
+    headers.insert(
+        "x-amz-checksum-sha256",
+        HeaderValue::from_str(&sha256_hex_to_base64(FAKE_SHA).unwrap()).unwrap(),
+    );
+    (StatusCode::OK, headers)
+}
+
 async fn spawn_mock(state: MockState) -> (String, tokio::task::JoinHandle<()>) {
     let app = Router::new()
         .route("/upload", put(handler))
         .with_state(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/upload"), handle)
+}
+
+async fn spawn_conditional_header_mock() -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new().route("/upload", put(conditional_header_handler));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/upload"), handle)
+}
+
+async fn spawn_precondition_with_head_mock() -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new().route(
+        "/upload",
+        put(precondition_failed_handler).head(verify_head_handler),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let handle = tokio::spawn(async move {
@@ -54,6 +105,11 @@ fn payload() -> Bytes {
     Bytes::from_static(&[0u8; 16])
 }
 
+/// 64 lowercase hex chars — valid input for `put_blob_with_policy`'s SHA-256
+/// argument. The mock S3 doesn't verify the checksum header (it accepts any
+/// PUT), so the value just needs to pass the upload-side format check.
+const FAKE_SHA: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
 #[tokio::test]
 async fn succeeds_on_first_attempt() {
     let attempts = Arc::new(AtomicU32::new(0));
@@ -67,16 +123,106 @@ async fn succeeds_on_first_attempt() {
 
     let client = test_client();
     client
-        .put_bytes_with_policy(
+        .put_blob_with_policy(
             &url,
             payload(),
-            "application/octet-stream",
+            FAKE_SHA,
             &UploadRetryPolicy::fast_for_tests(),
         )
         .await
         .expect("upload should succeed");
 
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn sends_required_presigned_put_headers() {
+    let (url, _h) = spawn_conditional_header_mock().await;
+
+    let client = test_client();
+    client
+        .put_blob_with_headers(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &PresignedPutHeaders::if_none_match_any(),
+        )
+        .await
+        .expect("conditional upload should send If-None-Match");
+}
+
+#[tokio::test]
+async fn conditional_precondition_failed_verifies_existing_object() {
+    let (url, _h) = spawn_precondition_with_head_mock().await;
+    let verify_head = PresignedHeadVerify {
+        url: url.clone(),
+        content_length: 16,
+        sha256: FAKE_SHA.to_string(),
+    };
+
+    let client = test_client();
+    client
+        .put_blob_with_headers_and_verify(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &PresignedPutHeaders::if_none_match_any(),
+            Some(&verify_head),
+        )
+        .await
+        .expect("conditional 412 with verified matching object should be idempotent success");
+}
+
+#[tokio::test]
+async fn conditional_precondition_failed_without_verify_head_is_error() {
+    let attempts = Arc::new(AtomicU32::new(0));
+    let (url, _h) = spawn_mock(MockState {
+        attempts: attempts.clone(),
+        fail_times: u32::MAX,
+        fail_status: StatusCode::PRECONDITION_FAILED,
+        retry_after: None,
+    })
+    .await;
+
+    let client = test_client();
+    let err = client
+        .put_blob_with_headers(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &PresignedPutHeaders::if_none_match_any(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert!(err.to_string().contains("verifyHead"), "{err}");
+}
+
+#[tokio::test]
+async fn precondition_failed_without_conditional_header_is_error() {
+    let attempts = Arc::new(AtomicU32::new(0));
+    let (url, _h) = spawn_mock(MockState {
+        attempts: attempts.clone(),
+        fail_times: u32::MAX,
+        fail_status: StatusCode::PRECONDITION_FAILED,
+        retry_after: None,
+    })
+    .await;
+
+    let client = test_client();
+    let err = client
+        .put_blob_with_policy(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &UploadRetryPolicy::fast_for_tests(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    assert!(err.to_string().contains("412"), "{err}");
 }
 
 #[tokio::test]
@@ -92,10 +238,10 @@ async fn retries_on_429_then_succeeds() {
 
     let client = test_client();
     client
-        .put_bytes_with_policy(
+        .put_blob_with_policy(
             &url,
             payload(),
-            "application/octet-stream",
+            FAKE_SHA,
             &UploadRetryPolicy::fast_for_tests(),
         )
         .await
@@ -117,10 +263,10 @@ async fn retries_on_408_then_succeeds() {
 
     let client = test_client();
     client
-        .put_bytes_with_policy(
+        .put_blob_with_policy(
             &url,
             payload(),
-            "application/octet-stream",
+            FAKE_SHA,
             &UploadRetryPolicy::fast_for_tests(),
         )
         .await
@@ -142,10 +288,10 @@ async fn retries_on_5xx() {
 
     let client = test_client();
     client
-        .put_bytes_with_policy(
+        .put_blob_with_policy(
             &url,
             payload(),
-            "application/octet-stream",
+            FAKE_SHA,
             &UploadRetryPolicy::fast_for_tests(),
         )
         .await
@@ -169,7 +315,7 @@ async fn honors_retry_after_header() {
     let policy = UploadRetryPolicy::fast_for_tests();
     let start = Instant::now();
     client
-        .put_bytes_with_policy(&url, payload(), "application/octet-stream", &policy)
+        .put_blob_with_policy(&url, payload(), FAKE_SHA, &policy)
         .await
         .expect("upload should succeed after Retry-After sleep");
     let elapsed = start.elapsed();
@@ -201,7 +347,7 @@ async fn non_numeric_retry_after_falls_back_to_backoff() {
     let policy = UploadRetryPolicy::fast_for_tests();
     let start = Instant::now();
     client
-        .put_bytes_with_policy(&url, payload(), "application/octet-stream", &policy)
+        .put_blob_with_policy(&url, payload(), FAKE_SHA, &policy)
         .await
         .expect("non-numeric Retry-After should silently fall back to exp backoff");
     let elapsed = start.elapsed();
@@ -229,7 +375,7 @@ async fn retry_after_exceeding_remaining_budget_fails_fast() {
     let policy = UploadRetryPolicy::fast_for_tests();
     let start = Instant::now();
     let err = client
-        .put_bytes_with_policy(&url, payload(), "application/octet-stream", &policy)
+        .put_blob_with_policy(&url, payload(), FAKE_SHA, &policy)
         .await
         .expect_err("Retry-After > budget must bail immediately");
     let elapsed = start.elapsed();
@@ -260,10 +406,10 @@ async fn fails_fast_on_403() {
 
     let client = test_client();
     let err = client
-        .put_bytes_with_policy(
+        .put_blob_with_policy(
             &url,
             payload(),
-            "application/octet-stream",
+            FAKE_SHA,
             &UploadRetryPolicy::fast_for_tests(),
         )
         .await
@@ -291,7 +437,7 @@ async fn fails_after_exhausting_attempts() {
     let policy = UploadRetryPolicy::fast_for_tests();
     let max = policy.max_attempts();
     let err = client
-        .put_bytes_with_policy(&url, payload(), "application/octet-stream", &policy)
+        .put_blob_with_policy(&url, payload(), FAKE_SHA, &policy)
         .await
         .expect_err("should exhaust retries");
 
@@ -317,7 +463,7 @@ async fn fails_when_budget_expires_before_attempts() {
     let client = test_client();
     let start = Instant::now();
     let err = client
-        .put_bytes_with_policy(&url, payload(), "application/octet-stream", &policy)
+        .put_blob_with_policy(&url, payload(), FAKE_SHA, &policy)
         .await
         .expect_err("should exhaust on budget");
     let elapsed = start.elapsed();
@@ -348,7 +494,7 @@ async fn retries_transport_error_then_exhausts() {
     let policy = UploadRetryPolicy::fast_for_tests();
     let start = Instant::now();
     let err = client
-        .put_bytes_with_policy(&url, payload(), "application/octet-stream", &policy)
+        .put_blob_with_policy(&url, payload(), FAKE_SHA, &policy)
         .await
         .expect_err("connection refused must eventually bail");
     let elapsed = start.elapsed();
@@ -363,4 +509,101 @@ async fn retries_transport_error_then_exhausts() {
         chain.contains("attempt"),
         "error should mention attempts after exhaustion: {chain}"
     );
+}
+
+// ── sha256_hex_to_base64 ────────────────────────────────────
+//
+// Mistakes here surface as `400 BadDigest` from S3 with no other clue, since
+// the header is the entire integrity contract for blob/bundle PUTs. Worth a
+// dedicated test surface even though the helper is small.
+
+/// SHA-256 of "hello world" — used as a known-good vector across the codebase.
+const HELLO_WORLD_SHA: &str = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
+/// AWS-canonical base64 of the raw 32-byte SHA above (NOT base64 of the hex string).
+const HELLO_WORLD_SHA_B64: &str = "uU0nuZNNPgilLlLX2n2r+sSE7+N6U4DukIj3rOLvzek=";
+
+#[test]
+fn sha256_hex_to_base64_known_vector() {
+    let got = sha256_hex_to_base64(HELLO_WORLD_SHA).unwrap();
+    assert_eq!(got, HELLO_WORLD_SHA_B64);
+}
+
+#[test]
+fn sha256_hex_to_base64_rejects_uppercase() {
+    let upper = HELLO_WORLD_SHA.to_uppercase();
+    let err = sha256_hex_to_base64(&upper).unwrap_err();
+    assert!(err.to_string().contains("lowercase"), "{err}");
+}
+
+#[test]
+fn sha256_hex_to_base64_rejects_too_short() {
+    let short = &HELLO_WORLD_SHA[..63];
+    let err = sha256_hex_to_base64(short).unwrap_err();
+    assert!(err.to_string().contains("64"), "{err}");
+}
+
+#[test]
+fn sha256_hex_to_base64_rejects_too_long() {
+    let mut long = HELLO_WORLD_SHA.to_string();
+    long.push('a');
+    let err = sha256_hex_to_base64(&long).unwrap_err();
+    assert!(err.to_string().contains("64"), "{err}");
+}
+
+#[test]
+fn sha256_hex_to_base64_rejects_non_hex() {
+    // Right length, one bad char in the middle.
+    let mut bad = HELLO_WORLD_SHA.to_string();
+    bad.replace_range(30..31, "z");
+    let err = sha256_hex_to_base64(&bad).unwrap_err();
+    assert!(err.to_string().contains("lowercase"), "{err}");
+}
+
+#[test]
+fn sha256_hex_to_base64_rejects_empty() {
+    let err = sha256_hex_to_base64("").unwrap_err();
+    assert!(err.to_string().contains("64"), "{err}");
+}
+
+// ── explain_s3_failure ──────────────────────────────────────
+//
+// `400 BadDigest` and `403 SignatureDoesNotMatch` are the two codes the
+// conditioned-PUT contract produces under content/size drift; users hit them
+// most often via build-cache races between scan and upload. The translation
+// turns S3's XML dump into one actionable sentence.
+
+#[test]
+fn explain_s3_failure_translates_bad_digest() {
+    let body = r#"<?xml version="1.0" encoding="UTF-8"?><Error><Code>BadDigest</Code><Message>The Content-MD5 you specified did not match what we received.</Message></Error>"#;
+    let msg = explain_s3_failure(StatusCode::BAD_REQUEST, body);
+    assert!(msg.contains("BadDigest"));
+    assert!(msg.contains("SHA-256"));
+    assert!(msg.contains("Rebuild"), "should hint at rebuild: {msg}");
+}
+
+#[test]
+fn explain_s3_failure_translates_signature_does_not_match() {
+    let body = r#"<Error><Code>SignatureDoesNotMatch</Code><Message>The request signature we calculated does not match.</Message></Error>"#;
+    let msg = explain_s3_failure(StatusCode::FORBIDDEN, body);
+    assert!(msg.contains("SignatureDoesNotMatch"));
+    assert!(msg.contains("Content-Length"));
+}
+
+#[test]
+fn explain_s3_failure_falls_back_to_raw_body_for_unknown_code() {
+    let body = r#"<Error><Code>EntityTooLarge</Code><Message>Your proposed upload exceeds the maximum allowed object size.</Message></Error>"#;
+    let msg = explain_s3_failure(StatusCode::BAD_REQUEST, body);
+    assert!(
+        msg.contains("EntityTooLarge"),
+        "raw body should be preserved as diagnostic when we don't know the code: {msg}"
+    );
+}
+
+#[test]
+fn explain_s3_failure_falls_back_when_body_has_no_code_tag() {
+    // Some gateways return plaintext on edge errors — must not silently lose it.
+    let body = "503 Service Unavailable\n";
+    let msg = explain_s3_failure(StatusCode::SERVICE_UNAVAILABLE, body);
+    assert!(msg.contains("503"));
+    assert!(msg.contains("Service Unavailable"));
 }

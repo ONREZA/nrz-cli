@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::Context;
@@ -58,6 +58,7 @@ pub struct Manifest {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Layer {
     pub name: String,
     pub target: LayerTarget,
@@ -68,8 +69,8 @@ pub struct Layer {
     pub export_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeConfig>,
-    #[serde(rename = "isPrecompressed", skip_serializing_if = "Option::is_none")]
-    pub is_precompressed: Option<bool>,
+    #[serde(rename = "bundleSha256", skip_serializing_if = "Option::is_none")]
+    pub bundle_sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
@@ -125,6 +126,8 @@ pub struct Route {
     pub methods: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub headers: Option<std::collections::HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallthrough: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -183,6 +186,10 @@ fn has_path_traversal(s: &str) -> bool {
         return true;
     }
     s.replace('\\', "/").split('/').any(|seg| seg == "..")
+}
+
+fn is_lower_sha256_hex(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 static JS_ONLY_REGEX: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
@@ -275,14 +282,11 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                 if layer.runtime.is_some() {
                     anyhow::bail!("STATIC layer '{}' must not have 'runtime'", layer.name);
                 }
+                if layer.bundle_sha256.is_some() {
+                    anyhow::bail!("STATIC layer '{}' must not have 'bundleSha256'", layer.name);
+                }
             }
             LayerTarget::Isolate => {
-                if layer.is_precompressed.is_some() {
-                    anyhow::bail!(
-                        "ISOLATE layer '{}' must not have 'isPrecompressed'",
-                        layer.name
-                    );
-                }
                 let entry = layer.entry.as_deref().ok_or_else(|| {
                     anyhow::anyhow!("layer '{}' (target=ISOLATE) requires 'entry'", layer.name)
                 })?;
@@ -314,14 +318,14 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                         other
                     ),
                 }
-            }
-            LayerTarget::Compute => {
-                if layer.is_precompressed.is_some() {
+                if layer.bundle_sha256.is_some() {
                     anyhow::bail!(
-                        "COMPUTE layer '{}' must not have 'isPrecompressed'",
+                        "ISOLATE layer '{}' must not have 'bundleSha256'",
                         layer.name
                     );
                 }
+            }
+            LayerTarget::Compute => {
                 let entry = layer.entry.as_deref().ok_or_else(|| {
                     anyhow::anyhow!("layer '{}' (target=COMPUTE) requires 'entry'", layer.name)
                 })?;
@@ -344,6 +348,14 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                 }
                 if layer.export_format.is_some() {
                     anyhow::bail!("COMPUTE layer '{}' must not have 'export'", layer.name);
+                }
+                if let Some(bundle_sha256) = &layer.bundle_sha256
+                    && !is_lower_sha256_hex(bundle_sha256)
+                {
+                    anyhow::bail!(
+                        "COMPUTE layer '{}' bundleSha256 must be 64 lowercase hex chars",
+                        layer.name
+                    );
                 }
             }
         }
@@ -378,10 +390,15 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
         );
     }
 
-    let layer_names: HashSet<&str> = manifest.layers.iter().map(|l| l.name.as_str()).collect();
+    let layer_targets: HashMap<&str, LayerTarget> = manifest
+        .layers
+        .iter()
+        .map(|l| (l.name.as_str(), l.target))
+        .collect();
 
-    let mut route_pattern_priorities: HashSet<(&str, i32)> = HashSet::new();
-    for (route_idx, route) in manifest.routes.iter().enumerate() {
+    let mut route_pattern_layers: HashSet<(&str, &str)> = HashSet::new();
+    let mut terminal_patterns: HashMap<&str, &str> = HashMap::new();
+    for route in &manifest.routes {
         if !route.pattern.starts_with("^/") {
             anyhow::bail!("route pattern must start with '^/': '{}'", route.pattern);
         }
@@ -399,39 +416,32 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
         if let Err(e) = Regex::new(&route.pattern) {
             anyhow::bail!("invalid regex in route pattern '{}': {}", route.pattern, e);
         }
-        let priority = route.priority.unwrap_or(0);
-        if !route_pattern_priorities.insert((route.pattern.as_str(), priority)) {
+        if !route_pattern_layers.insert((route.pattern.as_str(), route.layer.as_str())) {
             anyhow::bail!(
-                "duplicate route pattern with same priority: '{}' (priority {}{})",
+                "duplicate route pattern+layer: '{}' -> '{}'",
                 route.pattern,
-                priority,
-                if route.priority.is_none() {
-                    ", implicit default"
-                } else {
-                    ""
-                }
+                route.layer
             );
         }
-        // Same pattern + same layer at different priorities is unreachable:
-        // only one priority is evaluated per (pattern, layer) pair, making the other dead code.
-        for other in &manifest.routes[..route_idx] {
-            if other.pattern == route.pattern
-                && other.layer == route.layer
-                && other.priority.unwrap_or(0) != priority
-            {
-                anyhow::bail!(
-                    "route pattern '{}' maps to the same layer '{}' at different priorities ({} and {}), \
-                     which makes the lower-priority route unreachable",
-                    route.pattern,
-                    route.layer,
-                    other.priority.unwrap_or(0),
-                    priority
-                );
-            }
+
+        let layer_target = match layer_targets.get(route.layer.as_str()).copied() {
+            Some(target) => target,
+            None => anyhow::bail!("route references unknown layer: '{}'", route.layer),
+        };
+
+        if layer_target != LayerTarget::Static
+            && let Some(existing_layer) =
+                terminal_patterns.insert(route.pattern.as_str(), route.layer.as_str())
+        {
+            anyhow::bail!(
+                "route pattern '{}' has multiple terminal (non-STATIC) layers: '{}' and '{}'. \
+                 The second route is unreachable because COMPUTE/ISOLATE routes never fallthrough.",
+                route.pattern,
+                existing_layer,
+                route.layer
+            );
         }
-        if !layer_names.contains(route.layer.as_str()) {
-            anyhow::bail!("route references unknown layer: '{}'", route.layer);
-        }
+
         if let Some(methods) = &route.methods {
             for method in methods {
                 if !VALID_HTTP_METHODS.contains(&method.as_str()) {
@@ -445,12 +455,7 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
             }
         }
         if let Some(revalidate) = route.revalidate {
-            let layer_target = manifest
-                .layers
-                .iter()
-                .find(|l| l.name == route.layer)
-                .map(|l| l.target);
-            if layer_target == Some(LayerTarget::Static) {
+            if layer_target == LayerTarget::Static {
                 anyhow::bail!(
                     "ISR revalidate not applicable to STATIC layer '{}'",
                     route.layer
@@ -557,16 +562,11 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
     // ── Prerender ─────────────────────────────────────────────
 
     if let Some(prerender) = &manifest.prerender {
-        if !layer_names.contains(prerender.layer.as_str()) {
-            anyhow::bail!("prerender references unknown layer: '{}'", prerender.layer);
-        }
-        // Prerender layer must be STATIC
-        let prerender_layer_target = manifest
-            .layers
-            .iter()
-            .find(|l| l.name == prerender.layer)
-            .map(|l| l.target);
-        if prerender_layer_target != Some(LayerTarget::Static) {
+        let prerender_layer_target = match layer_targets.get(prerender.layer.as_str()).copied() {
+            Some(target) => target,
+            None => anyhow::bail!("prerender references unknown layer: '{}'", prerender.layer),
+        };
+        if prerender_layer_target != LayerTarget::Static {
             anyhow::bail!("prerender layer '{}' must be STATIC", prerender.layer);
         }
         // Page keys must start with '/' and paths must not contain traversal
@@ -607,7 +607,7 @@ pub fn generate_static_manifest() -> Manifest {
             entry: None,
             export_format: None,
             runtime: None,
-            is_precompressed: None,
+            bundle_sha256: None,
         }],
         routes: vec![Route {
             pattern: "^/.*$".to_string(),
@@ -616,6 +616,7 @@ pub fn generate_static_manifest() -> Manifest {
             revalidate: None,
             methods: None,
             headers: None,
+            fallthrough: None,
         }],
         prerender: None,
         middleware: None,
@@ -635,7 +636,7 @@ pub fn generate_compute_manifest(entry: &str) -> Manifest {
             entry: Some(entry.to_string()),
             export_format: None,
             runtime: None,
-            is_precompressed: None,
+            bundle_sha256: None,
         }],
         routes: vec![Route {
             pattern: "^/.*$".to_string(),
@@ -644,6 +645,7 @@ pub fn generate_compute_manifest(entry: &str) -> Manifest {
             revalidate: None,
             methods: None,
             headers: None,
+            fallthrough: None,
         }],
         prerender: None,
         middleware: None,
@@ -676,7 +678,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         entry: None,
         export_format: None,
         runtime: None,
-        is_precompressed: None,
+        bundle_sha256: None,
     }];
 
     if has_public {
@@ -687,7 +689,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
             entry: None,
             export_format: None,
             runtime: None,
-            is_precompressed: None,
+            bundle_sha256: None,
         });
     }
 
@@ -698,7 +700,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         entry: Some(server_entry.to_string()),
         export_format: None,
         runtime: None,
-        is_precompressed: None,
+        bundle_sha256: None,
     });
 
     let mut routes = vec![Route {
@@ -708,6 +710,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         revalidate: None,
         methods: None,
         headers: None,
+        fallthrough: None,
     }];
 
     if has_public {
@@ -718,6 +721,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
             revalidate: None,
             methods: None,
             headers: None,
+            fallthrough: None,
         });
     }
 
@@ -728,6 +732,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         revalidate: None,
         methods: None,
         headers: None,
+        fallthrough: None,
     });
 
     Manifest {
@@ -781,7 +786,7 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
             entry: None,
             export_format: None,
             runtime: None,
-            is_precompressed: None,
+            bundle_sha256: None,
         });
         routes.push(Route {
             pattern: pattern.to_string(),
@@ -790,6 +795,7 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
             revalidate: None,
             methods: None,
             headers: None,
+            fallthrough: None,
         });
     }
 
@@ -800,7 +806,7 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
         entry: Some(config.server_entry.to_string()),
         export_format: None,
         runtime: None,
-        is_precompressed: None,
+        bundle_sha256: None,
     });
     routes.push(Route {
         pattern: "^/.*$".to_string(),
@@ -809,6 +815,7 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
         revalidate: None,
         methods: None,
         headers: None,
+        fallthrough: None,
     });
 
     Manifest {

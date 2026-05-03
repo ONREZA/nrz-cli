@@ -1,4 +1,9 @@
-use super::env_handler::{is_secret_by_name, parse_dotenv, parse_dotenv_value};
+use serde_json::json;
+
+use super::env_handler::{
+    EnvVar, env_list_url, env_var_matches_targets, is_secret_by_name, parse_dotenv,
+    parse_dotenv_value,
+};
 
 // ── parse_dotenv ─────────────────────────────────────────────
 
@@ -167,4 +172,67 @@ fn secret_detection_case_insensitive() {
     assert!(is_secret_by_name("db_password"));
     assert!(is_secret_by_name("auth_token"));
     assert!(is_secret_by_name("client_secret"));
+}
+
+// ── server env endpoint contract ─────────────────────────────
+
+#[test]
+fn env_list_url_sends_single_target_only() {
+    assert_eq!(
+        env_list_url("proj", &["PRODUCTION".to_string()], None),
+        "/v1/projects/proj/env?target=PRODUCTION"
+    );
+    assert_eq!(
+        env_list_url(
+            "proj",
+            &["PRODUCTION".to_string(), "PREVIEW".to_string()],
+            None
+        ),
+        "/v1/projects/proj/env"
+    );
+}
+
+#[test]
+fn env_list_url_preserves_keys_filter() {
+    assert_eq!(
+        env_list_url("proj", &[], Some("API_KEY,DB_URL")),
+        "/v1/projects/proj/env?keys=API_KEY,DB_URL"
+    );
+    assert_eq!(
+        env_list_url("proj", &["PREVIEW".to_string()], Some("API_KEY")),
+        "/v1/projects/proj/env?target=PREVIEW&keys=API_KEY"
+    );
+}
+
+#[test]
+fn multi_target_filter_matches_server_single_target_semantics() {
+    let all_var: EnvVar = serde_json::from_value(json!({
+        "key": "GLOBAL",
+        "value": "x",
+        "isSecret": false,
+        "scopeType": "ALL",
+        "environments": []
+    }))
+    .unwrap();
+    let preview_var: EnvVar = serde_json::from_value(json!({
+        "key": "PREVIEW_ONLY",
+        "value": "x",
+        "isSecret": false,
+        "scopeType": "SELECTED",
+        "environments": [{ "id": "env1", "name": "Preview", "type": "PREVIEW" }]
+    }))
+    .unwrap();
+    let prod_var: EnvVar = serde_json::from_value(json!({
+        "key": "PROD_ONLY",
+        "value": "x",
+        "isSecret": false,
+        "scopeType": "SELECTED",
+        "environments": [{ "id": "env2", "name": "Production", "type": "PRODUCTION" }]
+    }))
+    .unwrap();
+
+    let targets = vec!["PREVIEW".to_string(), "DEVELOPMENT".to_string()];
+    assert!(env_var_matches_targets(&all_var, &targets));
+    assert!(env_var_matches_targets(&preview_var, &targets));
+    assert!(!env_var_matches_targets(&prod_var, &targets));
 }

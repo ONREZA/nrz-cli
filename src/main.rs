@@ -4,6 +4,8 @@ mod build;
 mod cli;
 mod deploy;
 mod deployments;
+#[cfg(test)]
+mod deployments_tests;
 mod detect;
 mod detect_sync;
 mod dev;

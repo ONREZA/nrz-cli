@@ -2,8 +2,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
+use base64::Engine;
 use bytes::Bytes;
-use reqwest::header::{HeaderMap, HeaderValue};
+use reqwest::header::{CONTENT_LENGTH, ETAG, HeaderMap, HeaderValue, IF_NONE_MATCH};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Deserialize)]
@@ -80,6 +81,63 @@ pub struct ApiClient {
     /// Plain client without auth headers, reused for presigned S3 uploads.
     upload_client: reqwest::Client,
     base_url: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PresignedPutResult {
+    pub(crate) e_tag: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "kebab-case")]
+pub(crate) struct PresignedPutHeaders {
+    pub(crate) if_none_match: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PresignedHeadVerify {
+    pub(crate) url: String,
+    pub(crate) content_length: u64,
+    pub(crate) sha256: String,
+}
+
+impl PresignedPutHeaders {
+    pub(crate) fn empty() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn if_none_match_any() -> Self {
+        Self {
+            if_none_match: Some("*".to_string()),
+        }
+    }
+
+    pub(crate) fn require_if_none_match_any(&self) -> anyhow::Result<Self> {
+        match self.if_none_match.as_deref() {
+            Some("*") => Ok(self.clone()),
+            Some(value) => bail!(
+                "server returned unsupported If-None-Match value for conditional presigned PUT: {value}"
+            ),
+            None => Ok(Self::if_none_match_any()),
+        }
+    }
+
+    fn is_conditional_create(&self) -> bool {
+        self.if_none_match.as_deref() == Some("*")
+    }
+
+    fn to_header_map(&self) -> anyhow::Result<HeaderMap> {
+        let mut headers = HeaderMap::new();
+        if let Some(value) = &self.if_none_match {
+            headers.insert(
+                IF_NONE_MATCH,
+                HeaderValue::from_str(value)
+                    .with_context(|| format!("invalid If-None-Match header value: {value}"))?,
+            );
+        }
+        Ok(headers)
+    }
 }
 
 impl ApiClient {
@@ -255,49 +313,157 @@ impl ApiClient {
         check_response(resp).await
     }
 
-    /// PUT raw bytes to an absolute URL (for presigned S3 uploads).
-    /// Uses a separate client without auth headers to avoid leaking credentials.
+    /// PUT a PACK_V1 artifact object to a server-issued conditioned presigned URL.
+    ///
+    /// The presign signature binds **both** `Content-Length` and `x-amz-checksum-sha256`
+    /// (RFC: `deployment-artifacts/INDEX.md` "No-overwrite invariant"). The CLI must
+    /// match exactly:
+    /// - `Content-Length` is set automatically by reqwest from `data.len()`.
+    /// - `x-amz-checksum-sha256` is the base64 of the SHA-256's raw 32 bytes
+    ///   (NOT base64 of the hex string — common foot-gun).
+    /// - Additional signed headers from the upload target, such as
+    ///   `If-None-Match: *` for PACK_V1 write-once pack parts, must be sent
+    ///   verbatim.
+    ///
+    /// Content-Type is intentionally **not** sent: the server doesn't sign it for
+    /// blob/bundle PUTs, and any Content-Type header reqwest *did* attach would
+    /// also need to match the signature, breaking unconditioned blob uploads.
+    /// reqwest 0.13 + `body(Bytes)` does not auto-set Content-Type, so leaving
+    /// the call free of `.header("Content-Type", …)` is safe.
     ///
     /// Retries transient failures (429, 408, 5xx, network errors) with exponential
-    /// backoff + full jitter, honoring `Retry-After` when provided. The retry policy
-    /// is provider-agnostic — parallel upload throughput self-regulates against any
-    /// rate-limited S3 gateway without needing client-side concurrency tuning.
-    pub async fn put_bytes(
+    /// backoff + full jitter, honoring `Retry-After`. Permanent 4xx integrity
+    /// rejects (400 BadDigest / 403 SignatureDoesNotMatch) propagate immediately.
+    /// `412 Precondition Failed` is accepted only for conditional create PUTs
+    /// after a presigned HEAD confirms the existing object size and checksum.
+    #[cfg(test)]
+    pub(crate) async fn put_blob_with_headers(
         &self,
         url: &str,
         data: Bytes,
-        content_type: &str,
+        sha256_hex: &str,
+        headers: &PresignedPutHeaders,
     ) -> anyhow::Result<()> {
-        self.put_bytes_with_policy(url, data, content_type, &UploadRetryPolicy::production())
+        self.put_blob_capture_with_headers(url, data, sha256_hex, headers)
+            .await
+            .map(|_| ())
+    }
+
+    pub(crate) async fn put_blob_with_headers_and_verify(
+        &self,
+        url: &str,
+        data: Bytes,
+        sha256_hex: &str,
+        headers: &PresignedPutHeaders,
+        verify_head: Option<&PresignedHeadVerify>,
+    ) -> anyhow::Result<()> {
+        self.put_blob_capture_with_policy_and_headers(
+            url,
+            data,
+            sha256_hex,
+            &UploadRetryPolicy::production(),
+            headers,
+            verify_head,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn put_blob_with_policy(
+        &self,
+        url: &str,
+        data: Bytes,
+        sha256_hex: &str,
+        policy: &UploadRetryPolicy,
+    ) -> anyhow::Result<()> {
+        self.put_blob_capture_with_policy_and_headers(
+            url,
+            data,
+            sha256_hex,
+            policy,
+            &PresignedPutHeaders::empty(),
+            None,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub(crate) async fn put_blob_capture(
+        &self,
+        url: &str,
+        data: Bytes,
+        sha256_hex: &str,
+    ) -> anyhow::Result<PresignedPutResult> {
+        self.put_blob_capture_with_headers(url, data, sha256_hex, &PresignedPutHeaders::empty())
             .await
     }
 
-    pub(crate) async fn put_bytes_with_policy(
+    pub(crate) async fn put_blob_capture_with_headers(
         &self,
         url: &str,
         data: Bytes,
-        content_type: &str,
+        sha256_hex: &str,
+        headers: &PresignedPutHeaders,
+    ) -> anyhow::Result<PresignedPutResult> {
+        self.put_blob_capture_with_policy_and_headers(
+            url,
+            data,
+            sha256_hex,
+            &UploadRetryPolicy::production(),
+            headers,
+            None,
+        )
+        .await
+    }
+
+    async fn put_blob_capture_with_policy_and_headers(
+        &self,
+        url: &str,
+        data: Bytes,
+        sha256_hex: &str,
         policy: &UploadRetryPolicy,
-    ) -> anyhow::Result<()> {
+        headers: &PresignedPutHeaders,
+        verify_head: Option<&PresignedHeadVerify>,
+    ) -> anyhow::Result<PresignedPutResult> {
+        let checksum_b64 = sha256_hex_to_base64(sha256_hex)
+            .with_context(|| format!("invalid SHA-256 for blob upload: {sha256_hex}"))?;
+        let signed_headers = headers.to_header_map()?;
+
         let started = Instant::now();
         let mut attempt: u32 = 0;
         let mut last_err: Option<anyhow::Error> = None;
 
         loop {
             attempt += 1;
-            let send_result = self
+            let mut request = self
                 .upload_client
                 .put(url)
-                .header("Content-Type", content_type)
-                .body(data.clone())
-                .send()
-                .await;
+                .header("x-amz-checksum-sha256", &checksum_b64);
+            for (name, value) in &signed_headers {
+                request = request.header(name, value);
+            }
+            let send_result = request.body(data.clone()).send().await;
 
             let (reason, retry_after) = match send_result {
                 Ok(resp) => {
                     let status = resp.status();
                     if status.is_success() {
-                        return Ok(());
+                        let e_tag = resp
+                            .headers()
+                            .get(ETAG)
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_string);
+                        return Ok(PresignedPutResult { e_tag });
+                    }
+                    if status == reqwest::StatusCode::PRECONDITION_FAILED
+                        && headers.is_conditional_create()
+                    {
+                        let verify_head = verify_head.with_context(|| {
+                            "conditional create returned 412 but server did not provide verifyHead"
+                        })?;
+                        self.verify_presigned_head(verify_head).await?;
+                        return Ok(PresignedPutResult { e_tag: None });
                     }
                     let retry_after = parse_retry_after(resp.headers());
                     let body = resp
@@ -305,7 +471,7 @@ impl ApiClient {
                         .await
                         .unwrap_or_else(|e| format!("<failed to read response: {e}>"));
                     if !is_transient_status(status) {
-                        bail!("S3 upload failed ({}): {}", status, body);
+                        bail!("{}", explain_s3_failure(status, &body));
                     }
                     (
                         format!("HTTP {}: {}", status, truncate(&body, 200)),
@@ -351,6 +517,48 @@ impl ApiClient {
             );
             tokio::time::sleep(delay).await;
         }
+    }
+
+    async fn verify_presigned_head(&self, verify: &PresignedHeadVerify) -> anyhow::Result<()> {
+        let expected_checksum_b64 = sha256_hex_to_base64(&verify.sha256)
+            .with_context(|| format!("invalid SHA-256 for HEAD verification: {}", verify.sha256))?;
+        let resp = self
+            .upload_client
+            .head(&verify.url)
+            .send()
+            .await
+            .context("failed to HEAD existing conditional upload target")?;
+        let status = resp.status();
+        if !status.is_success() {
+            bail!("conditional upload target exists but HEAD verification returned {status}");
+        }
+
+        let content_length = resp
+            .headers()
+            .get(CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .with_context(|| "conditional upload HEAD verification returned no Content-Length")?;
+        if content_length != verify.content_length {
+            bail!(
+                "conditional upload HEAD verification size mismatch: expected {}, got {}",
+                verify.content_length,
+                content_length
+            );
+        }
+
+        let checksum = resp
+            .headers()
+            .get("x-amz-checksum-sha256")
+            .and_then(|value| value.to_str().ok())
+            .with_context(
+                || "conditional upload HEAD verification returned no x-amz-checksum-sha256",
+            )?;
+        if checksum != expected_checksum_b64 {
+            bail!("conditional upload HEAD verification SHA-256 mismatch");
+        }
+
+        Ok(())
     }
 }
 
@@ -479,6 +687,60 @@ fn truncate(s: &str, n: usize) -> String {
         }
         format!("{}…", &s[..end])
     }
+}
+
+/// Translate a permanent S3 failure into an actionable CLI message.
+///
+/// S3 returns failures as XML like `<Error><Code>BadDigest</Code>...</Error>`.
+/// The raw body dumped verbatim is opaque to users — the two codes specific to
+/// the conditioned-PUT contract (`BadDigest`, `SignatureDoesNotMatch`) get
+/// bespoke hints; everything else falls back to the truncated body so we never
+/// hide diagnostic information.
+pub(crate) fn explain_s3_failure(status: reqwest::StatusCode, body: &str) -> String {
+    match parse_s3_error_code(body).as_deref() {
+        Some("BadDigest") => format!(
+            "S3 rejected the upload with BadDigest ({status}): the body's SHA-256 didn't match \
+             the signed `x-amz-checksum-sha256`. The file likely changed between scan and upload, \
+             or its content drifted. Rebuild and redeploy."
+        ),
+        Some("SignatureDoesNotMatch") => format!(
+            "S3 rejected the upload with SignatureDoesNotMatch ({status}): Content-Length or the \
+             SHA-256 header didn't match the presigned signature. Rebuild and redeploy."
+        ),
+        _ => format!("S3 upload failed ({status}): {}", truncate(body, 200)),
+    }
+}
+
+/// Hand-rolled extractor for `<Code>...</Code>` from an S3 error XML body.
+/// The body is small (<1 KB) and well-shaped; pulling in a real XML parser
+/// would be overkill for one tag, and a stray "<Code" inside `<Message>` is
+/// not a concern S3 produces in practice.
+fn parse_s3_error_code(body: &str) -> Option<String> {
+    let start = body.find("<Code>")? + "<Code>".len();
+    let end = body[start..].find("</Code>")?;
+    Some(body[start..start + end].trim().to_string())
+}
+
+/// Convert a 64-char lowercase hex SHA-256 into the base64 form S3 expects in
+/// `x-amz-checksum-sha256`.
+///
+/// The checksum is base64 of the **raw 32 bytes**, not base64 of the hex
+/// string. Mixing those up was the entire reason this helper exists in its own
+/// function: a wrong encoding would just make every PUT 400 with no clue why.
+pub(crate) fn sha256_hex_to_base64(hex: &str) -> anyhow::Result<String> {
+    if hex.len() != 64
+        || !hex
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        bail!("expected 64 lowercase hex chars, got {} chars", hex.len());
+    }
+    let mut bytes = [0u8; 32];
+    for i in 0..32 {
+        bytes[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
+            .with_context(|| format!("invalid hex byte at offset {}", i * 2))?;
+    }
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 fn build_upload_client() -> anyhow::Result<reqwest::Client> {

@@ -73,6 +73,7 @@ struct CreateResponse {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConnectionResponse {
+    #[serde(alias = "connection_uri")]
     connection_uri: String,
 }
 
@@ -87,9 +88,27 @@ struct Branch {
     is_preview_branch: Option<bool>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Serialize)]
 struct BranchListResponse {
     data: Vec<Branch>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum BranchListWire {
+    Envelope { data: Vec<Branch> },
+    Direct(Vec<Branch>),
+}
+
+impl<'de> Deserialize<'de> for BranchListResponse {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(match BranchListWire::deserialize(deserializer)? {
+            BranchListWire::Envelope { data } | BranchListWire::Direct(data) => Self { data },
+        })
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -132,7 +151,7 @@ pub struct DevEnvBranch {
 #[serde(rename_all = "camelCase")]
 struct CreateBody {
     #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
+    db_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cu_size: Option<f64>,
 }
@@ -154,8 +173,7 @@ struct CreateBranchBody {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AutoInjectBody {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    auto_inject_db_url: Option<bool>,
+    enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     env_var_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -393,7 +411,10 @@ async fn cmd_create(
 ) -> anyhow::Result<()> {
     output::status(json, "~", "Creating database...", output::Phase::Db);
 
-    let body = CreateBody { name, cu_size };
+    let body = CreateBody {
+        db_name: name,
+        cu_size,
+    };
     let created: CreateResponse = client
         .post(base, &body)
         .await
@@ -770,8 +791,18 @@ async fn cmd_config(
 
     if has_updates {
         let url = format!("{}/{}/auto-inject", base, db_id);
+        let enabled = match args.auto_inject {
+            Some(enabled) => enabled,
+            None => {
+                let info: DbInfoResponse = client
+                    .get(&format!("{}/{}", base, db_id))
+                    .await
+                    .context("failed to get current auto-inject settings")?;
+                info.db.auto_inject_db_url.unwrap_or(false)
+            }
+        };
         let body = AutoInjectBody {
-            auto_inject_db_url: args.auto_inject,
+            enabled,
             env_var_name: args.env_var,
             auto_create_preview_branch: args.preview_branches,
         };
@@ -1015,3 +1046,7 @@ fn format_cell(v: &serde_json::Value) -> String {
         other => other.to_string(),
     }
 }
+
+#[cfg(test)]
+#[path = "db_handler_tests.rs"]
+mod db_handler_tests;

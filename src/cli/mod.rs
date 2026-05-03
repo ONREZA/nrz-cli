@@ -12,6 +12,8 @@ pub mod kv;
 pub mod kv_handler;
 pub mod projects;
 pub mod projects_handler;
+#[cfg(test)]
+mod projects_handler_tests;
 pub mod workspace;
 pub mod workspace_handler;
 
