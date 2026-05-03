@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.0] - 2026-05-03
+
+### ⚠️ BREAKING CHANGES
+
+- **deploy:** switch to blob CAS upload contract, drop brotli pre-compression ([928e275](https://github.com/ONREZA/nrz-cli/commit/928e275a84c4f12152bf5bfda6c42f9ef983d002))
+
+### 🐛 Bug Fixes
+
+- **deploy:** sync artifact upload contracts ([4b39978](https://github.com/ONREZA/nrz-cli/commit/4b39978d1e3cf60469803bdb5d656799ac7c94e0))
+- **deploy:** sync deployment artifacts cli contract ([31c7151](https://github.com/ONREZA/nrz-cli/commit/31c7151138103408a91c9a388609ceffbed2a548))
+- **deploy:** align upload contract with DEP-326 server schema ([727eeb2](https://github.com/ONREZA/nrz-cli/commit/727eeb22d1ae59d859d5d13376602bd87765af31))
+
+### ♻️ Changed
+
+- **deploy:** tighten manifest resolution and bundle construction ([9ad5eeb](https://github.com/ONREZA/nrz-cli/commit/9ad5eebd389f2342781737268d2f01e472218835))
+
 ## [0.29.4] - 2026-05-02
 
 ### 🐛 Bug Fixes
