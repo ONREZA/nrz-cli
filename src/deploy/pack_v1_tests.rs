@@ -223,11 +223,17 @@ fn compute_bundle_uploads_are_declared_per_compute_layer() {
         }"#,
     );
     let bundle_sha = "a".repeat(64);
+    let bundle_files = vec![ComputeBundleFileUpload {
+        path: "server.js".into(),
+        size: 123,
+    }];
     let uploads =
-        build_compute_bundle_uploads(&manifest, &bundle_sha, 123, Some(b"bundle")).unwrap();
+        build_compute_bundle_uploads(&manifest, &bundle_sha, 123, &bundle_files, Some(b"bundle"))
+            .unwrap();
 
     assert_eq!(uploads.len(), 1);
     assert_eq!(uploads[0].layer_name, "server");
     assert_eq!(uploads[0].bundle_sha256, bundle_sha);
     assert_eq!(uploads[0].size, "123");
+    assert_eq!(uploads[0].files[0].path, "server.js");
 }

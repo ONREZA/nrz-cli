@@ -772,6 +772,10 @@ fn prepare_upload_body_serializes_pack_v1_contract() {
             layer_name: "server".into(),
             bundle_sha256: bundle_sha.clone(),
             size: "1024".into(),
+            files: vec![pack_v1::ComputeBundleFileUpload {
+                path: "server.js".into(),
+                size: 1024,
+            }],
             chunks: None,
         }],
         isolate_modules: vec![],
@@ -782,6 +786,7 @@ fn prepare_upload_body_serializes_pack_v1_contract() {
     assert!(value.get("manifestSummary").is_some());
     assert_eq!(value["manifestSummary"]["packParts"][0]["partIndex"], 0);
     assert_eq!(value["computeBundles"][0]["bundleSha256"], bundle_sha);
+    assert_eq!(value["computeBundles"][0]["files"][0]["path"], "server.js");
     assert!(value.get("uploadUrls").is_none());
     assert!(value.get("files").is_none());
     assert!(
@@ -1839,6 +1844,22 @@ fn pack_v1_static_plan_uses_only_static_layer_files() {
     assert_eq!(filtered.len(), 2);
     assert_eq!(filtered[0].path, "_static/_next/static/chunks/main.js");
     assert_eq!(filtered[1].path, "public/favicon.ico");
+}
+
+#[test]
+fn non_compute_layer_dirs_returns_only_non_compute_dirs() {
+    let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "layers": [
+            { "name": "static", "target": "STATIC", "directory": "client" },
+            { "name": "server", "target": "COMPUTE", "directory": "server", "entry": "index.js" },
+            { "name": "edge", "target": "ISOLATE", "directory": "worker", "entry": "main.js", "export": "fetch" }
+        ],
+        "routes": []
+    }))
+    .unwrap();
+
+    assert_eq!(non_compute_layer_dirs(&manifest), vec!["client", "worker"]);
 }
 
 // ── is_nextjs_project ───────────────────────────────────────

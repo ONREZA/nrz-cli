@@ -1,5 +1,5 @@
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::Context;
 use sha2::{Digest, Sha256};
@@ -13,13 +13,21 @@ pub struct BundleStats {
     pub bytes: Vec<u8>,
     pub sha256_hex: String,
     pub files: usize,
+    pub file_entries: Vec<BundleFileEntry>,
     pub symlinks_preserved: usize,
     pub symlinks_skipped: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct BundleFileEntry {
+    pub path: String,
+    pub size: u64,
 }
 
 #[derive(Debug, Default)]
 struct Counters {
     files: usize,
+    file_entries: Vec<BundleFileEntry>,
     symlinks_preserved: usize,
     symlinks_skipped: usize,
 }
@@ -37,8 +45,18 @@ struct Counters {
 /// produce a bundle that is guaranteed to fail on the compute node. Symlinks
 /// that escape the bundle root are skipped with a warning.
 pub fn create_bundle(output_dir: &Path) -> anyhow::Result<BundleStats> {
+    create_bundle_excluding_dirs(output_dir, &[])
+}
+
+/// Create a tar.zst bundle from the output directory, skipping selected
+/// layer directories that are shipped through another upload target.
+pub fn create_bundle_excluding_dirs(
+    output_dir: &Path,
+    excluded_dirs: &[String],
+) -> anyhow::Result<BundleStats> {
     let canonical_base = std::fs::canonicalize(output_dir)
         .with_context(|| format!("failed to canonicalize {}", output_dir.display()))?;
+    let excluded_dirs = normalize_excluded_dirs(excluded_dirs);
 
     let buf = Vec::new();
     let encoder = zstd::Encoder::new(buf, ZSTD_LEVEL).context("failed to create zstd encoder")?;
@@ -50,6 +68,7 @@ pub fn create_bundle(output_dir: &Path) -> anyhow::Result<BundleStats> {
         output_dir,
         output_dir,
         &canonical_base,
+        &excluded_dirs,
         &mut counters,
     )?;
 
@@ -73,9 +92,41 @@ pub fn create_bundle(output_dir: &Path) -> anyhow::Result<BundleStats> {
         bytes: compressed,
         sha256_hex,
         files: counters.files,
+        file_entries: counters.file_entries,
         symlinks_preserved: counters.symlinks_preserved,
         symlinks_skipped: counters.symlinks_skipped,
     })
+}
+
+fn normalize_excluded_dirs(dirs: &[String]) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = dirs
+        .iter()
+        .filter_map(|dir| {
+            let trimmed = dir.trim_matches('/');
+            if trimmed.is_empty() || trimmed == "." {
+                return None;
+            }
+            let path = Path::new(trimmed);
+            if path.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            }) {
+                return None;
+            }
+            Some(path.to_path_buf())
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn is_excluded(rel: &Path, excluded_dirs: &[PathBuf]) -> bool {
+    excluded_dirs
+        .iter()
+        .any(|dir| rel == dir || rel.starts_with(dir))
 }
 
 fn append_dir_recursive<W: Write>(
@@ -83,6 +134,7 @@ fn append_dir_recursive<W: Write>(
     base: &Path,
     current: &Path,
     canonical_base: &Path,
+    excluded_dirs: &[PathBuf],
     counters: &mut Counters,
 ) -> anyhow::Result<()> {
     let mut entries: Vec<_> = std::fs::read_dir(current)
@@ -100,6 +152,9 @@ fn append_dir_recursive<W: Write>(
         let rel = path
             .strip_prefix(base)
             .context("failed to compute relative path")?;
+        if is_excluded(rel, excluded_dirs) {
+            continue;
+        }
 
         if ft.is_symlink() {
             append_symlink(builder, &path, rel, canonical_base, counters)?;
@@ -108,11 +163,26 @@ fn append_dir_recursive<W: Write>(
             // (runtime code that expects `logs/`, `tmp/`, etc. to exist would otherwise
             // get an ENOENT on first access — a silent skip class we already fixed for symlinks).
             append_dir_entry(builder, rel)?;
-            append_dir_recursive(builder, base, &path, canonical_base, counters)?;
+            append_dir_recursive(
+                builder,
+                base,
+                &path,
+                canonical_base,
+                excluded_dirs,
+                counters,
+            )?;
         } else if ft.is_file() {
+            let size = entry
+                .metadata()
+                .with_context(|| format!("failed to stat {}", path.display()))?
+                .len();
             builder
                 .append_path_with_name(&path, rel)
                 .with_context(|| format!("failed to add {} to tar", rel.display()))?;
+            counters.file_entries.push(BundleFileEntry {
+                path: rel.to_string_lossy().replace('\\', "/"),
+                size,
+            });
             counters.files += 1;
         }
     }

@@ -35,6 +35,57 @@ fn produces_valid_tar_zst() {
         "directory entry should be emitted"
     );
     assert_eq!(found.len(), 3);
+    assert_eq!(stats.file_entries.len(), 2);
+    assert!(
+        stats
+            .file_entries
+            .iter()
+            .any(|file| file.path == "index.html")
+    );
+    assert!(
+        stats
+            .file_entries
+            .iter()
+            .any(|file| file.path == "assets/app.js")
+    );
+}
+
+#[test]
+fn excluding_dirs_skips_non_compute_layer_files_but_keeps_shared_deps() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("server")).unwrap();
+    fs::create_dir_all(dir.path().join("public")).unwrap();
+    fs::create_dir_all(dir.path().join("client/assets")).unwrap();
+    fs::create_dir_all(dir.path().join("node_modules/pkg")).unwrap();
+    fs::write(dir.path().join("server/index.mjs"), "export default {}").unwrap();
+    fs::write(dir.path().join("public/favicon.ico"), "ico").unwrap();
+    fs::write(dir.path().join("client/assets/app.js"), "app").unwrap();
+    fs::write(dir.path().join("node_modules/pkg/index.js"), "dep").unwrap();
+
+    let excluded = vec!["public".to_string(), "client".to_string()];
+    let stats = bundle::create_bundle_excluding_dirs(dir.path(), &excluded).unwrap();
+
+    let decoder = zstd::Decoder::new(stats.bytes.as_slice()).unwrap();
+    let mut archive = tar::Archive::new(decoder);
+    let paths: HashSet<String> = archive
+        .entries()
+        .unwrap()
+        .map(|entry| {
+            entry
+                .unwrap()
+                .path()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+
+    assert!(paths.contains("server/index.mjs"));
+    assert!(paths.contains("node_modules/pkg/index.js"));
+    assert!(!paths.contains("public/favicon.ico"));
+    assert!(!paths.contains("client/assets/app.js"));
+    assert!(!paths.contains("public"));
+    assert!(!paths.contains("client"));
 }
 
 #[test]

@@ -26,10 +26,10 @@ use crate::build;
 use crate::build::manifest as build_manifest;
 use crate::cli::{BuildArgs, DeployArgs};
 use crate::deploy::pack_v1::{
-    CompletedMultipartPart, ComputeBundleUpload, IsolateUploadPlan, MultipartCompleteTarget,
-    PackPlan, PresignedUpload, build_compute_bundle_uploads, build_isolate_upload_plan,
-    build_static_pack_plan, files_in_dirs, read_file_slice, read_pack_part_bytes,
-    read_pack_part_chunk_bytes, static_layer_dirs,
+    CompletedMultipartPart, ComputeBundleFileUpload, ComputeBundleUpload, IsolateUploadPlan,
+    MultipartCompleteTarget, PackPlan, PresignedUpload, build_compute_bundle_uploads,
+    build_isolate_upload_plan, build_static_pack_plan, files_in_dirs, read_file_slice,
+    read_pack_part_bytes, read_pack_part_chunk_bytes, static_layer_dirs,
 };
 use crate::detect::types::ComputeType;
 use crate::link;
@@ -149,6 +149,12 @@ impl BundleManifest {
             size: bytes.len() as u64,
         }
     }
+}
+
+struct LocalBundleData {
+    bytes: Vec<u8>,
+    sha256: String,
+    files: Vec<ComputeBundleFileUpload>,
 }
 
 /// Body for `POST /v1/projects/:id/deployments`.
@@ -802,10 +808,10 @@ pub async fn run(
     // Create artifact plan for PACK_V1. STATIC content is packed into ordered
     // pack parts; COMPUTE and ISOLATE targets are first-class upload targets in
     // the same prepare-upload session.
-    let bundle_data = maybe_create_bundle(&output_dir, has_compute_layer, json)?;
+    let bundle_data = maybe_create_bundle(&output_dir, &manifest_for_planning, json)?;
     let manifest_for_api = bind_compute_bundle_to_manifest_value(
         manifest_raw,
-        bundle_data.as_ref().map(|(_, sha)| sha.as_str()),
+        bundle_data.as_ref().map(|bundle| bundle.sha256.as_str()),
     )?;
     let upload_plan = build_pack_v1_upload_plan(
         &output_dir,
@@ -826,7 +832,7 @@ pub async fn run(
         commit_sha,
         bundle: bundle_data
             .as_ref()
-            .map(|(bytes, sha)| BundleManifest::of(bytes, sha)),
+            .map(|bundle| BundleManifest::of(&bundle.bytes, &bundle.sha256)),
     };
 
     let deployment: CreateDeploymentResponse = client
@@ -1073,15 +1079,21 @@ fn build_pack_v1_upload_plan(
     output_dir: &Path,
     manifest: &build_manifest::Manifest,
     files: &[FileEntry],
-    bundle_data: Option<&(Vec<u8>, String)>,
+    bundle_data: Option<&LocalBundleData>,
 ) -> anyhow::Result<PackV1UploadPlan> {
     let static_dirs = static_layer_dirs(manifest);
     let static_files = files_in_dirs(files, &static_dirs);
     let static_pack = build_static_pack_plan(output_dir, &static_files)?;
     let isolate = build_isolate_upload_plan(output_dir, manifest, files)?;
 
-    let compute_bundles = if let Some((bytes, sha)) = bundle_data {
-        build_compute_bundle_uploads(manifest, sha, bytes.len() as u64, Some(bytes))?
+    let compute_bundles = if let Some(bundle) = bundle_data {
+        build_compute_bundle_uploads(
+            manifest,
+            &bundle.sha256,
+            bundle.bytes.len() as u64,
+            &bundle.files,
+            Some(&bundle.bytes),
+        )?
     } else {
         if manifest_has_compute_layer(manifest) {
             bail!("COMPUTE manifest requires a tar.zst bundle upload plan");
@@ -1109,7 +1121,7 @@ async fn prepare_upload_and_complete(
     output_dir: &Path,
     json: bool,
     plan: PackV1UploadPlan,
-    bundle_data: Option<&(Vec<u8>, String)>,
+    bundle_data: Option<&LocalBundleData>,
 ) -> anyhow::Result<()> {
     output::status(
         json,
@@ -1643,16 +1655,16 @@ async fn upload_pack_parts(
 async fn upload_compute_bundle_targets(
     client: &ApiClient,
     targets: &[ComputeBundleUploadTarget],
-    bundle_data: Option<&(Vec<u8>, String)>,
+    bundle_data: Option<&LocalBundleData>,
     json: bool,
     multipart_targets: &mut Vec<MultipartCompleteTarget>,
 ) -> anyhow::Result<()> {
     if targets.is_empty() {
         return Ok(());
     }
-    let (bundle_bytes, bundle_sha) = bundle_data
+    let bundle_data = bundle_data
         .with_context(|| "server returned COMPUTE bundle targets but no local bundle was built")?;
-    let bundle = Bytes::from(bundle_bytes.clone());
+    let bundle = Bytes::from(bundle_data.bytes.clone());
 
     let spinner = make_spinner(
         json,
@@ -1664,12 +1676,12 @@ async fn upload_compute_bundle_targets(
     );
 
     for (idx, target) in targets.iter().enumerate() {
-        if target.bundle_sha256 != *bundle_sha {
+        if target.bundle_sha256 != bundle_data.sha256 {
             bail!(
                 "server requested bundle SHA {} for layer {}, but local bundle SHA is {}",
                 target.bundle_sha256,
                 target.layer_name,
-                bundle_sha
+                bundle_data.sha256
             );
         }
         if let Some(s) = &spinner {
@@ -2024,14 +2036,10 @@ async fn resume_deploy(
         output::Phase::Deploy,
     );
 
-    let bundle_data = maybe_create_bundle(
-        output_dir,
-        manifest_has_compute_layer(&manifest_for_planning),
-        json,
-    )?;
+    let bundle_data = maybe_create_bundle(output_dir, &manifest_for_planning, json)?;
     let manifest_for_api = bind_compute_bundle_to_manifest_value(
         manifest,
-        bundle_data.as_ref().map(|(_, sha)| sha.as_str()),
+        bundle_data.as_ref().map(|bundle| bundle.sha256.as_str()),
     )?;
     let upload_plan = build_pack_v1_upload_plan(
         output_dir,
@@ -2751,10 +2759,10 @@ fn ensure_process_entry(
 
 fn maybe_create_bundle(
     output_dir: &Path,
-    is_process: bool,
+    manifest: &build_manifest::Manifest,
     json: bool,
-) -> anyhow::Result<Option<(Vec<u8>, String)>> {
-    if !is_process {
+) -> anyhow::Result<Option<LocalBundleData>> {
+    if !manifest_has_compute_layer(manifest) {
         return Ok(None);
     }
     output::status(
@@ -2763,7 +2771,13 @@ fn maybe_create_bundle(
         "Creating tar.zst bundle (PROCESS deployment)...",
         output::Phase::Deploy,
     );
-    let stats = bundle::create_bundle(output_dir).context("failed to create tar.zst bundle")?;
+    let excluded_dirs = non_compute_layer_dirs(manifest);
+    let stats = if excluded_dirs.is_empty() {
+        bundle::create_bundle(output_dir)
+    } else {
+        bundle::create_bundle_excluding_dirs(output_dir, &excluded_dirs)
+    }
+    .context("failed to create tar.zst bundle")?;
 
     let mut summary = format!(
         "Bundle created ({}, {} files",
@@ -2787,7 +2801,32 @@ fn maybe_create_bundle(
         );
     }
 
-    Ok(Some((stats.bytes, stats.sha256_hex)))
+    let files = stats
+        .file_entries
+        .iter()
+        .map(|file| ComputeBundleFileUpload {
+            path: file.path.clone(),
+            size: file.size,
+        })
+        .collect();
+
+    Ok(Some(LocalBundleData {
+        bytes: stats.bytes,
+        sha256: stats.sha256_hex,
+        files,
+    }))
+}
+
+fn non_compute_layer_dirs(manifest: &build_manifest::Manifest) -> Vec<String> {
+    let mut dirs: Vec<String> = manifest
+        .layers
+        .iter()
+        .filter(|layer| layer.target != build_manifest::LayerTarget::Compute)
+        .map(|layer| layer.directory.clone())
+        .collect();
+    dirs.sort();
+    dirs.dedup();
+    dirs
 }
 
 // ── Build step ───────────────────────────────────────────────

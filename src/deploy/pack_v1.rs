@@ -97,8 +97,16 @@ pub(crate) struct ComputeBundleUpload {
     pub(crate) layer_name: String,
     pub(crate) bundle_sha256: String,
     pub(crate) size: String,
+    pub(crate) files: Vec<ComputeBundleFileUpload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) chunks: Option<Vec<MultipartChunkDescriptor>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ComputeBundleFileUpload {
+    pub(crate) path: String,
+    pub(crate) size: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -376,6 +384,7 @@ pub(crate) fn build_compute_bundle_uploads(
     manifest: &Manifest,
     bundle_sha256: &str,
     bundle_size: u64,
+    bundle_files: &[ComputeBundleFileUpload],
     bundle_bytes: Option<&[u8]>,
 ) -> anyhow::Result<Vec<ComputeBundleUpload>> {
     let chunks = match bundle_bytes {
@@ -393,6 +402,7 @@ pub(crate) fn build_compute_bundle_uploads(
             layer_name: layer.name.clone(),
             bundle_sha256: bundle_sha256.to_string(),
             size: bundle_size.to_string(),
+            files: bundle_files.to_vec(),
             chunks: chunks.clone(),
         })
         .collect();
