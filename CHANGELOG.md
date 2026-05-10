@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.30.1] - 2026-05-10
+
+### 🐛 Bug Fixes
+
+- **deploy:** validate compute bundle files ([ebb4ff7](https://github.com/ONREZA/nrz-cli/commit/ebb4ff7ca6d668c7e0e8ba80ad6ef74a984bf813))
+
 ## [0.30.0] - 2026-05-03
 
 ### ⚠️ BREAKING CHANGES
