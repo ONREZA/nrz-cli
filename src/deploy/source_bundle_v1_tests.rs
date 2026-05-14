@@ -99,3 +99,34 @@ fn logical_manifest_sha_uses_stable_key_ordering() {
         compute_logical_manifest_sha256(&right).unwrap()
     );
 }
+
+#[test]
+fn logical_manifest_defaults_middleware_priority_for_server_digest() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("middleware")).unwrap();
+    let middleware_body = b"export default function middleware() {}";
+    fs::write(dir.path().join("middleware/auth.mjs"), middleware_body).unwrap();
+    let middleware_sha = format!("{:x}", Sha256::digest(middleware_body));
+    let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "layers": [
+            { "name": "static", "target": "STATIC", "directory": "." }
+        ],
+        "routes": [],
+        "middleware": [{
+            "name": "auth",
+            "bundlePath": "middleware/auth.mjs",
+            "codeHash": middleware_sha,
+            "matchers": ["^/.*$"]
+        }]
+    }))
+    .unwrap();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+    let middleware = plan.logical_manifest.middleware.as_ref().unwrap();
+    assert_eq!(middleware[0].priority, 0);
+
+    let value = serde_json::to_value(&plan.logical_manifest).unwrap();
+    assert_eq!(value["middleware"][0]["priority"], 0);
+}
