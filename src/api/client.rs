@@ -107,19 +107,10 @@ impl PresignedPutHeaders {
         Self::default()
     }
 
+    #[cfg(test)]
     pub(crate) fn if_none_match_any() -> Self {
         Self {
             if_none_match: Some("*".to_string()),
-        }
-    }
-
-    pub(crate) fn require_if_none_match_any(&self) -> anyhow::Result<Self> {
-        match self.if_none_match.as_deref() {
-            Some("*") => Ok(self.clone()),
-            Some(value) => bail!(
-                "server returned unsupported If-None-Match value for conditional presigned PUT: {value}"
-            ),
-            None => Ok(Self::if_none_match_any()),
         }
     }
 
@@ -313,7 +304,7 @@ impl ApiClient {
         check_response(resp).await
     }
 
-    /// PUT a PACK_V1 artifact object to a server-issued conditioned presigned URL.
+    /// PUT a SOURCE_BUNDLE_V1 object to a server-issued conditioned presigned URL.
     ///
     /// The presign signature binds **both** `Content-Length` and `x-amz-checksum-sha256`
     /// (RFC: `deployment-artifacts/INDEX.md` "No-overwrite invariant"). The CLI must
@@ -322,7 +313,7 @@ impl ApiClient {
     /// - `x-amz-checksum-sha256` is the base64 of the SHA-256's raw 32 bytes
     ///   (NOT base64 of the hex string — common foot-gun).
     /// - Additional signed headers from the upload target, such as
-    ///   `If-None-Match: *` for PACK_V1 write-once pack parts, must be sent
+    ///   `If-None-Match: *` for write-once source objects, must be sent
     ///   verbatim.
     ///
     /// Content-Type is intentionally **not** sent: the server doesn't sign it for
