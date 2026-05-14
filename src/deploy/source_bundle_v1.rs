@@ -155,8 +155,7 @@ pub(crate) struct SourceLogicalManifestMiddleware {
     pub(crate) bundle_path: String,
     pub(crate) code_hash: String,
     pub(crate) matchers: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) priority: Option<i32>,
+    pub(crate) priority: i32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -377,7 +376,7 @@ fn build_logical_manifest(
                 bundle_path: item.bundle_path.clone(),
                 code_hash: item.code_hash.clone(),
                 matchers: item.matchers.clone(),
-                priority: item.priority,
+                priority: item.priority.unwrap_or(0),
             })
             .collect()
     });
