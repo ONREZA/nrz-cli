@@ -130,3 +130,10 @@ fn logical_manifest_defaults_middleware_priority_for_server_digest() {
     let value = serde_json::to_value(&plan.logical_manifest).unwrap();
     assert_eq!(value["middleware"][0]["priority"], 0);
 }
+
+#[test]
+fn source_bundle_multipart_threshold_matches_server_contract() {
+    assert!(!should_use_multipart(MULTIPART_THRESHOLD_BYTES - 1));
+    assert!(should_use_multipart(MULTIPART_THRESHOLD_BYTES));
+    assert!(should_use_multipart(MULTIPART_THRESHOLD_BYTES + 1));
+}

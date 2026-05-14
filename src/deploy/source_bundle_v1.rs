@@ -243,7 +243,7 @@ pub(crate) fn build_source_bundle_plan(
         let _ = std::fs::remove_file(&source_path);
     }
     let (source_sha256, source_size_bytes) = write_result?;
-    let multipart = if source_size_bytes > MULTIPART_THRESHOLD_BYTES {
+    let multipart = if should_use_multipart(source_size_bytes) {
         Some(describe_multipart(&source_path, source_size_bytes)?)
     } else {
         None
@@ -736,6 +736,10 @@ fn build_pax_path_record(path: &str) -> String {
         }
         length = byte_length;
     }
+}
+
+pub(crate) fn should_use_multipart(source_size_bytes: u64) -> bool {
+    source_size_bytes >= MULTIPART_THRESHOLD_BYTES
 }
 
 fn describe_multipart(
