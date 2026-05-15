@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.31.0] - 2026-05-15
+
+### ✨ Features
+
+- **deploy:** upload source bundle artifacts ([9cef9bc](https://github.com/ONREZA/nrz-cli/commit/9cef9bcb27dd9dc95216a0b08a1de3507b6cb158))
+
+### 🐛 Bug Fixes
+
+- **deploy:** align source bundle multipart threshold ([d955a48](https://github.com/ONREZA/nrz-cli/commit/d955a48b7cc27f70cc2a8a76f5e92bb167e041b9))
+- **deploy:** align source bundle middleware digest ([030d55a](https://github.com/ONREZA/nrz-cli/commit/030d55ad4764a139d69b5f1b4f0113f91921783f))
+
 ## [0.30.1] - 2026-05-10
 
 ### 🐛 Bug Fixes
