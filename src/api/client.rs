@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, bail};
 use base64::Engine;
 use bytes::Bytes;
-use reqwest::header::{CONTENT_LENGTH, ETAG, HeaderMap, HeaderValue, IF_NONE_MATCH};
+use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE, ETAG, HeaderMap, HeaderValue, IF_NONE_MATCH};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Deserialize)]
@@ -16,6 +16,9 @@ struct ApiError {
     #[serde(default)]
     code: Option<String>,
     #[serde(default)]
+    #[serde(alias = "retryAfterSeconds")]
+    retry_after_seconds: Option<u64>,
+    #[serde(default)]
     details: Option<serde_json::Value>,
 }
 
@@ -26,6 +29,7 @@ pub struct StructuredApiError {
     pub status: reqwest::StatusCode,
     pub code: String,
     pub message: String,
+    pub retry_after_seconds: Option<u64>,
     pub details: Option<serde_json::Value>,
 }
 
@@ -91,6 +95,7 @@ pub(crate) struct PresignedPutResult {
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "kebab-case")]
 pub(crate) struct PresignedPutHeaders {
+    pub(crate) content_type: Option<String>,
     pub(crate) if_none_match: Option<String>,
 }
 
@@ -110,6 +115,7 @@ impl PresignedPutHeaders {
     #[cfg(test)]
     pub(crate) fn if_none_match_any() -> Self {
         Self {
+            content_type: None,
             if_none_match: Some("*".to_string()),
         }
     }
@@ -120,6 +126,13 @@ impl PresignedPutHeaders {
 
     fn to_header_map(&self) -> anyhow::Result<HeaderMap> {
         let mut headers = HeaderMap::new();
+        if let Some(value) = &self.content_type {
+            headers.insert(
+                CONTENT_TYPE,
+                HeaderValue::from_str(value)
+                    .with_context(|| format!("invalid Content-Type header value: {value}"))?,
+            );
+        }
         if let Some(value) = &self.if_none_match {
             headers.insert(
                 IF_NONE_MATCH,
@@ -260,11 +273,13 @@ impl ApiClient {
 
         let status = resp.status();
         if !status.is_success() {
+            let retry_after_seconds =
+                parse_retry_after(resp.headers()).map(|duration| duration.as_secs());
             let body = resp
                 .text()
                 .await
                 .unwrap_or_else(|e| format!("<failed to read response: {e}>"));
-            return Err(extract_api_error(status, &body));
+            return Err(extract_api_error(status, &body, retry_after_seconds));
         }
 
         Ok(())
@@ -313,14 +328,9 @@ impl ApiClient {
     /// - `x-amz-checksum-sha256` is the base64 of the SHA-256's raw 32 bytes
     ///   (NOT base64 of the hex string — common foot-gun).
     /// - Additional signed headers from the upload target, such as
-    ///   `If-None-Match: *` for write-once source objects, must be sent
-    ///   verbatim.
-    ///
-    /// Content-Type is intentionally **not** sent: the server doesn't sign it for
-    /// blob/bundle PUTs, and any Content-Type header reqwest *did* attach would
-    /// also need to match the signature, breaking unconditioned blob uploads.
-    /// reqwest 0.13 + `body(Bytes)` does not auto-set Content-Type, so leaving
-    /// the call free of `.header("Content-Type", …)` is safe.
+    ///   `Content-Type: application/zstd` and `If-None-Match: *` for write-once
+    ///   source objects, must be sent verbatim. Legacy PACK blob PUTs pass an
+    ///   empty header set, so they remain free of unsigned Content-Type.
     ///
     /// Retries transient failures (429, 408, 5xx, network errors) with exponential
     /// backoff + full jitter, honoring `Retry-After`. Permanent 4xx integrity
@@ -470,7 +480,9 @@ impl ApiClient {
                     )
                 }
                 Err(err) => {
-                    if !is_transient_reqwest_err(&err) {
+                    let is_transient = is_transient_reqwest_err(&err);
+                    let err = err.without_url();
+                    if !is_transient {
                         return Err(anyhow::Error::new(err).context("S3 upload failed (permanent)"));
                     }
                     let reason = format!("network error: {err}");
@@ -518,6 +530,7 @@ impl ApiClient {
             .head(&verify.url)
             .send()
             .await
+            .map_err(|err| err.without_url())
             .context("failed to HEAD existing conditional upload target")?;
         let status = resp.status();
         if !status.is_success() {
@@ -589,9 +602,9 @@ impl UploadRetryPolicy {
     pub(crate) const fn budget_exhaust_for_tests() -> Self {
         Self {
             max_attempts: 100,
-            budget: Duration::from_millis(250),
-            base: Duration::from_millis(50),
-            cap: Duration::from_millis(200),
+            budget: Duration::from_secs(2),
+            base: Duration::from_millis(500),
+            cap: Duration::from_millis(1_000),
         }
     }
 
@@ -695,8 +708,9 @@ pub(crate) fn explain_s3_failure(status: reqwest::StatusCode, body: &str) -> Str
              or its content drifted. Rebuild and redeploy."
         ),
         Some("SignatureDoesNotMatch") => format!(
-            "S3 rejected the upload with SignatureDoesNotMatch ({status}): Content-Length or the \
-             SHA-256 header didn't match the presigned signature. Rebuild and redeploy."
+            "S3 rejected the upload with SignatureDoesNotMatch ({status}): Content-Length, \
+             Content-Type, If-None-Match, or the SHA-256 header didn't match the presigned \
+             signature. Rebuild and redeploy."
         ),
         _ => format!("S3 upload failed ({status}): {}", truncate(body, 200)),
     }
@@ -749,7 +763,11 @@ fn resolve_base_url() -> String {
     std::env::var("NRZ_API_URL").unwrap_or_else(|_| "https://api.onreza.ru".to_string())
 }
 
-fn extract_api_error(status: reqwest::StatusCode, body: &str) -> anyhow::Error {
+pub(super) fn extract_api_error(
+    status: reqwest::StatusCode,
+    body: &str,
+    retry_after_seconds: Option<u64>,
+) -> anyhow::Error {
     if let Ok(envelope) = serde_json::from_str::<ApiEnvelope<serde_json::Value>>(body) {
         if !envelope.errors.is_empty() {
             return anyhow::anyhow!(
@@ -775,6 +793,7 @@ fn extract_api_error(status: reqwest::StatusCode, body: &str) -> anyhow::Error {
                 status,
                 code,
                 message: msg,
+                retry_after_seconds: api_err.retry_after_seconds.or(retry_after_seconds),
                 details: api_err.details,
             }
             .into();
@@ -788,11 +807,13 @@ fn extract_api_error(status: reqwest::StatusCode, body: &str) -> anyhow::Error {
 async fn check_response<T: DeserializeOwned>(resp: reqwest::Response) -> anyhow::Result<T> {
     let status = resp.status();
     if !status.is_success() {
+        let retry_after_seconds =
+            parse_retry_after(resp.headers()).map(|duration| duration.as_secs());
         let body = resp
             .text()
             .await
             .unwrap_or_else(|e| format!("<failed to read response: {e}>"));
-        return Err(extract_api_error(status, &body));
+        return Err(extract_api_error(status, &body, retry_after_seconds));
     }
 
     let body = resp.text().await.context("failed to read response body")?;

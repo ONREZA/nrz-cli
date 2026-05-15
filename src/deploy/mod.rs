@@ -41,11 +41,21 @@ use crate::detect::types::ComputeType;
 use crate::link;
 use crate::output;
 use nrz::config::{HealthCheckPathConfig, ProjectConfig};
+use url::Url;
 use uuid::Uuid;
 
-const UPLOAD_COMPLETE_RETRY_BUDGET: Duration = Duration::from_secs(30 * 60);
-const UPLOAD_COMPLETE_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
-const UPLOAD_COMPLETE_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
+const SOURCE_COMPLETION_RETRY_BUDGET: Duration = Duration::from_secs(30 * 60);
+const SOURCE_COMPLETION_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
+const SOURCE_COMPLETION_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
+const PREPARE_UPLOAD_RETRY_BUDGET: Duration = Duration::from_secs(10 * 60);
+const PREPARE_UPLOAD_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
+const PREPARE_UPLOAD_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
+const UPLOAD_FAILED_RETRY_BUDGET: Duration = Duration::from_secs(5 * 60);
+const UPLOAD_FAILED_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
+const UPLOAD_FAILED_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
+const MAX_UPLOAD_FAILURE_LOG_LENGTH: usize = 4096;
+const REDACTED_URL_COMPONENT: &str = "REDACTED";
+const SOURCE_UPLOAD_PUT_FAILED: &str = "SOURCE_UPLOAD_PUT_FAILED";
 
 // ── Workspace / plan ─────────────────────────────────────────
 
@@ -1032,37 +1042,33 @@ async fn prepare_upload_and_complete(
         multipart: plan.multipart.clone(),
     };
 
-    let prepared: PrepareUploadResponse = match client
-        .post(
-            &format!("/v1/deployments/{deployment_id}/prepare-upload"),
-            &body,
-        )
-        .await
-    {
-        Ok(resp) => resp,
-        Err(e) => {
-            if json
-                && let Some(api_err) = e.downcast_ref::<crate::api::StructuredApiError>()
-                && (api_err.code == "LIMIT_EXCEEDED" || api_err.code == "SUBSCRIPTION_REQUIRED")
-            {
-                output::log_error_structured(
-                    "deploy",
-                    &api_err.message,
-                    &api_err.code,
-                    api_err.details.as_ref(),
-                );
-            }
-            return Err(e.context("failed to prepare upload"));
+    let prepared = prepare_upload_with_retry(client, deployment_id, &body, json).await?;
+
+    let multipart_completion = match upload_source_object(client, &prepared, plan, json).await {
+        Ok(completion) => completion,
+        Err(error) => {
+            report_source_object_upload_failed(
+                client,
+                deployment_id,
+                deployment_attempt_id,
+                &prepared,
+                &error,
+                json,
+            )
+            .await;
+            return Err(error);
         }
     };
-
-    let multipart_completion = upload_source_object(client, &prepared, plan, json).await?;
+    // Completion endpoints are idempotent, but response failures are ambiguous:
+    // the server may already have accepted the completion before the CLI hears
+    // back. Do not send upload-failed after this point.
     complete_source_multipart_if_needed(
         client,
         deployment_id,
         deployment_attempt_id,
         &prepared,
         multipart_completion,
+        json,
     )
     .await?;
 
@@ -1141,6 +1147,19 @@ struct UploadCompleteBody {
     logical_manifest_sha256: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadFailedBody {
+    deployment_id: String,
+    upload_session_id: String,
+    deployment_attempt_id: String,
+    operation_id: String,
+    artifact_format: String,
+    source_artifact_id: String,
+    error_code: String,
+    error_log: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(
     tag = "kind",
@@ -1180,6 +1199,28 @@ enum UploadCompleteResponse {
     NoopAlreadyCompleted {
         #[allow(dead_code)]
         deployment_id: String,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+enum UploadFailedResponse {
+    SourceUploadFailed {
+        #[allow(dead_code)]
+        deployment_id: String,
+        #[allow(dead_code)]
+        upload_session_id: String,
+    },
+    #[serde(rename = "noop_already_accepted")]
+    NoopAlreadyAccepted {
+        #[allow(dead_code)]
+        deployment_id: String,
+        #[allow(dead_code)]
+        upload_session_id: String,
     },
 }
 
@@ -1233,25 +1274,118 @@ struct SourceMultipartCompletion {
     parts: Vec<CompletedMultipartPart>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UploadCompleteRetryReason {
-    S3Visibility,
-    OwnerVerifyInProgress,
-}
+async fn prepare_upload_with_retry(
+    client: &ApiClient,
+    deployment_id: &str,
+    body: &PrepareUploadBody,
+    json: bool,
+) -> anyhow::Result<PrepareUploadResponse> {
+    let started = Instant::now();
+    let mut delay = PREPARE_UPLOAD_INITIAL_RETRY_DELAY;
+    let mut attempts = 0u32;
 
-impl UploadCompleteRetryReason {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::S3Visibility => "S3 objects are not visible yet",
-            Self::OwnerVerifyInProgress => "owner verification is still in progress",
+    loop {
+        attempts += 1;
+        match client
+            .post(
+                &format!("/v1/deployments/{deployment_id}/prepare-upload"),
+                body,
+            )
+            .await
+        {
+            Ok(resp) => return Ok(resp),
+            Err(error) => {
+                let Some(retry) = classify_prepare_upload_retry_error(&error) else {
+                    if json
+                        && let Some(api_err) =
+                            error.downcast_ref::<crate::api::StructuredApiError>()
+                        && (api_err.code == "LIMIT_EXCEEDED"
+                            || api_err.code == "SUBSCRIPTION_REQUIRED")
+                    {
+                        output::log_error_structured(
+                            "deploy",
+                            &api_err.message,
+                            &api_err.code,
+                            api_err.details.as_ref(),
+                        );
+                    }
+                    return Err(error.context("failed to prepare upload"));
+                };
+
+                let elapsed = started.elapsed();
+                if elapsed >= PREPARE_UPLOAD_RETRY_BUDGET {
+                    return Err(error.context(format!(
+                        "failed to prepare upload after waiting {:?}",
+                        PREPARE_UPLOAD_RETRY_BUDGET
+                    )));
+                }
+
+                if attempts == 1 {
+                    let message = match retry.reason {
+                        SourceControlPlaneRetryReason::ControlPlaneBackpressure => {
+                            "Waiting for artifact ingest capacity...".to_string()
+                        }
+                        reason => format!("Waiting for prepare-upload ({})...", reason.as_str()),
+                    };
+                    output::status(json, "~", message, output::Phase::Deploy);
+                }
+
+                let remaining = PREPARE_UPLOAD_RETRY_BUDGET.saturating_sub(elapsed);
+                let sleep_for = retry_delay_with_hint(
+                    retry.retry_after,
+                    delay,
+                    PREPARE_UPLOAD_MAX_RETRY_DELAY,
+                    remaining,
+                );
+                tokio::time::sleep(sleep_for).await;
+                delay = delay.saturating_mul(2).min(PREPARE_UPLOAD_MAX_RETRY_DELAY);
+            }
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UploadCompleteAttempt {
+enum SourceControlPlaneRetryReason {
+    PrepareUploadInProgress,
+    S3Visibility,
+    OwnerVerifyInProgress,
+    CompletionInProgress,
+    FailureReportInProgress,
+    ControlPlaneBackpressure,
+    TransportAmbiguous,
+}
+
+impl SourceControlPlaneRetryReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::PrepareUploadInProgress => "prepare-upload is still in progress",
+            Self::S3Visibility => "S3 objects are not visible yet",
+            Self::OwnerVerifyInProgress => "owner verification is still in progress",
+            Self::CompletionInProgress => "source completion is still in progress",
+            Self::FailureReportInProgress => "upload failure report is still in progress",
+            Self::ControlPlaneBackpressure => "artifact ingest capacity is saturated",
+            Self::TransportAmbiguous => "control-plane response was not received",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SourceControlPlaneRetry {
+    reason: SourceControlPlaneRetryReason,
+    retry_after: Option<Duration>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourceCompletionAttempt {
     Terminal,
-    Retry(UploadCompleteRetryReason),
+    Retry(SourceControlPlaneRetry),
+}
+
+fn classify_prepare_upload_retry_error(error: &anyhow::Error) -> Option<SourceControlPlaneRetry> {
+    classify_standard_control_plane_retry_error(
+        error,
+        SourceControlPlaneRetryReason::PrepareUploadInProgress,
+    )
 }
 
 async fn complete_upload_with_retry(
@@ -1264,57 +1398,8 @@ async fn complete_upload_with_retry(
     source_artifact_id: &str,
 ) -> anyhow::Result<()> {
     let started = Instant::now();
-    let mut delay = UPLOAD_COMPLETE_INITIAL_RETRY_DELAY;
+    let mut delay = SOURCE_COMPLETION_INITIAL_RETRY_DELAY;
     let mut attempts = 0u32;
-
-    loop {
-        attempts += 1;
-        match post_upload_complete_once(
-            client,
-            deployment_id,
-            upload_session_id,
-            deployment_attempt_id,
-            plan,
-            source_artifact_id,
-        )
-        .await?
-        {
-            UploadCompleteAttempt::Terminal => return Ok(()),
-            UploadCompleteAttempt::Retry(reason) => {
-                let elapsed = started.elapsed();
-                if elapsed >= UPLOAD_COMPLETE_RETRY_BUDGET {
-                    bail!(
-                        "upload-complete did not reach a terminal state after {:?} (last state: {})",
-                        UPLOAD_COMPLETE_RETRY_BUDGET,
-                        reason.as_str()
-                    );
-                }
-
-                if attempts == 1 {
-                    output::status(
-                        json,
-                        "~",
-                        format!("Waiting for upload-complete ({})...", reason.as_str()),
-                        output::Phase::Deploy,
-                    );
-                }
-
-                let sleep_for = delay.min(UPLOAD_COMPLETE_RETRY_BUDGET.saturating_sub(elapsed));
-                tokio::time::sleep(sleep_for).await;
-                delay = delay.saturating_mul(2).min(UPLOAD_COMPLETE_MAX_RETRY_DELAY);
-            }
-        }
-    }
-}
-
-async fn post_upload_complete_once(
-    client: &ApiClient,
-    deployment_id: &str,
-    upload_session_id: &str,
-    deployment_attempt_id: &str,
-    plan: &SourceBundlePlan,
-    source_artifact_id: &str,
-) -> anyhow::Result<UploadCompleteAttempt> {
     let body = UploadCompleteBody {
         deployment_id: deployment_id.to_string(),
         upload_session_id: upload_session_id.to_string(),
@@ -1327,16 +1412,60 @@ async fn post_upload_complete_once(
         logical_manifest_sha256: plan.logical_manifest_sha256.clone(),
     };
 
+    loop {
+        attempts += 1;
+        match post_upload_complete_once(client, deployment_id, &body).await? {
+            SourceCompletionAttempt::Terminal => return Ok(()),
+            SourceCompletionAttempt::Retry(retry) => {
+                let elapsed = started.elapsed();
+                if elapsed >= SOURCE_COMPLETION_RETRY_BUDGET {
+                    bail!(
+                        "upload-complete did not reach a terminal state after {:?} (last state: {})",
+                        SOURCE_COMPLETION_RETRY_BUDGET,
+                        retry.reason.as_str()
+                    );
+                }
+
+                if attempts == 1 {
+                    output::status(
+                        json,
+                        "~",
+                        format!("Waiting for upload-complete ({})...", retry.reason.as_str()),
+                        output::Phase::Deploy,
+                    );
+                }
+
+                let remaining = SOURCE_COMPLETION_RETRY_BUDGET.saturating_sub(elapsed);
+                let sleep_for = retry_delay_with_hint(
+                    retry.retry_after,
+                    delay,
+                    SOURCE_COMPLETION_MAX_RETRY_DELAY,
+                    remaining,
+                );
+                tokio::time::sleep(sleep_for).await;
+                delay = delay
+                    .saturating_mul(2)
+                    .min(SOURCE_COMPLETION_MAX_RETRY_DELAY);
+            }
+        }
+    }
+}
+
+async fn post_upload_complete_once(
+    client: &ApiClient,
+    deployment_id: &str,
+    body: &UploadCompleteBody,
+) -> anyhow::Result<SourceCompletionAttempt> {
     match client
         .post::<_, UploadCompleteResponse>(
             &format!("/v1/deployments/{deployment_id}/upload-complete"),
-            &body,
+            body,
         )
         .await
     {
         Ok(response) => classify_upload_complete_response(response),
         Err(error) => match classify_upload_complete_retry_error(&error) {
-            Some(reason) => Ok(UploadCompleteAttempt::Retry(reason)),
+            Some(reason) => Ok(SourceCompletionAttempt::Retry(reason)),
             None => Err(error.context("failed to signal upload complete")),
         },
     }
@@ -1344,39 +1473,108 @@ async fn post_upload_complete_once(
 
 fn classify_upload_complete_response(
     response: UploadCompleteResponse,
-) -> anyhow::Result<UploadCompleteAttempt> {
+) -> anyhow::Result<SourceCompletionAttempt> {
     match response {
         UploadCompleteResponse::SourceUploadCompleted { .. }
         | UploadCompleteResponse::SourceFastPathCompleted { .. }
         | UploadCompleteResponse::SourceVerifiedAwaitingRuntime { .. }
         | UploadCompleteResponse::NoopAlreadyCompleted { .. } => {
-            Ok(UploadCompleteAttempt::Terminal)
+            Ok(SourceCompletionAttempt::Terminal)
         }
-        UploadCompleteResponse::Incomplete { .. } => Ok(UploadCompleteAttempt::Retry(
-            UploadCompleteRetryReason::S3Visibility,
-        )),
+        UploadCompleteResponse::Incomplete { .. } => {
+            Ok(SourceCompletionAttempt::Retry(SourceControlPlaneRetry {
+                reason: SourceControlPlaneRetryReason::S3Visibility,
+                retry_after: None,
+            }))
+        }
         UploadCompleteResponse::Expired { expired_at, .. } => {
             bail!("upload window expired at {expired_at}; create a new deployment and upload again")
         }
     }
 }
 
-fn classify_upload_complete_retry_error(
+fn classify_upload_complete_retry_error(error: &anyhow::Error) -> Option<SourceControlPlaneRetry> {
+    if let Some(api_error) = error.downcast_ref::<crate::api::StructuredApiError>()
+        && api_error.code == "VALIDATION_ERROR"
+        && api_error
+            .message
+            .to_ascii_lowercase()
+            .contains("upload is incomplete")
+    {
+        return Some(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::S3Visibility,
+            retry_after: None,
+        });
+    };
+
+    classify_standard_control_plane_retry_error(
+        error,
+        SourceControlPlaneRetryReason::OwnerVerifyInProgress,
+    )
+}
+
+fn classify_multipart_complete_retry_error(
     error: &anyhow::Error,
-) -> Option<UploadCompleteRetryReason> {
-    let api_error = error.downcast_ref::<crate::api::StructuredApiError>()?;
+) -> Option<SourceControlPlaneRetry> {
+    classify_standard_control_plane_retry_error(
+        error,
+        SourceControlPlaneRetryReason::CompletionInProgress,
+    )
+}
+
+fn classify_upload_failed_retry_error(error: &anyhow::Error) -> Option<SourceControlPlaneRetry> {
+    classify_standard_control_plane_retry_error(
+        error,
+        SourceControlPlaneRetryReason::FailureReportInProgress,
+    )
+}
+
+fn classify_standard_control_plane_retry_error(
+    error: &anyhow::Error,
+    in_progress_reason: SourceControlPlaneRetryReason,
+) -> Option<SourceControlPlaneRetry> {
+    let Some(api_error) = error.downcast_ref::<crate::api::StructuredApiError>() else {
+        return classify_control_plane_transport_retry_error(error);
+    };
     match api_error.code.as_str() {
-        "OPERATION_IN_PROGRESS" => Some(UploadCompleteRetryReason::OwnerVerifyInProgress),
-        "VALIDATION_ERROR"
-            if api_error
-                .message
-                .to_ascii_lowercase()
-                .contains("upload is incomplete") =>
-        {
-            Some(UploadCompleteRetryReason::S3Visibility)
-        }
-        _ => None,
+        "OPERATION_IN_PROGRESS" => Some(SourceControlPlaneRetry {
+            reason: in_progress_reason,
+            retry_after: None,
+        }),
+        "SERVICE_UNAVAILABLE" | "TOO_MANY_REQUESTS" => Some(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::ControlPlaneBackpressure,
+            retry_after: api_error.retry_after_seconds.map(Duration::from_secs),
+        }),
+        _ => classify_control_plane_transport_retry_error(error),
     }
+}
+
+fn classify_control_plane_transport_retry_error(
+    error: &anyhow::Error,
+) -> Option<SourceControlPlaneRetry> {
+    is_ambiguous_control_plane_transport_error(error).then_some(SourceControlPlaneRetry {
+        reason: SourceControlPlaneRetryReason::TransportAmbiguous,
+        retry_after: None,
+    })
+}
+
+fn is_ambiguous_control_plane_transport_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(|err| err.status().is_none() && !err.is_builder() && !err.is_decode())
+    })
+}
+
+fn retry_delay_with_hint(
+    retry_after: Option<Duration>,
+    fallback: Duration,
+    fallback_max: Duration,
+    remaining: Duration,
+) -> Duration {
+    retry_after
+        .unwrap_or_else(|| fallback.min(fallback_max))
+        .min(remaining)
 }
 
 async fn upload_source_object(
@@ -1457,6 +1655,7 @@ async fn complete_source_multipart_if_needed(
     deployment_attempt_id: &str,
     prepared: &PrepareUploadResponse,
     completion: Option<SourceMultipartCompletion>,
+    json: bool,
 ) -> anyhow::Result<()> {
     if prepared.required_complete == RequiredComplete::UploadComplete {
         if completion.is_some() {
@@ -1478,14 +1677,264 @@ async fn complete_source_multipart_if_needed(
         upload_id: completion.upload_id,
         parts: completion.parts,
     };
-    let _: MultipartCompleteResponse = client
-        .post(
+    complete_source_multipart_with_retry(client, deployment_id, &body, json).await
+}
+
+async fn complete_source_multipart_with_retry(
+    client: &ApiClient,
+    deployment_id: &str,
+    body: &MultipartCompleteBody,
+    json: bool,
+) -> anyhow::Result<()> {
+    let started = Instant::now();
+    let mut delay = SOURCE_COMPLETION_INITIAL_RETRY_DELAY;
+    let mut attempts = 0u32;
+
+    loop {
+        attempts += 1;
+        match post_source_multipart_complete_once(client, deployment_id, body).await? {
+            SourceCompletionAttempt::Terminal => return Ok(()),
+            SourceCompletionAttempt::Retry(retry) => {
+                let elapsed = started.elapsed();
+                if elapsed >= SOURCE_COMPLETION_RETRY_BUDGET {
+                    bail!(
+                        "multipart-complete did not reach a terminal state after {:?} (last state: {})",
+                        SOURCE_COMPLETION_RETRY_BUDGET,
+                        retry.reason.as_str()
+                    );
+                }
+
+                if attempts == 1 {
+                    output::status(
+                        json,
+                        "~",
+                        format!(
+                            "Waiting for multipart-complete ({})...",
+                            retry.reason.as_str()
+                        ),
+                        output::Phase::Deploy,
+                    );
+                }
+
+                let remaining = SOURCE_COMPLETION_RETRY_BUDGET.saturating_sub(elapsed);
+                let sleep_for = retry_delay_with_hint(
+                    retry.retry_after,
+                    delay,
+                    SOURCE_COMPLETION_MAX_RETRY_DELAY,
+                    remaining,
+                );
+                tokio::time::sleep(sleep_for).await;
+                delay = delay
+                    .saturating_mul(2)
+                    .min(SOURCE_COMPLETION_MAX_RETRY_DELAY);
+            }
+        }
+    }
+}
+
+async fn post_source_multipart_complete_once(
+    client: &ApiClient,
+    deployment_id: &str,
+    body: &MultipartCompleteBody,
+) -> anyhow::Result<SourceCompletionAttempt> {
+    match client
+        .post::<_, MultipartCompleteResponse>(
             &format!("/v1/deployments/{deployment_id}/multipart-complete"),
-            &body,
+            body,
         )
         .await
-        .context("failed to complete source multipart upload")?;
-    Ok(())
+    {
+        Ok(_) => Ok(SourceCompletionAttempt::Terminal),
+        Err(error) => match classify_multipart_complete_retry_error(&error) {
+            Some(retry) => Ok(SourceCompletionAttempt::Retry(retry)),
+            None => Err(error.context("failed to complete source multipart upload")),
+        },
+    }
+}
+
+async fn report_source_object_upload_failed(
+    client: &ApiClient,
+    deployment_id: &str,
+    deployment_attempt_id: &str,
+    prepared: &PrepareUploadResponse,
+    error: &anyhow::Error,
+    json: bool,
+) {
+    let body = UploadFailedBody {
+        deployment_id: deployment_id.to_string(),
+        upload_session_id: prepared.upload_session_id().to_string(),
+        deployment_attempt_id: deployment_attempt_id.to_string(),
+        operation_id: Uuid::now_v7().to_string(),
+        artifact_format: "SOURCE_BUNDLE_V1".to_string(),
+        source_artifact_id: prepared.source_artifact_id().to_string(),
+        error_code: SOURCE_UPLOAD_PUT_FAILED.to_string(),
+        error_log: upload_failure_log(error),
+    };
+
+    if let Err(report_error) =
+        report_source_object_upload_failed_with_retry(client, deployment_id, &body, json).await
+    {
+        output::warn(
+            json,
+            format!("Failed to mark SOURCE_BUNDLE_V1 upload as failed: {report_error}"),
+            output::Phase::Deploy,
+        );
+    }
+}
+
+async fn report_source_object_upload_failed_with_retry(
+    client: &ApiClient,
+    deployment_id: &str,
+    body: &UploadFailedBody,
+    json: bool,
+) -> anyhow::Result<()> {
+    let started = Instant::now();
+    let mut delay = UPLOAD_FAILED_INITIAL_RETRY_DELAY;
+    let mut attempts = 0u32;
+
+    loop {
+        attempts += 1;
+        let result = client
+            .post::<_, UploadFailedResponse>(
+                &format!("/v1/deployments/{deployment_id}/upload-failed"),
+                body,
+            )
+            .await;
+        match result {
+            Ok(_) => return Ok(()),
+            Err(error) => {
+                let Some(retry) = classify_upload_failed_retry_error(&error) else {
+                    return Err(error.context("failed to report source upload failure"));
+                };
+                let elapsed = started.elapsed();
+                if elapsed >= UPLOAD_FAILED_RETRY_BUDGET {
+                    return Err(error.context(format!(
+                        "failed to report source upload failure after waiting {:?}",
+                        UPLOAD_FAILED_RETRY_BUDGET
+                    )));
+                }
+
+                if attempts == 1 {
+                    output::status(
+                        json,
+                        "~",
+                        format!("Waiting for upload-failed ({})...", retry.reason.as_str()),
+                        output::Phase::Deploy,
+                    );
+                }
+
+                let remaining = UPLOAD_FAILED_RETRY_BUDGET.saturating_sub(elapsed);
+                let sleep_for = retry_delay_with_hint(
+                    retry.retry_after,
+                    delay,
+                    UPLOAD_FAILED_MAX_RETRY_DELAY,
+                    remaining,
+                );
+                tokio::time::sleep(sleep_for).await;
+                delay = delay.saturating_mul(2).min(UPLOAD_FAILED_MAX_RETRY_DELAY);
+            }
+        }
+    }
+}
+
+fn upload_failure_log(error: &anyhow::Error) -> String {
+    let message = format!("{error:#}");
+    let message = redact_url_credentials(&message);
+    truncate_upload_failure_log(&message)
+}
+
+fn truncate_upload_failure_log(message: &str) -> String {
+    if message.len() <= MAX_UPLOAD_FAILURE_LOG_LENGTH {
+        return message.to_string();
+    }
+    let mut end = MAX_UPLOAD_FAILURE_LOG_LENGTH;
+    while !message.is_char_boundary(end) && end > 0 {
+        end -= 1;
+    }
+    message[..end].to_string()
+}
+
+fn redact_url_credentials(message: &str) -> String {
+    let mut output = String::with_capacity(message.len());
+    let mut cursor = 0;
+
+    while let Some(start) = find_url_start(&message[cursor..]) {
+        let start = cursor + start;
+        output.push_str(&message[cursor..start]);
+
+        let candidate_len = url_candidate_len(&message[start..]);
+        let candidate = &message[start..start + candidate_len];
+        output.push_str(&redact_url_candidate(candidate));
+        cursor = start + candidate_len;
+    }
+
+    output.push_str(&message[cursor..]);
+    output
+}
+
+fn find_url_start(message: &str) -> Option<usize> {
+    match (message.find("http://"), message.find("https://")) {
+        (Some(http), Some(https)) => Some(http.min(https)),
+        (Some(http), None) => Some(http),
+        (None, Some(https)) => Some(https),
+        (None, None) => None,
+    }
+}
+
+fn url_candidate_len(message: &str) -> usize {
+    message
+        .char_indices()
+        .find(|(_, ch)| ch.is_whitespace() || matches!(ch, '"' | '\'' | '`' | '<' | '>'))
+        .map(|(idx, _)| idx)
+        .unwrap_or(message.len())
+}
+
+fn redact_url_candidate(candidate: &str) -> String {
+    let (url_part, suffix) = split_url_candidate_suffix(candidate);
+    let Ok(mut url) = Url::parse(url_part) else {
+        return candidate.to_string();
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return candidate.to_string();
+    }
+
+    let mut changed = false;
+    if !url.username().is_empty() {
+        let _ = url.set_username(REDACTED_URL_COMPONENT);
+        changed = true;
+    }
+    if url.password().is_some() {
+        let _ = url.set_password(Some(REDACTED_URL_COMPONENT));
+        changed = true;
+    }
+    if url.query().is_some() {
+        url.set_query(Some(REDACTED_URL_COMPONENT));
+        changed = true;
+    }
+    if url.fragment().is_some() {
+        url.set_fragment(Some(REDACTED_URL_COMPONENT));
+        changed = true;
+    }
+
+    if changed {
+        format!("{url}{suffix}")
+    } else {
+        candidate.to_string()
+    }
+}
+
+fn split_url_candidate_suffix(candidate: &str) -> (&str, &str) {
+    let mut end = candidate.len();
+    while end > 0 {
+        let Some(ch) = candidate[..end].chars().next_back() else {
+            break;
+        };
+        if !matches!(ch, ')' | ']' | '}' | ',' | '.' | ';') {
+            break;
+        }
+        end -= ch.len_utf8();
+    }
+    (&candidate[..end], &candidate[end..])
 }
 
 struct SinglePutUpload<'a> {

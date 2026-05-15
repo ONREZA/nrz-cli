@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::State;
-use axum::http::header::CONTENT_LENGTH;
+use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::put;
@@ -12,7 +12,7 @@ use bytes::Bytes;
 
 use super::client::{
     ApiClient, PresignedHeadVerify, PresignedPutHeaders, UploadRetryPolicy, explain_s3_failure,
-    sha256_hex_to_base64,
+    extract_api_error, sha256_hex_to_base64,
 };
 
 #[derive(Clone)]
@@ -46,6 +46,25 @@ async fn conditional_header_handler(headers: HeaderMap) -> impl IntoResponse {
         Some("*") => (StatusCode::OK, "ok"),
         _ => (StatusCode::BAD_REQUEST, "missing if-none-match"),
     }
+}
+
+async fn signed_source_headers_handler(headers: HeaderMap) -> impl IntoResponse {
+    let has_content_type = headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        == Some("application/zstd");
+    let has_if_none_match = headers
+        .get("if-none-match")
+        .and_then(|value| value.to_str().ok())
+        == Some("*");
+
+    if has_content_type && has_if_none_match {
+        return (StatusCode::OK, "ok");
+    }
+    (
+        StatusCode::BAD_REQUEST,
+        "missing content-type or if-none-match",
+    )
 }
 
 async fn precondition_failed_handler() -> impl IntoResponse {
@@ -84,6 +103,16 @@ async fn spawn_conditional_header_mock() -> (String, tokio::task::JoinHandle<()>
     (format!("http://{addr}/upload"), handle)
 }
 
+async fn spawn_signed_source_headers_mock() -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new().route("/upload", put(signed_source_headers_handler));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/upload"), handle)
+}
+
 async fn spawn_precondition_with_head_mock() -> (String, tokio::task::JoinHandle<()>) {
     let app = Router::new().route(
         "/upload",
@@ -109,6 +138,34 @@ fn payload() -> Bytes {
 /// argument. The mock S3 doesn't verify the checksum header (it accepts any
 /// PUT), so the value just needs to pass the upload-side format check.
 const FAKE_SHA: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+#[test]
+fn structured_api_error_uses_retry_after_header_hint() {
+    let error = extract_api_error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        r#"{"code":"SERVICE_UNAVAILABLE","message":"overloaded"}"#,
+        Some(2),
+    );
+    let structured = error
+        .downcast_ref::<super::client::StructuredApiError>()
+        .expect("structured API error");
+
+    assert_eq!(structured.retry_after_seconds, Some(2));
+}
+
+#[test]
+fn structured_api_error_accepts_camel_case_retry_after_body_hint() {
+    let error = extract_api_error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        r#"{"code":"SERVICE_UNAVAILABLE","message":"overloaded","retryAfterSeconds":3}"#,
+        None,
+    );
+    let structured = error
+        .downcast_ref::<super::client::StructuredApiError>()
+        .expect("structured API error");
+
+    assert_eq!(structured.retry_after_seconds, Some(3));
+}
 
 #[tokio::test]
 async fn succeeds_on_first_attempt() {
@@ -149,6 +206,25 @@ async fn sends_required_presigned_put_headers() {
         )
         .await
         .expect("conditional upload should send If-None-Match");
+}
+
+#[tokio::test]
+async fn sends_source_bundle_content_type_from_presigned_headers() {
+    let (url, _h) = spawn_signed_source_headers_mock().await;
+
+    let client = test_client();
+    client
+        .put_blob_with_headers(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &PresignedPutHeaders {
+                content_type: Some("application/zstd".to_string()),
+                if_none_match: Some("*".to_string()),
+            },
+        )
+        .await
+        .expect("SOURCE_BUNDLE_V1 upload should send all server-signed headers");
 }
 
 #[tokio::test]
@@ -468,7 +544,7 @@ async fn fails_when_budget_expires_before_attempts() {
         .expect_err("should exhaust on budget");
     let elapsed = start.elapsed();
 
-    // Budget is 250ms, base 50ms, cap 200ms. A handful of retries will consume it
+    // Budget is 2s, base 500ms, cap 1s. A handful of retries will consume it
     // long before max_attempts=100. Must bail with well below that many attempts.
     let attempts_made = attempts.load(Ordering::SeqCst);
     assert!(
@@ -476,7 +552,7 @@ async fn fails_when_budget_expires_before_attempts() {
         "expected budget-path exhaustion, attempts={attempts_made}"
     );
     assert!(
-        elapsed < Duration::from_secs(2),
+        elapsed < Duration::from_secs(5),
         "should bail shortly after budget expires, took {elapsed:?}"
     );
     assert!(format!("{err:#}").contains("attempt"));
@@ -488,7 +564,9 @@ async fn retries_transport_error_then_exhausts() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     drop(listener);
-    let url = format!("http://{addr}/upload");
+    let url = format!(
+        "http://{addr}/upload?X-Amz-Signature=signature-secret&X-Amz-Credential=credential-secret"
+    );
 
     let client = test_client();
     let policy = UploadRetryPolicy::fast_for_tests();
@@ -509,6 +587,9 @@ async fn retries_transport_error_then_exhausts() {
         chain.contains("attempt"),
         "error should mention attempts after exhaustion: {chain}"
     );
+    assert!(!chain.contains("X-Amz-Signature"), "{chain}");
+    assert!(!chain.contains("signature-secret"), "{chain}");
+    assert!(!chain.contains("credential-secret"), "{chain}");
 }
 
 // ── sha256_hex_to_base64 ────────────────────────────────────
@@ -587,6 +668,8 @@ fn explain_s3_failure_translates_signature_does_not_match() {
     let msg = explain_s3_failure(StatusCode::FORBIDDEN, body);
     assert!(msg.contains("SignatureDoesNotMatch"));
     assert!(msg.contains("Content-Length"));
+    assert!(msg.contains("Content-Type"));
+    assert!(msg.contains("If-None-Match"));
 }
 
 #[test]

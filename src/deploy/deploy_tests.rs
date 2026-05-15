@@ -774,6 +774,119 @@ fn prepare_upload_body_serializes_source_bundle_v1_contract() {
     assert!(value.get("isolateModules").is_none());
 }
 
+#[test]
+fn upload_failed_body_serializes_source_bundle_v1_contract() {
+    let body = UploadFailedBody {
+        deployment_id: Uuid::now_v7().to_string(),
+        upload_session_id: Uuid::now_v7().to_string(),
+        deployment_attempt_id: Uuid::now_v7().to_string(),
+        operation_id: Uuid::now_v7().to_string(),
+        artifact_format: "SOURCE_BUNDLE_V1".into(),
+        source_artifact_id: "c".repeat(64),
+        error_code: SOURCE_UPLOAD_PUT_FAILED.into(),
+        error_log: "S3 rejected the upload".into(),
+    };
+
+    let value = serde_json::to_value(&body).unwrap();
+    assert_eq!(value["artifactFormat"], "SOURCE_BUNDLE_V1");
+    assert_eq!(value["errorCode"], SOURCE_UPLOAD_PUT_FAILED);
+    assert_eq!(value["errorLog"], "S3 rejected the upload");
+    assert!(value.get("sourceSha256").is_none());
+    assert!(value.get("sourceSizeBytes").is_none());
+}
+
+#[test]
+fn upload_failed_reporting_uses_only_source_object_upload_failure_code() {
+    assert_eq!(SOURCE_UPLOAD_PUT_FAILED, "SOURCE_UPLOAD_PUT_FAILED");
+}
+
+#[test]
+fn upload_failure_log_is_bounded_for_server_contract() {
+    let long = "x".repeat(MAX_UPLOAD_FAILURE_LOG_LENGTH + 10);
+    let error = anyhow::anyhow!("{long}");
+    let truncated = upload_failure_log(&error);
+    assert_eq!(truncated.len(), MAX_UPLOAD_FAILURE_LOG_LENGTH);
+}
+
+#[test]
+fn upload_failure_log_redacts_presigned_url_query_before_reporting() {
+    let error = anyhow::anyhow!(
+        "error sending request for url (https://bucket.s3.example/source.tar.zst?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=signature-secret&X-Amz-Credential=credential-secret)"
+    )
+    .context("failed to upload SOURCE_BUNDLE_V1 source object");
+
+    let log = upload_failure_log(&error);
+
+    assert!(log.contains("failed to upload SOURCE_BUNDLE_V1 source object"));
+    assert!(
+        log.contains("https://bucket.s3.example/source.tar.zst?REDACTED)"),
+        "{log}"
+    );
+    assert!(!log.contains("X-Amz-Signature"), "{log}");
+    assert!(!log.contains("signature-secret"), "{log}");
+    assert!(!log.contains("credential-secret"), "{log}");
+}
+
+#[test]
+fn control_plane_backpressure_honors_retry_after_above_backoff_cap() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        code: "SERVICE_UNAVAILABLE".into(),
+        message: "Artifact ingest service is overloaded".into(),
+        retry_after_seconds: Some(30),
+        details: None,
+    }
+    .into();
+
+    assert_eq!(
+        classify_prepare_upload_retry_error(&error),
+        Some(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::ControlPlaneBackpressure,
+            retry_after: Some(Duration::from_secs(30)),
+        })
+    );
+    assert_eq!(
+        retry_delay_with_hint(
+            Some(Duration::from_secs(30)),
+            Duration::from_millis(500),
+            Duration::from_secs(5),
+            Duration::from_secs(60),
+        ),
+        Duration::from_secs(30)
+    );
+}
+
+#[test]
+fn retry_delay_caps_only_fallback_backoff_and_remaining_budget() {
+    assert_eq!(
+        retry_delay_with_hint(
+            None,
+            Duration::from_secs(30),
+            Duration::from_secs(5),
+            Duration::from_secs(60),
+        ),
+        Duration::from_secs(5)
+    );
+    assert_eq!(
+        retry_delay_with_hint(
+            Some(Duration::from_secs(30)),
+            Duration::from_millis(500),
+            Duration::from_secs(5),
+            Duration::from_secs(60),
+        ),
+        Duration::from_secs(30)
+    );
+    assert_eq!(
+        retry_delay_with_hint(
+            Some(Duration::from_secs(30)),
+            Duration::from_millis(500),
+            Duration::from_secs(5),
+            Duration::from_secs(10),
+        ),
+        Duration::from_secs(10)
+    );
+}
+
 #[tokio::test]
 async fn source_single_put_sends_conditional_header_from_wire_hint() {
     let content = Bytes::from_static(b"hello source");
@@ -807,7 +920,10 @@ fn upload_complete_incomplete_response_is_retryable() {
 
     assert_eq!(
         attempt,
-        UploadCompleteAttempt::Retry(UploadCompleteRetryReason::S3Visibility)
+        SourceCompletionAttempt::Retry(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::S3Visibility,
+            retry_after: None,
+        })
     );
 }
 
@@ -817,13 +933,163 @@ fn upload_complete_operation_in_progress_error_is_retryable() {
         status: reqwest::StatusCode::CONFLICT,
         code: "OPERATION_IN_PROGRESS".into(),
         message: "upload-complete: waiting on owner verify".into(),
+        retry_after_seconds: None,
         details: None,
     }
     .into();
 
     assert_eq!(
         classify_upload_complete_retry_error(&error),
-        Some(UploadCompleteRetryReason::OwnerVerifyInProgress)
+        Some(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::OwnerVerifyInProgress,
+            retry_after: None,
+        })
+    );
+}
+
+#[test]
+fn upload_complete_control_plane_backpressure_is_retryable() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        code: "SERVICE_UNAVAILABLE".into(),
+        message: "Artifact ingest service is overloaded".into(),
+        retry_after_seconds: Some(2),
+        details: None,
+    }
+    .into();
+
+    assert_eq!(
+        classify_upload_complete_retry_error(&error),
+        Some(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::ControlPlaneBackpressure,
+            retry_after: Some(Duration::from_secs(2)),
+        })
+    );
+}
+
+#[test]
+fn prepare_upload_operation_in_progress_error_is_retryable() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: reqwest::StatusCode::CONFLICT,
+        code: "OPERATION_IN_PROGRESS".into(),
+        message: "prepare-upload is already in progress".into(),
+        retry_after_seconds: None,
+        details: None,
+    }
+    .into();
+
+    assert_eq!(
+        classify_prepare_upload_retry_error(&error),
+        Some(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::PrepareUploadInProgress,
+            retry_after: None,
+        })
+    );
+}
+
+#[tokio::test]
+async fn prepare_upload_transport_error_is_retryable() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let error = anyhow::Error::new(
+        reqwest::Client::new()
+            .post(format!("http://{addr}/v1/deployments/d/prepare-upload"))
+            .send()
+            .await
+            .expect_err("closed listener should refuse the request"),
+    )
+    .context("request failed: POST /v1/deployments/d/prepare-upload");
+
+    assert_eq!(
+        classify_prepare_upload_retry_error(&error),
+        Some(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::TransportAmbiguous,
+            retry_after: None,
+        })
+    );
+}
+
+#[test]
+fn upload_failed_control_plane_backpressure_is_retryable() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        code: "SERVICE_UNAVAILABLE".into(),
+        message: "Artifact ingest service is overloaded".into(),
+        retry_after_seconds: Some(2),
+        details: None,
+    }
+    .into();
+
+    assert_eq!(
+        classify_upload_failed_retry_error(&error),
+        Some(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::ControlPlaneBackpressure,
+            retry_after: Some(Duration::from_secs(2)),
+        })
+    );
+}
+
+#[test]
+fn upload_failed_operation_in_progress_error_is_retryable() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: reqwest::StatusCode::CONFLICT,
+        code: "OPERATION_IN_PROGRESS".into(),
+        message: "upload-failed is already running".into(),
+        retry_after_seconds: None,
+        details: None,
+    }
+    .into();
+
+    assert_eq!(
+        classify_upload_failed_retry_error(&error),
+        Some(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::FailureReportInProgress,
+            retry_after: None,
+        })
+    );
+}
+
+#[test]
+fn multipart_complete_operation_in_progress_error_is_retryable() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: reqwest::StatusCode::CONFLICT,
+        code: "OPERATION_IN_PROGRESS".into(),
+        message: "multipart-complete is already running".into(),
+        retry_after_seconds: None,
+        details: None,
+    }
+    .into();
+
+    assert_eq!(
+        classify_multipart_complete_retry_error(&error),
+        Some(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::CompletionInProgress,
+            retry_after: None,
+        })
+    );
+}
+
+#[tokio::test]
+async fn multipart_complete_transport_error_is_retryable() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let error = anyhow::Error::new(
+        reqwest::Client::new()
+            .post(format!("http://{addr}/v1/deployments/d/multipart-complete"))
+            .send()
+            .await
+            .expect_err("closed listener should refuse the request"),
+    )
+    .context("request failed: POST /v1/deployments/d/multipart-complete");
+
+    assert_eq!(
+        classify_multipart_complete_retry_error(&error),
+        Some(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::TransportAmbiguous,
+            retry_after: None,
+        })
     );
 }
 
@@ -833,13 +1099,17 @@ fn upload_complete_legacy_incomplete_error_is_retryable() {
         status: reqwest::StatusCode::BAD_REQUEST,
         code: "VALIDATION_ERROR".into(),
         message: "Upload is incomplete: pack parts 0 missing in S3.".into(),
+        retry_after_seconds: None,
         details: Some(serde_json::json!({ "field": "sourceObject" })),
     }
     .into();
 
     assert_eq!(
         classify_upload_complete_retry_error(&error),
-        Some(UploadCompleteRetryReason::S3Visibility)
+        Some(SourceControlPlaneRetry {
+            reason: SourceControlPlaneRetryReason::S3Visibility,
+            retry_after: None,
+        })
     );
 }
 
