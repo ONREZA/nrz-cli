@@ -35,7 +35,8 @@ use crate::cli::{BuildArgs, DeployArgs};
 use crate::deploy::source_bundle_v1::{
     CLI_PROTOCOL_VERSION, CompletedMultipartPart, PresignedSourceMultipart,
     PresignedSourceMultipartChunk, PresignedSourceSinglePut, SOURCE_BUNDLE_FORMAT,
-    SourceBundlePlan, build_source_bundle_plan,
+    SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, SourceBundlePlan, build_source_bundle_plan,
+    source_bundle_contract_characters,
 };
 use crate::detect::types::ComputeType;
 use crate::link;
@@ -3401,10 +3402,12 @@ const SCAN_HASH_CHUNK_BYTES: usize = 64 * 1024;
 /// memory. Bytes are re-read from disk at upload time (page cache absorbs the
 /// second read on any reasonable build host).
 ///
-/// Symlinks are rejected: SOURCE_BUNDLE_V1 only admits regular files.
+/// Safe relative symlinks are preserved as SOURCE_BUNDLE_V1 logical entries.
 fn scan_dir(dir: &Path) -> anyhow::Result<Vec<FileEntry>> {
     let mut files = Vec::new();
-    scan_dir_recursive(dir, dir, &mut files)?;
+    let canonical_base = std::fs::canonicalize(dir)
+        .with_context(|| format!("failed to canonicalize {}", dir.display()))?;
+    scan_dir_recursive(dir, dir, &canonical_base, &mut files)?;
     files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }
@@ -3515,6 +3518,7 @@ fn warn_large_deploy_files(json: bool, files: &[FileEntry]) {
 fn scan_dir_recursive(
     base: &Path,
     current: &Path,
+    canonical_base: &Path,
     files: &mut Vec<FileEntry>,
 ) -> anyhow::Result<()> {
     let entries = std::fs::read_dir(current)
@@ -3534,11 +3538,17 @@ fn scan_dir_recursive(
                 .context("failed to compute relative path")?
                 .to_string_lossy()
                 .replace('\\', "/");
-            bail!("SOURCE_BUNDLE_V1 does not support symlinks in build output: {rel}");
+            let link_target = read_deploy_symlink_target(&path, &rel, canonical_base)?;
+            files.push(FileEntry {
+                path: rel,
+                size: 0,
+                content_hash: format!("{:x}", Sha256::digest(link_target.as_bytes())),
+            });
+            continue;
         }
 
         if ft.is_dir() {
-            scan_dir_recursive(base, &path, files)?;
+            scan_dir_recursive(base, &path, canonical_base, files)?;
         } else if ft.is_file() {
             #[cfg(unix)]
             {
@@ -3571,6 +3581,97 @@ fn scan_dir_recursive(
         }
     }
 
+    Ok(())
+}
+
+fn read_deploy_symlink_target(
+    path: &Path,
+    rel: &str,
+    canonical_base: &Path,
+) -> anyhow::Result<String> {
+    let target = std::fs::read_link(path)
+        .with_context(|| format!("failed to read SOURCE_BUNDLE_V1 symlink {}", path.display()))?;
+    let target = target.to_str().ok_or_else(|| {
+        output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!(
+                "SOURCE_BUNDLE_V1 symlink target is not UTF-8: {}",
+                path.display()
+            ),
+        )
+    })?;
+    validate_deploy_symlink_target(rel, target)?;
+    match std::fs::canonicalize(path) {
+        Ok(canonical) if canonical.starts_with(canonical_base) => Ok(target.to_string()),
+        Ok(canonical) => Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!(
+                "SOURCE_BUNDLE_V1 symlink escapes build output: {rel} -> {target} resolved to {}",
+                canonical.display()
+            ),
+        )),
+        Err(error) => Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!("SOURCE_BUNDLE_V1 broken symlink in build output: {rel} -> {target} ({error})"),
+        )),
+    }
+}
+
+fn validate_deploy_symlink_target(rel: &str, target: &str) -> anyhow::Result<()> {
+    if target.is_empty() || target.contains('\\') || target.contains('\0') {
+        return Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!("unsafe SOURCE_BUNDLE_V1 symlink target: {rel} -> {target}"),
+        ));
+    }
+    if source_bundle_contract_characters(target) > SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS {
+        return Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!(
+                "SOURCE_BUNDLE_V1 symlink target too long: {rel} -> {target} (max {SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS} characters)"
+            ),
+        ));
+    }
+    let target_path = Path::new(target);
+    if target_path.is_absolute() {
+        return Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!("SOURCE_BUNDLE_V1 symlink has absolute target: {rel} -> {target}"),
+        ));
+    }
+
+    let mut resolved = PathBuf::new();
+    if let Some(parent) = Path::new(rel).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        resolved.push(parent);
+    }
+    for component in target_path.components() {
+        match component {
+            Component::Normal(part) => resolved.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !resolved.pop() {
+                    return Err(output::coded_error(
+                        "INVALID_BUILD_OUTPUT",
+                        format!("SOURCE_BUNDLE_V1 symlink escapes build output: {rel} -> {target}"),
+                    ));
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(output::coded_error(
+                    "INVALID_BUILD_OUTPUT",
+                    format!("unsafe SOURCE_BUNDLE_V1 symlink target: {rel} -> {target}"),
+                ));
+            }
+        }
+    }
+    if resolved.as_os_str().is_empty() {
+        return Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!("unsafe SOURCE_BUNDLE_V1 symlink target: {rel} -> {target}"),
+        ));
+    }
     Ok(())
 }
 

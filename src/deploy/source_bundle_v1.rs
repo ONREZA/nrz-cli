@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -15,6 +16,7 @@ use crate::build::manifest::{LayerTarget, Manifest};
 pub(crate) const SOURCE_BUNDLE_SCHEMA_VERSION: &str = "SOURCE_BUNDLE_V1.0";
 pub(crate) const SOURCE_BUNDLE_FORMAT: &str = "tar.zst";
 pub(crate) const CLI_PROTOCOL_VERSION: &str = "source-bundle-v1";
+pub(crate) const SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS: usize = 512;
 pub(crate) const MULTIPART_THRESHOLD_BYTES: u64 = 256 * 1024 * 1024;
 pub(crate) const MULTIPART_CHUNK_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -36,10 +38,13 @@ const TAR_FIELD_SIZE: usize = 8;
 const TAR_SIZE_FIELD_SIZE: usize = 12;
 const TAR_MAGIC_LENGTH: usize = 6;
 const TAR_VERSION_LENGTH: usize = 2;
+const TAR_LINKNAME_OFFSET: usize = 157;
+const TAR_LINKNAME_LENGTH: usize = 100;
 const TAR_MODE_OCTAL_WIDTH: usize = 7;
 const TAR_SIZE_OCTAL_WIDTH: usize = 11;
 const TAR_CHECKSUM_OCTAL_WIDTH: usize = 6;
 const TAR_FILE_MODE: u64 = 0o644;
+const TAR_SYMLINK_MODE: u64 = 0o777;
 const TAR_SPACE: u8 = 0x20;
 
 #[derive(Debug)]
@@ -98,11 +103,23 @@ pub(crate) struct SourceLogicalManifestFile {
     pub(crate) path: String,
     pub(crate) sha256: String,
     pub(crate) size: u64,
+    #[serde(rename = "entryType", skip_serializing_if = "Option::is_none")]
+    pub(crate) entry_type: Option<SourceLogicalManifestEntryType>,
+    #[serde(rename = "linkTarget", skip_serializing_if = "Option::is_none")]
+    pub(crate) link_target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) content_type: Option<String>,
     pub(crate) role: SourceLogicalManifestFileRole,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) layer_name: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum SourceLogicalManifestEntryType {
+    File,
+    Symlink,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -215,9 +232,32 @@ pub(crate) struct CompletedMultipartPart {
 #[derive(Debug)]
 struct SourceBundleEntry {
     path: String,
-    full_path: PathBuf,
     size: u64,
     sha256: String,
+    kind: SourceBundleEntryKind,
+}
+
+#[derive(Debug)]
+enum SourceBundleEntryKind {
+    File {
+        full_path: PathBuf,
+    },
+    Symlink {
+        link_target: String,
+        resolved_path: String,
+    },
+}
+
+#[derive(Debug)]
+struct SourceSymlinkTarget {
+    link_target: String,
+    resolved_path: String,
+}
+
+#[derive(Debug, Default)]
+struct SourceArchivePathIndex {
+    files: HashSet<String>,
+    symlinks: HashMap<String, String>,
 }
 
 #[derive(Debug)]
@@ -232,7 +272,7 @@ pub(crate) fn build_source_bundle_plan(
     files: &[FileEntry],
 ) -> anyhow::Result<SourceBundlePlan> {
     let entries = source_entries(output_dir, files)?;
-    let logical_manifest = build_logical_manifest(manifest, files)?;
+    let logical_manifest = build_logical_manifest(manifest, &entries)?;
     ensure_manifest_covers_entries(&logical_manifest, &entries)?;
     let logical_manifest_sha256 = compute_logical_manifest_sha256(&logical_manifest)?;
 
@@ -273,6 +313,8 @@ fn source_entries(
     output_dir: &Path,
     files: &[FileEntry],
 ) -> anyhow::Result<Vec<SourceBundleEntry>> {
+    let canonical_base = std::fs::canonicalize(output_dir)
+        .with_context(|| format!("failed to canonicalize {}", output_dir.display()))?;
     let mut entries = Vec::with_capacity(files.len());
     for file in files {
         validate_source_path(&file.path)?;
@@ -280,10 +322,24 @@ fn source_entries(
         let metadata = std::fs::symlink_metadata(&full_path)
             .with_context(|| format!("failed to stat {}", full_path.display()))?;
         if metadata.file_type().is_symlink() {
-            bail!(
-                "SOURCE_BUNDLE_V1 does not support symlinks in build output: {}",
-                file.path
-            );
+            let symlink = read_source_symlink_target(&full_path, &file.path, &canonical_base)?;
+            let sha256 = sha256_hex(symlink.link_target.as_bytes());
+            if file.size != 0 || file.content_hash != sha256 {
+                bail!(
+                    "SOURCE_BUNDLE_V1 symlink changed during packaging: {}",
+                    file.path
+                );
+            }
+            entries.push(SourceBundleEntry {
+                path: file.path.clone(),
+                size: 0,
+                sha256,
+                kind: SourceBundleEntryKind::Symlink {
+                    link_target: symlink.link_target,
+                    resolved_path: symlink.resolved_path,
+                },
+            });
+            continue;
         }
         if !metadata.is_file() {
             bail!(
@@ -311,10 +367,20 @@ fn source_entries(
         }
         entries.push(SourceBundleEntry {
             path: file.path.clone(),
-            full_path,
             size,
             sha256,
+            kind: SourceBundleEntryKind::File { full_path },
         });
+    }
+    let path_index = SourceArchivePathIndex::from_entries(&entries)?;
+    for entry in &entries {
+        if let SourceBundleEntryKind::Symlink {
+            link_target,
+            resolved_path,
+        } = &entry.kind
+        {
+            ensure_symlink_target_in_archive(&entry.path, link_target, resolved_path, &path_index)?;
+        }
     }
     entries.sort_by(|a, b| compare_utf8(&a.path, &b.path));
     Ok(entries)
@@ -322,27 +388,36 @@ fn source_entries(
 
 fn build_logical_manifest(
     manifest: &Manifest,
-    files: &[FileEntry],
+    entries: &[SourceBundleEntry],
 ) -> anyhow::Result<SourceLogicalManifest> {
-    let mut logical_files = Vec::with_capacity(files.len());
+    let mut logical_files = Vec::with_capacity(entries.len());
     let middleware_paths = middleware_paths(manifest);
     let prerender_paths = prerender_paths(manifest);
 
-    for file in files {
-        validate_source_path(&file.path)?;
-        let matched_layer = best_layer_match(manifest, &file.path)?;
+    for entry in entries {
+        validate_source_path(&entry.path)?;
+        let matched_layer = best_layer_match(manifest, &entry.path)?;
         let (role, layer_name) = file_role(
             manifest,
-            &file.path,
+            &entry.path,
             matched_layer.as_ref(),
             &middleware_paths,
             &prerender_paths,
         );
+        let (entry_type, link_target) = match &entry.kind {
+            SourceBundleEntryKind::File { .. } => (None, None),
+            SourceBundleEntryKind::Symlink { link_target, .. } => (
+                Some(SourceLogicalManifestEntryType::Symlink),
+                Some(link_target.clone()),
+            ),
+        };
         logical_files.push(SourceLogicalManifestFile {
-            path: file.path.clone(),
-            sha256: file.content_hash.clone(),
-            size: file.size,
-            content_type: content_type_from_path(&file.path).map(str::to_string),
+            path: entry.path.clone(),
+            sha256: entry.sha256.clone(),
+            size: entry.size,
+            entry_type,
+            link_target,
+            content_type: content_type_from_path(&entry.path).map(str::to_string),
             role,
             layer_name,
         });
@@ -400,7 +475,20 @@ fn ensure_manifest_covers_entries(
         bail!("SOURCE_BUNDLE_V1 logical manifest/file entry count mismatch");
     }
     for (file, entry) in manifest.files.iter().zip(entries) {
-        if file.path != entry.path || file.sha256 != entry.sha256 || file.size != entry.size {
+        let entry_type = match entry.kind {
+            SourceBundleEntryKind::File { .. } => None,
+            SourceBundleEntryKind::Symlink { .. } => Some(SourceLogicalManifestEntryType::Symlink),
+        };
+        let link_target = match &entry.kind {
+            SourceBundleEntryKind::File { .. } => None,
+            SourceBundleEntryKind::Symlink { link_target, .. } => Some(link_target.as_str()),
+        };
+        if file.path != entry.path
+            || file.sha256 != entry.sha256
+            || file.size != entry.size
+            || file.entry_type != entry_type
+            || file.link_target.as_deref() != link_target
+        {
             bail!(
                 "SOURCE_BUNDLE_V1 logical manifest does not match archive entry {}",
                 entry.path
@@ -580,6 +668,195 @@ fn validate_source_path(path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+impl SourceArchivePathIndex {
+    fn from_entries(entries: &[SourceBundleEntry]) -> anyhow::Result<Self> {
+        let mut index = Self::default();
+        for entry in entries {
+            index.insert_entry(entry)?;
+        }
+        Ok(index)
+    }
+
+    fn insert_entry(&mut self, entry: &SourceBundleEntry) -> anyhow::Result<()> {
+        validate_source_path(&entry.path)?;
+        match &entry.kind {
+            SourceBundleEntryKind::File { .. } => {
+                self.files.insert(entry.path.clone());
+            }
+            SourceBundleEntryKind::Symlink { link_target, .. } => {
+                self.symlinks
+                    .insert(entry.path.clone(), link_target.to_string());
+            }
+        }
+        Ok(())
+    }
+
+    fn contains_resolvable_target(&self, path: &str, symlink_path: &str) -> anyhow::Result<bool> {
+        validate_source_path(path)?;
+        let mut seen = HashSet::new();
+        seen.insert(symlink_path.to_string());
+        self.path_resolves_to_file(path, &mut seen)
+    }
+
+    fn path_resolves_to_file(
+        &self,
+        path: &str,
+        seen_symlinks: &mut HashSet<String>,
+    ) -> anyhow::Result<bool> {
+        if self.files.contains(path) {
+            return Ok(true);
+        }
+
+        if let Some(link_target) = self.symlinks.get(path) {
+            if !seen_symlinks.insert(path.to_string()) {
+                return Ok(false);
+            }
+            let resolved = resolve_source_symlink_target(path, link_target)?;
+            return self.path_resolves_to_file(&resolved, seen_symlinks);
+        }
+
+        if let Some((prefix, link_target)) = self.longest_symlink_prefix(path) {
+            if !seen_symlinks.insert(prefix.to_string()) {
+                return Ok(false);
+            }
+            let suffix = path
+                .strip_prefix(prefix)
+                .unwrap_or_default()
+                .strip_prefix('/')
+                .unwrap_or_default();
+            let mut resolved = resolve_source_symlink_target(prefix, link_target)?;
+            if !suffix.is_empty() {
+                resolved.push('/');
+                resolved.push_str(suffix);
+                validate_source_path(&resolved)?;
+            }
+            return self.path_resolves_to_file(&resolved, seen_symlinks);
+        }
+
+        let descendant_prefix = format!("{path}/");
+        for candidate in self.files.iter().chain(self.symlinks.keys()) {
+            if !candidate.starts_with(&descendant_prefix) {
+                continue;
+            }
+            let mut branch_seen = seen_symlinks.clone();
+            if self.path_resolves_to_file(candidate, &mut branch_seen)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn longest_symlink_prefix<'a>(&'a self, path: &'a str) -> Option<(&'a str, &'a str)> {
+        let mut prefix = path;
+        loop {
+            if let Some(link_target) = self.symlinks.get(prefix) {
+                return Some((prefix, link_target.as_str()));
+            }
+            let (parent, _) = prefix.rsplit_once('/')?;
+            prefix = parent;
+        }
+    }
+}
+
+fn read_source_symlink_target(
+    path: &Path,
+    rel_path: &str,
+    canonical_base: &Path,
+) -> anyhow::Result<SourceSymlinkTarget> {
+    let target = std::fs::read_link(path)
+        .with_context(|| format!("failed to read SOURCE_BUNDLE_V1 symlink {}", path.display()))?;
+    let target = target.to_str().ok_or_else(|| {
+        anyhow::anyhow!(
+            "SOURCE_BUNDLE_V1 symlink target is not UTF-8: {}",
+            path.display()
+        )
+    })?;
+    let resolved_path = resolve_source_symlink_target(rel_path, target)?;
+    match std::fs::canonicalize(path) {
+        Ok(canonical) if canonical.starts_with(canonical_base) => Ok(SourceSymlinkTarget {
+            link_target: target.to_string(),
+            resolved_path,
+        }),
+        Ok(canonical) => bail!(
+            "SOURCE_BUNDLE_V1 symlink escapes build output: {} -> {} resolved to {}",
+            rel_path,
+            target,
+            canonical.display()
+        ),
+        Err(error) => bail!(
+            "SOURCE_BUNDLE_V1 broken symlink in build output: {} -> {} ({})",
+            rel_path,
+            target,
+            error
+        ),
+    }
+}
+
+fn ensure_symlink_target_in_archive(
+    rel_path: &str,
+    link_target: &str,
+    resolved_path: &str,
+    path_index: &SourceArchivePathIndex,
+) -> anyhow::Result<()> {
+    if path_index.contains_resolvable_target(resolved_path, rel_path)? {
+        return Ok(());
+    }
+    bail!(
+        "SOURCE_BUNDLE_V1 symlink target is not included in archive: {} -> {} resolved to {}",
+        rel_path,
+        link_target,
+        resolved_path
+    );
+}
+
+fn resolve_source_symlink_target(rel_path: &str, target: &str) -> anyhow::Result<String> {
+    if target.is_empty() || target.contains('\\') || target.contains('\0') {
+        bail!("unsafe SOURCE_BUNDLE_V1 symlink target for {rel_path}: {target}");
+    }
+    if source_bundle_contract_characters(target) > SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS {
+        bail!(
+            "SOURCE_BUNDLE_V1 symlink target too long for {rel_path}: {target} (max {SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS} characters)"
+        );
+    }
+    let target_path = Path::new(target);
+    if target_path.is_absolute() {
+        bail!("SOURCE_BUNDLE_V1 symlink has absolute target: {rel_path} -> {target}");
+    }
+
+    let mut resolved = PathBuf::new();
+    if let Some(parent) = Path::new(rel_path).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        resolved.push(parent);
+    }
+    for component in target_path.components() {
+        match component {
+            Component::Normal(part) => resolved.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !resolved.pop() {
+                    bail!("SOURCE_BUNDLE_V1 symlink escapes archive root: {rel_path} -> {target}");
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                bail!("unsafe SOURCE_BUNDLE_V1 symlink target for {rel_path}: {target}");
+            }
+        }
+    }
+
+    let resolved = resolved.to_string_lossy().replace('\\', "/");
+    validate_source_path(&resolved)?;
+    Ok(resolved)
+}
+
+pub(crate) fn source_bundle_contract_characters(value: &str) -> usize {
+    value.encode_utf16().count()
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
 fn write_source_bundle(
     source_path: &Path,
     entries: &[SourceBundleEntry],
@@ -609,27 +886,61 @@ fn write_source_bundle(
 fn write_tar_entry<W: Write>(writer: &mut W, entry: &SourceBundleEntry) -> anyhow::Result<()> {
     let path_bytes = entry.path.as_bytes();
     let needs_pax_path = path_bytes.len() > TAR_NAME_LENGTH;
-    if needs_pax_path {
-        let pax_body = build_pax_path_record(&entry.path).into_bytes();
-        writer.write_all(&tar_header(".__onreza/pax", pax_body.len() as u64, b'x'))?;
+    let link_target = match &entry.kind {
+        SourceBundleEntryKind::File { .. } => None,
+        SourceBundleEntryKind::Symlink { link_target, .. } => Some(link_target.as_str()),
+    };
+    let needs_pax_link_target =
+        link_target.is_some_and(|target| target.len() > TAR_LINKNAME_LENGTH);
+    if needs_pax_path || needs_pax_link_target {
+        let mut fields = Vec::new();
+        if needs_pax_path {
+            fields.push(("path", entry.path.as_str()));
+        }
+        if let Some(link_target) = link_target
+            && needs_pax_link_target
+        {
+            fields.push(("linkpath", link_target));
+        }
+        let pax_body = build_pax_record(&fields).into_bytes();
+        writer.write_all(&tar_header(
+            ".__onreza/pax",
+            pax_body.len() as u64,
+            b'x',
+            None,
+        ))?;
         writer.write_all(&pax_body)?;
         write_tar_padding(writer, pax_body.len() as u64)?;
+    }
+
+    if let SourceBundleEntryKind::Symlink { link_target, .. } = &entry.kind {
+        writer.write_all(&tar_header(
+            if needs_pax_path { "file" } else { &entry.path },
+            0,
+            b'2',
+            (!needs_pax_link_target).then_some(link_target.as_str()),
+        ))?;
+        return Ok(());
     }
 
     writer.write_all(&tar_header(
         if needs_pax_path { "file" } else { &entry.path },
         entry.size,
         b'0',
+        None,
     ))?;
-    let mut file = std::fs::File::open(&entry.full_path)
-        .with_context(|| format!("failed to open {}", entry.full_path.display()))?;
+    let SourceBundleEntryKind::File { full_path } = &entry.kind else {
+        unreachable!("symlink entries return before file copy")
+    };
+    let mut file = std::fs::File::open(full_path)
+        .with_context(|| format!("failed to open {}", full_path.display()))?;
     let mut remaining = entry.size;
     let mut buffer = vec![0u8; COPY_BUFFER_BYTES];
     while remaining > 0 {
         let limit = remaining.min(COPY_BUFFER_BYTES as u64) as usize;
         let read = file
             .read(&mut buffer[..limit])
-            .with_context(|| format!("failed to read {}", entry.full_path.display()))?;
+            .with_context(|| format!("failed to read {}", full_path.display()))?;
         if read == 0 {
             bail!(
                 "SOURCE_BUNDLE_V1 file truncated during packaging: {}",
@@ -642,7 +953,7 @@ fn write_tar_entry<W: Write>(writer: &mut W, entry: &SourceBundleEntry) -> anyho
     let mut extra = [0u8; 1];
     if file
         .read(&mut extra)
-        .with_context(|| format!("failed to re-check {}", entry.full_path.display()))?
+        .with_context(|| format!("failed to re-check {}", full_path.display()))?
         != 0
     {
         bail!(
@@ -654,14 +965,32 @@ fn write_tar_entry<W: Write>(writer: &mut W, entry: &SourceBundleEntry) -> anyho
     Ok(())
 }
 
-fn tar_header(path: &str, size: u64, type_flag: u8) -> [u8; TAR_BLOCK_SIZE] {
+fn tar_header(
+    path: &str,
+    size: u64,
+    type_flag: u8,
+    link_name: Option<&str>,
+) -> [u8; TAR_BLOCK_SIZE] {
     let mut header = [0u8; TAR_BLOCK_SIZE];
     write_ascii(&mut header, 0, TAR_NAME_LENGTH, path);
+    if let Some(link_name) = link_name {
+        write_ascii(
+            &mut header,
+            TAR_LINKNAME_OFFSET,
+            TAR_LINKNAME_LENGTH,
+            link_name,
+        );
+    }
+    let mode = if type_flag == b'2' {
+        TAR_SYMLINK_MODE
+    } else {
+        TAR_FILE_MODE
+    };
     write_ascii(
         &mut header,
         TAR_MODE_OFFSET,
         TAR_FIELD_SIZE,
-        &octal(TAR_FILE_MODE, TAR_MODE_OCTAL_WIDTH),
+        &octal(mode, TAR_MODE_OCTAL_WIDTH),
     );
     write_ascii(
         &mut header,
@@ -725,8 +1054,15 @@ fn write_tar_padding<W: Write>(writer: &mut W, size: u64) -> anyhow::Result<()> 
     Ok(())
 }
 
-fn build_pax_path_record(path: &str) -> String {
-    let body = format!("path={path}\n");
+fn build_pax_record(fields: &[(&str, &str)]) -> String {
+    fields
+        .iter()
+        .map(|(key, value)| build_pax_key_value_record(key, value))
+        .collect()
+}
+
+fn build_pax_key_value_record(key: &str, value: &str) -> String {
+    let body = format!("{key}={value}\n");
     let mut length = format!("0 {body}").len();
     loop {
         let record = format!("{length} {body}");

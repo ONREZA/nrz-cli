@@ -1,4 +1,8 @@
 use std::fs;
+#[cfg(unix)]
+use std::io::Cursor;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
@@ -62,6 +66,8 @@ fn logical_manifest_sha_uses_stable_key_ordering() {
             path: "index.html".into(),
             sha256: "a".repeat(64),
             size: 5,
+            entry_type: None,
+            link_target: None,
             content_type: Some("text/html; charset=utf-8".into()),
             role: SourceLogicalManifestFileRole::Static,
             layer_name: Some("static".into()),
@@ -98,6 +104,176 @@ fn logical_manifest_sha_uses_stable_key_ordering() {
         compute_logical_manifest_sha256(&left).unwrap(),
         compute_logical_manifest_sha256(&right).unwrap()
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn source_bundle_plan_preserves_safe_relative_symlinks() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("node_modules/.pnpm/pkg")).unwrap();
+    fs::write(
+        dir.path().join("node_modules/.pnpm/pkg/index.js"),
+        b"module.exports = 1",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(".pnpm/pkg", dir.path().join("node_modules/pkg")).unwrap();
+    let manifest = static_manifest();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+
+    let symlink = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "node_modules/pkg")
+        .unwrap();
+    assert_eq!(
+        symlink.entry_type,
+        Some(SourceLogicalManifestEntryType::Symlink)
+    );
+    assert_eq!(symlink.link_target.as_deref(), Some(".pnpm/pkg"));
+    assert_eq!(symlink.size, 0);
+    assert_eq!(
+        symlink.sha256,
+        format!("{:x}", Sha256::digest(b".pnpm/pkg"))
+    );
+
+    let compressed = plan.read_all().await.unwrap();
+    let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
+    let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
+    let mut saw_symlink = false;
+    for entry in archive.entries().unwrap() {
+        let entry = entry.unwrap();
+        if entry.path().unwrap().to_string_lossy() != "node_modules/pkg" {
+            continue;
+        }
+        assert!(entry.header().entry_type().is_symlink());
+        assert_eq!(
+            entry.link_name().unwrap().unwrap(),
+            PathBuf::from(".pnpm/pkg")
+        );
+        saw_symlink = true;
+    }
+    assert!(saw_symlink);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn source_bundle_plan_accepts_symlink_chain_through_archive_prefix() {
+    let dir = tempdir().unwrap();
+    let package_dir = dir
+        .path()
+        .join("node_modules/.pnpm/foo@1.0.0/node_modules/foo");
+    fs::create_dir_all(package_dir.join("bin")).unwrap();
+    fs::write(package_dir.join("bin/foo.js"), b"console.log('foo')").unwrap();
+    fs::create_dir_all(dir.path().join("node_modules/.bin")).unwrap();
+    std::os::unix::fs::symlink(
+        ".pnpm/foo@1.0.0/node_modules/foo",
+        dir.path().join("node_modules/foo"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        "../foo/bin/foo.js",
+        dir.path().join("node_modules/.bin/foo"),
+    )
+    .unwrap();
+    let manifest = static_manifest();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+
+    let compressed = plan.read_all().await.unwrap();
+    let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
+    let extracted = tempdir().unwrap();
+    tar::Archive::new(Cursor::new(tar_bytes))
+        .unpack(extracted.path())
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(extracted.path().join("node_modules/.bin/foo")).unwrap(),
+        "console.log('foo')"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_plan_rejects_symlink_to_empty_directory() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("empty")).unwrap();
+    std::os::unix::fs::symlink("empty", dir.path().join("empty-link")).unwrap();
+    let manifest = static_manifest();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let err = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("target is not included in archive"),
+        "{err}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn source_bundle_plan_accepts_symlink_to_directory_with_symlink_only_descendants() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("dir")).unwrap();
+    fs::write(dir.path().join("real.txt"), b"real").unwrap();
+    std::os::unix::fs::symlink("../real.txt", dir.path().join("dir/link")).unwrap();
+    std::os::unix::fs::symlink("dir", dir.path().join("alias")).unwrap();
+    let manifest = static_manifest();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+
+    let compressed = plan.read_all().await.unwrap();
+    let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
+    let extracted = tempdir().unwrap();
+    tar::Archive::new(Cursor::new(tar_bytes))
+        .unpack(extracted.path())
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(extracted.path().join("alias/link")).unwrap(),
+        "real"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_plan_rejects_symlink_to_filtered_file() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("cache")).unwrap();
+    fs::write(dir.path().join("cache/data.txt"), b"cache").unwrap();
+    std::os::unix::fs::symlink("cache/data.txt", dir.path().join("cache-link")).unwrap();
+    let manifest = static_manifest();
+    let mut files = scan_dir(dir.path()).unwrap();
+    files.retain(|file| file.path != "cache/data.txt");
+
+    let err = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("target is not included in archive"),
+        "{err}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_plan_rejects_overlong_symlink_target() {
+    let dir = tempdir().unwrap();
+    let target = "a".repeat(SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS + 1);
+    std::os::unix::fs::symlink(&target, dir.path().join("long-link")).unwrap();
+    let manifest = static_manifest();
+    let files = vec![FileEntry {
+        path: "long-link".into(),
+        size: 0,
+        content_hash: format!("{:x}", Sha256::digest(target.as_bytes())),
+    }];
+
+    let err = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap_err();
+
+    assert!(err.to_string().contains("target too long"), "{err}");
 }
 
 #[test]

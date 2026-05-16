@@ -171,16 +171,67 @@ fn scan_files_allows_double_dots_in_filename() {
 
 #[cfg(unix)]
 #[test]
-fn scan_files_rejects_symlinks() {
+fn scan_files_preserves_safe_relative_symlinks() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("real.txt"), "real").unwrap();
+    std::os::unix::fs::symlink("real.txt", dir.path().join("link.txt")).unwrap();
+
+    let files = scan_dir(dir.path()).unwrap();
+
+    let link = files.iter().find(|file| file.path == "link.txt").unwrap();
+    assert_eq!(link.size, 0);
+    assert_eq!(
+        link.content_hash,
+        format!("{:x}", sha2::Sha256::digest(b"real.txt"))
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_files_rejects_absolute_symlinks() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("real.txt"), "real").unwrap();
     std::os::unix::fs::symlink(dir.path().join("real.txt"), dir.path().join("link.txt")).unwrap();
 
     let err = scan_dir(dir.path()).unwrap_err();
-    assert!(
-        err.to_string().contains("does not support symlinks"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("absolute target"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_files_rejects_overlong_symlink_targets() {
+    let dir = tempdir().unwrap();
+    let target = "a".repeat(source_bundle_v1::SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS + 1);
+    std::os::unix::fs::symlink(&target, dir.path().join("link.txt")).unwrap();
+
+    let err = scan_dir(dir.path()).unwrap_err();
+
+    assert!(err.to_string().contains("target too long"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_files_rejects_broken_symlinks() {
+    let dir = tempdir().unwrap();
+    std::os::unix::fs::symlink("missing.txt", dir.path().join("link.txt")).unwrap();
+
+    let err = scan_dir(dir.path()).unwrap_err();
+    assert!(err.to_string().contains("broken symlink"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_files_rejects_symlinks_that_escape_output() {
+    let root = tempdir().unwrap();
+    let dir = root.path().join("app");
+    let outside = root.path().join("outside");
+    fs::create_dir_all(&dir).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("real.txt"), "real").unwrap();
+    std::os::unix::fs::symlink("../outside/real.txt", dir.join("link.txt")).unwrap();
+
+    let err = scan_dir(&dir).unwrap_err();
+    assert!(err.to_string().contains("escapes build output"), "{err}");
 }
 
 // ── synthetic_sha tests ─────────────────────────────────────
@@ -952,6 +1003,8 @@ fn prepare_upload_body_serializes_source_bundle_v1_contract() {
             path: "index.html".into(),
             sha256: "a".repeat(64),
             size: 12,
+            entry_type: None,
+            link_target: None,
             content_type: Some("text/html; charset=utf-8".into()),
             role: source_bundle_v1::SourceLogicalManifestFileRole::Static,
             layer_name: Some("static".into()),
