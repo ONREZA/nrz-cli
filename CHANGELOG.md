@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.31.3] - 2026-05-16
+
+### 🐛 Bug Fixes
+
+- **deploy:** validate source bundle symlink targets ([d3fc506](https://github.com/ONREZA/nrz-cli/commit/d3fc506c7c5e8ff56ea63f2c9e3a678fe7936586))
+
 ## [0.31.2] - 2026-05-16
 
 ### 🐛 Bug Fixes
