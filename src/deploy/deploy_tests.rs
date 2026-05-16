@@ -234,6 +234,32 @@ fn scan_files_rejects_symlinks_that_escape_output() {
     assert!(err.to_string().contains("escapes build output"), "{err}");
 }
 
+#[cfg(unix)]
+#[test]
+fn scan_files_rejects_symlinks_that_traverse_through_regular_files() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("real.txt"), "real").unwrap();
+    std::os::unix::fs::symlink("real.txt/", dir.path().join("link.txt")).unwrap();
+
+    let err = scan_dir(dir.path()).unwrap_err();
+
+    assert!(err.to_string().contains("broken symlink"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_files_rejects_symlink_parent_traversal_after_regular_file() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("dir")).unwrap();
+    fs::write(dir.path().join("dir/file"), "file").unwrap();
+    fs::write(dir.path().join("dir/other"), "other").unwrap();
+    std::os::unix::fs::symlink("dir/file/../other", dir.path().join("link.txt")).unwrap();
+
+    let err = scan_dir(dir.path()).unwrap_err();
+
+    assert!(err.to_string().contains("broken symlink"), "{err}");
+}
+
 // ── synthetic_sha tests ─────────────────────────────────────
 
 #[test]
