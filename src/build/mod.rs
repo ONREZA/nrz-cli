@@ -93,6 +93,26 @@ struct OutputCandidateTier {
     candidates: Vec<OutputCandidate>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UserOutputRefinement {
+    FrameworkContainerOnly,
+    FrameworkContainerAndProjectRoot,
+}
+
+impl UserOutputRefinement {
+    fn for_framework(framework: &str) -> Self {
+        if is_nextjs_standalone_framework(framework) {
+            Self::FrameworkContainerAndProjectRoot
+        } else {
+            Self::FrameworkContainerOnly
+        }
+    }
+
+    fn allows_project_root(self) -> bool {
+        self == Self::FrameworkContainerAndProjectRoot
+    }
+}
+
 pub async fn run(
     args: BuildArgs,
     json: bool,
@@ -124,11 +144,12 @@ pub async fn run_with_hint(
         }
     };
     let fw_dirs = compute_aware_output_dirs(detection);
-    let (output_dir, has_manifest) = detect_output_dir(
+    let (output_dir, has_manifest) = detect_output_dir_for_framework(
         &project_dir,
         &config.output_dirs(),
         &fw_dirs,
         server_output_dir,
+        &detection.framework,
     )?;
     tracing::info!(?output_dir, has_manifest, "found output directory");
 
@@ -470,14 +491,37 @@ fn try_generate_ssr_manifest(
 /// - DETECTED outputDirectory: current framework refinements of the detected hint,
 ///   then detected path, then framework dirs, then config dirs.
 /// - PRESET/default outputDirectory: framework dirs > preset path > config dirs.
+#[cfg(test)]
 fn detect_output_dir(
     project_dir: &Path,
     config_dirs: &[&str],
     framework_dirs: &[&str],
     server_output_dir: Option<OutputDirectoryHint<'_>>,
 ) -> anyhow::Result<(std::path::PathBuf, bool)> {
-    let resolved =
-        resolve_output_directory(project_dir, config_dirs, framework_dirs, server_output_dir)?;
+    let resolved = resolve_output_directory(
+        project_dir,
+        config_dirs,
+        framework_dirs,
+        server_output_dir,
+        UserOutputRefinement::FrameworkContainerOnly,
+    )?;
+    Ok((resolved.path, resolved.has_manifest))
+}
+
+fn detect_output_dir_for_framework(
+    project_dir: &Path,
+    config_dirs: &[&str],
+    framework_dirs: &[&str],
+    server_output_dir: Option<OutputDirectoryHint<'_>>,
+    framework: &str,
+) -> anyhow::Result<(std::path::PathBuf, bool)> {
+    let resolved = resolve_output_directory(
+        project_dir,
+        config_dirs,
+        framework_dirs,
+        server_output_dir,
+        UserOutputRefinement::for_framework(framework),
+    )?;
     Ok((resolved.path, resolved.has_manifest))
 }
 
@@ -486,13 +530,17 @@ fn resolve_output_directory(
     config_dirs: &[&str],
     framework_dirs: &[&str],
     server_output_dir: Option<OutputDirectoryHint<'_>>,
+    user_output_refinement: UserOutputRefinement,
 ) -> anyhow::Result<ResolvedOutputDirectory> {
     if let Some(hint) = server_output_dir
         && hint.source.is_user_explicit()
     {
-        if let Some(refined) =
-            resolve_user_framework_container_artifact(project_dir, hint.path, framework_dirs)
-        {
+        if let Some(refined) = resolve_user_framework_container_artifact(
+            project_dir,
+            hint.path,
+            framework_dirs,
+            user_output_refinement,
+        ) {
             return Ok(refined);
         }
 
@@ -604,13 +652,23 @@ fn resolve_user_framework_container_artifact(
     project_dir: &Path,
     hint_path: &str,
     framework_dirs: &[&str],
+    refinement: UserOutputRefinement,
 ) -> Option<ResolvedOutputDirectory> {
     // Some historic/server-side settings store the framework container as a
     // USER value. For Next.js, `.next` is that container; the deployable
     // artifact is mode-specific (`.next/standalone` for PROCESS or `out` for
     // static export). Keep arbitrary USER paths exact, but resolve known
     // framework containers through the same adapter-derived candidates.
-    if hint_path.trim_matches('/') != ".next" {
+    let hint_path = hint_path.trim_matches('/');
+    let is_project_root_hint = hint_path.is_empty() || hint_path == ".";
+    let is_next_container_hint = hint_path == ".next";
+    if is_project_root_hint && !refinement.allows_project_root() {
+        return None;
+    }
+    if is_project_root_hint && project_dir.join(".onreza/manifest.json").is_file() {
+        return None;
+    }
+    if !is_project_root_hint && !is_next_container_hint {
         return None;
     }
 
@@ -618,8 +676,12 @@ fn resolve_user_framework_container_artifact(
         .iter()
         .copied()
         .filter(|candidate| {
-            matches!(candidate.trim_matches('/'), ".next/standalone" | "out")
-                && is_framework_refinement_of_detected_hint(".next", candidate)
+            if is_project_root_hint {
+                matches!(candidate.trim_matches('/'), ".next/standalone" | "out")
+            } else {
+                matches!(candidate.trim_matches('/'), ".next/standalone" | "out")
+                    && is_framework_refinement_of_detected_hint(".next", candidate)
+            }
         })
         .find_map(|candidate| {
             let path = project_dir.join(candidate);

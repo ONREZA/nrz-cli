@@ -1,7 +1,8 @@
 use super::{
     BuildSettingSource, OutputDirectoryHint, collect_body_files, compute_aware_output_dirs,
-    copy_dir_recursive, copy_missing_prisma_packages, detect_output_dir, prepare_nextjs_standalone,
-    run_with_hint, try_generate_ssr_manifest,
+    copy_dir_recursive, copy_missing_prisma_packages, detect_output_dir,
+    detect_output_dir_for_framework, prepare_nextjs_standalone, run_with_hint,
+    try_generate_ssr_manifest,
 };
 use crate::cli::BuildArgs;
 
@@ -226,6 +227,62 @@ fn user_root_output_dir_does_not_refine_to_framework_output() {
         &["dist"],
         &["dist"],
         Some(output_hint(".", BuildSettingSource::User)),
+    )
+    .unwrap();
+
+    assert_eq!(found, dir.path().join("."));
+    assert!(!has_manifest);
+}
+
+#[test]
+fn nextjs_user_root_output_dir_allows_standalone_refinement() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/standalone/.onreza")).unwrap();
+
+    let (found, has_manifest) = detect_output_dir_for_framework(
+        dir.path(),
+        &["dist"],
+        &[".next/standalone", ".next"],
+        Some(output_hint(".", BuildSettingSource::User)),
+        "nextjs",
+    )
+    .unwrap();
+
+    assert!(found.ends_with(".next/standalone"));
+    assert!(has_manifest);
+}
+
+#[test]
+fn nextjs_user_root_output_dir_preserves_root_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".onreza")).unwrap();
+    std::fs::write(dir.path().join(".onreza/manifest.json"), "{}").unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/standalone/.onreza")).unwrap();
+
+    let (found, has_manifest) = detect_output_dir_for_framework(
+        dir.path(),
+        &["dist"],
+        &[".next/standalone", ".next"],
+        Some(output_hint(".", BuildSettingSource::User)),
+        "nextjs",
+    )
+    .unwrap();
+
+    assert_eq!(found, dir.path().join("."));
+    assert!(has_manifest);
+}
+
+#[test]
+fn non_nextjs_user_root_output_dir_stays_exact() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("out/.onreza")).unwrap();
+
+    let (found, has_manifest) = detect_output_dir_for_framework(
+        dir.path(),
+        &["dist"],
+        &["out"],
+        Some(output_hint(".", BuildSettingSource::User)),
+        "vite",
     )
     .unwrap();
 
@@ -477,6 +534,33 @@ fn nextjs_user_dot_next_allows_standalone_refinement() {
     .unwrap();
 
     assert!(found.ends_with(".next/standalone"));
+}
+
+#[test]
+fn user_project_root_refinement_is_limited_to_next_like_frameworks() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".next/standalone")).unwrap();
+    std::fs::create_dir(dir.path().join("out")).unwrap();
+
+    let (found, _) = detect_output_dir_for_framework(
+        dir.path(),
+        &["dist"],
+        &[".next/standalone", "out"],
+        Some(output_hint(".", BuildSettingSource::User)),
+        "nextjs",
+    )
+    .unwrap();
+    assert!(found.ends_with(".next/standalone"));
+
+    let (found, _) = detect_output_dir_for_framework(
+        dir.path(),
+        &["dist"],
+        &[".next/standalone", "out"],
+        Some(output_hint(".", BuildSettingSource::User)),
+        "vite",
+    )
+    .unwrap();
+    assert_eq!(found, dir.path().join("."));
 }
 
 #[test]
@@ -1176,6 +1260,59 @@ async fn nextjs_user_standalone_output_dir_is_not_rewritten() {
 }
 
 #[tokio::test]
+async fn nextjs_user_root_run_with_hint_preserves_root_manifest() {
+    let project = tempfile::tempdir().unwrap();
+
+    std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
+    std::fs::write(
+        project.path().join(".onreza/manifest.json"),
+        r#"{
+          "version": 1,
+          "layers": [
+            {"name": "root-static", "target": "STATIC", "directory": "."}
+          ],
+          "routes": [
+            {"pattern": "^/.*$", "layer": "root-static"}
+          ]
+        }"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
+    std::fs::write(
+        project.path().join(".next/standalone/server.js"),
+        "// server",
+    )
+    .unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: true,
+    };
+
+    let result = run_with_hint(
+        args,
+        true,
+        &config,
+        Some(&detection),
+        Some(output_hint(".", BuildSettingSource::User)),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.output_dir,
+        project.path().canonicalize().unwrap().join(".")
+    );
+    let manifest = result
+        .manifest
+        .expect("USER root output should preserve its explicit root manifest");
+    assert_eq!(manifest.layers.len(), 1);
+    assert_eq!(manifest.layers[0].name, "root-static");
+}
+
+#[tokio::test]
 async fn nextjs_user_dot_next_run_with_hint_uses_standalone_artifact() {
     let project = tempfile::tempdir().unwrap();
 
@@ -1209,7 +1346,7 @@ async fn nextjs_user_dot_next_run_with_hint_uses_standalone_artifact() {
     .await
     .unwrap();
 
-    assert!(result.output_dir.ends_with(".next/standalone"));
+    assert_eq!(result.output_dir, project.path().join(".next/standalone"));
     let manifest = result
         .manifest
         .expect("USER .next should use Next.js standalone artifact when present");

@@ -542,6 +542,229 @@ fn install_command_user_source_used_without_package_json() {
     assert_eq!(result.unwrap(), "make deps");
 }
 
+#[test]
+fn pnpm_sandbox_build_script_compat_preserves_user_environment() {
+    let dir = tempdir().unwrap();
+
+    let (cmd, env) = prepare_install_command_with_sandbox("pnpm install", dir.path(), true, true);
+
+    assert_eq!(cmd, "pnpm install");
+    assert!(env.contains(&(
+        "npm_config_dangerously_allow_all_builds".to_string(),
+        "true".to_string()
+    )));
+    assert!(env.contains(&(
+        "pnpm_config_dangerously_allow_all_builds".to_string(),
+        "true".to_string()
+    )));
+    assert!(
+        env.iter()
+            .all(|(key, _)| !matches!(key.as_str(), "HOME" | "XDG_CONFIG_HOME")),
+        "compat env must not hide user-level npm/pnpm config: {env:?}"
+    );
+}
+
+#[test]
+fn pnpm_sandbox_build_script_compat_uses_existing_builder_marker() {
+    let platform_marker = |key: &str| match key {
+        "ONREZA" => Some("1".to_string()),
+        "CI" => Some("true".to_string()),
+        _ => None,
+    };
+    assert!(running_in_onreza_build_sandbox_from_env(platform_marker));
+
+    let explicit_marker = |key: &str| match key {
+        "NRZ_BUILD_SANDBOX" => Some("true".to_string()),
+        _ => None,
+    };
+    assert!(running_in_onreza_build_sandbox_from_env(explicit_marker));
+
+    let onreza_without_ci = |key: &str| match key {
+        "ONREZA" => Some("1".to_string()),
+        _ => None,
+    };
+    assert!(!running_in_onreza_build_sandbox_from_env(onreza_without_ci));
+}
+
+#[test]
+fn pnpm_sandbox_build_script_compat_respects_project_policy() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("pnpm-workspace.yaml"),
+        "dangerouslyAllowAllBuilds: false\n",
+    )
+    .unwrap();
+
+    let (cmd, env) = prepare_install_command_with_sandbox("pnpm install", dir.path(), true, true);
+
+    assert_eq!(cmd, "pnpm install");
+    assert!(env.is_empty());
+}
+
+#[test]
+fn pnpm_sandbox_build_script_compat_does_not_treat_false_ignore_scripts_as_policy() {
+    let cases = [
+        (".npmrc", "ignore-scripts=false\n"),
+        (".pnpmrc", "pnpm.ignoreScripts=false\n"),
+        ("pnpm-workspace.yaml", "ignoreDepScripts: false\n"),
+        ("package.json", r#"{"pnpm":{"ignoreScripts":false}}"#),
+    ];
+
+    for (file, contents) in cases {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join(file), contents).unwrap();
+
+        let (_, env) = prepare_install_command_with_sandbox("pnpm install", dir.path(), true, true);
+
+        assert!(
+            !env.is_empty(),
+            "{file}={contents:?} should not disable sandbox pnpm build-script compat"
+        );
+    }
+}
+
+#[test]
+fn pnpm_sandbox_build_script_compat_respects_true_ignore_scripts_policy() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join(".npmrc"), "ignore-scripts=true\n").unwrap();
+
+    let (_, env) = prepare_install_command_with_sandbox("pnpm install", dir.path(), true, true);
+
+    assert!(env.is_empty());
+}
+
+#[test]
+fn pnpm_install_command_parser_handles_workspace_forms() {
+    for cmd in [
+        "pnpm install",
+        "pnpm i",
+        "pnpm -C app install",
+        "pnpm --filter web install",
+        "pnpm --filter=web install",
+        "pnpm@11.1.2 install",
+        "corepack pnpm install",
+        "cd app && pnpm install",
+        r#""pnpm" install"#,
+    ] {
+        assert!(
+            is_pnpm_install_command(cmd),
+            "{cmd:?} should be treated as pnpm install"
+        );
+    }
+}
+
+#[test]
+fn pnpm_install_command_parser_rejects_non_install_commands() {
+    for cmd in [
+        "pnpm build",
+        "pnpm run install",
+        "npm install",
+        "corepack yarn install",
+        "pnpm --filter web build",
+    ] {
+        assert!(
+            !is_pnpm_install_command(cmd),
+            "{cmd:?} should not be treated as pnpm install"
+        );
+    }
+}
+
+#[test]
+fn pnpm_build_policy_detection_recognizes_explicit_allowlists() {
+    let cases = [
+        ("pnpm-workspace.yaml", "onlyBuiltDependencies:\n  - sharp\n"),
+        (
+            "pnpm-workspace.yml",
+            "ignoredBuiltDependencies:\n  - esbuild\n",
+        ),
+        (".pnpmrc", "only-built-dependencies[]=sharp\n"),
+        (
+            "package.json",
+            r#"{"pnpm":{"onlyBuiltDependencies":["sharp"]}}"#,
+        ),
+    ];
+
+    for (file, contents) in cases {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join(file), contents).unwrap();
+
+        let (_, env) = prepare_install_command_with_sandbox("pnpm install", dir.path(), true, true);
+
+        assert!(
+            env.is_empty(),
+            "{file}={contents:?} should disable sandbox pnpm compat"
+        );
+    }
+}
+
+#[test]
+fn source_bundle_manifest_contract_rejects_compute_bundle_sha256() {
+    let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "layers": [
+            {
+                "name": "server",
+                "target": "COMPUTE",
+                "directory": ".",
+                "entry": "server.js",
+                "bundleSha256": "a".repeat(64)
+            }
+        ],
+        "routes": [
+            {"pattern": "^/.*$", "layer": "server"}
+        ]
+    }))
+    .unwrap();
+
+    let err = validate_source_bundle_manifest_contract(&manifest).unwrap_err();
+
+    assert!(err.to_string().contains("legacy bundleSha256"));
+}
+
+#[test]
+fn prepare_deploy_files_prunes_next_cache_only() {
+    let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "layers": [
+            {"name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js"}
+        ],
+        "routes": [
+            {"pattern": "^/.*$", "layer": "server"}
+        ]
+    }))
+    .unwrap();
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"next":"15.0.0","react":"19.0.0"}}"#,
+    )
+    .unwrap();
+    let detection = crate::detect::detect_with_framework_override(dir.path(), None);
+    let files = vec![
+        fe(".next/cache/webpack/client.json", 10, "aa"),
+        fe(
+            "node_modules/@next/swc-linux-x64-gnu/package.json",
+            20,
+            "bb",
+        ),
+        fe("server.js", 30, "cc"),
+    ];
+
+    let deployable = prepare_deploy_files(&manifest, files, &detection, true).unwrap();
+    let paths = deployable
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        paths,
+        vec![
+            "node_modules/@next/swc-linux-x64-gnu/package.json",
+            "server.js"
+        ]
+    );
+}
+
 // ── framework preset source handling ─────────────────────────
 
 #[test]

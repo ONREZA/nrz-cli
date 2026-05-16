@@ -56,6 +56,10 @@ const UPLOAD_FAILED_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_UPLOAD_FAILURE_LOG_LENGTH: usize = 4096;
 const REDACTED_URL_COMPONENT: &str = "REDACTED";
 const SOURCE_UPLOAD_PUT_FAILED: &str = "SOURCE_UPLOAD_PUT_FAILED";
+const PNPM_BUILD_SCRIPT_COMPAT_ENV: [(&str, &str); 2] = [
+    ("npm_config_dangerously_allow_all_builds", "true"),
+    ("pnpm_config_dangerously_allow_all_builds", "true"),
+];
 
 // ── Workspace / plan ─────────────────────────────────────────
 
@@ -425,7 +429,7 @@ pub async fn run(
     }
 
     // Pre-build env injection for framework compatibility.
-    let build_env: Vec<(&str, &str)> = {
+    let build_env: Vec<(String, String)> = {
         let mut env = Vec::new();
 
         // Next.js: inject NEXT_PRIVATE_STANDALONE=1 so users don't have to manually set
@@ -437,7 +441,7 @@ pub async fn run(
                 "Next.js detected, enabling standalone output (NEXT_PRIVATE_STANDALONE=1)",
                 output::Phase::Deploy,
             );
-            env.push(("NEXT_PRIVATE_STANDALONE", "1"));
+            env.push(("NEXT_PRIVATE_STANDALONE".to_string(), "1".to_string()));
         }
 
         // SvelteKit: adapter-auto checks platform env vars to pick an adapter.
@@ -450,7 +454,7 @@ pub async fn run(
                 "SvelteKit adapter-auto detected, enabling adapter-node (GCP_BUILDPACKS=1)",
                 output::Phase::Deploy,
             );
-            env.push(("GCP_BUILDPACKS", "1"));
+            env.push(("GCP_BUILDPACKS".to_string(), "1".to_string()));
         }
 
         env
@@ -508,15 +512,9 @@ pub async fn run(
         output::Phase::Deploy,
     );
     let output_dir_for_scan = output_dir.clone();
-    let files = tokio::task::spawn_blocking(move || scan_dir(&output_dir_for_scan))
+    let scanned_files = tokio::task::spawn_blocking(move || scan_dir(&output_dir_for_scan))
         .await
         .context("file scan task failed (panic or runtime shutdown)")??;
-    if files.is_empty() {
-        return Err(output::coded_error(
-            "INVALID_BUILD_OUTPUT",
-            format!("output directory is empty: {}", output_dir.display()),
-        ));
-    }
 
     // Resolve compute type: CLI flag > config > manifest layers > detect
     let compute = if let Some(ref m) = loaded_manifest {
@@ -621,6 +619,17 @@ pub async fn run(
     let manifest_for_planning: build_manifest::Manifest =
         serde_json::from_value(manifest_raw.clone())
             .context("failed to parse resolved deployment manifest")?;
+    validate_source_bundle_manifest_contract(&manifest_for_planning)?;
+    let files = prepare_deploy_files(&manifest_for_planning, scanned_files, &detection, json)?;
+    if files.is_empty() {
+        return Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!(
+                "output directory has no deployable files after framework normalization: {}",
+                output_dir.display()
+            ),
+        ));
+    }
     let has_compute_layer = manifest_has_compute_layer(&manifest_for_planning);
 
     // Resolve health check path (PROCESS only)
@@ -2843,7 +2852,7 @@ fn run_command_streaming(
     json: bool,
     phase: output::Phase,
     child_stream: &str,
-    extra_env: &[(&str, &str)],
+    extra_env: &[(String, String)],
 ) -> anyhow::Result<()> {
     use std::io::BufRead;
 
@@ -2856,7 +2865,11 @@ fn run_command_streaming(
         let status = std::process::Command::new(shell)
             .args(shell_args)
             .current_dir(project_dir)
-            .envs(extra_env.iter().copied())
+            .envs(
+                extra_env
+                    .iter()
+                    .map(|(key, value)| (key.as_str(), value.as_str())),
+            )
             .status()
             .with_context(|| format!("failed to start command: {cmd}"))?;
         if !status.success() {
@@ -2882,7 +2895,11 @@ fn run_command_streaming(
     let mut child = std::process::Command::new(shell)
         .args(shell_args)
         .current_dir(project_dir)
-        .envs(extra_env.iter().copied())
+        .envs(
+            extra_env
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        )
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -2981,6 +2998,7 @@ fn run_install_step(
     let Some(cmd) = resolve_install_command(project_dir, server_command) else {
         return Ok(());
     };
+    let (cmd, install_env) = prepare_install_command(&cmd, project_dir, json);
 
     output::status(
         json,
@@ -2995,7 +3013,7 @@ fn run_install_step(
         json,
         output::Phase::Install,
         "debug",
-        &[],
+        &install_env,
     )?;
     output::success(json, "Dependencies installed", output::Phase::Deploy);
     Ok(())
@@ -3025,11 +3043,328 @@ fn resolve_install_command(
     }
 }
 
+fn prepare_install_command(
+    cmd: &str,
+    project_dir: &Path,
+    json: bool,
+) -> (String, Vec<(String, String)>) {
+    prepare_install_command_with_sandbox(cmd, project_dir, json, running_in_onreza_build_sandbox())
+}
+
+fn prepare_install_command_with_sandbox(
+    cmd: &str,
+    project_dir: &Path,
+    json: bool,
+    running_in_sandbox: bool,
+) -> (String, Vec<(String, String)>) {
+    if !should_apply_pnpm_build_scripts_compat(cmd, project_dir, running_in_sandbox) {
+        return (cmd.to_string(), Vec::new());
+    }
+
+    output::status(
+        json,
+        "~",
+        "pnpm install in build sandbox: allowing dependency build scripts (no project pnpm build policy found)",
+        output::Phase::Deploy,
+    );
+
+    (cmd.to_string(), pnpm_build_scripts_compat_env())
+}
+
+fn pnpm_build_scripts_compat_env() -> Vec<(String, String)> {
+    PNPM_BUILD_SCRIPT_COMPAT_ENV
+        .iter()
+        .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+        .collect()
+}
+
+fn should_apply_pnpm_build_scripts_compat(
+    cmd: &str,
+    project_dir: &Path,
+    running_in_sandbox: bool,
+) -> bool {
+    running_in_sandbox
+        && is_pnpm_install_command(cmd)
+        && !has_explicit_pnpm_build_policy(project_dir)
+}
+
+fn running_in_onreza_build_sandbox() -> bool {
+    running_in_onreza_build_sandbox_from_env(|key| std::env::var(key).ok())
+}
+
+fn running_in_onreza_build_sandbox_from_env(mut env: impl FnMut(&str) -> Option<String>) -> bool {
+    env_value_is_truthy(env("NRZ_BUILD_SANDBOX").as_deref())
+        || (env_value_is_truthy(env("ONREZA").as_deref())
+            && env_value_is_truthy(env("CI").as_deref()))
+}
+
+fn env_value_is_truthy(value: Option<&str>) -> bool {
+    matches!(
+        value.map(str::trim),
+        Some("1" | "true" | "TRUE" | "yes" | "YES")
+    )
+}
+
+fn is_pnpm_install_command(cmd: &str) -> bool {
+    let tokens = shell_command_tokens(cmd);
+    let Some(pnpm_index) = tokens.iter().position(|token| is_pnpm_command_token(token)) else {
+        return false;
+    };
+
+    let mut skip_next = false;
+    for token in tokens.iter().skip(pnpm_index + 1) {
+        if is_shell_command_separator(token) {
+            break;
+        }
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if pnpm_option_takes_value(token) {
+            skip_next = !token.contains('=');
+            continue;
+        }
+        if token.starts_with('-') {
+            continue;
+        }
+        return matches!(token.as_str(), "install" | "i");
+    }
+    false
+}
+
+fn shell_command_tokens(cmd: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut chars = cmd.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if let Some(active_quote) = quote {
+            if ch == active_quote {
+                quote = None;
+            } else {
+                current.push(ch);
+            }
+            continue;
+        }
+
+        match ch {
+            '"' | '\'' => quote = Some(ch),
+            '&' | '|' if chars.peek() == Some(&ch) => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                chars.next();
+                tokens.push(format!("{ch}{ch}"));
+            }
+            ';' => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                tokens.push(";".to_string());
+            }
+            ch if ch.is_whitespace() => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    tokens
+}
+
+fn is_pnpm_command_token(token: &str) -> bool {
+    let command = token
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(token)
+        .trim_matches(|ch| ch == '"' || ch == '\'');
+    command == "pnpm" || command.starts_with("pnpm@")
+}
+
+fn is_shell_command_separator(token: &str) -> bool {
+    matches!(token, "&&" | "||" | ";")
+}
+
+fn pnpm_option_takes_value(token: &str) -> bool {
+    matches!(
+        token,
+        "-C" | "--dir"
+            | "--filter"
+            | "--workspace-dir"
+            | "--store-dir"
+            | "--config"
+            | "--package-import-method"
+            | "--network-concurrency"
+            | "--fetch-retries"
+            | "--fetch-retry-factor"
+            | "--fetch-retry-mintimeout"
+            | "--fetch-retry-maxtimeout"
+    ) || token.starts_with("--filter=")
+        || token.starts_with("--dir=")
+        || token.starts_with("--workspace-dir=")
+        || token.starts_with("--store-dir=")
+        || token.starts_with("--config.")
+}
+
+fn has_explicit_pnpm_build_policy(project_dir: &Path) -> bool {
+    for dir in project_dir.ancestors() {
+        for file in [
+            "pnpm-workspace.yaml",
+            "pnpm-workspace.yml",
+            ".npmrc",
+            ".pnpmrc",
+            "package.json",
+        ] {
+            let path = dir.join(file);
+            let Ok(contents) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            if file_contains_pnpm_build_policy(file, &contents) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn file_contains_pnpm_build_policy(file_name: &str, contents: &str) -> bool {
+    if matches!(file_name, ".npmrc" | ".pnpmrc") {
+        return rc_file_contains_pnpm_build_policy(contents);
+    }
+
+    if file_name == "package.json" {
+        return package_json_contains_pnpm_build_policy(contents);
+    }
+
+    yaml_file_contains_pnpm_build_policy(contents)
+}
+
+fn rc_file_contains_pnpm_build_policy(contents: &str) -> bool {
+    contents.lines().any(|line| {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            return false;
+        }
+        let Some((key, value)) = parse_rc_config_setting(line) else {
+            return false;
+        };
+        pnpm_build_policy_setting_blocks_compat(key, value)
+    })
+}
+
+fn yaml_file_contains_pnpm_build_policy(contents: &str) -> bool {
+    contents.lines().any(|line| {
+        let line = line.trim_start();
+        if line.is_empty() || line.starts_with('#') || line.starts_with('-') {
+            return false;
+        }
+        let Some((key, value)) = parse_yaml_config_setting(line) else {
+            return false;
+        };
+        pnpm_build_policy_setting_blocks_compat(key, value)
+    })
+}
+
+fn package_json_contains_pnpm_build_policy(contents: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(contents) else {
+        return false;
+    };
+    value
+        .get("pnpm")
+        .and_then(|pnpm| pnpm.as_object())
+        .is_some_and(|pnpm| {
+            pnpm.iter().any(|(key, value)| {
+                let value = json_config_scalar(value);
+                pnpm_build_policy_setting_blocks_compat(key, value.as_deref())
+            })
+        })
+}
+
+fn parse_rc_config_setting(line: &str) -> Option<(&str, Option<&str>)> {
+    if let Some((key, value)) = line.split_once('=') {
+        return Some((clean_config_key(key)?, Some(value.trim())));
+    }
+
+    let mut parts = line.splitn(2, char::is_whitespace);
+    let key = clean_config_key(parts.next()?)?;
+    Some((key, parts.next().map(str::trim)))
+}
+
+fn parse_yaml_config_setting(line: &str) -> Option<(&str, Option<&str>)> {
+    let (key, value) = line.trim_start().split_once(':')?;
+    let key = clean_config_key(key)?;
+    let value = value.trim();
+    Some((key, (!value.is_empty()).then_some(value)))
+}
+
+fn clean_config_key(key: &str) -> Option<&str> {
+    let key = key.trim().trim_matches(|ch| ch == '"' || ch == '\'').trim();
+    (!key.is_empty()).then_some(key)
+}
+
+fn json_config_scalar(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::String(value) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn pnpm_build_policy_setting_blocks_compat(key: &str, value: Option<&str>) -> bool {
+    match normalize_pnpm_build_policy_key(key).as_str() {
+        "allowbuilds"
+        | "dangerouslyallowallbuilds"
+        | "onlybuiltdependencies"
+        | "onlybuiltdependenciesfile"
+        | "ignoredbuiltdependencies"
+        | "neverbuiltdependencies" => true,
+        "ignoredepscripts" | "strictdepbuilds" | "ignorescripts" => {
+            config_bool_value(value).unwrap_or(true)
+        }
+        _ => false,
+    }
+}
+
+fn config_bool_value(value: Option<&str>) -> Option<bool> {
+    let value = value?
+        .split(['#', ';'])
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_matches(|ch| ch == '"' || ch == '\'')
+        .to_ascii_lowercase();
+    match value.as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn normalize_pnpm_build_policy_key(key: &str) -> String {
+    let normalized: String = key
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect();
+    normalized
+        .strip_prefix("pnpm")
+        .unwrap_or(&normalized)
+        .to_string()
+}
+
 fn run_build_step(
     cmd: &str,
     project_dir: &Path,
     json: bool,
-    extra_env: &[(&str, &str)],
+    extra_env: &[(String, String)],
 ) -> anyhow::Result<()> {
     if cmd.trim().is_empty() {
         return Err(output::coded_error(
@@ -3072,6 +3407,109 @@ fn scan_dir(dir: &Path) -> anyhow::Result<Vec<FileEntry>> {
     scan_dir_recursive(dir, dir, &mut files)?;
     files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
+}
+
+fn prepare_deploy_files(
+    manifest: &build_manifest::Manifest,
+    files: Vec<FileEntry>,
+    detection: &crate::detect::types::DetectionResult,
+    json: bool,
+) -> anyhow::Result<Vec<FileEntry>> {
+    let original_count = files.len();
+    let original_bytes = files.iter().map(|file| file.size).sum::<u64>();
+    let mut pruned_count = 0usize;
+    let mut pruned_bytes = 0u64;
+    let mut deployable = Vec::with_capacity(files.len());
+
+    for file in files {
+        if is_framework_build_only_path(manifest, detection, &file.path) {
+            pruned_count += 1;
+            pruned_bytes = pruned_bytes.saturating_add(file.size);
+            continue;
+        }
+        deployable.push(file);
+    }
+
+    if pruned_count > 0 {
+        output::status(
+            json,
+            "~",
+            format!(
+                "Pruned {pruned_count}/{original_count} build-only artifact(s) from SOURCE_BUNDLE_V1 ({})",
+                format_u64_bytes(pruned_bytes)
+            ),
+            output::Phase::Deploy,
+        );
+        tracing::info!(
+            pruned_count,
+            original_count,
+            pruned_bytes,
+            original_bytes,
+            "pruned framework build-only artifacts before SOURCE_BUNDLE_V1 packaging"
+        );
+    }
+
+    warn_large_deploy_files(json, &deployable);
+    Ok(deployable)
+}
+
+fn validate_source_bundle_manifest_contract(
+    manifest: &build_manifest::Manifest,
+) -> anyhow::Result<()> {
+    for layer in &manifest.layers {
+        if layer.target == build_manifest::LayerTarget::Compute && layer.bundle_sha256.is_some() {
+            return Err(output::coded_error(
+                "INVALID_BUNDLE_MANIFEST",
+                format!(
+                    "COMPUTE layer '{}' uses legacy bundleSha256. SOURCE_BUNDLE_V1 computes bundle identity from the uploaded source manifest; remove bundleSha256 from .onreza/manifest.json.",
+                    layer.name
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_framework_build_only_path(
+    manifest: &build_manifest::Manifest,
+    detection: &crate::detect::types::DetectionResult,
+    path: &str,
+) -> bool {
+    if !manifest_has_compute_layer(manifest) {
+        return false;
+    }
+    if !matches!(
+        detection.framework.as_str(),
+        "nextjs" | "blitzjs" | "payload"
+    ) {
+        return false;
+    }
+
+    path == ".next/cache" || path.starts_with(".next/cache/") || path.contains("/.next/cache/")
+}
+
+fn warn_large_deploy_files(json: bool, files: &[FileEntry]) {
+    const LARGE_DEPLOY_FILE_WARNING_BYTES: u64 = 25 * 1024 * 1024;
+    let mut large = files
+        .iter()
+        .filter(|file| file.size > LARGE_DEPLOY_FILE_WARNING_BYTES)
+        .collect::<Vec<_>>();
+    large.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.path.cmp(&b.path)));
+    if large.is_empty() {
+        return;
+    }
+
+    let display = large
+        .iter()
+        .take(5)
+        .map(|file| format!("{} ({})", file.path, format_u64_bytes(file.size)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    output::warn(
+        json,
+        format!("Large deployment files detected before upload: {display}"),
+        output::Phase::Deploy,
+    );
 }
 
 fn scan_dir_recursive(
