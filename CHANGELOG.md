@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.31.2] - 2026-05-16
+
+### 🐛 Bug Fixes
+
+- **deploy:** harden source bundle build handling ([689a35f](https://github.com/ONREZA/nrz-cli/commit/689a35f8ed27905d61dd74aad237956d12707fb6))
+
 ## [0.31.1] - 2026-05-15
 
 ### 🐛 Bug Fixes
