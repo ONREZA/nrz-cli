@@ -2,7 +2,9 @@
 
 `installCommand`, `buildCommand`, and `outputDirectory` are source-aware. The
 value string alone is not enough to decide whether the CLI may apply local
-fallbacks or framework analysis.
+fallbacks or framework analysis. At runtime the CLI first builds one
+`onreza.toml`-shaped effective config in memory, then runs build/deploy from
+that model only.
 
 All three settings use the same source enum:
 
@@ -52,7 +54,11 @@ Command precedence is:
 | Setting | CLI precedence |
 | --- | --- |
 | `buildCommand` | `--build-command` > local `[build].command` > server command/source > package.json auto-detect |
-| `installCommand` | server command/source > package-manager auto-detect |
+| `installCommand` | local `[build].install_command` > server command/source > package-manager auto-detect |
+
+For output directories, local `[build].output_directory` is a `USER` source and
+therefore exact/authoritative. `[build].output_dirs` remains only the fallback
+search list used after framework/source-aware candidates.
 
 Server command source affects empty or missing server values:
 

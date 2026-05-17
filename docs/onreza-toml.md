@@ -19,7 +19,7 @@
 | `id` | string | да (после init) | ID проекта на платформе вида `proj_abc123`. Прописывается автоматически при `nrz init` / `nrz link`. Используется во всех API-вызовах. |
 | `name` | string | нет | Отображаемое имя проекта. Заполняется при `nrz init`. |
 | `workspace` | string | нет | Slug воркспейса (организации). Заполняется при `nrz init`. |
-| `framework` | string | нет | Slug обнаруженного фреймворка (например `next`, `nuxt`, `sveltekit`, `astro`, `vite`, `remix`). **Заполняется автоматически** командой `nrz detect --save` и при каждом `nrz deploy`. Не редактируйте вручную. |
+| `framework` | string | нет | Slug фреймворка (например `next`, `nuxt`, `sveltekit`, `astro`, `vite`, `remix`). Заполняется командой `nrz detect --save` и используется как локальный override для build/deploy. |
 
 **Пример:**
 ```toml
@@ -70,7 +70,9 @@ debug = "node --inspect src/index.js"
 
 | Поле | Тип | По умолчанию | Описание |
 |------|-----|-------------|---------|
+| `install_command` | string | авто | Команда установки зависимостей перед build/deploy. Если не задана, определяется по package manager. Пустая строка означает явный skip. |
 | `command` | string | нет | Команда сборки, которая выполняется автоматически перед `nrz deploy` (если не передан `--skip-build`). Пример: `"npm run build"`. |
+| `output_directory` | string | авто | Единственная авторитетная директория build output. Если задана в `onreza.toml`, CLI не делает silent fallback в другие директории. |
 | `output_dirs` | string[] | см. ниже | Список директорий, в которых CLI ищет build output. Порядок важен — берётся первая существующая. |
 
 **Дефолтный `output_dirs`:**
@@ -83,7 +85,9 @@ output_dirs = ["dist", ".output", "build", "out", "_site", "www", ".vitepress/di
 **Пример:**
 ```toml
 [build]
+install_command = "pnpm install"
 command = "npm run build"
+output_directory = "dist"
 output_dirs = ["dist"]
 ```
 
@@ -278,7 +282,7 @@ SENTRY_DSN = { visibility = "sensitive", required = false }
 | `project.id` | `nrz init`, `nrz link` |
 | `project.name` | `nrz init` |
 | `project.workspace` | `nrz init` |
-| `project.framework` | `nrz detect --save`, `nrz deploy` |
+| `project.framework` | `nrz detect --save` |
 
 ## Приоритет настроек
 

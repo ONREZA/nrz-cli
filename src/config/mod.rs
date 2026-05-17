@@ -70,7 +70,7 @@ impl<'de> Deserialize<'de> for HealthCheckPathConfig {
 }
 
 /// Top-level config loaded from `onreza.toml`.
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ProjectConfig {
     pub project: ProjectSection,
@@ -82,7 +82,7 @@ pub struct ProjectConfig {
     pub env: EnvSection,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ProjectSection {
     pub id: Option<String>,
@@ -91,7 +91,7 @@ pub struct ProjectSection {
     pub framework: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct DevSection {
     pub command: Option<String>,
@@ -105,14 +105,16 @@ pub struct DevSection {
     pub aliases: HashMap<String, String>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct BuildSection {
     pub output_dirs: Option<Vec<String>>,
     pub command: Option<String>,
+    pub install_command: Option<String>,
+    pub output_directory: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct DeploySection {
     /// Compute type override: "static", "isolate", "process".
@@ -133,7 +135,7 @@ pub struct DeploySection {
 /// database = "my-db"    # id or name — auto-resolved if omitted
 /// branch = "dev"        # branch for nrz dev — main if omitted
 /// ```
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct DbSection {
     /// Database ID or name. If omitted, uses first auto-inject-enabled DB.
@@ -301,6 +303,14 @@ impl ProjectConfig {
         self.build.command.as_deref()
     }
 
+    pub fn install_command(&self) -> Option<&str> {
+        self.build.install_command.as_deref()
+    }
+
+    pub fn output_directory(&self) -> Option<&str> {
+        self.build.output_directory.as_deref()
+    }
+
     pub fn deploy_compute(&self) -> Option<&str> {
         self.deploy.compute.as_deref()
     }
@@ -336,6 +346,229 @@ impl ProjectConfig {
     pub fn env_strict(&self) -> bool {
         self.env.strict
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum BuildSettingSource {
+    Preset,
+    Detected,
+    User,
+}
+
+impl BuildSettingSource {
+    pub fn is_user_explicit(self) -> bool {
+        self == Self::User
+    }
+
+    pub fn is_authoritative_command_absence(self) -> bool {
+        matches!(self, Self::Detected | Self::User)
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBuildSettings {
+    pub framework_preset: Option<String>,
+    pub install_command: Option<String>,
+    pub install_command_source: Option<BuildSettingSource>,
+    pub build_command: Option<String>,
+    pub build_command_source: Option<BuildSettingSource>,
+    pub output_directory: Option<String>,
+    pub output_directory_source: Option<BuildSettingSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceAwareSetting {
+    pub value: Option<String>,
+    pub source: Option<BuildSettingSource>,
+}
+
+impl SourceAwareSetting {
+    fn from_user(value: Option<String>) -> Option<Self> {
+        value.map(|value| Self {
+            value: normalize_optional_string(Some(value)),
+            source: Some(BuildSettingSource::User),
+        })
+    }
+
+    fn from_server_command(
+        value: Option<String>,
+        source: Option<BuildSettingSource>,
+    ) -> Option<Self> {
+        let value = normalize_optional_string(value);
+
+        match source {
+            Some(BuildSettingSource::Preset) => None,
+            Some(source) => {
+                if value.is_some() || source.is_authoritative_command_absence() {
+                    Some(Self {
+                        value,
+                        source: Some(source),
+                    })
+                } else {
+                    None
+                }
+            }
+            None => value.map(|value| Self {
+                value: Some(value),
+                source: None,
+            }),
+        }
+    }
+
+    fn from_server_output(
+        value: Option<String>,
+        source: Option<BuildSettingSource>,
+    ) -> Option<Self> {
+        normalize_optional_string(value).map(|value| Self {
+            value: Some(value),
+            source: Some(source.unwrap_or(BuildSettingSource::Preset)),
+        })
+    }
+
+    pub fn value(&self) -> Option<&str> {
+        self.value.as_deref()
+    }
+
+    pub fn source_or_preset(&self) -> BuildSettingSource {
+        self.source.unwrap_or(BuildSettingSource::Preset)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EffectiveProjectConfig {
+    project_dir: PathBuf,
+    config: ProjectConfig,
+    framework_override: Option<String>,
+    install_command: Option<SourceAwareSetting>,
+    build_command: Option<SourceAwareSetting>,
+    output_directory: Option<SourceAwareSetting>,
+}
+
+impl EffectiveProjectConfig {
+    pub fn from_project_config(project_dir: PathBuf, config: ProjectConfig) -> Self {
+        let framework_override =
+            normalize_authoritative_framework(config.project.framework.as_deref())
+                .map(str::to_string);
+        let install_command = SourceAwareSetting::from_user(config.build.install_command.clone());
+        let build_command = SourceAwareSetting::from_user(config.build.command.clone());
+        let output_directory = normalize_optional_string(config.build.output_directory.clone())
+            .map(|value| SourceAwareSetting {
+                value: Some(value),
+                source: Some(BuildSettingSource::User),
+            });
+
+        Self {
+            project_dir,
+            config,
+            framework_override,
+            install_command,
+            build_command,
+            output_directory,
+        }
+    }
+
+    pub fn load(project_dir: PathBuf) -> anyhow::Result<Self> {
+        let config = load(&project_dir)?;
+        Ok(Self::from_project_config(project_dir, config))
+    }
+
+    pub fn apply_server_settings(&mut self, settings: Option<&ProjectBuildSettings>) {
+        let Some(settings) = settings else {
+            return;
+        };
+
+        if self.framework_override.is_none()
+            && let Some(framework) =
+                normalize_authoritative_framework(settings.framework_preset.as_deref())
+        {
+            self.framework_override = Some(framework.to_string());
+        }
+
+        if self.install_command.is_none() {
+            self.install_command = SourceAwareSetting::from_server_command(
+                settings.install_command.clone(),
+                settings.install_command_source,
+            );
+        }
+
+        if self.build_command.is_none() {
+            self.build_command = SourceAwareSetting::from_server_command(
+                settings.build_command.clone(),
+                settings.build_command_source,
+            );
+        }
+
+        if self.output_directory.is_none() {
+            self.output_directory = SourceAwareSetting::from_server_output(
+                settings.output_directory.clone(),
+                settings.output_directory_source,
+            );
+        }
+    }
+
+    pub fn project_dir(&self) -> &Path {
+        &self.project_dir
+    }
+
+    pub fn config(&self) -> &ProjectConfig {
+        &self.config
+    }
+
+    pub fn framework_override(&self) -> Option<&str> {
+        self.framework_override.as_deref()
+    }
+
+    pub fn install_command(&self) -> Option<&SourceAwareSetting> {
+        self.install_command.as_ref()
+    }
+
+    pub fn build_command(&self) -> Option<&SourceAwareSetting> {
+        self.build_command.as_ref()
+    }
+
+    pub fn output_directory(&self) -> Option<&SourceAwareSetting> {
+        self.output_directory.as_ref()
+    }
+
+    pub fn output_dirs(&self) -> Vec<&str> {
+        self.config.output_dirs()
+    }
+
+    pub fn deploy_compute(&self) -> Option<&str> {
+        self.config.deploy_compute()
+    }
+
+    pub fn deploy_entry(&self) -> Option<&str> {
+        self.config.deploy_entry()
+    }
+
+    pub fn deploy_app(&self) -> Option<&str> {
+        self.config.deploy_app()
+    }
+
+    pub fn project_id(&self) -> Option<&str> {
+        self.config
+            .project
+            .id
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+    }
+}
+
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+pub fn normalize_authoritative_framework(framework: Option<&str>) -> Option<&str> {
+    let framework = framework?.trim();
+    if framework.is_empty() || framework.eq_ignore_ascii_case("other") {
+        return None;
+    }
+    Some(framework)
 }
 
 // ── Load / Save ─────────────────────────────────────────────
@@ -455,7 +688,9 @@ pub fn generate_template(
 # staging = "npm run dev -- --host 0.0.0.0 --port 3001"
 
 # [build]
+# install_command = "npm install"
 # command = "npm run build"
+# output_directory = "dist"
 # output_dirs = ["dist", ".output", "build", "out", "_site", "www", ".vitepress/dist"]
 
 # [deploy]
@@ -524,10 +759,10 @@ pub fn save_or_update(
 ///
 /// If the file exists, updates `framework` field in-place.
 /// If not, does nothing (scaffold must exist first).
-pub fn save_framework(project_dir: &Path, framework: &str) -> anyhow::Result<()> {
+pub fn save_framework(project_dir: &Path, framework: &str) -> anyhow::Result<bool> {
     let path = project_dir.join(CONFIG_FILENAME);
     if !path.exists() {
-        return Ok(());
+        return Ok(false);
     }
 
     let content = std::fs::read_to_string(&path)
@@ -537,14 +772,14 @@ pub fn save_framework(project_dir: &Path, framework: &str) -> anyhow::Result<()>
         toml::from_str(&content).with_context(|| format!("failed to parse {}", path.display()))?;
 
     if config.project.framework.as_deref() == Some(framework) {
-        return Ok(());
+        return Ok(true);
     }
 
     let updated = update_single_field_in_toml(&content, "framework", framework);
     std::fs::write(&path, updated)
         .with_context(|| format!("failed to write {}", path.display()))?;
 
-    Ok(())
+    Ok(true)
 }
 
 /// Update a single field in the `[project]` section in-place.

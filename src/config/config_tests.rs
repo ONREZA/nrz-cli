@@ -18,6 +18,9 @@ host = "0.0.0.0"
 data_dir = "custom/data"
 
 [build]
+install_command = "pnpm install"
+command = "pnpm build"
+output_directory = "out"
 output_dirs = ["out", "public"]
 
 [db]
@@ -35,10 +38,12 @@ branch = "dev"
     assert_eq!(config.dev_port(), 3000);
     assert_eq!(config.dev_host(), "0.0.0.0");
     assert_eq!(config.data_dir_relative(), "custom/data");
+    assert_eq!(config.install_command(), Some("pnpm install"));
+    assert_eq!(config.build_command(), Some("pnpm build"));
+    assert_eq!(config.output_directory(), Some("out"));
     assert_eq!(config.output_dirs(), vec!["out", "public"]);
     assert_eq!(config.db_database(), Some("my-db"));
     assert_eq!(config.db_branch(), Some("dev"));
-    assert!(config.build_command().is_none());
     assert!(config.dev.aliases.is_empty());
 }
 
@@ -53,6 +58,95 @@ fn load_config_with_build_command() {
 
     let config = load(dir.path()).unwrap();
     assert_eq!(config.build_command(), Some("pnpm build"));
+}
+
+#[test]
+fn effective_config_merges_server_settings_into_onreza_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = ProjectConfig::default();
+    let mut effective =
+        EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+
+    effective.apply_server_settings(Some(&ProjectBuildSettings {
+        framework_preset: Some("vite".to_string()),
+        build_command: Some("npm run build".to_string()),
+        build_command_source: Some(BuildSettingSource::Detected),
+        output_directory: Some("dist".to_string()),
+        output_directory_source: Some(BuildSettingSource::Preset),
+        ..Default::default()
+    }));
+
+    assert_eq!(effective.project_dir(), dir.path());
+    assert_eq!(effective.framework_override(), Some("vite"));
+    assert_eq!(
+        effective
+            .build_command()
+            .and_then(SourceAwareSetting::value),
+        Some("npm run build")
+    );
+    assert_eq!(
+        effective
+            .output_directory()
+            .map(SourceAwareSetting::source_or_preset),
+        Some(BuildSettingSource::Preset)
+    );
+}
+
+#[test]
+fn effective_config_local_build_command_wins_over_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = ProjectConfig::default();
+    config.build.command = Some("pnpm build".to_string());
+    let mut effective =
+        EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+
+    effective.apply_server_settings(Some(&ProjectBuildSettings {
+        build_command: Some("npm run build".to_string()),
+        build_command_source: Some(BuildSettingSource::User),
+        ..Default::default()
+    }));
+
+    assert_eq!(
+        effective
+            .build_command()
+            .and_then(SourceAwareSetting::value),
+        Some("pnpm build")
+    );
+}
+
+#[test]
+fn effective_config_local_framework_wins_over_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = ProjectConfig::default();
+    config.project.framework = Some("vite".to_string());
+    let mut effective =
+        EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+
+    effective.apply_server_settings(Some(&ProjectBuildSettings {
+        framework_preset: Some("nextjs".to_string()),
+        ..Default::default()
+    }));
+
+    assert_eq!(effective.framework_override(), Some("vite"));
+}
+
+#[test]
+fn effective_config_preset_commands_keep_autodetect_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = ProjectConfig::default();
+    let mut effective =
+        EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+
+    effective.apply_server_settings(Some(&ProjectBuildSettings {
+        install_command: Some("npm install".to_string()),
+        install_command_source: Some(BuildSettingSource::Preset),
+        build_command: Some("npm run build".to_string()),
+        build_command_source: Some(BuildSettingSource::Preset),
+        ..Default::default()
+    }));
+
+    assert!(effective.install_command().is_none());
+    assert!(effective.build_command().is_none());
 }
 
 #[test]
@@ -86,6 +180,8 @@ fn default_config_has_empty_aliases_and_no_build_command() {
     let config = ProjectConfig::default();
     assert!(config.dev.aliases.is_empty());
     assert!(config.build_command().is_none());
+    assert!(config.install_command().is_none());
+    assert!(config.output_directory().is_none());
 }
 
 #[test]
@@ -473,7 +569,7 @@ fn save_framework_replaces_existing() {
 fn save_framework_noop_when_no_toml() {
     let dir = tempfile::tempdir().unwrap();
     // No onreza.toml exists — should do nothing
-    save_framework(dir.path(), "nextjs").unwrap();
+    assert!(!save_framework(dir.path(), "nextjs").unwrap());
     assert!(!dir.path().join("onreza.toml").exists());
 }
 

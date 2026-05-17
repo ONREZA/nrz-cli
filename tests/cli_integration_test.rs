@@ -420,6 +420,53 @@ fn detect_save_writes_framework_to_toml() {
 }
 
 #[test]
+fn detect_save_without_onreza_toml_fails_honestly() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"dependencies": {"vite": "5.0.0"}}"#,
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["detect", "--save", "--json"]);
+    cmd.assert()
+        .failure()
+        .stdout(contains("cannot save detected framework"))
+        .stdout(contains("onreza.toml not found"));
+
+    assert!(!temp.path().join("onreza.toml").exists());
+}
+
+#[test]
+fn build_uses_onreza_toml_from_dir_argument() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = temp.path().join("app");
+    fs::create_dir_all(app.join("dist")).unwrap();
+    fs::write(app.join("onreza.toml"), "[project]\nframework = \"vite\"\n").unwrap();
+    fs::write(
+        app.join("package.json"),
+        r#"{
+          "scripts": {"build": "vite build"},
+          "dependencies": {"express": "^4.19.0", "react": "^18.3.0"},
+          "devDependencies": {"vite": "^5.0.0", "@vitejs/plugin-react": "^4.0.0"}
+        }"#,
+    )
+    .unwrap();
+    fs::write(app.join("vite.config.js"), "x".repeat(600)).unwrap();
+    fs::write(app.join("dist/index.html"), "<div id=\"root\"></div>").unwrap();
+    fs::write(app.join("dist/app.js"), "console.log('app')").unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["build", "app", "--json"]);
+    cmd.assert()
+        .success()
+        .stdout(contains("Auto-generated STATIC manifest"))
+        .stdout(contains("\\\"framework\\\":\\\"vite\\\""))
+        .stdout(contains("\\\"target\\\":\\\"STATIC\\\""));
+}
+
+#[test]
 fn detect_nonexistent_directory_returns_error() {
     let mut cmd = nrz();
     cmd.args(["detect", "--json", "/tmp/nrz_test_nonexistent_dir_12345"]);

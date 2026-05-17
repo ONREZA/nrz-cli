@@ -73,6 +73,14 @@
           "type": "string",
           "description": "Build command to run before deploy (e.g. \"npm run build\")"
         },
+        "install_command": {
+          "type": "string",
+          "description": "Install command to run before build/deploy (e.g. \"pnpm install\"). Empty string means explicitly skip install."
+        },
+        "output_directory": {
+          "type": "string",
+          "description": "Authoritative build output directory for deploy (e.g. \"dist\", \".next/standalone\"). Prefer output_dirs for fallback search lists."
+        },
         "output_dirs": {
           "type": "array",
           "description": "Directories to search for build output",

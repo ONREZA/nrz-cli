@@ -51,7 +51,12 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
 
     // --save: persist framework to onreza.toml
     if args.save && result.framework != "other" {
-        nrz::config::save_framework(&project_dir, &result.framework)?;
+        if !nrz::config::save_framework(&project_dir, &result.framework)? {
+            anyhow::bail!(
+                "cannot save detected framework: onreza.toml not found in {}. Run `nrz init` first or create onreza.toml.",
+                project_dir.display()
+            );
+        }
         if !json {
             output::status(
                 false,

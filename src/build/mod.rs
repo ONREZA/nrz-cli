@@ -9,11 +9,12 @@ mod build_tests;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::cli::BuildArgs;
 use crate::output;
-use nrz::config::ProjectConfig;
+pub(crate) use nrz::config::BuildSettingSource;
+use nrz::config::{EffectiveProjectConfig, ProjectConfig};
 
 #[derive(Serialize)]
 struct LayerInfo {
@@ -40,24 +41,6 @@ struct BuildOutput {
 pub struct BuildResult {
     pub output_dir: std::path::PathBuf,
     pub manifest: Option<manifest::Manifest>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub(crate) enum BuildSettingSource {
-    Preset,
-    Detected,
-    User,
-}
-
-impl BuildSettingSource {
-    fn is_user_explicit(self) -> bool {
-        self == Self::User
-    }
-
-    pub(crate) fn is_authoritative_command_absence(self) -> bool {
-        matches!(self, Self::Detected | Self::User)
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -118,9 +101,14 @@ pub async fn run(
     json: bool,
     config: &ProjectConfig,
 ) -> anyhow::Result<BuildResult> {
-    run_with_hint(args, json, config, None, None).await
+    let project_dir = Path::new(&args.dir)
+        .canonicalize()
+        .with_context(|| format!("project directory not found: {}", args.dir))?;
+    let effective = EffectiveProjectConfig::from_project_config(project_dir, config.clone());
+    run_with_effective_config(args, json, &effective, None).await
 }
 
+#[cfg(test)]
 pub async fn run_with_hint(
     args: BuildArgs,
     json: bool,
@@ -131,24 +119,54 @@ pub async fn run_with_hint(
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
+    let mut effective = EffectiveProjectConfig::from_project_config(project_dir, config.clone());
+    if let Some(hint) = server_output_dir {
+        let settings = nrz::config::ProjectBuildSettings {
+            output_directory: Some(hint.path.to_string()),
+            output_directory_source: Some(hint.source),
+            ..Default::default()
+        };
+        effective.apply_server_settings(Some(&settings));
+    }
+
+    run_with_effective_config(args, json, &effective, detection).await
+}
+
+pub(crate) async fn run_with_effective_config(
+    args: BuildArgs,
+    json: bool,
+    effective: &EffectiveProjectConfig,
+    detection: Option<&crate::detect::types::DetectionResult>,
+) -> anyhow::Result<BuildResult> {
+    let project_dir = effective.project_dir();
 
     let internal_detection;
     let detection = match detection {
         Some(d) => d,
         None => {
             internal_detection = crate::detect::detect_with_framework_override(
-                &project_dir,
-                config.project.framework.as_deref(),
+                project_dir,
+                effective.framework_override(),
             );
             &internal_detection
         }
     };
     let fw_dirs = compute_aware_output_dirs(detection);
+    let output_directory_hint = effective
+        .output_directory()
+        .and_then(|setting| setting.value())
+        .map(|path| OutputDirectoryHint {
+            path,
+            source: effective
+                .output_directory()
+                .map(|setting| setting.source_or_preset())
+                .unwrap_or(BuildSettingSource::Preset),
+        });
     let (output_dir, has_manifest) = detect_output_dir_for_framework(
-        &project_dir,
-        &config.output_dirs(),
+        project_dir,
+        &effective.output_dirs(),
         &fw_dirs,
-        server_output_dir,
+        output_directory_hint,
         &detection.framework,
     )?;
     tracing::info!(?output_dir, has_manifest, "found output directory");
@@ -226,9 +244,9 @@ pub async fn run_with_hint(
             .ssr_analysis
             .as_ref()
             .is_some_and(|ssr| ssr.has_standalone_output())
-            || resolve_nextjs_standalone_server(&project_dir, &output_dir).is_some())
+            || resolve_nextjs_standalone_server(project_dir, &output_dir).is_some())
     {
-        let Some(standalone) = resolve_nextjs_standalone_server(&project_dir, &output_dir) else {
+        let Some(standalone) = resolve_nextjs_standalone_server(project_dir, &output_dir) else {
             return Err(output::coded_error(
                 "MISSING_BUILD_OUTPUT",
                 format!(
@@ -241,7 +259,7 @@ pub async fn run_with_hint(
         };
 
         prepare_nextjs_standalone_for_server(
-            &project_dir,
+            project_dir,
             &output_dir,
             &standalone.server_dir,
             json,

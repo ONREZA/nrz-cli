@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::Path;
 
 use axum::Router;
 use axum::http::{HeaderMap, StatusCode};
@@ -14,6 +15,45 @@ fn fe(path: &str, size: u64, content_hash: &str) -> FileEntry {
         path: path.into(),
         size,
         content_hash: content_hash.into(),
+    }
+}
+
+fn effective_config(
+    project_dir: &Path,
+    config: nrz::config::ProjectConfig,
+) -> nrz::config::EffectiveProjectConfig {
+    nrz::config::EffectiveProjectConfig::from_project_config(project_dir.to_path_buf(), config)
+}
+
+fn effective_with_server_settings(
+    project_dir: &Path,
+    config: nrz::config::ProjectConfig,
+    settings: nrz::config::ProjectBuildSettings,
+) -> nrz::config::EffectiveProjectConfig {
+    let mut effective = effective_config(project_dir, config);
+    effective.apply_server_settings(Some(&settings));
+    effective
+}
+
+fn server_build_settings(
+    command: Option<&str>,
+    source: Option<nrz::config::BuildSettingSource>,
+) -> nrz::config::ProjectBuildSettings {
+    nrz::config::ProjectBuildSettings {
+        build_command: command.map(str::to_string),
+        build_command_source: source,
+        ..Default::default()
+    }
+}
+
+fn server_install_settings(
+    command: Option<&str>,
+    source: Option<nrz::config::BuildSettingSource>,
+) -> nrz::config::ProjectBuildSettings {
+    nrz::config::ProjectBuildSettings {
+        install_command: command.map(str::to_string),
+        install_command_source: source,
+        ..Default::default()
     }
 }
 
@@ -307,7 +347,8 @@ fn build_command_explicit_wins_over_config_and_auto() {
     let mut config = nrz::config::ProjectConfig::default();
     config.build.command = Some("config cmd".into());
 
-    let result = resolve_build_command(Some("explicit cmd"), dir.path(), &config, None);
+    let effective = effective_config(dir.path(), config);
+    let result = resolve_build_command(Some("explicit cmd"), dir.path(), &effective);
     assert_eq!(result.unwrap(), "explicit cmd");
 }
 
@@ -320,7 +361,8 @@ fn build_command_config_wins_over_auto() {
     let mut config = nrz::config::ProjectConfig::default();
     config.build.command = Some("config cmd".into());
 
-    let result = resolve_build_command(None, dir.path(), &config, None);
+    let effective = effective_config(dir.path(), config);
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert_eq!(result.unwrap(), "config cmd");
 }
 
@@ -335,7 +377,8 @@ fn build_command_auto_detect_bun_lock() {
     fs::write(dir.path().join("bun.lock"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config, None);
+    let effective = effective_config(dir.path(), config);
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert_eq!(result.unwrap(), "bun run build");
 }
 
@@ -350,7 +393,8 @@ fn build_command_auto_detect_bun_lockb() {
     fs::write(dir.path().join("bun.lockb"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config, None);
+    let effective = effective_config(dir.path(), config);
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert_eq!(result.unwrap(), "bun run build");
 }
 
@@ -365,7 +409,8 @@ fn build_command_auto_detect_pnpm() {
     fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config, None);
+    let effective = effective_config(dir.path(), config);
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert_eq!(result.unwrap(), "pnpm run build");
 }
 
@@ -380,7 +425,8 @@ fn build_command_auto_detect_yarn() {
     fs::write(dir.path().join("yarn.lock"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config, None);
+    let effective = effective_config(dir.path(), config);
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert_eq!(result.unwrap(), "yarn run build");
 }
 
@@ -394,7 +440,8 @@ fn build_command_auto_detect_npm_fallback() {
     .unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config, None);
+    let effective = effective_config(dir.path(), config);
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert_eq!(result.unwrap(), "npm run build");
 }
 
@@ -408,7 +455,8 @@ fn build_command_none_without_build_script() {
     .unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config, None);
+    let effective = effective_config(dir.path(), config);
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert!(result.is_none());
 }
 
@@ -417,7 +465,8 @@ fn build_command_none_without_package_json() {
     let dir = tempdir().unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(None, dir.path(), &config, None);
+    let effective = effective_config(dir.path(), config);
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert!(result.is_none());
 }
 
@@ -429,12 +478,12 @@ fn build_command_server_wins_over_auto_detect() {
     fs::write(dir.path().join("package.json"), "{}").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(
-        None,
+    let effective = effective_with_server_settings(
         dir.path(),
-        &config,
-        command_hint(Some("server build cmd"), None),
+        config,
+        server_build_settings(Some("server build cmd"), None),
     );
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert_eq!(result.unwrap(), "server build cmd");
 }
 
@@ -445,12 +494,12 @@ fn build_command_config_wins_over_server() {
     let mut config = nrz::config::ProjectConfig::default();
     config.build.command = Some("config cmd".into());
 
-    let result = resolve_build_command(
-        None,
+    let effective = effective_with_server_settings(
         dir.path(),
-        &config,
-        command_hint(Some("server cmd"), None),
+        config,
+        server_build_settings(Some("server cmd"), None),
     );
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert_eq!(result.unwrap(), "config cmd");
 }
 
@@ -459,12 +508,12 @@ fn build_command_explicit_wins_over_server() {
     let dir = tempdir().unwrap();
     let config = nrz::config::ProjectConfig::default();
 
-    let result = resolve_build_command(
-        Some("explicit"),
+    let effective = effective_with_server_settings(
         dir.path(),
-        &config,
-        command_hint(Some("server cmd"), None),
+        config,
+        server_build_settings(Some("server cmd"), None),
     );
+    let result = resolve_build_command(Some("explicit"), dir.path(), &effective);
     assert_eq!(result.unwrap(), "explicit");
 }
 
@@ -473,12 +522,12 @@ fn build_command_server_used_without_package_json() {
     let dir = tempdir().unwrap();
     // No package.json — auto-detect would return None, but server command should still work
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(
-        None,
+    let effective = effective_with_server_settings(
         dir.path(),
-        &config,
-        command_hint(Some("make build"), None),
+        config,
+        server_build_settings(Some("make build"), None),
     );
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert_eq!(result.unwrap(), "make build");
 }
 
@@ -486,15 +535,15 @@ fn build_command_server_used_without_package_json() {
 fn build_command_user_source_used_without_package_json() {
     let dir = tempdir().unwrap();
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(
-        None,
+    let effective = effective_with_server_settings(
         dir.path(),
-        &config,
-        command_hint(
+        config,
+        server_build_settings(
             Some("make build"),
-            Some(crate::build::BuildSettingSource::User),
+            Some(nrz::config::BuildSettingSource::User),
         ),
     );
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert_eq!(result.unwrap(), "make build");
 }
 
@@ -502,15 +551,15 @@ fn build_command_user_source_used_without_package_json() {
 fn build_command_preset_source_without_package_json_skips() {
     let dir = tempdir().unwrap();
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(
-        None,
+    let effective = effective_with_server_settings(
         dir.path(),
-        &config,
-        command_hint(
+        config,
+        server_build_settings(
             Some("npm run build"),
-            Some(crate::build::BuildSettingSource::Preset),
+            Some(nrz::config::BuildSettingSource::Preset),
         ),
     );
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert!(result.is_none());
 }
 
@@ -525,15 +574,15 @@ fn build_command_preset_source_uses_local_package_manager() {
     fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(
-        None,
+    let effective = effective_with_server_settings(
         dir.path(),
-        &config,
-        command_hint(
+        config,
+        server_build_settings(
             Some("npm run build"),
-            Some(crate::build::BuildSettingSource::Preset),
+            Some(nrz::config::BuildSettingSource::Preset),
         ),
     );
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert_eq!(result.unwrap(), "pnpm run build");
 }
 
@@ -547,12 +596,12 @@ fn build_command_detected_empty_suppresses_auto_detect() {
     .unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(
-        None,
+    let effective = effective_with_server_settings(
         dir.path(),
-        &config,
-        command_hint(None, Some(crate::build::BuildSettingSource::Detected)),
+        config,
+        server_build_settings(None, Some(nrz::config::BuildSettingSource::Detected)),
     );
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert!(result.is_none());
 }
 
@@ -566,12 +615,12 @@ fn build_command_preset_empty_keeps_auto_detect_fallback() {
     .unwrap();
 
     let config = nrz::config::ProjectConfig::default();
-    let result = resolve_build_command(
-        None,
+    let effective = effective_with_server_settings(
         dir.path(),
-        &config,
-        command_hint(None, Some(crate::build::BuildSettingSource::Preset)),
+        config,
+        server_build_settings(None, Some(nrz::config::BuildSettingSource::Preset)),
     );
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert_eq!(result.unwrap(), "npm run build");
 }
 
@@ -580,13 +629,15 @@ fn build_command_preset_empty_keeps_auto_detect_fallback() {
 #[test]
 fn install_command_preset_source_without_package_json_skips() {
     let dir = tempdir().unwrap();
-    let result = resolve_install_command(
+    let effective = effective_with_server_settings(
         dir.path(),
-        command_hint(
+        nrz::config::ProjectConfig::default(),
+        server_install_settings(
             Some("npm install"),
-            Some(crate::build::BuildSettingSource::Preset),
+            Some(nrz::config::BuildSettingSource::Preset),
         ),
     );
+    let result = resolve_install_command(dir.path(), &effective);
     assert!(result.is_none());
 }
 
@@ -596,26 +647,30 @@ fn install_command_preset_source_uses_local_package_manager() {
     fs::write(dir.path().join("package.json"), "{}").unwrap();
     fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
 
-    let result = resolve_install_command(
+    let effective = effective_with_server_settings(
         dir.path(),
-        command_hint(
+        nrz::config::ProjectConfig::default(),
+        server_install_settings(
             Some("npm install"),
-            Some(crate::build::BuildSettingSource::Preset),
+            Some(nrz::config::BuildSettingSource::Preset),
         ),
     );
+    let result = resolve_install_command(dir.path(), &effective);
     assert_eq!(result.unwrap(), "pnpm install");
 }
 
 #[test]
 fn install_command_user_source_used_without_package_json() {
     let dir = tempdir().unwrap();
-    let result = resolve_install_command(
+    let effective = effective_with_server_settings(
         dir.path(),
-        command_hint(
+        nrz::config::ProjectConfig::default(),
+        server_install_settings(
             Some("make deps"),
-            Some(crate::build::BuildSettingSource::User),
+            Some(nrz::config::BuildSettingSource::User),
         ),
     );
+    let result = resolve_install_command(dir.path(), &effective);
     assert_eq!(result.unwrap(), "make deps");
 }
 
@@ -866,7 +921,7 @@ fn server_framework_other_does_not_mask_local_vite_detection() {
 }
 
 #[test]
-fn server_framework_specific_preset_remains_authoritative() {
+fn server_framework_specific_preset_is_usable_when_local_framework_absent() {
     assert_eq!(
         authoritative_server_framework_preset(Some("vite")),
         Some("vite")

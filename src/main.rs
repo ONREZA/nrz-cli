@@ -19,6 +19,7 @@ mod rollback;
 mod upgrade;
 
 use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use cli::{Cli, Command};
@@ -40,8 +41,8 @@ async fn main() {
     let workspace = cli.workspace.clone();
     let env = cli.env;
 
-    let project_dir = std::env::current_dir().unwrap_or_default();
-    let config = match nrz::config::load(&project_dir) {
+    let config_dir = config_dir_for_command(&cli.command);
+    let config = match nrz::config::load(&config_dir) {
         Ok(c) => c,
         Err(e) => {
             let coded = output::coded_error("INVALID_CONFIG", format!("{e:#}"));
@@ -63,6 +64,17 @@ async fn main() {
     if let Err(ref e) = result {
         emit_terminal_error(json, e);
         std::process::exit(1);
+    }
+}
+
+fn config_dir_for_command(command: &Command) -> PathBuf {
+    match command {
+        Command::Dev(args) => Path::new(&args.dir).to_path_buf(),
+        Command::Build(args) => Path::new(&args.dir).to_path_buf(),
+        Command::Deploy(args) => Path::new(&args.dir).to_path_buf(),
+        Command::Link(args) => Path::new(&args.dir).to_path_buf(),
+        Command::Detect(args) => Path::new(&args.dir).to_path_buf(),
+        _ => std::env::current_dir().unwrap_or_default(),
     }
 }
 

@@ -41,7 +41,9 @@ use crate::deploy::source_bundle_v1::{
 use crate::detect::types::ComputeType;
 use crate::link;
 use crate::output;
-use nrz::config::{HealthCheckPathConfig, ProjectConfig};
+use nrz::config::{
+    EffectiveProjectConfig, HealthCheckPathConfig, ProjectBuildSettings, ProjectConfig,
+};
 use url::Url;
 use uuid::Uuid;
 
@@ -74,56 +76,11 @@ struct WorkspaceInfo {
 
 // ── Project settings from server ─────────────────────────────
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectInfo {
-    framework_preset: Option<String>,
-    install_command: Option<String>,
-    install_command_source: Option<build::BuildSettingSource>,
-    build_command: Option<String>,
-    build_command_source: Option<build::BuildSettingSource>,
-    output_directory: Option<String>,
-    output_directory_source: Option<build::BuildSettingSource>,
-}
+type ProjectInfo = ProjectBuildSettings;
 
-#[derive(Debug, Clone, Copy)]
-struct CommandHint<'a> {
-    command: Option<&'a str>,
-}
-
-fn command_hint<'a>(
-    command: Option<&'a str>,
-    source: Option<build::BuildSettingSource>,
-) -> Option<CommandHint<'a>> {
-    let command = command.filter(|v| !v.trim().is_empty());
-
-    match source {
-        // PRESET is a fallback/default from the platform, not a user intent.
-        // Let local package-manager/script detection decide whether there is
-        // anything to run, otherwise static/non-JS repos fail on npm ENOENT.
-        Some(build::BuildSettingSource::Preset) => None,
-        Some(source) => {
-            if command.is_some() || source.is_authoritative_command_absence() {
-                Some(CommandHint { command })
-            } else {
-                None
-            }
-        }
-        // Older APIs did not expose source metadata. Preserve compatibility
-        // for explicit command values, but do not treat missing fields as an
-        // authoritative absence.
-        None => command.map(|command| CommandHint {
-            command: Some(command),
-        }),
-    }
-}
-
+#[cfg(test)]
 fn authoritative_server_framework_preset(preset: Option<&str>) -> Option<&str> {
-    let preset = preset?.trim();
-    if preset.is_empty() || preset.eq_ignore_ascii_case("other") {
-        return None;
-    }
-    Some(preset)
+    nrz::config::normalize_authoritative_framework(preset)
 }
 
 async fn fetch_project_settings(
@@ -356,13 +313,29 @@ pub async fn run(
     // Verify auth early to avoid wasting time on build if token is invalid
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
+    let resume_deployment_id = args.resume_deployment.as_deref().map(str::trim);
+    if let Some(deployment_id) = resume_deployment_id
+        && deployment_id.is_empty()
+    {
+        return Err(output::coded_error(
+            "INVALID_ARGUMENT",
+            "--resume-deployment requires a non-empty deployment ID".to_string(),
+        ));
+    }
 
-    // Early-resolve project_id (without interactive fallback) to fetch server settings
-    let early_project_id = args
+    // Early-resolve project_id before build/detect so server settings can be
+    // imported into the same effective config as local onreza.toml.
+    let mut early_project_id = args
         .project_id
         .as_deref()
         .or(config.project.id.as_deref())
         .map(String::from);
+    if early_project_id.is_none()
+        && let Some(deployment_id) = resume_deployment_id
+    {
+        early_project_id =
+            Some(resolve_project_id_for_resume(&client, deployment_id, None, config).await?);
+    }
 
     // Fetch project settings from server if project_id is known
     let server_settings = if let Some(ref pid) = early_project_id {
@@ -403,30 +376,13 @@ pub async fn run(
         None
     };
 
-    let server_install_cmd = server_settings
-        .as_ref()
-        .and_then(|s| command_hint(s.install_command.as_deref(), s.install_command_source));
-    let server_build_cmd = server_settings
-        .as_ref()
-        .and_then(|s| command_hint(s.build_command.as_deref(), s.build_command_source));
-    let server_output_dir = server_settings
-        .as_ref()
-        .and_then(|s| s.output_directory.as_deref())
-        .filter(|v| !v.trim().is_empty());
-    let server_output_dir_hint = server_output_dir.map(|path| build::OutputDirectoryHint {
-        path,
-        source: server_settings
-            .as_ref()
-            .and_then(|s| s.output_directory_source)
-            .unwrap_or(build::BuildSettingSource::Preset),
-    });
-    let server_framework_preset = server_settings
-        .as_ref()
-        .and_then(|s| authoritative_server_framework_preset(s.framework_preset.as_deref()));
+    let mut effective =
+        EffectiveProjectConfig::from_project_config(project_dir.clone(), config.clone());
+    effective.apply_server_settings(server_settings.as_ref());
 
     // Run install step (default: enabled, skip with --skip-install or --skip-build)
     if !args.skip_build && !args.skip_install {
-        run_install_step(&project_dir, json, server_install_cmd)?;
+        run_install_step(&project_dir, json, &effective)?;
     }
 
     // Pre-build env injection for framework compatibility.
@@ -463,21 +419,16 @@ pub async fn run(
 
     // Run build step (default: enabled, skip with --skip-build)
     if !args.skip_build
-        && let Some(cmd) = resolve_build_command(
-            args.build_command.as_deref(),
-            &project_dir,
-            config,
-            server_build_cmd,
-        )
+        && let Some(cmd) =
+            resolve_build_command(args.build_command.as_deref(), &project_dir, &effective)
     {
         run_build_step(&cmd, &project_dir, json, &build_env)?;
     }
 
-    // Detect framework once — shared by build (output dir search) and deploy (compute type).
-    // Server project settings are authoritative for builder-driven deploys;
-    // local onreza.toml is the fallback for direct CLI deploys.
-    let framework_override = server_framework_preset.or(config.project.framework.as_deref());
-    let detection = crate::detect::detect_with_framework_override(&project_dir, framework_override);
+    // Detect framework once from the merged runtime config — shared by build
+    // (output dir search) and deploy (compute type).
+    let detection =
+        crate::detect::detect_with_framework_override(&project_dir, effective.framework_override());
 
     // Validate build output
     output::status(
@@ -486,15 +437,14 @@ pub async fn run(
         "Validating build output...",
         output::Phase::Deploy,
     );
-    let build_result = build::run_with_hint(
+    let build_result = build::run_with_effective_config(
         BuildArgs {
             dir: project_dir.to_string_lossy().into_owned(),
             skip_validation: false,
         },
         json,
-        config,
+        &effective,
         Some(&detection),
-        server_output_dir_hint,
     )
     .await?;
 
@@ -519,24 +469,32 @@ pub async fn run(
 
     // Resolve compute type: CLI flag > config > manifest layers > detect
     let compute = if let Some(ref m) = loaded_manifest {
-        if args.compute.is_none() && config.deploy_compute().is_none() {
+        if args.compute.is_none() && effective.deploy_compute().is_none() {
             match build_manifest::primary_compute_target(m) {
                 build_manifest::LayerTarget::Compute => ComputeType::Process,
                 build_manifest::LayerTarget::Isolate => ComputeType::Isolate,
                 build_manifest::LayerTarget::Static => ComputeType::Static,
             }
         } else {
-            resolve_compute_type(args.compute.as_deref(), config.deploy_compute(), &detection)?
+            resolve_compute_type(
+                args.compute.as_deref(),
+                effective.deploy_compute(),
+                &detection,
+            )?
         }
     } else {
-        resolve_compute_type(args.compute.as_deref(), config.deploy_compute(), &detection)?
+        resolve_compute_type(
+            args.compute.as_deref(),
+            effective.deploy_compute(),
+            &detection,
+        )?
     };
     let mut warnings: Vec<String> = Vec::new();
 
     // Inform about SSR framework compute mode when auto-detected
     if !has_manifest
         && args.compute.is_none()
-        && config.deploy_compute().is_none()
+        && effective.deploy_compute().is_none()
         && crate::detect::presets::is_ssr_framework(&detection.framework)
     {
         let msg = match compute {
@@ -579,7 +537,7 @@ pub async fn run(
         let (entry, warning) = ensure_process_entry(
             &output_dir,
             &project_dir,
-            config.deploy_entry(),
+            effective.deploy_entry(),
             &detection,
             json,
         )
@@ -658,19 +616,18 @@ pub async fn run(
     // ── Resume mode: builder calls us with an existing deployment ID ──
     if let Some(deployment_id) = &args.resume_deployment {
         let deployment_id = deployment_id.trim();
-        if deployment_id.is_empty() {
-            return Err(output::coded_error(
-                "INVALID_ARGUMENT",
-                "--resume-deployment requires a non-empty deployment ID".to_string(),
-            ));
-        }
-        let project_id = resolve_project_id_for_resume(
-            &client,
-            deployment_id,
-            args.project_id.as_deref(),
-            config,
-        )
-        .await?;
+        let project_id = match early_project_id.clone() {
+            Some(project_id) => project_id,
+            None => {
+                resolve_project_id_for_resume(
+                    &client,
+                    deployment_id,
+                    args.project_id.as_deref(),
+                    config,
+                )
+                .await?
+            }
+        };
         return resume_deploy(
             &client,
             deployment_id,
@@ -691,8 +648,8 @@ pub async fn run(
     // Resolve project: --project-id > onreza.toml > interactive
     let project_id = if let Some(pid) = &args.project_id {
         pid.clone()
-    } else if let Some(id) = &config.project.id {
-        id.clone()
+    } else if let Some(id) = effective.project_id() {
+        id.to_string()
     } else {
         if json {
             bail!(
@@ -2784,17 +2741,13 @@ fn ensure_process_entry(
 fn resolve_build_command(
     explicit: Option<&str>,
     project_dir: &Path,
-    config: &ProjectConfig,
-    server_command: Option<CommandHint<'_>>,
+    effective: &EffectiveProjectConfig,
 ) -> Option<String> {
     if let Some(cmd) = explicit {
         return Some(cmd.to_string());
     }
-    if let Some(cmd) = config.build_command() {
-        return Some(cmd.to_string());
-    }
-    if let Some(hint) = server_command {
-        return hint.command.map(str::to_string);
+    if let Some(setting) = effective.build_command() {
+        return setting.value().map(str::to_string);
     }
     // Only auto-detect if package.json has a "build" script
     let pkg = crate::detect::package_json::PackageJson::load(project_dir)?;
@@ -2994,9 +2947,9 @@ fn run_command_streaming(
 fn run_install_step(
     project_dir: &Path,
     json: bool,
-    server_command: Option<CommandHint<'_>>,
+    effective: &EffectiveProjectConfig,
 ) -> anyhow::Result<()> {
-    let Some(cmd) = resolve_install_command(project_dir, server_command) else {
+    let Some(cmd) = resolve_install_command(project_dir, effective) else {
         return Ok(());
     };
     let (cmd, install_env) = prepare_install_command(&cmd, project_dir, json);
@@ -3022,12 +2975,12 @@ fn run_install_step(
 
 fn resolve_install_command(
     project_dir: &Path,
-    server_command: Option<CommandHint<'_>>,
+    effective: &EffectiveProjectConfig,
 ) -> Option<String> {
-    // Priority: authoritative server command > auto-detect from package manager.
-    // PRESET server commands are filtered out by command_hint().
-    if let Some(server_cmd) = server_command {
-        return server_cmd.command.map(str::to_string);
+    // Priority: effective config command > auto-detect from package manager.
+    // PRESET server commands are filtered out while building EffectiveProjectConfig.
+    if let Some(setting) = effective.install_command() {
+        return setting.value().map(str::to_string);
     }
     if !project_dir.join("package.json").exists() {
         return None;
