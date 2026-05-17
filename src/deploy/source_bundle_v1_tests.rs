@@ -292,7 +292,7 @@ fn logical_manifest_defaults_middleware_priority_for_server_digest() {
         "middleware": [{
             "name": "auth",
             "bundlePath": "middleware/auth.mjs",
-            "codeHash": middleware_sha,
+            "codeHash": format!("sha256-{middleware_sha}"),
             "matchers": ["^/.*$"]
         }]
     }))
@@ -302,9 +302,41 @@ fn logical_manifest_defaults_middleware_priority_for_server_digest() {
     let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
     let middleware = plan.logical_manifest.middleware.as_ref().unwrap();
     assert_eq!(middleware[0].priority, 0);
+    assert_eq!(middleware[0].code_hash, middleware_sha);
 
     let value = serde_json::to_value(&plan.logical_manifest).unwrap();
     assert_eq!(value["middleware"][0]["priority"], 0);
+    assert_eq!(value["middleware"][0]["codeHash"], middleware_sha);
+}
+
+#[test]
+fn logical_manifest_rejects_middleware_code_hash_mismatch() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("middleware")).unwrap();
+    fs::write(
+        dir.path().join("middleware/auth.mjs"),
+        b"export default function middleware() {}",
+    )
+    .unwrap();
+    let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "layers": [
+            { "name": "static", "target": "STATIC", "directory": "." }
+        ],
+        "routes": [],
+        "middleware": [{
+            "name": "auth",
+            "bundlePath": "middleware/auth.mjs",
+            "codeHash": format!("sha256-{}", "0".repeat(64)),
+            "matchers": ["^/.*$"]
+        }]
+    }))
+    .unwrap();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let err = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap_err();
+
+    assert!(err.to_string().contains("codeHash does not match"), "{err}");
 }
 
 #[test]

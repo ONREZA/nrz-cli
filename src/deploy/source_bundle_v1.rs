@@ -443,18 +443,43 @@ fn build_logical_manifest(
             methods: route.methods.clone(),
         })
         .collect();
-    let middleware = manifest.middleware.as_ref().map(|items| {
-        items
-            .iter()
-            .map(|item| SourceLogicalManifestMiddleware {
-                name: item.name.clone(),
-                bundle_path: item.bundle_path.clone(),
-                code_hash: item.code_hash.clone(),
-                matchers: item.matchers.clone(),
-                priority: item.priority.unwrap_or(0),
-            })
-            .collect()
-    });
+    let middleware = manifest
+        .middleware
+        .as_ref()
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| {
+                    let code_hash = normalize_middleware_code_hash(&item.name, &item.code_hash)?;
+                    let bundle_sha256 = logical_files
+                    .iter()
+                    .find(|file| file.path == item.bundle_path)
+                    .map(|file| file.sha256.as_str())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "middleware '{}' bundlePath '{}' was not found in the output directory",
+                            item.name,
+                            item.bundle_path
+                        )
+                    })?;
+                    if code_hash != bundle_sha256 {
+                        anyhow::bail!(
+                            "middleware '{}' codeHash does not match bundlePath '{}'",
+                            item.name,
+                            item.bundle_path
+                        );
+                    }
+                    Ok(SourceLogicalManifestMiddleware {
+                        name: item.name.clone(),
+                        bundle_path: item.bundle_path.clone(),
+                        code_hash,
+                        matchers: item.matchers.clone(),
+                        priority: item.priority.unwrap_or(0),
+                    })
+                })
+                .collect::<anyhow::Result<Vec<_>>>()
+        })
+        .transpose()?;
 
     Ok(SourceLogicalManifest {
         schema_version: SOURCE_BUNDLE_SCHEMA_VERSION.to_string(),
@@ -465,6 +490,14 @@ fn build_logical_manifest(
         middleware,
         entrypoints,
     })
+}
+
+fn normalize_middleware_code_hash(name: &str, value: &str) -> anyhow::Result<String> {
+    let hash = value.strip_prefix("sha256-").unwrap_or(value);
+    if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        anyhow::bail!("middleware '{name}' codeHash must be a SHA-256 hex digest");
+    }
+    Ok(hash.to_ascii_lowercase())
 }
 
 fn ensure_manifest_covers_entries(
