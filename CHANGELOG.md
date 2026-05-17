@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.0] - 2026-05-17
+
+### ✨ Features
+
+- **config:** explain effective project configuration ([cd80038](https://github.com/ONREZA/nrz-cli/commit/cd800381cac3db3658dd6f2e84b596ef4783f9a2))
+
+### 🐛 Bug Fixes
+
+- **config:** unify effective project configuration ([79a6f78](https://github.com/ONREZA/nrz-cli/commit/79a6f786fe6c799ae27344ef5f6322f30f6751cf))
+- **deploy:** validate middleware code hashes ([1579c81](https://github.com/ONREZA/nrz-cli/commit/1579c817ea00eeddaff25e3f5cff52ab0231d101))
+
+### ✅ Testing
+
+- **deploy:** cover invalid source symlink targets ([7a0c51c](https://github.com/ONREZA/nrz-cli/commit/7a0c51ce14dadbe9245287b7de9aad0e1f4d1874))
+
 ## [0.31.3] - 2026-05-16
 
 ### 🐛 Bug Fixes
