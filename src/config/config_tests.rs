@@ -131,6 +131,136 @@ fn effective_config_local_framework_wins_over_server() {
 }
 
 #[test]
+fn merge_child_uses_child_runtime_settings_with_parent_identity_fallback() {
+    let mut parent = ProjectConfig::default();
+    parent.project.id = Some("proj_root".to_string());
+    parent.project.framework = Some("nextjs".to_string());
+    parent.build.command = Some("npm run root-build".to_string());
+    parent.env.declarations.insert(
+        "ROOT_ONLY".to_string(),
+        EnvVarDecl {
+            visibility: EnvVisibility::Plain,
+            required: true,
+        },
+    );
+
+    let mut child = ProjectConfig::default();
+    child.project.framework = Some("vite".to_string());
+    child.build.command = Some("pnpm build".to_string());
+    child.build.output_directory = Some("dist".to_string());
+    child.env.declarations.insert(
+        "CHILD_ONLY".to_string(),
+        EnvVarDecl {
+            visibility: EnvVisibility::Sensitive,
+            required: false,
+        },
+    );
+
+    let merged = parent.merge_child(child);
+
+    assert_eq!(merged.project.id.as_deref(), Some("proj_root"));
+    assert_eq!(merged.project.framework.as_deref(), Some("vite"));
+    assert_eq!(merged.build.command.as_deref(), Some("pnpm build"));
+    assert_eq!(merged.build.output_directory.as_deref(), Some("dist"));
+    assert!(merged.env.declarations.contains_key("ROOT_ONLY"));
+    assert!(merged.env.declarations.contains_key("CHILD_ONLY"));
+}
+
+#[test]
+fn merge_child_treats_blank_child_identity_as_absent() {
+    let mut parent = ProjectConfig::default();
+    parent.project.id = Some("proj_root".to_string());
+    parent.project.name = Some("root".to_string());
+    parent.project.workspace = Some("workspace".to_string());
+    parent.project.framework = Some("nextjs".to_string());
+
+    let mut child = ProjectConfig::default();
+    child.project.id = Some(String::new());
+    child.project.name = Some("   ".to_string());
+    child.project.workspace = Some(String::new());
+    child.project.framework = Some(" ".to_string());
+
+    let merged = parent.merge_child(child);
+
+    assert_eq!(merged.project.id.as_deref(), Some("proj_root"));
+    assert_eq!(merged.project.name.as_deref(), Some("root"));
+    assert_eq!(merged.project.workspace.as_deref(), Some("workspace"));
+    assert_eq!(merged.project.framework.as_deref(), Some("nextjs"));
+}
+
+#[test]
+fn merge_child_for_selected_app_replaces_parent_deploy_app() {
+    let mut parent = ProjectConfig::default();
+    parent.deploy.app = Some("api".to_string());
+    let child = ProjectConfig::default();
+
+    let merged = parent.merge_child_for_selected_app(child, "web");
+
+    assert_eq!(merged.deploy.app.as_deref(), Some("web"));
+}
+
+#[test]
+fn effective_config_explain_reports_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = ProjectConfig::default();
+    config.project.id = Some("proj_123".to_string());
+    config.project.framework = Some("vite".to_string());
+    config.build.command = Some("pnpm build".to_string());
+    config.build.output_directory = Some("dist".to_string());
+
+    let effective = EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+    let explanation = effective.explain();
+
+    assert_eq!(explanation.project_id.value.as_deref(), Some("proj_123"));
+    assert_eq!(explanation.project_id.source, "onreza.toml");
+    assert_eq!(explanation.framework.value.as_deref(), Some("vite"));
+    assert_eq!(explanation.framework.source, "onreza.toml");
+    assert_eq!(
+        explanation.build_command.value.as_deref(),
+        Some("pnpm build")
+    );
+    assert_eq!(explanation.build_command.source, "onreza.toml");
+    assert_eq!(explanation.output_directory.value.as_deref(), Some("dist"));
+    assert_eq!(explanation.output_directory.source, "onreza.toml");
+}
+
+#[test]
+fn effective_config_project_id_override_wins_over_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = ProjectConfig::default();
+    config.project.id = Some("proj_root".to_string());
+    let mut effective =
+        EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+
+    effective
+        .apply_project_id_override(Some("proj_cli"))
+        .unwrap();
+    let explanation = effective.explain();
+
+    assert_eq!(effective.project_id(), Some("proj_cli"));
+    assert_eq!(explanation.project_id.value.as_deref(), Some("proj_cli"));
+    assert_eq!(explanation.project_id.source, "cli");
+}
+
+#[test]
+fn effective_config_deploy_app_override_reports_cli_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = ProjectConfig::default();
+    config.deploy.app = Some("api".to_string());
+    let mut effective =
+        EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+
+    effective
+        .apply_deploy_app_cli_override(Some("web"))
+        .unwrap();
+    let explanation = effective.explain();
+
+    assert_eq!(effective.deploy_app(), Some("web"));
+    assert_eq!(explanation.deploy_app.value.as_deref(), Some("web"));
+    assert_eq!(explanation.deploy_app.source, "cli");
+}
+
+#[test]
 fn effective_config_preset_commands_keep_autodetect_open() {
     let dir = tempfile::tempdir().unwrap();
     let config = ProjectConfig::default();

@@ -104,6 +104,14 @@ output_dirs = ["dist"]
 | `entry` | string | авто | Точка входа для `PROCESS`-деплоев (Node.js/Bun сервер). Должна быть относительным путём без `..`. Пример: `"server.ts"`, `"dist/index.js"`. Если не задана, CLI определяет автоматически. |
 | `app` | string | нет | Монорепо: какой workspace/пакет деплоить. Матчится по имени пакета из `package.json`, имени директории, или относительному пути. Эквивалент CLI флага `--app` / `--filter`. |
 
+Для `nrz deploy --app web` CLI сначала выбирает workspace из root config, затем
+строит финальный effective config для директории app. Если в app есть свой
+`onreza.toml`, его поля переопределяют root config, а root project identity
+(`project.id`/`name`/`workspace`) остается fallback. Проверить итоговое решение:
+`nrz config explain --app web --json`. По умолчанию `config explain` также
+подтягивает server project settings для `project.id`, как `nrz deploy`; для
+локального-only просмотра используйте `nrz config explain --local`.
+
 **Compute types:**
 
 | Тип | Когда использовать |
@@ -283,6 +291,10 @@ SENTRY_DSN = { visibility = "sensitive", required = false }
 | `project.name` | `nrz init` |
 | `project.workspace` | `nrz init` |
 | `project.framework` | `nrz detect --save` |
+
+Если нужен только локальный scaffold без создания или линковки platform project,
+используйте `nrz init --local`. Это явный путь перед `nrz detect --save`, когда
+`onreza.toml` еще отсутствует.
 
 ## Приоритет настроек
 

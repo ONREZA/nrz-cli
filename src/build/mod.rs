@@ -114,13 +114,13 @@ pub async fn run_with_hint(
     json: bool,
     config: &ProjectConfig,
     detection: Option<&crate::detect::types::DetectionResult>,
-    server_output_dir: Option<OutputDirectoryHint<'_>>,
+    output_directory_hint: Option<OutputDirectoryHint<'_>>,
 ) -> anyhow::Result<BuildResult> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
     let mut effective = EffectiveProjectConfig::from_project_config(project_dir, config.clone());
-    if let Some(hint) = server_output_dir {
+    if let Some(hint) = output_directory_hint {
         let settings = nrz::config::ProjectBuildSettings {
             output_directory: Some(hint.path.to_string()),
             output_directory_source: Some(hint.source),
@@ -514,13 +514,13 @@ fn detect_output_dir(
     project_dir: &Path,
     config_dirs: &[&str],
     framework_dirs: &[&str],
-    server_output_dir: Option<OutputDirectoryHint<'_>>,
+    output_directory_hint: Option<OutputDirectoryHint<'_>>,
 ) -> anyhow::Result<(std::path::PathBuf, bool)> {
     let resolved = resolve_output_directory(
         project_dir,
         config_dirs,
         framework_dirs,
-        server_output_dir,
+        output_directory_hint,
         UserOutputRefinement::FrameworkContainerOnly,
     )?;
     Ok((resolved.path, resolved.has_manifest))
@@ -530,14 +530,14 @@ fn detect_output_dir_for_framework(
     project_dir: &Path,
     config_dirs: &[&str],
     framework_dirs: &[&str],
-    server_output_dir: Option<OutputDirectoryHint<'_>>,
+    output_directory_hint: Option<OutputDirectoryHint<'_>>,
     framework: &str,
 ) -> anyhow::Result<(std::path::PathBuf, bool)> {
     let resolved = resolve_output_directory(
         project_dir,
         config_dirs,
         framework_dirs,
-        server_output_dir,
+        output_directory_hint,
         UserOutputRefinement::for_framework(framework),
     )?;
     Ok((resolved.path, resolved.has_manifest))
@@ -547,10 +547,10 @@ fn resolve_output_directory(
     project_dir: &Path,
     config_dirs: &[&str],
     framework_dirs: &[&str],
-    server_output_dir: Option<OutputDirectoryHint<'_>>,
+    output_directory_hint: Option<OutputDirectoryHint<'_>>,
     user_output_refinement: UserOutputRefinement,
 ) -> anyhow::Result<ResolvedOutputDirectory> {
-    if let Some(hint) = server_output_dir
+    if let Some(hint) = output_directory_hint
         && hint.source.is_user_explicit()
     {
         if let Some(refined) = resolve_user_framework_container_artifact(
@@ -581,14 +581,14 @@ fn resolve_output_directory(
         ));
     }
 
-    // Log when non-explicit server-provided directory doesn't exist on disk.
-    if let Some(hint) = server_output_dir
+    // Log when a non-explicit source-aware hint doesn't exist on disk.
+    if let Some(hint) = output_directory_hint
         && !project_dir.join(hint.path).is_dir()
     {
         tracing::debug!(
-            server_output_dir = hint.path,
+            output_directory_hint = hint.path,
             source = ?hint.source,
-            "server-configured output directory not found on disk, will try other candidates"
+            "source-aware output directory hint not found on disk, will try other candidates"
         );
     }
 
@@ -598,9 +598,9 @@ fn resolve_output_directory(
     let mut seen = std::collections::HashSet::<String>::new();
     let mut all_dirs = Vec::<String>::new();
     let mut tiers = Vec::<OutputCandidateTier>::new();
-    let server_path = server_output_dir.map(|hint| (hint.path, hint.source));
+    let hint_path = output_directory_hint.map(|hint| (hint.path, hint.source));
 
-    if let Some((path, BuildSettingSource::Detected)) = server_path {
+    if let Some((path, BuildSettingSource::Detected)) = hint_path {
         // A detected framework container like `.next` is a pre-build hint. If current
         // framework analysis has a more precise artifact root, prefer that refinement
         // over the generic container.
@@ -631,7 +631,7 @@ fn resolve_output_directory(
         framework_dirs.iter().copied(),
     );
 
-    if let Some((path, BuildSettingSource::Preset)) = server_path {
+    if let Some((path, BuildSettingSource::Preset)) = hint_path {
         push_output_candidate_tier(
             &mut tiers,
             &mut all_dirs,

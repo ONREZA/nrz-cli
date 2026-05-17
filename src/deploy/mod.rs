@@ -41,9 +41,7 @@ use crate::deploy::source_bundle_v1::{
 use crate::detect::types::ComputeType;
 use crate::link;
 use crate::output;
-use nrz::config::{
-    EffectiveProjectConfig, HealthCheckPathConfig, ProjectBuildSettings, ProjectConfig,
-};
+use nrz::config::{EffectiveProjectConfig, HealthCheckPathConfig, ProjectConfig};
 use url::Url;
 use uuid::Uuid;
 
@@ -76,22 +74,13 @@ struct WorkspaceInfo {
 
 // ── Project settings from server ─────────────────────────────
 
-type ProjectInfo = ProjectBuildSettings;
-
 #[cfg(test)]
 fn authoritative_server_framework_preset(preset: Option<&str>) -> Option<&str> {
     nrz::config::normalize_authoritative_framework(preset)
 }
 
-async fn fetch_project_settings(
-    client: &ApiClient,
-    project_id: &str,
-) -> anyhow::Result<ProjectInfo> {
-    client
-        .get(&format!("/v1/projects/{project_id}"))
-        .await
-        .context("failed to fetch project settings")
-}
+#[cfg(test)]
+type ProjectInfo = nrz::config::ProjectBuildSettings;
 
 // ── API structs ──────────────────────────────────────────────
 
@@ -235,80 +224,23 @@ pub async fn run(
     workspace: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
-    let mut project_dir = Path::new(&args.dir)
+    let root_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
-
-    // Resolve --app for monorepo: detect workspaces and switch to the target app directory
-    // Priority: CLI --app > [deploy] app in onreza.toml
-    let effective_app = args.app.as_deref().or(config.deploy_app());
-    if let Some(app_name) = effective_app {
-        let mono_fs = crate::detect::fs::LocalFs::new(&project_dir);
-        let mono_pkg = crate::detect::package_json::PackageJson::load_from_fs(&mono_fs);
-        let mono_pm =
-            crate::detect::package_manager::detect_package_manager(&mono_fs, mono_pkg.as_ref());
-        let mono_info =
-            crate::detect::monorepo::detect_monorepo(&mono_fs, mono_pkg.as_ref(), mono_pm.as_ref());
-
-        match mono_info {
-            Some(info) => match crate::detect::monorepo::resolve_app(&info, app_name) {
-                Some(app_path) => {
-                    let resolved = project_dir.join(&app_path);
-                    if !resolved.is_dir() {
-                        return Err(output::coded_error(
-                            "MONOREPO_APP_NOT_FOUND",
-                            format!(
-                                "resolved app directory does not exist: {}",
-                                resolved.display()
-                            ),
-                        ));
-                    }
-                    output::status(
-                        json,
-                        "~",
-                        format!("Monorepo: deploying app \"{app_name}\" from {app_path}/"),
-                        output::Phase::Deploy,
-                    );
-                    project_dir = resolved
-                        .canonicalize()
-                        .with_context(|| format!("failed to resolve app path: {app_path}"))?;
-                }
-                None => {
-                    let available: Vec<String> = info
-                        .packages
-                        .iter()
-                        .map(|p| p.name.as_deref().unwrap_or(&p.path).to_string())
-                        .collect();
-                    return Err(output::coded_error(
-                        "MONOREPO_APP_NOT_FOUND",
-                        format!(
-                            "app \"{app_name}\" not found in monorepo workspaces.\n\
-                             Available packages: {}",
-                            if available.is_empty() {
-                                "(none resolved)".to_string()
-                            } else {
-                                available.join(", ")
-                            }
-                        ),
-                    ));
-                }
-            },
-            None => {
-                let source = if args.app.is_some() {
-                    "--app"
-                } else {
-                    "[deploy] app in onreza.toml"
-                };
-                return Err(output::coded_error(
-                    "MONOREPO_APP_NOT_FOUND",
-                    format!(
-                        "{source} was specified but no monorepo detected in {}",
-                        project_dir.display()
-                    ),
-                ));
-            }
-        }
+    let project_context = crate::project_context::resolve(&root_dir, config, args.app.as_deref())?;
+    if let Some(app) = &project_context.selected_app {
+        output::status(
+            json,
+            "~",
+            format!(
+                "Monorepo: deploying app \"{}\" from {}/",
+                app.requested, app.path
+            ),
+            output::Phase::Deploy,
+        );
     }
+    let project_dir = project_context.project_dir.clone();
+    let config = &project_context.config;
 
     // Verify auth early to avoid wasting time on build if token is invalid
     let tok = auth::resolve_token(token, workspace)?;
@@ -339,8 +271,8 @@ pub async fn run(
 
     // Fetch project settings from server if project_id is known
     let server_settings = if let Some(ref pid) = early_project_id {
-        match fetch_project_settings(&client, pid).await {
-            Ok(info) => {
+        match crate::project_settings::fetch_for_effective_config(&client, pid).await? {
+            crate::project_settings::ProjectSettingsFetch::Applied(info) => {
                 tracing::info!(
                     ?info.build_command,
                     ?info.build_command_source,
@@ -353,20 +285,12 @@ pub async fn run(
                 );
                 Some(info)
             }
-            Err(e) => {
-                // 4xx errors (wrong project ID, no permissions) should abort early
-                let err_msg = format!("{e:#}");
-                let is_client_error = err_msg.contains("API error (4");
-                if is_client_error {
-                    return Err(e.context(format!(
-                        "failed to fetch settings for project '{pid}'. \
-                         Verify the project ID is correct"
-                    )));
-                }
-                // Transient/network errors: warn and continue with local config
+            crate::project_settings::ProjectSettingsFetch::TransientFailure { message } => {
                 output::warn(
                     json,
-                    format!("Could not fetch project settings: {e}. Using local configuration."),
+                    format!(
+                        "Could not fetch project settings: {message}. Using local configuration."
+                    ),
                     output::Phase::Deploy,
                 );
                 None

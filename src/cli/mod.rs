@@ -1,3 +1,5 @@
+pub mod config;
+pub mod config_handler;
 pub mod db;
 pub mod db_handler;
 pub mod detect;
@@ -17,6 +19,7 @@ mod projects_handler_tests;
 pub mod workspace;
 pub mod workspace_handler;
 
+pub use config::ConfigArgs;
 pub use db::DbArgs;
 pub use detect::DetectArgs;
 pub use domains::DomainsArgs;
@@ -93,6 +96,9 @@ pub enum Command {
 
     /// Manage projects
     Projects(ProjectsArgs),
+
+    /// Inspect effective CLI configuration
+    Config(ConfigArgs),
 
     /// List deployments for a project
     Deployments(DeploymentsArgs),
@@ -284,4 +290,8 @@ pub struct InitArgs {
     /// Link existing project by ID
     #[arg(long)]
     pub project_id: Option<String>,
+
+    /// Create only local onreza.toml/.onreza scaffold; never create or link a platform project
+    #[arg(long, conflicts_with_all = ["create", "project_id"])]
+    pub local: bool,
 }

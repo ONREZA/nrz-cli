@@ -4,12 +4,68 @@
 //! and JSON mode activates automatically. All assertions check JSON in stdout.
 
 use assert_cmd::Command;
+use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::get};
 use predicates::str::contains;
+use serde_json::json;
 use std::fs;
 
 /// Get the binary command
 fn nrz() -> Command {
     Command::cargo_bin("nrz").unwrap()
+}
+
+fn spawn_project_settings_mock() -> String {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            let app = Router::new().route(
+                "/v1/projects/{project_id}",
+                get(
+                    |axum::extract::Path(_project_id): axum::extract::Path<String>| async {
+                        Json(json!({
+                            "frameworkPreset": "vite",
+                            "buildCommand": "npm run server-build",
+                            "buildCommandSource": "USER",
+                            "outputDirectory": "server-dist",
+                            "outputDirectorySource": "USER"
+                        }))
+                    },
+                ),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tx.send(format!("http://{addr}")).unwrap();
+            axum::serve(listener, app).await.unwrap();
+        });
+    });
+    rx.recv().unwrap()
+}
+
+fn spawn_project_settings_failure_mock(status: StatusCode) -> String {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            let app = Router::new().route(
+                "/v1/projects/{project_id}",
+                get(move || async move {
+                    (
+                        status,
+                        Json(json!({
+                            "error": "project settings unavailable"
+                        })),
+                    )
+                        .into_response()
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tx.send(format!("http://{addr}")).unwrap();
+            axum::serve(listener, app).await.unwrap();
+        });
+    });
+    rx.recv().unwrap()
 }
 
 #[test]
@@ -170,6 +226,176 @@ fn deploy_app_not_found_lists_available() {
         .failure()
         .stdout(contains("not found"))
         .stdout(contains("@my/web"));
+}
+
+// ── nrz config ───────────────────────────────────────────────
+
+#[test]
+fn config_explain_app_merges_root_identity_with_app_config() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"name": "root", "workspaces": ["apps/*"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("onreza.toml"),
+        "[project]\nid = \"proj_root\"\nframework = \"nextjs\"\n",
+    )
+    .unwrap();
+    let apps_web = temp.path().join("apps").join("web");
+    fs::create_dir_all(&apps_web).unwrap();
+    fs::write(apps_web.join("package.json"), r#"{"name": "web"}"#).unwrap();
+    fs::write(
+        apps_web.join("onreza.toml"),
+        "[project]\nid = \"\"\nframework = \"vite\"\n\n[build]\ncommand = \"pnpm build\"\noutput_directory = \"dist\"\n",
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["config", "explain", "--app", "web", "--local"]);
+    cmd.assert()
+        .success()
+        .stdout(contains(
+            "\"selectedApp\":{\"requested\":\"web\",\"path\":\"apps/web\",\"source\":\"cli\"}",
+        ))
+        .stdout(contains(
+            "\"projectId\":{\"value\":\"proj_root\",\"source\":\"onreza.toml\"}",
+        ))
+        .stdout(contains(
+            "\"framework\":{\"value\":\"vite\",\"source\":\"onreza.toml\"}",
+        ))
+        .stdout(contains(
+            "\"buildCommand\":{\"value\":\"pnpm build\",\"source\":\"onreza.toml\"}",
+        ))
+        .stdout(contains(
+            "\"outputDirectory\":{\"value\":\"dist\",\"source\":\"onreza.toml\"}",
+        ))
+        .stdout(contains(
+            "\"deployApp\":{\"value\":\"web\",\"source\":\"cli\"}",
+        ));
+}
+
+#[test]
+fn config_explain_cli_app_override_replaces_root_deploy_app() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"name": "root", "workspaces": ["apps/*"]}"#,
+    )
+    .unwrap();
+    fs::write(temp.path().join("onreza.toml"), "[deploy]\napp = \"api\"\n").unwrap();
+    for app in ["api", "web"] {
+        let app_dir = temp.path().join("apps").join(app);
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::write(
+            app_dir.join("package.json"),
+            format!(r#"{{"name": "{app}"}}"#),
+        )
+        .unwrap();
+    }
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["config", "explain", "--app", "web", "--local"]);
+    cmd.assert()
+        .success()
+        .stdout(contains(
+            "\"selectedApp\":{\"requested\":\"web\",\"path\":\"apps/web\",\"source\":\"cli\"}",
+        ))
+        .stdout(contains(
+            "\"deployApp\":{\"value\":\"web\",\"source\":\"cli\"}",
+        ));
+}
+
+#[test]
+fn config_explain_project_id_override_updates_effective_project_id() {
+    let api_url = spawn_project_settings_mock();
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("onreza.toml"),
+        "[project]\nid = \"proj_root\"\n",
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).env("NRZ_API_URL", api_url).args([
+        "--token",
+        "test-token",
+        "config",
+        "explain",
+        "--project-id",
+        "proj_cli",
+    ]);
+    cmd.assert()
+        .success()
+        .stdout(contains(
+            "\"serverSettings\":{\"applied\":true,\"projectId\":\"proj_cli\",\"source\":\"server\"}",
+        ))
+        .stdout(contains(
+            "\"projectId\":{\"value\":\"proj_cli\",\"source\":\"cli\"}",
+        ));
+}
+
+#[test]
+fn config_explain_applies_server_project_settings() {
+    let api_url = spawn_project_settings_mock();
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("onreza.toml"),
+        "[project]\nid = \"proj_root\"\n",
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).env("NRZ_API_URL", api_url).args([
+        "--token",
+        "test-token",
+        "config",
+        "explain",
+    ]);
+    cmd.assert()
+        .success()
+        .stdout(contains(
+            "\"serverSettings\":{\"applied\":true,\"projectId\":\"proj_root\",\"source\":\"server\"}",
+        ))
+        .stdout(contains(
+            "\"framework\":{\"value\":\"vite\",\"source\":\"server\"}",
+        ))
+        .stdout(contains(
+            "\"buildCommand\":{\"value\":\"npm run server-build\",\"source\":\"server:USER\"}",
+        ))
+        .stdout(contains(
+            "\"outputDirectory\":{\"value\":\"server-dist\",\"source\":\"server:USER\"}",
+        ));
+}
+
+#[test]
+fn config_explain_uses_local_config_when_server_settings_are_transiently_unavailable() {
+    let api_url = spawn_project_settings_failure_mock(StatusCode::SERVICE_UNAVAILABLE);
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("onreza.toml"),
+        "[project]\nid = \"proj_root\"\n\n[build]\ncommand = \"pnpm build\"\n",
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).env("NRZ_API_URL", api_url).args([
+        "--token",
+        "test-token",
+        "config",
+        "explain",
+    ]);
+    cmd.assert()
+        .success()
+        .stdout(contains(
+            "\"serverSettings\":{\"applied\":false,\"projectId\":\"proj_root\",\"source\":\"server-unavailable\"}",
+        ))
+        .stdout(contains(
+            "\"buildCommand\":{\"value\":\"pnpm build\",\"source\":\"onreza.toml\"}",
+        ));
 }
 
 // ── nrz detect ──────────────────────────────────────────────
@@ -436,6 +662,20 @@ fn detect_save_without_onreza_toml_fails_honestly() {
         .stdout(contains("onreza.toml not found"));
 
     assert!(!temp.path().join("onreza.toml").exists());
+}
+
+#[test]
+fn init_local_creates_scaffold_without_platform_link() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp).args(["init", "--local", "--json"]);
+    cmd.assert()
+        .success()
+        .stdout(contains("\"projectId\":null"));
+
+    assert!(temp.path().join("onreza.toml").exists());
+    assert!(temp.path().join(".onreza").is_dir());
 }
 
 #[test]

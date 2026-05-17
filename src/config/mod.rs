@@ -256,6 +256,68 @@ pub struct EnvSection {
 // ── Accessor methods with defaults ──────────────────────────
 
 impl ProjectConfig {
+    pub fn merge_child(&self, child: ProjectConfig) -> ProjectConfig {
+        let parent = self.clone();
+
+        let mut aliases = parent.dev.aliases;
+        aliases.extend(child.dev.aliases);
+
+        let mut declarations = parent.env.declarations;
+        declarations.extend(child.env.declarations);
+
+        ProjectConfig {
+            project: ProjectSection {
+                id: merge_project_string(child.project.id, parent.project.id),
+                name: merge_project_string(child.project.name, parent.project.name),
+                workspace: merge_project_string(child.project.workspace, parent.project.workspace),
+                framework: merge_project_string(child.project.framework, parent.project.framework),
+            },
+            dev: DevSection {
+                command: child.dev.command.or(parent.dev.command),
+                port: child.dev.port.or(parent.dev.port),
+                host: child.dev.host.or(parent.dev.host),
+                data_dir: child.dev.data_dir.or(parent.dev.data_dir),
+                aliases,
+            },
+            build: BuildSection {
+                output_dirs: child.build.output_dirs.or(parent.build.output_dirs),
+                command: child.build.command.or(parent.build.command),
+                install_command: child.build.install_command.or(parent.build.install_command),
+                output_directory: child
+                    .build
+                    .output_directory
+                    .or(parent.build.output_directory),
+            },
+            deploy: DeploySection {
+                compute: child.deploy.compute.or(parent.deploy.compute),
+                entry: child.deploy.entry.or(parent.deploy.entry),
+                health_check_path: child
+                    .deploy
+                    .health_check_path
+                    .or(parent.deploy.health_check_path),
+                app: child.deploy.app.or(parent.deploy.app),
+            },
+            db: DbSection {
+                database: child.db.database.or(parent.db.database),
+                branch: child.db.branch.or(parent.db.branch),
+            },
+            env: EnvSection {
+                strict: child.env.strict || parent.env.strict,
+                declarations,
+            },
+        }
+    }
+
+    pub fn merge_child_for_selected_app(
+        &self,
+        child: ProjectConfig,
+        selected_app: &str,
+    ) -> ProjectConfig {
+        let mut merged = self.merge_child(child);
+        merged.deploy.app = Some(selected_app.to_string());
+        merged
+    }
+
     pub fn dev_alias_command(&self, name: &str) -> Option<&str> {
         self.dev.aliases.get(name).map(|s| s.as_str())
     }
@@ -357,6 +419,14 @@ pub enum BuildSettingSource {
 }
 
 impl BuildSettingSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Preset => "PRESET",
+            Self::Detected => "DETECTED",
+            Self::User => "USER",
+        }
+    }
+
     pub fn is_user_explicit(self) -> bool {
         self == Self::User
     }
@@ -382,6 +452,7 @@ pub struct ProjectBuildSettings {
 pub struct SourceAwareSetting {
     pub value: Option<String>,
     pub source: Option<BuildSettingSource>,
+    pub origin: EffectiveSettingOrigin,
 }
 
 impl SourceAwareSetting {
@@ -389,6 +460,7 @@ impl SourceAwareSetting {
         value.map(|value| Self {
             value: normalize_optional_string(Some(value)),
             source: Some(BuildSettingSource::User),
+            origin: EffectiveSettingOrigin::LocalConfig,
         })
     }
 
@@ -405,6 +477,7 @@ impl SourceAwareSetting {
                     Some(Self {
                         value,
                         source: Some(source),
+                        origin: EffectiveSettingOrigin::ServerSettings,
                     })
                 } else {
                     None
@@ -413,6 +486,7 @@ impl SourceAwareSetting {
             None => value.map(|value| Self {
                 value: Some(value),
                 source: None,
+                origin: EffectiveSettingOrigin::ServerSettings,
             }),
         }
     }
@@ -424,6 +498,7 @@ impl SourceAwareSetting {
         normalize_optional_string(value).map(|value| Self {
             value: Some(value),
             source: Some(source.unwrap_or(BuildSettingSource::Preset)),
+            origin: EffectiveSettingOrigin::ServerSettings,
         })
     }
 
@@ -434,13 +509,59 @@ impl SourceAwareSetting {
     pub fn source_or_preset(&self) -> BuildSettingSource {
         self.source.unwrap_or(BuildSettingSource::Preset)
     }
+
+    pub fn origin(&self) -> EffectiveSettingOrigin {
+        self.origin
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectiveSettingOrigin {
+    Cli,
+    LocalConfig,
+    ServerSettings,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveConfigValue {
+    pub value: Option<String>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveConfigList {
+    pub values: Vec<String>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveConfigExplanation {
+    pub project_dir: String,
+    pub project_id: EffectiveConfigValue,
+    pub framework: EffectiveConfigValue,
+    pub install_command: EffectiveConfigValue,
+    pub build_command: EffectiveConfigValue,
+    pub output_directory: EffectiveConfigValue,
+    pub output_dirs: EffectiveConfigList,
+    pub deploy_compute: EffectiveConfigValue,
+    pub deploy_entry: EffectiveConfigValue,
+    pub deploy_app: EffectiveConfigValue,
 }
 
 #[derive(Debug, Clone)]
 pub struct EffectiveProjectConfig {
     project_dir: PathBuf,
     config: ProjectConfig,
+    project_id: Option<String>,
+    project_id_source: Option<EffectiveSettingOrigin>,
     framework_override: Option<String>,
+    framework_override_source: Option<EffectiveSettingOrigin>,
+    deploy_app: Option<String>,
+    deploy_app_source: Option<EffectiveSettingOrigin>,
     install_command: Option<SourceAwareSetting>,
     build_command: Option<SourceAwareSetting>,
     output_directory: Option<SourceAwareSetting>,
@@ -448,21 +569,38 @@ pub struct EffectiveProjectConfig {
 
 impl EffectiveProjectConfig {
     pub fn from_project_config(project_dir: PathBuf, config: ProjectConfig) -> Self {
+        let project_id = normalize_optional_string(config.project.id.clone());
+        let project_id_source = project_id
+            .as_ref()
+            .map(|_| EffectiveSettingOrigin::LocalConfig);
         let framework_override =
             normalize_authoritative_framework(config.project.framework.as_deref())
                 .map(str::to_string);
+        let framework_override_source = framework_override
+            .as_ref()
+            .map(|_| EffectiveSettingOrigin::LocalConfig);
+        let deploy_app = normalize_optional_string(config.deploy.app.clone());
+        let deploy_app_source = deploy_app
+            .as_ref()
+            .map(|_| EffectiveSettingOrigin::LocalConfig);
         let install_command = SourceAwareSetting::from_user(config.build.install_command.clone());
         let build_command = SourceAwareSetting::from_user(config.build.command.clone());
         let output_directory = normalize_optional_string(config.build.output_directory.clone())
             .map(|value| SourceAwareSetting {
                 value: Some(value),
                 source: Some(BuildSettingSource::User),
+                origin: EffectiveSettingOrigin::LocalConfig,
             });
 
         Self {
             project_dir,
             config,
+            project_id,
+            project_id_source,
             framework_override,
+            framework_override_source,
+            deploy_app,
+            deploy_app_source,
             install_command,
             build_command,
             output_directory,
@@ -472,6 +610,35 @@ impl EffectiveProjectConfig {
     pub fn load(project_dir: PathBuf) -> anyhow::Result<Self> {
         let config = load(&project_dir)?;
         Ok(Self::from_project_config(project_dir, config))
+    }
+
+    pub fn apply_project_id_override(&mut self, project_id: Option<&str>) -> anyhow::Result<()> {
+        let Some(project_id) = project_id else {
+            return Ok(());
+        };
+        let Some(project_id) = normalize_optional_string(Some(project_id.to_string())) else {
+            anyhow::bail!("--project-id must not be empty");
+        };
+
+        self.project_id = Some(project_id);
+        self.project_id_source = Some(EffectiveSettingOrigin::Cli);
+        Ok(())
+    }
+
+    pub fn apply_deploy_app_cli_override(
+        &mut self,
+        deploy_app: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let Some(deploy_app) = deploy_app else {
+            return Ok(());
+        };
+        let Some(deploy_app) = normalize_optional_string(Some(deploy_app.to_string())) else {
+            anyhow::bail!("--app must not be empty");
+        };
+
+        self.deploy_app = Some(deploy_app);
+        self.deploy_app_source = Some(EffectiveSettingOrigin::Cli);
+        Ok(())
     }
 
     pub fn apply_server_settings(&mut self, settings: Option<&ProjectBuildSettings>) {
@@ -484,6 +651,7 @@ impl EffectiveProjectConfig {
                 normalize_authoritative_framework(settings.framework_preset.as_deref())
         {
             self.framework_override = Some(framework.to_string());
+            self.framework_override_source = Some(EffectiveSettingOrigin::ServerSettings);
         }
 
         if self.install_command.is_none() {
@@ -545,22 +713,118 @@ impl EffectiveProjectConfig {
     }
 
     pub fn deploy_app(&self) -> Option<&str> {
-        self.config.deploy_app()
+        self.deploy_app.as_deref()
     }
 
     pub fn project_id(&self) -> Option<&str> {
-        self.config
-            .project
-            .id
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
+        self.project_id.as_deref()
     }
+
+    pub fn explain(&self) -> EffectiveConfigExplanation {
+        EffectiveConfigExplanation {
+            project_dir: self.project_dir.display().to_string(),
+            project_id: explain_origin_value(self.project_id(), self.project_id_source, "absent"),
+            framework: explain_framework(
+                self.framework_override.as_deref(),
+                self.framework_override_source,
+            ),
+            install_command: explain_source_aware_setting(self.install_command.as_ref(), "auto"),
+            build_command: explain_source_aware_setting(self.build_command.as_ref(), "auto"),
+            output_directory: explain_source_aware_setting(self.output_directory.as_ref(), "auto"),
+            output_dirs: EffectiveConfigList {
+                values: self.output_dirs().into_iter().map(str::to_string).collect(),
+                source: if self.config.build.output_dirs.is_some() {
+                    "onreza.toml".to_string()
+                } else {
+                    "default".to_string()
+                },
+            },
+            deploy_compute: explain_config_option(self.deploy_compute(), "onreza.toml", "auto"),
+            deploy_entry: explain_config_option(self.deploy_entry(), "onreza.toml", "absent"),
+            deploy_app: explain_origin_value(self.deploy_app(), self.deploy_app_source, "absent"),
+        }
+    }
+}
+
+fn merge_project_string(child: Option<String>, parent: Option<String>) -> Option<String> {
+    normalize_optional_string(child).or_else(|| normalize_optional_string(parent))
 }
 
 fn normalize_optional_string(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn explain_config_option(
+    value: Option<&str>,
+    present_source: &str,
+    absent_source: &str,
+) -> EffectiveConfigValue {
+    EffectiveConfigValue {
+        value: value.map(str::to_string),
+        source: if value.is_some() {
+            present_source.to_string()
+        } else {
+            absent_source.to_string()
+        },
+    }
+}
+
+fn explain_framework(
+    value: Option<&str>,
+    source: Option<EffectiveSettingOrigin>,
+) -> EffectiveConfigValue {
+    explain_origin_value(value, source, "auto")
+}
+
+fn explain_origin_value(
+    value: Option<&str>,
+    source: Option<EffectiveSettingOrigin>,
+    absent_source: &str,
+) -> EffectiveConfigValue {
+    EffectiveConfigValue {
+        value: value.map(str::to_string),
+        source: source
+            .map(explain_effective_origin)
+            .unwrap_or_else(|| absent_source.to_string()),
+    }
+}
+
+fn explain_source_aware_setting(
+    setting: Option<&SourceAwareSetting>,
+    absent_source: &str,
+) -> EffectiveConfigValue {
+    let Some(setting) = setting else {
+        return EffectiveConfigValue {
+            value: None,
+            source: absent_source.to_string(),
+        };
+    };
+
+    EffectiveConfigValue {
+        value: setting.value().map(str::to_string),
+        source: explain_source_aware_origin(setting),
+    }
+}
+
+fn explain_source_aware_origin(setting: &SourceAwareSetting) -> String {
+    match setting.origin() {
+        EffectiveSettingOrigin::Cli => "cli".to_string(),
+        EffectiveSettingOrigin::LocalConfig => "onreza.toml".to_string(),
+        EffectiveSettingOrigin::ServerSettings => match setting.source {
+            Some(source) => format!("server:{}", source.as_str()),
+            None => "server".to_string(),
+        },
+    }
+}
+
+fn explain_effective_origin(source: EffectiveSettingOrigin) -> String {
+    match source {
+        EffectiveSettingOrigin::Cli => "cli".to_string(),
+        EffectiveSettingOrigin::LocalConfig => "onreza.toml".to_string(),
+        EffectiveSettingOrigin::ServerSettings => "server".to_string(),
+    }
 }
 
 pub fn normalize_authoritative_framework(framework: Option<&str>) -> Option<&str> {

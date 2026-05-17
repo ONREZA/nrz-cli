@@ -53,7 +53,7 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
     if args.save && result.framework != "other" {
         if !nrz::config::save_framework(&project_dir, &result.framework)? {
             anyhow::bail!(
-                "cannot save detected framework: onreza.toml not found in {}. Run `nrz init` first or create onreza.toml.",
+                "cannot save detected framework: onreza.toml not found in {}. Run `nrz init --local` first or create onreza.toml.",
                 project_dir.display()
             );
         }

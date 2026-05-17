@@ -94,70 +94,70 @@ fn framework_existing_dir_wins_over_config_manifest_dir() {
     assert!(!has_manifest);
 }
 
-// ── detect_output_dir with server_output_dir ─────────────────
+// ── detect_output_dir with output_directory_hint ─────────────────
 
 #[test]
-fn server_output_dir_used_when_no_framework_or_config_match() {
+fn output_directory_hint_used_when_no_framework_or_config_match() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir(dir.path().join("server-out")).unwrap();
+    std::fs::create_dir(dir.path().join("hint-out")).unwrap();
 
     let (found, _) = detect_output_dir(
         dir.path(),
         &["dist"],
         &[],
-        Some(output_hint("server-out", BuildSettingSource::Preset)),
+        Some(output_hint("hint-out", BuildSettingSource::Preset)),
     )
     .unwrap();
-    assert_eq!(found.file_name().unwrap(), "server-out");
+    assert_eq!(found.file_name().unwrap(), "hint-out");
 }
 
 #[test]
-fn framework_dir_wins_over_server_output_dir() {
+fn framework_dir_wins_over_output_directory_hint() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join(".next")).unwrap();
-    std::fs::create_dir(dir.path().join("server-out")).unwrap();
+    std::fs::create_dir(dir.path().join("hint-out")).unwrap();
 
     let (found, _) = detect_output_dir(
         dir.path(),
         &["dist"],
         &[".next"],
-        Some(output_hint("server-out", BuildSettingSource::Preset)),
+        Some(output_hint("hint-out", BuildSettingSource::Preset)),
     )
     .unwrap();
     assert_eq!(found.file_name().unwrap(), ".next");
 }
 
 #[test]
-fn server_output_dir_wins_over_config_dir() {
+fn output_directory_hint_wins_over_config_dir() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir(dir.path().join("server-out")).unwrap();
+    std::fs::create_dir(dir.path().join("hint-out")).unwrap();
     std::fs::create_dir(dir.path().join("dist")).unwrap();
 
-    // server-out is checked before config "dist"
+    // hint-out is checked before config "dist"
     let (found, _) = detect_output_dir(
         dir.path(),
         &["dist"],
         &[],
-        Some(output_hint("server-out", BuildSettingSource::Preset)),
+        Some(output_hint("hint-out", BuildSettingSource::Preset)),
     )
     .unwrap();
-    assert_eq!(found.file_name().unwrap(), "server-out");
+    assert_eq!(found.file_name().unwrap(), "hint-out");
 }
 
 #[test]
-fn server_output_dir_appears_in_error_when_not_found() {
+fn output_directory_hint_appears_in_error_when_not_found() {
     let dir = tempfile::tempdir().unwrap();
     let err = detect_output_dir(
         dir.path(),
         &["dist"],
         &[".next"],
-        Some(output_hint("server-out", BuildSettingSource::Preset)),
+        Some(output_hint("hint-out", BuildSettingSource::Preset)),
     )
     .unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("server-out/"),
-        "error should list server-out: {msg}"
+        msg.contains("hint-out/"),
+        "error should list hint-out: {msg}"
     );
 }
 
@@ -186,17 +186,17 @@ fn explicit_output_dir_wins_over_framework_and_config_dirs() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".next/standalone/.onreza")).unwrap();
     std::fs::create_dir(dir.path().join("dist")).unwrap();
-    std::fs::create_dir(dir.path().join("server-out")).unwrap();
+    std::fs::create_dir(dir.path().join("hint-out")).unwrap();
 
     let (found, has_manifest) = detect_output_dir(
         dir.path(),
         &["dist"],
         &[".next/standalone", ".next"],
-        Some(output_hint("server-out", BuildSettingSource::User)),
+        Some(output_hint("hint-out", BuildSettingSource::User)),
     )
     .unwrap();
 
-    assert_eq!(found.file_name().unwrap(), "server-out");
+    assert_eq!(found.file_name().unwrap(), "hint-out");
     assert!(!has_manifest);
 }
 
@@ -617,17 +617,17 @@ fn nextjs_static_export_prefers_out_over_preset_dot_next() {
 #[test]
 fn generic_process_user_output_dir_wins_over_root_framework_dir() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir(dir.path().join("server-out")).unwrap();
+    std::fs::create_dir(dir.path().join("hint-out")).unwrap();
 
     let (found, _) = detect_output_dir(
         dir.path(),
         &["dist"],
         &["."],
-        Some(output_hint("server-out", BuildSettingSource::User)),
+        Some(output_hint("hint-out", BuildSettingSource::User)),
     )
     .unwrap();
 
-    assert_eq!(found.file_name().unwrap(), "server-out");
+    assert_eq!(found.file_name().unwrap(), "hint-out");
 }
 
 // ── STATIC auto-gen in run_with_hint ─────────────────────────

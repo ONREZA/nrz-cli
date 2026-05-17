@@ -36,11 +36,17 @@ nrz login
 # 2) Create local scaffold and optionally link/create platform project
 nrz init
 # alternatives:
+# nrz init --local
 # nrz init --create --name my-app
 # nrz init --project-id proj_abc123
 
 # 3) Detect framework and persist it to onreza.toml
 nrz detect --save
+
+# Explain what build/deploy config the CLI will use
+nrz config explain --json
+# Local-only explanation without fetching server project settings:
+# nrz config explain --local --json
 
 # 4) Local development with ONREZA emulation (KV + DB)
 nrz dev

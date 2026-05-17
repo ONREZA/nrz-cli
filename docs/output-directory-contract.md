@@ -4,7 +4,10 @@
 value string alone is not enough to decide whether the CLI may apply local
 fallbacks or framework analysis. At runtime the CLI first builds one
 `onreza.toml`-shaped effective config in memory, then runs build/deploy from
-that model only.
+that model only. Use `nrz config explain --json` to inspect the selected
+project directory, app merge, values, and sources before running deploy. By
+default it fetches the same server project settings that deploy uses; pass
+`--local` to inspect only local `onreza.toml` state.
 
 All three settings use the same source enum:
 

@@ -148,6 +148,8 @@ pub async fn run(
             );
         }
         (Some(selected.project_id), Some(selected.project_name))
+    } else if args.local {
+        (None, None)
     } else if !json && std::io::stdin().is_terminal() {
         // Interactive wizard
         let result_ids =

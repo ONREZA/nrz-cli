@@ -15,6 +15,8 @@ mod logs;
 mod output;
 #[cfg(test)]
 mod output_tests;
+mod project_context;
+mod project_settings;
 mod rollback;
 mod upgrade;
 
@@ -72,6 +74,9 @@ fn config_dir_for_command(command: &Command) -> PathBuf {
         Command::Dev(args) => Path::new(&args.dir).to_path_buf(),
         Command::Build(args) => Path::new(&args.dir).to_path_buf(),
         Command::Deploy(args) => Path::new(&args.dir).to_path_buf(),
+        Command::Config(args) => match &args.command {
+            cli::config::ConfigCommand::Explain(args) => Path::new(&args.dir).to_path_buf(),
+        },
         Command::Link(args) => Path::new(&args.dir).to_path_buf(),
         Command::Detect(args) => Path::new(&args.dir).to_path_buf(),
         _ => std::env::current_dir().unwrap_or_default(),
@@ -113,6 +118,9 @@ async fn run_command(
         Command::Link(args) => link::run(args, json, token, workspace, config).await,
         Command::Upgrade(args) => upgrade::run(args).await,
         Command::Projects(args) => cli::projects_handler::run(args, json, token, workspace).await,
+        Command::Config(args) => {
+            cli::config_handler::run(args, json, token, workspace, config).await
+        }
         Command::Deployments(args) => deployments::run(args, json, token, workspace, config).await,
         Command::Logs(args) => logs::run(args, json, token, workspace, config).await,
         Command::Env(args) => {
