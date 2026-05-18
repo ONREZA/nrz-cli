@@ -90,25 +90,20 @@ fn valid_nextjs_manifest_parses() {
 }
 
 #[test]
-fn compute_bundle_sha256_and_route_fallthrough_parse() {
+fn route_fallthrough_parses() {
     let dir = tempfile::tempdir().unwrap();
-    let sha = "a".repeat(64);
-    let json = format!(
-        r#"{{
+    let json = r#"{
         "version": 1,
-        "layers": [{{
+        "layers": [{
             "name": "server",
             "target": "COMPUTE",
             "directory": ".",
-            "entry": "server.js",
-            "bundleSha256": "{sha}"
-        }}],
-        "routes": [{{ "pattern": "^/.*$", "layer": "server", "fallthrough": true }}]
-    }}"#
-    );
+            "entry": "server.js"
+        }],
+        "routes": [{ "pattern": "^/.*$", "layer": "server", "fallthrough": true }]
+    }"#;
     let path = write_manifest(dir.path(), &json);
     let m = load_and_validate(&path).unwrap();
-    assert_eq!(m.layers[0].bundle_sha256.as_deref(), Some(sha.as_str()));
     assert_eq!(m.routes[0].fallthrough, Some(true));
 }
 

@@ -441,18 +441,18 @@ fn build_logical_manifest(
                 .iter()
                 .map(|item| {
                     let code_hash = normalize_middleware_code_hash(&item.name, &item.code_hash)?;
-                    let bundle_sha256 = logical_files
-                    .iter()
-                    .find(|file| file.path == item.bundle_path)
-                    .map(|file| file.sha256.as_str())
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "middleware '{}' bundlePath '{}' was not found in the output directory",
-                            item.name,
-                            item.bundle_path
-                        )
-                    })?;
-                    if code_hash != bundle_sha256 {
+                    let bundle_file_sha256 = logical_files
+                        .iter()
+                        .find(|file| file.path == item.bundle_path)
+                        .map(|file| file.sha256.as_str())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "middleware '{}' bundlePath '{}' was not found in the output directory",
+                                item.name,
+                                item.bundle_path
+                            )
+                        })?;
+                    if code_hash != bundle_file_sha256 {
                         anyhow::bail!(
                             "middleware '{}' codeHash does not match bundlePath '{}'",
                             item.name,

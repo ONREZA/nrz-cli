@@ -830,30 +830,6 @@ fn pnpm_build_policy_detection_recognizes_explicit_allowlists() {
 }
 
 #[test]
-fn source_bundle_manifest_contract_rejects_compute_bundle_sha256() {
-    let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version": 1,
-        "layers": [
-            {
-                "name": "server",
-                "target": "COMPUTE",
-                "directory": ".",
-                "entry": "server.js",
-                "bundleSha256": "a".repeat(64)
-            }
-        ],
-        "routes": [
-            {"pattern": "^/.*$", "layer": "server"}
-        ]
-    }))
-    .unwrap();
-
-    let err = validate_source_bundle_manifest_contract(&manifest).unwrap_err();
-
-    assert!(err.to_string().contains("legacy bundleSha256"));
-}
-
-#[test]
 fn prepare_deploy_files_prunes_next_cache_only() {
     let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
         "version": 1,
@@ -1125,10 +1101,30 @@ fn prepare_upload_body_serializes_source_bundle_v1_contract() {
     assert_eq!(value["sourceFormat"], "tar.zst");
     assert_eq!(value["sourceSizeBytes"], "4096");
     assert_eq!(value["logicalManifestSha256"], logical_manifest_sha256);
-    assert!(value.get("manifestSummary").is_none());
-    assert!(value.get("packParts").is_none());
-    assert!(value.get("computeBundles").is_none());
-    assert!(value.get("isolateModules").is_none());
+    let mut keys = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "artifactFormat",
+            "cliProtocolVersion",
+            "deploymentAttemptId",
+            "deploymentId",
+            "logicalManifest",
+            "logicalManifestSha256",
+            "operationId",
+            "projectId",
+            "sourceFormat",
+            "sourceSha256",
+            "sourceSizeBytes",
+            "workspaceId",
+        ]
+    );
 }
 
 #[test]
@@ -1451,11 +1447,11 @@ async fn multipart_complete_transport_error_is_retryable() {
 }
 
 #[test]
-fn upload_complete_legacy_incomplete_error_is_retryable() {
+fn upload_complete_source_object_incomplete_error_is_retryable() {
     let error: anyhow::Error = crate::api::StructuredApiError {
         status: reqwest::StatusCode::BAD_REQUEST,
         code: "VALIDATION_ERROR".into(),
-        message: "Upload is incomplete: pack parts 0 missing in S3.".into(),
+        message: "Upload is incomplete: source object is not visible in S3 yet.".into(),
         retry_after_seconds: None,
         details: Some(serde_json::json!({ "field": "sourceObject" })),
     }

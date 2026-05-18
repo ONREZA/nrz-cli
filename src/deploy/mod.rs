@@ -8,11 +8,6 @@ mod deploy_tests;
 pub(crate) mod health_check;
 #[cfg(test)]
 mod health_check_tests;
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) mod pack_v1;
-#[cfg(test)]
-mod pack_v1_tests;
 pub(crate) mod source_bundle_v1;
 #[cfg(test)]
 mod source_bundle_v1_tests;
@@ -502,7 +497,6 @@ pub async fn run(
     let manifest_for_planning: build_manifest::Manifest =
         serde_json::from_value(manifest_raw.clone())
             .context("failed to parse resolved deployment manifest")?;
-    validate_source_bundle_manifest_contract(&manifest_for_planning)?;
     let files = prepare_deploy_files(&manifest_for_planning, scanned_files, &detection, json)?;
     if files.is_empty() {
         return Err(output::coded_error(
@@ -3331,23 +3325,6 @@ fn prepare_deploy_files(
 
     warn_large_deploy_files(json, &deployable);
     Ok(deployable)
-}
-
-fn validate_source_bundle_manifest_contract(
-    manifest: &build_manifest::Manifest,
-) -> anyhow::Result<()> {
-    for layer in &manifest.layers {
-        if layer.target == build_manifest::LayerTarget::Compute && layer.bundle_sha256.is_some() {
-            return Err(output::coded_error(
-                "INVALID_BUNDLE_MANIFEST",
-                format!(
-                    "COMPUTE layer '{}' uses legacy bundleSha256. SOURCE_BUNDLE_V1 computes bundle identity from the uploaded source manifest; remove bundleSha256 from .onreza/manifest.json.",
-                    layer.name
-                ),
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn is_framework_build_only_path(

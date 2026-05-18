@@ -69,8 +69,6 @@ pub struct Layer {
     pub export_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeConfig>,
-    #[serde(rename = "bundleSha256", skip_serializing_if = "Option::is_none")]
-    pub bundle_sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Clone, Copy)]
@@ -188,10 +186,6 @@ fn has_path_traversal(s: &str) -> bool {
     s.replace('\\', "/").split('/').any(|seg| seg == "..")
 }
 
-fn is_lower_sha256_hex(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-}
-
 static JS_ONLY_REGEX: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
 
 /// Returns `true` if `pattern` contains JS-only regex features
@@ -282,9 +276,6 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                 if layer.runtime.is_some() {
                     anyhow::bail!("STATIC layer '{}' must not have 'runtime'", layer.name);
                 }
-                if layer.bundle_sha256.is_some() {
-                    anyhow::bail!("STATIC layer '{}' must not have 'bundleSha256'", layer.name);
-                }
             }
             LayerTarget::Isolate => {
                 let entry = layer.entry.as_deref().ok_or_else(|| {
@@ -318,12 +309,6 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                         other
                     ),
                 }
-                if layer.bundle_sha256.is_some() {
-                    anyhow::bail!(
-                        "ISOLATE layer '{}' must not have 'bundleSha256'",
-                        layer.name
-                    );
-                }
             }
             LayerTarget::Compute => {
                 let entry = layer.entry.as_deref().ok_or_else(|| {
@@ -348,14 +333,6 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                 }
                 if layer.export_format.is_some() {
                     anyhow::bail!("COMPUTE layer '{}' must not have 'export'", layer.name);
-                }
-                if let Some(bundle_sha256) = &layer.bundle_sha256
-                    && !is_lower_sha256_hex(bundle_sha256)
-                {
-                    anyhow::bail!(
-                        "COMPUTE layer '{}' bundleSha256 must be 64 lowercase hex chars",
-                        layer.name
-                    );
                 }
             }
         }
@@ -607,7 +584,6 @@ pub fn generate_static_manifest() -> Manifest {
             entry: None,
             export_format: None,
             runtime: None,
-            bundle_sha256: None,
         }],
         routes: vec![Route {
             pattern: "^/.*$".to_string(),
@@ -636,7 +612,6 @@ pub fn generate_compute_manifest(entry: &str) -> Manifest {
             entry: Some(entry.to_string()),
             export_format: None,
             runtime: None,
-            bundle_sha256: None,
         }],
         routes: vec![Route {
             pattern: "^/.*$".to_string(),
@@ -678,7 +653,6 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         entry: None,
         export_format: None,
         runtime: None,
-        bundle_sha256: None,
     }];
 
     if has_public {
@@ -689,7 +663,6 @@ pub fn generate_nextjs_standalone_manifest_for_server(
             entry: None,
             export_format: None,
             runtime: None,
-            bundle_sha256: None,
         });
     }
 
@@ -700,7 +673,6 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         entry: Some(server_entry.to_string()),
         export_format: None,
         runtime: None,
-        bundle_sha256: None,
     });
 
     let mut routes = vec![Route {
@@ -786,7 +758,6 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
             entry: None,
             export_format: None,
             runtime: None,
-            bundle_sha256: None,
         });
         routes.push(Route {
             pattern: pattern.to_string(),
@@ -806,7 +777,6 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
         entry: Some(config.server_entry.to_string()),
         export_format: None,
         runtime: None,
-        bundle_sha256: None,
     });
     routes.push(Route {
         pattern: "^/.*$".to_string(),

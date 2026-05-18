@@ -53,7 +53,7 @@ tar = "0.4"
 # Parallel uploads (deploy)
 futures = "0.3"
 
-# Hashing (synthetic commit SHA, PACK_V1 content/address planning)
+# Hashing (synthetic commit SHA, SOURCE_BUNDLE_V1 content/address planning)
 sha2 = "0.10"
 
 # Base64 (encoding SHA-256 for `x-amz-checksum-sha256` PUT header)
@@ -75,7 +75,7 @@ anyhow = "1"
 # URL handling (file:// URLs for NODE_OPTIONS)
 url = "2"
 
-# Operation/idempotency identifiers for the PACK_V1 upload contract
+# Operation/idempotency identifiers for the SOURCE_BUNDLE_V1 upload contract
 uuid = { version = "1", features = ["v7"] }
 
 # Unix signals (graceful shutdown)
