@@ -347,16 +347,6 @@ fn source_entries(
                 file.path
             );
         }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            if metadata.nlink() > 1 {
-                bail!(
-                    "SOURCE_BUNDLE_V1 does not support hardlinked files in build output: {}",
-                    file.path
-                );
-            }
-        }
         let (size, sha256) = hash_file_streaming(&full_path)
             .with_context(|| format!("failed to hash SOURCE_BUNDLE_V1 file {}", file.path))?;
         if size != file.size || sha256 != file.content_hash {

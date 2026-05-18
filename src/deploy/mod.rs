@@ -3427,23 +3427,6 @@ fn scan_dir_recursive(
         if ft.is_dir() {
             scan_dir_recursive(base, &path, canonical_base, files)?;
         } else if ft.is_file() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::MetadataExt;
-                let metadata = entry
-                    .metadata()
-                    .with_context(|| format!("failed to stat {}", path.display()))?;
-                if metadata.nlink() > 1 {
-                    let rel = path
-                        .strip_prefix(base)
-                        .context("failed to compute relative path")?
-                        .to_string_lossy()
-                        .replace('\\', "/");
-                    bail!(
-                        "SOURCE_BUNDLE_V1 does not support hardlinked files in build output: {rel}"
-                    );
-                }
-            }
             let rel = path
                 .strip_prefix(base)
                 .context("failed to compute relative path")?;

@@ -108,6 +108,65 @@ fn logical_manifest_sha_uses_stable_key_ordering() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn source_bundle_plan_serializes_hardlinked_files_as_regular_files() {
+    let dir = tempdir().unwrap();
+    let platform_bin = dir
+        .path()
+        .join("node_modules/@esbuild/linux-x64/bin/esbuild");
+    fs::create_dir_all(platform_bin.parent().unwrap()).unwrap();
+    fs::write(&platform_bin, b"esbuild").unwrap();
+    let package_bin = dir.path().join("node_modules/esbuild/bin/esbuild");
+    fs::create_dir_all(package_bin.parent().unwrap()).unwrap();
+    fs::hard_link(&platform_bin, &package_bin).unwrap();
+    let manifest = static_manifest();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+
+    let package_manifest_entry = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "node_modules/esbuild/bin/esbuild")
+        .unwrap();
+    assert_eq!(package_manifest_entry.entry_type, None);
+    assert_eq!(package_manifest_entry.size, b"esbuild".len() as u64);
+
+    let compressed = plan.read_all().await.unwrap();
+    let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
+    let mut archive = tar::Archive::new(Cursor::new(tar_bytes.as_slice()));
+    let mut hardlinked_paths = Vec::new();
+    for entry in archive.entries().unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path().unwrap().to_string_lossy().into_owned();
+        if path == "node_modules/@esbuild/linux-x64/bin/esbuild"
+            || path == "node_modules/esbuild/bin/esbuild"
+        {
+            assert!(entry.header().entry_type().is_file());
+            hardlinked_paths.push(path);
+        }
+    }
+    hardlinked_paths.sort();
+    assert_eq!(
+        hardlinked_paths,
+        [
+            "node_modules/@esbuild/linux-x64/bin/esbuild",
+            "node_modules/esbuild/bin/esbuild"
+        ]
+    );
+
+    let extracted = tempdir().unwrap();
+    tar::Archive::new(Cursor::new(tar_bytes.as_slice()))
+        .unpack(extracted.path())
+        .unwrap();
+    assert_eq!(
+        fs::read(extracted.path().join("node_modules/esbuild/bin/esbuild")).unwrap(),
+        b"esbuild"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn source_bundle_plan_preserves_safe_relative_symlinks() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("node_modules/.pnpm/pkg")).unwrap();
