@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.1] - 2026-05-18
+
+### 🐛 Bug Fixes
+
+- **deploy:** serialize hardlinked source files ([bd253e1](https://github.com/ONREZA/nrz-cli/commit/bd253e1f7e0d4c21d10e409a89a9c64edfafceef))
+
 ## [0.32.0] - 2026-05-17
 
 ### ✨ Features
