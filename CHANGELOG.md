@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.2] - 2026-05-18
+
+### 🐛 Bug Fixes
+
+- **deploy:** remove legacy pack manifest contract ([a063b4a](https://github.com/ONREZA/nrz-cli/commit/a063b4a54592fd11449e2b52f0582c5c05157075))
+
 ## [0.32.1] - 2026-05-18
 
 ### 🐛 Bug Fixes
