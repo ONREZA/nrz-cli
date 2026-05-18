@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.3] - 2026-05-18
+
+### 🐛 Bug Fixes
+
+- **deploy:** embed source bundle manifest metadata ([7280a79](https://github.com/ONREZA/nrz-cli/commit/7280a791114bee98681ce5eaa24bc6999c179e8a))
+
 ## [0.32.2] - 2026-05-18
 
 ### 🐛 Bug Fixes
