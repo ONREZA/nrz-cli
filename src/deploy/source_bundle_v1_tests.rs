@@ -1,5 +1,4 @@
 use std::fs;
-#[cfg(unix)]
 use std::io::Cursor;
 #[cfg(unix)]
 use std::path::PathBuf;
@@ -55,6 +54,64 @@ async fn source_bundle_plan_is_deterministic_and_uses_identity_file_hashes() {
         first.source_sha256
     );
     assert_eq!(compressed.len() as u64, first.source_size_bytes);
+}
+
+#[tokio::test]
+async fn source_bundle_embeds_canonical_logical_manifest_first() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("index.html"), b"hello").unwrap();
+    let manifest = static_manifest();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+    let compressed = plan.read_all().await.unwrap();
+    let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
+    let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
+    let mut entries = archive.entries().unwrap();
+    let mut manifest_entry = entries.next().unwrap().unwrap();
+    let mut manifest_body = String::new();
+    std::io::Read::read_to_string(&mut manifest_entry, &mut manifest_body).unwrap();
+
+    assert_eq!(
+        manifest_entry.path().unwrap().to_string_lossy(),
+        ".__onreza/logical-manifest.json"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(manifest_body.as_bytes())),
+        plan.logical_manifest_sha256
+    );
+    assert_eq!(plan.logical_manifest_summary.file_count, 1);
+    assert_eq!(plan.logical_manifest_summary.logical_static_bytes, "5");
+}
+
+#[test]
+fn source_bundle_plan_rejects_reserved_metadata_namespace() {
+    let manifest = static_manifest();
+
+    let root_file = tempdir().unwrap();
+    fs::write(root_file.path().join(".__onreza"), b"user").unwrap();
+    let files = scan_dir(root_file.path()).unwrap();
+    let err = build_source_bundle_plan(root_file.path(), &manifest, &files).unwrap_err();
+    assert!(
+        err.to_string().contains("reserves metadata namespace"),
+        "{err}"
+    );
+
+    let manifest_collision = tempdir().unwrap();
+    fs::create_dir(manifest_collision.path().join(".__onreza")).unwrap();
+    fs::write(
+        manifest_collision
+            .path()
+            .join(".__onreza/logical-manifest.json"),
+        b"user",
+    )
+    .unwrap();
+    let files = scan_dir(manifest_collision.path()).unwrap();
+    let err = build_source_bundle_plan(manifest_collision.path(), &manifest, &files).unwrap_err();
+    assert!(
+        err.to_string().contains("reserves metadata namespace"),
+        "{err}"
+    );
 }
 
 #[test]

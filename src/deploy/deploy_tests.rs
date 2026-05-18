@@ -1079,6 +1079,12 @@ fn prepare_upload_body_serializes_source_bundle_v1_contract() {
     };
     let logical_manifest_sha256 =
         source_bundle_v1::compute_logical_manifest_sha256(&logical_manifest).unwrap();
+    let logical_manifest_summary = source_bundle_v1::SourceLogicalManifestSummary {
+        file_count: 1,
+        logical_static_bytes: "12".into(),
+        artifact_size_bytes: "0".into(),
+        max_static_file_size_bytes: "12".into(),
+    };
     let body = PrepareUploadBody {
         deployment_id: Uuid::now_v7().to_string(),
         workspace_id: Uuid::now_v7().to_string(),
@@ -1087,7 +1093,7 @@ fn prepare_upload_body_serializes_source_bundle_v1_contract() {
         operation_id: Uuid::now_v7().to_string(),
         artifact_format: "SOURCE_BUNDLE_V1".into(),
         cli_protocol_version: source_bundle_v1::CLI_PROTOCOL_VERSION.into(),
-        logical_manifest,
+        logical_manifest_summary,
         logical_manifest_sha256: logical_manifest_sha256.clone(),
         source_format: source_bundle_v1::SOURCE_BUNDLE_FORMAT.into(),
         source_sha256: "b".repeat(64),
@@ -1097,9 +1103,13 @@ fn prepare_upload_body_serializes_source_bundle_v1_contract() {
 
     let value = serde_json::to_value(&body).unwrap();
     assert_eq!(value["artifactFormat"], "SOURCE_BUNDLE_V1");
-    assert_eq!(value["cliProtocolVersion"], "source-bundle-v1");
+    assert_eq!(
+        value["cliProtocolVersion"],
+        "source-bundle-v1-embedded-manifest"
+    );
     assert_eq!(value["sourceFormat"], "tar.zst");
     assert_eq!(value["sourceSizeBytes"], "4096");
+    assert_eq!(value["logicalManifestSummary"]["fileCount"], 1);
     assert_eq!(value["logicalManifestSha256"], logical_manifest_sha256);
     let mut keys = value
         .as_object()
@@ -1115,8 +1125,8 @@ fn prepare_upload_body_serializes_source_bundle_v1_contract() {
             "cliProtocolVersion",
             "deploymentAttemptId",
             "deploymentId",
-            "logicalManifest",
             "logicalManifestSha256",
+            "logicalManifestSummary",
             "operationId",
             "projectId",
             "sourceFormat",

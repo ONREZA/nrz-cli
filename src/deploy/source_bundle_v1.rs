@@ -15,7 +15,10 @@ use crate::build::manifest::{LayerTarget, Manifest};
 
 pub(crate) const SOURCE_BUNDLE_SCHEMA_VERSION: &str = "SOURCE_BUNDLE_V1.0";
 pub(crate) const SOURCE_BUNDLE_FORMAT: &str = "tar.zst";
-pub(crate) const CLI_PROTOCOL_VERSION: &str = "source-bundle-v1";
+pub(crate) const CLI_PROTOCOL_VERSION: &str = "source-bundle-v1-embedded-manifest";
+const SOURCE_BUNDLE_METADATA_DIR: &str = ".__onreza";
+const SOURCE_BUNDLE_METADATA_PREFIX: &str = ".__onreza/";
+const SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH: &str = ".__onreza/logical-manifest.json";
 pub(crate) const SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS: usize = 512;
 pub(crate) const MULTIPART_THRESHOLD_BYTES: u64 = 256 * 1024 * 1024;
 pub(crate) const MULTIPART_CHUNK_BYTES: u64 = 16 * 1024 * 1024;
@@ -49,7 +52,9 @@ const TAR_SPACE: u8 = 0x20;
 
 #[derive(Debug)]
 pub(crate) struct SourceBundlePlan {
+    #[cfg(test)]
     pub(crate) logical_manifest: SourceLogicalManifest,
+    pub(crate) logical_manifest_summary: SourceLogicalManifestSummary,
     pub(crate) logical_manifest_sha256: String,
     pub(crate) source_sha256: String,
     pub(crate) source_size_bytes: u64,
@@ -191,6 +196,15 @@ pub(crate) struct SourceBundleMultipartDescriptor {
     pub(crate) parts: Vec<SourceBundleMultipartPart>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SourceLogicalManifestSummary {
+    pub(crate) file_count: u64,
+    pub(crate) logical_static_bytes: String,
+    pub(crate) artifact_size_bytes: String,
+    pub(crate) max_static_file_size_bytes: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PresignedSourceSinglePut {
@@ -274,11 +288,14 @@ pub(crate) fn build_source_bundle_plan(
     let entries = source_entries(output_dir, files)?;
     let logical_manifest = build_logical_manifest(manifest, &entries)?;
     ensure_manifest_covers_entries(&logical_manifest, &entries)?;
-    let logical_manifest_sha256 = compute_logical_manifest_sha256(&logical_manifest)?;
+    let logical_manifest_json = canonical_logical_manifest_json(&logical_manifest)?;
+    let logical_manifest_sha256 = sha256_hex(logical_manifest_json.as_bytes());
+    let logical_manifest_summary = summarize_logical_manifest(&logical_manifest);
 
     let source_path =
         std::env::temp_dir().join(format!("nrz-source-bundle-{}.tar.zst", Uuid::now_v7()));
-    let write_result = write_source_bundle(&source_path, &entries);
+    let write_result =
+        write_source_bundle(&source_path, logical_manifest_json.as_bytes(), &entries);
     if write_result.is_err() {
         let _ = std::fs::remove_file(&source_path);
     }
@@ -290,7 +307,9 @@ pub(crate) fn build_source_bundle_plan(
     };
 
     Ok(SourceBundlePlan {
+        #[cfg(test)]
         logical_manifest,
+        logical_manifest_summary,
         logical_manifest_sha256,
         source_sha256,
         source_size_bytes,
@@ -299,14 +318,45 @@ pub(crate) fn build_source_bundle_plan(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn compute_logical_manifest_sha256(
     manifest: &SourceLogicalManifest,
 ) -> anyhow::Result<String> {
-    let value = serde_json::to_value(manifest).context("failed to serialize logical manifest")?;
-    Ok(format!(
-        "{:x}",
-        Sha256::digest(stable_json_string(&value)?.as_bytes())
+    Ok(sha256_hex(
+        canonical_logical_manifest_json(manifest)?.as_bytes(),
     ))
+}
+
+fn canonical_logical_manifest_json(manifest: &SourceLogicalManifest) -> anyhow::Result<String> {
+    let value = serde_json::to_value(manifest).context("failed to serialize logical manifest")?;
+    stable_json_string(&value)
+}
+
+fn summarize_logical_manifest(manifest: &SourceLogicalManifest) -> SourceLogicalManifestSummary {
+    let mut logical_static_bytes = 0_u64;
+    let mut artifact_size_bytes = 0_u64;
+    let mut max_static_file_size_bytes = 0_u64;
+    for file in &manifest.files {
+        if file.role == SourceLogicalManifestFileRole::Static {
+            logical_static_bytes = logical_static_bytes.saturating_add(file.size);
+        } else {
+            artifact_size_bytes = artifact_size_bytes.saturating_add(file.size);
+        }
+        if matches!(
+            file.role,
+            SourceLogicalManifestFileRole::Static
+                | SourceLogicalManifestFileRole::Prerender
+                | SourceLogicalManifestFileRole::Config
+        ) {
+            max_static_file_size_bytes = max_static_file_size_bytes.max(file.size);
+        }
+    }
+    SourceLogicalManifestSummary {
+        file_count: manifest.files.len() as u64,
+        logical_static_bytes: logical_static_bytes.to_string(),
+        artifact_size_bytes: artifact_size_bytes.to_string(),
+        max_static_file_size_bytes: max_static_file_size_bytes.to_string(),
+    }
 }
 
 fn source_entries(
@@ -683,6 +733,11 @@ fn validate_source_path(path: &str) -> anyhow::Result<()> {
     if path.is_empty() || path.starts_with('/') || path.contains('\\') || path.contains('\0') {
         bail!("invalid SOURCE_BUNDLE_V1 path: {path}");
     }
+    if path == SOURCE_BUNDLE_METADATA_DIR || path.starts_with(SOURCE_BUNDLE_METADATA_PREFIX) {
+        bail!(
+            "SOURCE_BUNDLE_V1 reserves metadata namespace {SOURCE_BUNDLE_METADATA_PREFIX}: {path}"
+        );
+    }
     for segment in path.split('/') {
         if segment.is_empty() || segment == "." || segment == ".." {
             bail!("unsafe SOURCE_BUNDLE_V1 path: {path}");
@@ -882,6 +937,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 fn write_source_bundle(
     source_path: &Path,
+    logical_manifest_json: &[u8],
     entries: &[SourceBundleEntry],
 ) -> anyhow::Result<(String, u64)> {
     let file = std::fs::OpenOptions::new()
@@ -896,6 +952,11 @@ fn write_source_bundle(
         .include_checksum(true)
         .context("failed to enable zstd checksum")?;
 
+    write_tar_metadata_entry(
+        &mut encoder,
+        SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH,
+        logical_manifest_json,
+    )?;
     for entry in entries {
         write_tar_entry(&mut encoder, entry)?;
     }
@@ -904,6 +965,17 @@ fn write_source_bundle(
 
     let writer = encoder.finish().context("failed to finalize zstd stream")?;
     Ok(writer.finish())
+}
+
+fn write_tar_metadata_entry<W: Write>(
+    writer: &mut W,
+    path: &str,
+    body: &[u8],
+) -> anyhow::Result<()> {
+    writer.write_all(&tar_header(path, body.len() as u64, b'0', None))?;
+    writer.write_all(body)?;
+    write_tar_padding(writer, body.len() as u64)?;
+    Ok(())
 }
 
 fn write_tar_entry<W: Write>(writer: &mut W, entry: &SourceBundleEntry) -> anyhow::Result<()> {
