@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.32.4] - 2026-05-28
+
+### 🐛 Bug Fixes
+
+- **deploy:** preserve detection precedence ([e756abd](https://github.com/ONREZA/nrz-cli/commit/e756abda2c864a0075515e9d35935011a5cfb40a))
+
 ## [0.32.3] - 2026-05-18
 
 ### 🐛 Bug Fixes
