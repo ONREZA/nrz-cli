@@ -127,9 +127,36 @@ struct DeploymentStatusResponse {
     production: Option<bool>,
     error: Option<String>,
     #[allow(dead_code)]
+    error_code: Option<String>,
+    error_details: Option<DeploymentErrorDetails>,
+    #[allow(dead_code)]
     created_at: Option<String>,
     #[allow(dead_code)]
     ready_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeploymentErrorDetails {
+    runtime_startup_failure: Option<RuntimeStartupFailureDetails>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeStartupFailureDetails {
+    code: Option<String>,
+    message: Option<String>,
+    check_type: Option<String>,
+    health_path: Option<String>,
+    expected_port: Option<u16>,
+    #[serde(default)]
+    detected_ports: Vec<u16>,
+    timeout_seconds: Option<u64>,
+    attempts: Option<u32>,
+    last_error: Option<String>,
+    process_entry: Option<String>,
+    log_tail: Option<String>,
+    retry_after_seconds: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -141,6 +168,83 @@ struct DeployOutput {
     warnings: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     health_check: Option<HealthCheckInfo>,
+}
+
+fn format_deployment_failure(error: &str, status: &DeploymentStatusResponse) -> String {
+    let Some(details) = status
+        .error_details
+        .as_ref()
+        .and_then(|details| details.runtime_startup_failure.as_ref())
+    else {
+        return error.to_string();
+    };
+
+    let mut lines = Vec::new();
+    lines.push(
+        details
+            .message
+            .as_deref()
+            .filter(|message| !message.trim().is_empty())
+            .unwrap_or(error)
+            .to_string(),
+    );
+
+    let mut facts = Vec::new();
+    if let Some(code) = details.code.as_deref() {
+        facts.push(format!("reason: {code}"));
+    }
+    if let Some(check_type) = details.check_type.as_deref() {
+        let check = match (check_type, details.health_path.as_deref()) {
+            ("http", Some(path)) => format!("HTTP {path}"),
+            ("http", None) => "HTTP".to_string(),
+            ("tcp", _) => "TCP".to_string(),
+            (other, _) => other.to_string(),
+        };
+        facts.push(format!("check: {check}"));
+    }
+    if let Some(port) = details.expected_port {
+        facts.push(format!("expected port: {port}"));
+    }
+    if !details.detected_ports.is_empty() {
+        facts.push(format!(
+            "detected ports: {}",
+            details
+                .detected_ports
+                .iter()
+                .map(u16::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if let Some(timeout) = details.timeout_seconds {
+        facts.push(format!("timeout: {timeout}s"));
+    }
+    if let Some(attempts) = details.attempts {
+        facts.push(format!("attempts: {attempts}"));
+    }
+    if let Some(entry) = details.process_entry.as_deref() {
+        facts.push(format!("entry: {entry}"));
+    }
+    if let Some(last_error) = details.last_error.as_deref() {
+        facts.push(format!("last readiness error: {last_error}"));
+    }
+    if let Some(retry_after) = details.retry_after_seconds {
+        facts.push(format!("retry after: {retry_after}s"));
+    }
+
+    if !facts.is_empty() {
+        lines.push(format!("Runtime diagnostics: {}", facts.join("; ")));
+    }
+
+    if let Some(log_tail) = details
+        .log_tail
+        .as_deref()
+        .filter(|tail| !tail.trim().is_empty())
+    {
+        lines.push(format!("Recent runtime output:\n{}", log_tail.trim()));
+    }
+
+    lines.join("\n")
 }
 
 /// JSON output for health check configuration.
@@ -299,6 +403,13 @@ pub async fn run(
         EffectiveProjectConfig::from_project_config(project_dir.clone(), config.clone());
     effective.apply_server_settings(server_settings.as_ref());
 
+    // Explicit compute intent is safe to resolve before build because it comes
+    // only from CLI/config. Framework detection stays post-build: generated
+    // outputs such as root index.html are part of the detection surface.
+    let explicit_compute =
+        resolve_explicit_compute_type(args.compute.as_deref(), effective.deploy_compute())?;
+    validate_prebuild_compute_intent(&project_dir, explicit_compute)?;
+
     // Run install step (default: enabled, skip with --skip-install or --skip-build)
     if !args.skip_build && !args.skip_install {
         run_install_step(&project_dir, json, &effective)?;
@@ -344,8 +455,8 @@ pub async fn run(
         run_build_step(&cmd, &project_dir, json, &build_env)?;
     }
 
-    // Detect framework once from the merged runtime config — shared by build
-    // (output dir search) and deploy (compute type).
+    // Detect after build so generated static HTML roots, manifests, and output
+    // markers participate in framework/output resolution.
     let detection =
         crate::detect::detect_with_framework_override(&project_dir, effective.framework_override());
 
@@ -386,28 +497,8 @@ pub async fn run(
         .await
         .context("file scan task failed (panic or runtime shutdown)")??;
 
-    // Resolve compute type: CLI flag > config > manifest layers > detect
-    let compute = if let Some(ref m) = loaded_manifest {
-        if args.compute.is_none() && effective.deploy_compute().is_none() {
-            match build_manifest::primary_compute_target(m) {
-                build_manifest::LayerTarget::Compute => ComputeType::Process,
-                build_manifest::LayerTarget::Isolate => ComputeType::Isolate,
-                build_manifest::LayerTarget::Static => ComputeType::Static,
-            }
-        } else {
-            resolve_compute_type(
-                args.compute.as_deref(),
-                effective.deploy_compute(),
-                &detection,
-            )?
-        }
-    } else {
-        resolve_compute_type(
-            args.compute.as_deref(),
-            effective.deploy_compute(),
-            &detection,
-        )?
-    };
+    let compute =
+        resolve_deploy_compute_type(explicit_compute, loaded_manifest.as_ref(), &detection);
     let mut warnings: Vec<String> = Vec::new();
 
     // Inform about SSR framework compute mode when auto-detected
@@ -721,8 +812,11 @@ pub async fn run(
             }
             "failed" => {
                 finish_spinner(spinner, "");
-                let msg = status.error.unwrap_or_else(|| "unknown error".into());
-                bail!("deployment failed: {msg}");
+                let msg = status.error.as_deref().unwrap_or("unknown error");
+                bail!(
+                    "deployment failed: {}",
+                    format_deployment_failure(msg, &status)
+                );
             }
             other => {
                 if let Some(ref s) = spinner {
@@ -2212,6 +2306,29 @@ fn validate_process_output(
     Ok(())
 }
 
+/// Pre-build validation for PROCESS deployments.
+///
+/// This only checks package-level signals because it runs before the build
+/// artifact exists. Output marker checks stay in `validate_process_output`.
+fn validate_prebuild_process_project(project_dir: &Path) -> anyhow::Result<()> {
+    if let Some(msg) = detect_workers_runtime_package_target(project_dir)? {
+        return Err(output::coded_error("FRAMEWORK_UNSUPPORTED", msg));
+    }
+
+    Ok(())
+}
+
+fn validate_prebuild_compute_intent(
+    project_dir: &Path,
+    explicit_compute: Option<ComputeType>,
+) -> anyhow::Result<()> {
+    if explicit_compute == Some(ComputeType::Process) {
+        validate_prebuild_process_project(project_dir)?;
+    }
+
+    Ok(())
+}
+
 /// Detect projects targeting a Workers-style runtime (Cloudflare workerd,
 /// Shopify Oxygen) whose build output cannot execute on Node/Bun.
 ///
@@ -2228,6 +2345,14 @@ fn detect_workers_runtime_target(
     project_dir: &Path,
     output_dir: &Path,
 ) -> anyhow::Result<Option<String>> {
+    if let Some(msg) = detect_workers_runtime_package_target(project_dir)? {
+        return Ok(Some(msg));
+    }
+
+    detect_workers_runtime_output_target(output_dir)
+}
+
+fn detect_workers_runtime_package_target(project_dir: &Path) -> anyhow::Result<Option<String>> {
     // Strict load: an unreadable or malformed package.json is propagated as an
     // error instead of silently yielding "no signal". Otherwise a corrupted
     // manifest would let a Workers bundle ship as PROCESS — the exact failure
@@ -2239,10 +2364,8 @@ fn detect_workers_runtime_target(
     let has_mini_oxygen = pkg
         .as_ref()
         .is_some_and(|p| p.has_dependency("@shopify/mini-oxygen"));
-    let has_wrangler_output = output_dir.join("server/wrangler.json").is_file();
-    let has_oxygen_output = output_dir.join("server/oxygen.json").is_file();
 
-    if !has_cf_plugin && !has_mini_oxygen && !has_wrangler_output && !has_oxygen_output {
+    if !has_cf_plugin && !has_mini_oxygen {
         return Ok(None);
     }
 
@@ -2265,7 +2388,22 @@ fn detect_workers_runtime_target(
              \x20    It replaces the Oxygen server with Express and emits build/server/index.js \
              plus a server.mjs entry at the project root.",
         )
-    } else if has_wrangler_output {
+    } else {
+        unreachable!("package-level Workers runtime detector has no matching signal");
+    };
+
+    Ok(Some(workers_runtime_message(runtime, trigger, remedy)))
+}
+
+fn detect_workers_runtime_output_target(output_dir: &Path) -> anyhow::Result<Option<String>> {
+    let has_wrangler_output = output_dir.join("server/wrangler.json").is_file();
+    let has_oxygen_output = output_dir.join("server/oxygen.json").is_file();
+
+    if !has_wrangler_output && !has_oxygen_output {
+        return Ok(None);
+    }
+
+    let (runtime, trigger, remedy) = if has_wrangler_output {
         (
             "Cloudflare Workers",
             "server/wrangler.json was emitted into the build output",
@@ -2281,7 +2419,11 @@ fn detect_workers_runtime_target(
         )
     };
 
-    Ok(Some(format!(
+    Ok(Some(workers_runtime_message(runtime, trigger, remedy)))
+}
+
+fn workers_runtime_message(runtime: &str, trigger: &str, remedy: &str) -> String {
+    format!(
         "{runtime} target detected ({trigger}).\n\n\
          ONREZA PROCESS compute runs Node/Bun servers, not the Workers runtime (workerd), \
          so this build cannot be deployed as-is.\n\n\
@@ -2290,7 +2432,7 @@ fn detect_workers_runtime_target(
          \x20    nrz deploy --compute static\n\n\
          \x20 2. Switch to a Node server build.\n\
          \x20    {remedy}"
-    )))
+    )
 }
 
 /// Framework-specific diagnostic when entry point resolution fails.
@@ -2612,11 +2754,7 @@ fn ensure_process_entry(
         if !entry_path.is_file() {
             return Err(output::coded_error(
                 "INVALID_DEPLOY_ENTRY",
-                format!(
-                    "Entry point \"{entry}\" not found in output directory: {}\n\n\
-                     Make sure the file exists after running your build command.",
-                    output_dir.display()
-                ),
+                missing_entrypoint_message(entry, output_dir),
             ));
         }
         let canonical_entry = entry_path
@@ -2651,6 +2789,136 @@ fn ensure_process_entry(
     }
 
     Ok((entry, None))
+}
+
+const MISPLACED_ENTRYPOINT_MAX_DEPTH: usize = 4;
+const MISPLACED_ENTRYPOINT_MAX_MATCHES: usize = 5;
+
+fn missing_entrypoint_message(entry: &str, output_dir: &Path) -> String {
+    let mut message = format!(
+        "Entry point \"{entry}\" not found in output directory: {}\n\n\
+         Make sure the file exists after running your build command.",
+        output_dir.display()
+    );
+
+    let candidates = find_nested_entrypoint_candidates(output_dir, entry);
+    if candidates.is_empty() {
+        return message;
+    }
+
+    message.push_str("\n\nFound matching entry point file outside the selected output root:");
+    for candidate in &candidates {
+        message.push_str(&format!("\n  - {candidate}"));
+    }
+
+    if let Some(output_hint) = output_directory_hint_for_nested_entry(&candidates[0], entry) {
+        message.push_str(&format!(
+            "\n\nThis usually means outputDirectory points at {} while the build emits a nested deploy artifact.\n\
+             Set [build] output_directory = \"{output_hint}\" and keep [deploy] entry = \"{entry}\".",
+            output_dir.display()
+        ));
+    } else {
+        message.push_str(
+            "\n\nThis usually means outputDirectory and [deploy] entry describe different roots. \
+             Point outputDirectory at the directory that contains the entry point.",
+        );
+    }
+
+    message
+}
+
+fn output_directory_hint_for_nested_entry(candidate: &str, entry: &str) -> Option<String> {
+    let candidate = Path::new(candidate);
+    let entry_depth = Path::new(entry).components().count();
+    let mut output_dir = candidate;
+    for _ in 0..entry_depth {
+        output_dir = output_dir.parent()?;
+    }
+
+    if output_dir.as_os_str().is_empty() {
+        return None;
+    }
+
+    Some(output_dir.to_string_lossy().replace('\\', "/"))
+}
+
+fn find_nested_entrypoint_candidates(output_dir: &Path, entry: &str) -> Vec<String> {
+    let entry_path = Path::new(entry);
+    let direct_entry = output_dir.join(entry_path);
+    let mut matches = Vec::new();
+    collect_nested_entrypoint_candidates(
+        output_dir,
+        output_dir,
+        entry_path,
+        &direct_entry,
+        0,
+        &mut matches,
+    );
+    matches.sort();
+    matches.truncate(MISPLACED_ENTRYPOINT_MAX_MATCHES);
+    matches
+}
+
+fn collect_nested_entrypoint_candidates(
+    base: &Path,
+    current: &Path,
+    entry: &Path,
+    direct_entry: &Path,
+    depth: usize,
+    matches: &mut Vec<String>,
+) {
+    if matches.len() >= MISPLACED_ENTRYPOINT_MAX_MATCHES || depth >= MISPLACED_ENTRYPOINT_MAX_DEPTH
+    {
+        return;
+    }
+
+    let Ok(entries) = std::fs::read_dir(current) else {
+        return;
+    };
+
+    for entry_result in entries {
+        if matches.len() >= MISPLACED_ENTRYPOINT_MAX_MATCHES {
+            return;
+        }
+
+        let Ok(dir_entry) = entry_result else {
+            continue;
+        };
+        let path = dir_entry.path();
+        let Ok(file_type) = dir_entry.file_type() else {
+            continue;
+        };
+
+        if file_type.is_dir() {
+            if should_skip_misplaced_entrypoint_dir(&path) {
+                continue;
+            }
+            collect_nested_entrypoint_candidates(
+                base,
+                &path,
+                entry,
+                direct_entry,
+                depth + 1,
+                matches,
+            );
+            continue;
+        }
+
+        if file_type.is_file()
+            && path != direct_entry
+            && path.ends_with(entry)
+            && let Ok(rel) = path.strip_prefix(base)
+        {
+            matches.push(rel.to_string_lossy().replace('\\', "/"));
+        }
+    }
+}
+
+fn should_skip_misplaced_entrypoint_dir(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|name| name.to_str()),
+        Some("node_modules" | ".git" | ".cache" | ".next" | "target")
+    )
 }
 
 // ── Build step ───────────────────────────────────────────────
@@ -3364,7 +3632,10 @@ fn warn_large_deploy_files(json: bool, files: &[FileEntry]) {
         .join(", ");
     output::warn(
         json,
-        format!("Large deployment files detected before upload: {display}"),
+        format!(
+            "Large deployment files detected before upload: {display}. \
+             Server-side plan limits will be checked during upload preparation."
+        ),
         output::Phase::Deploy,
     );
 }
@@ -3551,16 +3822,43 @@ fn synthetic_sha(files: &[FileEntry]) -> String {
 
 // ── Compute type resolution ──────────────────────────────────
 
-fn resolve_compute_type(
+fn resolve_deploy_compute_type(
+    explicit_compute: Option<ComputeType>,
+    manifest: Option<&build_manifest::Manifest>,
+    detection: &crate::detect::types::DetectionResult,
+) -> ComputeType {
+    if let Some(explicit) = explicit_compute {
+        return explicit;
+    }
+
+    if let Some(manifest) = manifest {
+        return compute_type_from_manifest(manifest);
+    }
+
+    detection.suggested_compute
+}
+
+fn resolve_explicit_compute_type(
     cli_flag: Option<&str>,
     config_value: Option<&str>,
-    detection: &crate::detect::types::DetectionResult,
-) -> anyhow::Result<ComputeType> {
-    // Priority: CLI flag > config > detection
-    if let Some(val) = cli_flag.or(config_value) {
-        return parse_compute_type(val);
+) -> anyhow::Result<Option<ComputeType>> {
+    if let Some(val) = cli_flag {
+        return parse_compute_type(val).map(Some);
     }
-    Ok(detection.suggested_compute)
+
+    if let Some(val) = config_value {
+        return parse_compute_type(val).map(Some);
+    }
+
+    Ok(None)
+}
+
+fn compute_type_from_manifest(manifest: &build_manifest::Manifest) -> ComputeType {
+    match build_manifest::primary_compute_target(manifest) {
+        build_manifest::LayerTarget::Compute => ComputeType::Process,
+        build_manifest::LayerTarget::Isolate => ComputeType::Isolate,
+        build_manifest::LayerTarget::Static => ComputeType::Static,
+    }
 }
 
 fn parse_compute_type(s: &str) -> anyhow::Result<ComputeType> {

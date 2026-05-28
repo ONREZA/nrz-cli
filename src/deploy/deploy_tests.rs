@@ -1702,6 +1702,107 @@ fn validate_unknown_framework_ok() {
 }
 
 #[test]
+fn validate_prebuild_process_project_rejects_cloudflare_vite_plugin() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies":{"@cloudflare/vite-plugin":"^1.0.0"}}"#,
+    )
+    .unwrap();
+
+    let err = validate_prebuild_process_project(dir.path())
+        .expect_err("package-level Workers target should fail before build");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Cloudflare Workers target detected")
+            && msg.contains("@cloudflare/vite-plugin"),
+        "should mention package-level Cloudflare signal: {msg}"
+    );
+    let coded = err
+        .chain()
+        .find_map(|c| c.downcast_ref::<crate::output::CodedError>())
+        .expect("prebuild framework rejection must carry a CodedError");
+    assert_eq!(coded.code, "FRAMEWORK_UNSUPPORTED");
+}
+
+#[test]
+fn validate_prebuild_compute_intent_skips_autodetect_process() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"devDependencies":{"@cloudflare/vite-plugin":"^1.0.0"}}"#,
+    )
+    .unwrap();
+
+    let explicit_compute = resolve_explicit_compute_type(None, None).unwrap();
+
+    assert_eq!(explicit_compute, None);
+    assert!(validate_prebuild_compute_intent(dir.path(), explicit_compute).is_ok());
+}
+
+#[test]
+fn resolve_deploy_compute_type_prefers_static_manifest_over_autodetect_process() {
+    let manifest = crate::build::manifest::generate_static_manifest();
+    let detection = make_detection("tanstack-start", None);
+
+    let compute = resolve_deploy_compute_type(None, Some(&manifest), &detection);
+
+    assert_eq!(compute, ComputeType::Static);
+}
+
+#[tokio::test]
+async fn postbuild_detection_preserves_generated_root_static_html() {
+    let dir = tempdir().unwrap();
+    let config = nrz::config::ProjectConfig::default();
+    let effective =
+        nrz::config::EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+
+    let stale_detection =
+        crate::detect::detect_with_framework_override(dir.path(), effective.framework_override());
+    assert_eq!(stale_detection.framework, "other");
+
+    fs::write(dir.path().join("index.html"), "<h1>generated</h1>").unwrap();
+
+    let stale_result = build::run_with_effective_config(
+        BuildArgs {
+            dir: dir.path().to_string_lossy().into_owned(),
+            skip_validation: true,
+        },
+        true,
+        &effective,
+        Some(&stale_detection),
+    )
+    .await;
+    assert!(
+        stale_result.is_err(),
+        "stale prebuild detection should miss generated root static HTML"
+    );
+
+    let postbuild_detection =
+        crate::detect::detect_with_framework_override(dir.path(), effective.framework_override());
+    assert_eq!(postbuild_detection.framework, "static-html");
+
+    let result = build::run_with_effective_config(
+        BuildArgs {
+            dir: dir.path().to_string_lossy().into_owned(),
+            skip_validation: true,
+        },
+        true,
+        &effective,
+        Some(&postbuild_detection),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.output_dir, dir.path());
+    let manifest = result
+        .manifest
+        .expect("root static HTML should auto-generate a STATIC manifest");
+    assert_eq!(compute_type_from_manifest(&manifest), ComputeType::Static);
+    assert_eq!(manifest.layers[0].directory, ".");
+}
+
+#[test]
 fn validate_cloudflare_vite_plugin_dep_bails() {
     let dir = tempdir().unwrap();
     let output_dir = dir.path().join("dist");
@@ -2586,6 +2687,72 @@ fn ensure_process_entry_missing_user_entry_is_invalid_deploy_entry() {
         .expect_err("user entry missing on disk must fail");
     let wrapped = crate::output::with_default_code(err, "MISSING_PROCESS_ENTRY");
     expect_code(&wrapped, "INVALID_DEPLOY_ENTRY");
+}
+
+#[test]
+fn ensure_process_entry_missing_user_entry_suggests_nested_output_dir() {
+    // Regression from production: selected output root was /workspace, but the
+    // build emitted onreza-output/server.cjs. The user needs an outputDirectory
+    // fix, not a generic "server.cjs missing" message.
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("onreza-output")).unwrap();
+    fs::write(
+        dir.path().join("onreza-output/server.cjs"),
+        "console.log('ok')",
+    )
+    .unwrap();
+
+    let detection = make_detection("express", None);
+    let err = ensure_process_entry(dir.path(), dir.path(), Some("server.cjs"), &detection, true)
+        .expect_err("entry is outside selected output root");
+    let msg = err.to_string();
+
+    assert!(
+        msg.contains("onreza-output/server.cjs"),
+        "should mention discovered nested entry: {msg}"
+    );
+    assert!(
+        msg.contains("[build] output_directory = \"onreza-output\""),
+        "should suggest the outputDirectory fix: {msg}"
+    );
+    expect_code(&err, "INVALID_DEPLOY_ENTRY");
+}
+
+#[test]
+fn format_deployment_failure_includes_runtime_startup_details() {
+    let status = DeploymentStatusResponse {
+        id: "dep-1".to_string(),
+        status: "failed".to_string(),
+        url: None,
+        production: None,
+        error: Some("Pre-warm failed".to_string()),
+        error_code: Some("DEPLOY_PREWARM_PORT_MISMATCH".to_string()),
+        error_details: Some(DeploymentErrorDetails {
+            runtime_startup_failure: Some(RuntimeStartupFailureDetails {
+                code: Some("port_mismatch".to_string()),
+                message: Some("Your app is listening on port 3000.".to_string()),
+                check_type: Some("tcp".to_string()),
+                health_path: None,
+                expected_port: Some(30123),
+                detected_ports: vec![3000],
+                timeout_seconds: Some(30),
+                attempts: Some(2700),
+                last_error: Some("Connection refused".to_string()),
+                process_entry: Some("server.js".to_string()),
+                log_tail: Some("server started on 3000".to_string()),
+                retry_after_seconds: None,
+            }),
+        }),
+        created_at: None,
+        ready_at: None,
+    };
+
+    let msg = format_deployment_failure("Pre-warm failed", &status);
+
+    assert!(msg.contains("Your app is listening on port 3000."));
+    assert!(msg.contains("expected port: 30123"));
+    assert!(msg.contains("detected ports: 3000"));
+    assert!(msg.contains("Recent runtime output"));
 }
 
 #[test]
