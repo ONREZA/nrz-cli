@@ -6,6 +6,7 @@ ONREZA platform CLI — dev, build, deploy.
 
 ```bash
 npm install -g @onreza/nrz
+npm install -g @onreza/nrz@beta  # prerelease channel
 ```
 
 After installation the `nrz` binary is available in your `$PATH`.
@@ -17,6 +18,7 @@ nrz dev          # Start dev server with ONREZA runtime emulation
 nrz build        # Validate build output and manifest
 nrz deploy       # Deploy to ONREZA platform
 nrz upgrade      # Self-update to the latest version
+nrz upgrade --channel beta
 ```
 
 ## Supported platforms

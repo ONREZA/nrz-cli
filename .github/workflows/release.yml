@@ -2,51 +2,125 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        type: choice
+        required: true
+        default: stable
+        options:
+          - stable
+          - beta
+          - rc
+          - canary
+      bump:
+        description: Version bump when version is not provided
+        type: choice
+        required: true
+        default: auto
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+      version:
+        description: Explicit version, for example 0.33.0 or 0.33.0-beta.0
+        type: string
+        required: false
+      publish_npm:
+        description: Publish npm package after GitHub assets are finalized
+        type: boolean
+        required: true
+        default: true
+
+defaults:
+  run:
+    shell: bash
 
 env:
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  release:
-    name: Release
+  prepare:
+    name: Prepare release
     runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
-      version: ${{ steps.release.outputs.version }}
-      tag: ${{ steps.release.outputs.tag }}
-      released: ${{ steps.release.outputs.released }}
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
+      channel: ${{ steps.metadata.outputs.channel }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+      npm_dist_tag: ${{ steps.metadata.outputs.npm_dist_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      - name: Install dependencies
-        run: npm ci
+      - name: Setup Dagger
+        uses: dagger/dagger-for-github@v5
 
       - name: Configure Git
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
 
-      - name: Run onreza-release
-        id: release
-        run: npx onreza-release --verbose
+      - name: Apply release metadata
+        run: |
+          dagger call prepare-release \
+            --source=. \
+            --channel="$RELEASE_CHANNEL" \
+            --version="$RELEASE_VERSION" \
+            --bump="$RELEASE_BUMP" \
+            export --path . --wipe=false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_BUMP: ${{ inputs.bump }}
+
+      - name: Read release metadata
+        id: metadata
+        run: |
+          VERSION="$(jq -r '.version' .nrz-release/metadata.json)"
+          TAG="$(jq -r '.tag' .nrz-release/metadata.json)"
+          CHANNEL="$(jq -r '.channel' .nrz-release/metadata.json)"
+          PRERELEASE="$(jq -r '.prerelease' .nrz-release/metadata.json)"
+          NPM_DIST_TAG="$(jq -r '.npmDistTag' .nrz-release/metadata.json)"
+          {
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "channel=$CHANNEL"
+            echo "prerelease=$PRERELEASE"
+            echo "npm_dist_tag=$NPM_DIST_TAG"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Commit and tag release
+        run: |
+          rm -rf .nrz-release
+          git add Cargo.toml Cargo.lock CHANGELOG.md package.json package-lock.json
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "No release file changes were produced"
+            exit 1
+          fi
+          git commit -m "chore(release): $RELEASE_TAG [skip ci]"
+          git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "$RELEASE_TAG"
+        env:
+          RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
 
   build:
     name: Build (${{ matrix.platform }})
-    needs: release
-    if: needs.release.outputs.released == 'true'
+    needs: prepare
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - platform: linux-x64
@@ -68,15 +142,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - name: Install musl tools (Linux)
         if: contains(matrix.target, 'musl')
-        run: sudo apt-get install -y musl-tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: '1.92.0'
           targets: ${{ matrix.target }}
 
       - name: Build release binary
@@ -86,32 +161,15 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: strip target/${{ matrix.target }}/release/${{ matrix.binary }}
 
-      - name: Create archive (Unix)
-        if: matrix.os != 'windows-latest'
-        shell: bash
-        run: |
-          mkdir -p dist-archive/${{ matrix.platform }}
-          cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist-archive/${{ matrix.platform }}/
-          tar -czf nrz-${{ matrix.platform }}.tar.gz -C dist-archive ${{ matrix.platform }}
-
-      - name: Create archive (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        run: |
-          mkdir -p dist-archive/${{ matrix.platform }}
-          cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist-archive/${{ matrix.platform }}/
-          tar -czf nrz-${{ matrix.platform }}.tar.gz -C dist-archive ${{ matrix.platform }}
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nrz-${{ matrix.platform }}
-          path: nrz-${{ matrix.platform }}.tar.gz
+          name: nrz-bin-${{ matrix.platform }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
 
   publish:
     name: Publish
-    needs: [release, build]
-    if: needs.release.outputs.released == 'true'
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -119,48 +177,62 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Setup Dagger
+        uses: dagger/dagger-for-github@v5
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./dist/raw
+
+      - name: Package release archives
+        run: |
+          dagger call package-release-artifacts \
+            --binaries=./dist/raw \
+            export --path ./dist/release --wipe=true
+
+      - name: Publish GitHub release
+        run: |
+          dagger call publish-github-release \
+            --source=. \
+            --artifacts=./dist/release \
+            --github-token=env:GITHUB_TOKEN \
+            --version="$RELEASE_VERSION" \
+            --tag="$RELEASE_TAG" \
+            --channel="$RELEASE_CHANNEL" \
+            --repository="$GITHUB_REPOSITORY"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
 
       - name: Setup Node.js
+        if: inputs.publish_npm
         uses: actions/setup-node@v4
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./dist
-
-      - name: Flatten dist directory
+      - name: Generate npm package
+        if: inputs.publish_npm
         run: |
-          cd dist
-          for dir in */; do
-            mv "$dir"* .
-            rmdir "$dir"
-          done
-          ls -la
-
-      - name: Publish binaries and npm packages
-        run: |
-          npx onreza-release publish-binaries \
-            --tag ${{ needs.release.outputs.tag }} \
-            --npm-publish "npm publish --provenance --access public" \
-            --verbose
+          dagger call npm-package \
+            --source=. \
+            --version="$RELEASE_VERSION" \
+            --tag="$RELEASE_TAG" \
+            --channel="$RELEASE_CHANNEL" \
+            export --path ./dist/npm --wipe=true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
 
-      - name: Generate checksums
-        run: |
-          cd dist
-          sha256sum *.tar.gz > checksums-sha256.txt
-          cat checksums-sha256.txt
-
-      - name: Upload checksums to release
-        run: |
-          gh release upload ${{ needs.release.outputs.tag }} dist/checksums-sha256.txt --clobber
+      - name: Publish npm package
+        if: inputs.publish_npm
+        run: npm publish --provenance --access public --tag "$NPM_DIST_TAG"
+        working-directory: ./dist/npm
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_DIST_TAG: ${{ needs.prepare.outputs.npm_dist_tag }}

@@ -20,7 +20,7 @@ Every command must support machine and human modes:
 - `cargo fmt`: format code.
 - `cargo clippy -- -D warnings`: fail on lints/warnings.
 - `npm run prepare`: install Lefthook hooks.
-- `npx onreza-release --dry-run --verbose`: local release dry run.
+- `dagger call release-metadata --source=. --channel=stable --bump=auto`: local release plan dry run.
 
 ## Coding Style & Testing Guidelines
 Use Rust 2024 + `rustfmt` defaults (4-space indentation, stable formatting). Naming: files/modules/functions `snake_case`, types `PascalCase`.

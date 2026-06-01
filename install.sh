@@ -53,10 +53,13 @@ if [[ "$PLATFORM" == unsupported* ]]; then
     exit 1
 fi
 
-VERSION=$(get_latest_version)
+VERSION="${NRZ_VERSION:-$(get_latest_version)}"
 if [ -z "$VERSION" ]; then
     echo "❌ Failed to get latest version"
     exit 1
+fi
+if [[ "$VERSION" != v* ]]; then
+    VERSION="v$VERSION"
 fi
 
 echo "📦 Version: $VERSION"

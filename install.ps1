@@ -36,7 +36,10 @@ function Get-LatestVersion {
 Write-Host "🔧 Installing $BinaryName..." -ForegroundColor Cyan
 
 $Platform = Detect-Platform
-$Version = Get-LatestVersion
+$Version = if ($env:NRZ_VERSION) { $env:NRZ_VERSION } else { Get-LatestVersion }
+if (!$Version.StartsWith("v")) {
+    $Version = "v$Version"
+}
 
 Write-Host "📦 Version: $Version" -ForegroundColor Gray
 Write-Host "💻 Platform: $Platform" -ForegroundColor Gray
