@@ -62,8 +62,14 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Dagger
-        uses: dagger/dagger-for-github@v5
+      - name: Install Dagger CLI
+        run: |
+          DAGGER_VERSION="$(jq -r '.engineVersion | sub("^v"; "")' dagger.json)"
+          DAGGER_BIN_DIR="$RUNNER_TEMP/dagger"
+          mkdir -p "$DAGGER_BIN_DIR"
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$DAGGER_BIN_DIR" DAGGER_VERSION="$DAGGER_VERSION" sh
+          echo "$DAGGER_BIN_DIR" >> "$GITHUB_PATH"
+          "$DAGGER_BIN_DIR/dagger" version
 
       - name: Configure Git
         run: |
@@ -179,8 +185,14 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag }}
 
-      - name: Setup Dagger
-        uses: dagger/dagger-for-github@v5
+      - name: Install Dagger CLI
+        run: |
+          DAGGER_VERSION="$(jq -r '.engineVersion | sub("^v"; "")' dagger.json)"
+          DAGGER_BIN_DIR="$RUNNER_TEMP/dagger"
+          mkdir -p "$DAGGER_BIN_DIR"
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$DAGGER_BIN_DIR" DAGGER_VERSION="$DAGGER_VERSION" sh
+          echo "$DAGGER_BIN_DIR" >> "$GITHUB_PATH"
+          "$DAGGER_BIN_DIR/dagger" version
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
