@@ -3,9 +3,9 @@ use std::io::Cursor;
 #[cfg(unix)]
 use std::path::PathBuf;
 
-use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
+use super::hash::sha256_hex;
 use super::source_bundle_v1::*;
 use super::*;
 
@@ -38,10 +38,7 @@ async fn source_bundle_plan_is_deterministic_and_uses_identity_file_hashes() {
     );
     assert_eq!(first.logical_manifest.files[0].path, "a.txt");
     assert_eq!(first.logical_manifest.files[1].path, "b.txt");
-    assert_eq!(
-        first.logical_manifest.files[0].sha256,
-        format!("{:x}", Sha256::digest(b"a"))
-    );
+    assert_eq!(first.logical_manifest.files[0].sha256, sha256_hex(b"a"));
     assert_eq!(
         first.logical_manifest.files[0].role,
         SourceLogicalManifestFileRole::Static
@@ -49,10 +46,7 @@ async fn source_bundle_plan_is_deterministic_and_uses_identity_file_hashes() {
     assert!(first.multipart.is_none());
 
     let compressed = first.read_all().await.unwrap();
-    assert_eq!(
-        format!("{:x}", Sha256::digest(&compressed)),
-        first.source_sha256
-    );
+    assert_eq!(sha256_hex(&compressed), first.source_sha256);
     assert_eq!(compressed.len() as u64, first.source_size_bytes);
 }
 
@@ -77,7 +71,7 @@ async fn source_bundle_embeds_canonical_logical_manifest_first() {
         ".__onreza/logical-manifest.json"
     );
     assert_eq!(
-        format!("{:x}", Sha256::digest(manifest_body.as_bytes())),
+        sha256_hex(manifest_body.as_bytes()),
         plan.logical_manifest_sha256
     );
     assert_eq!(plan.logical_manifest_summary.file_count, 1);
@@ -275,10 +269,7 @@ async fn source_bundle_plan_preserves_safe_relative_symlinks() {
     );
     assert_eq!(symlink.link_target.as_deref(), Some(".pnpm/pkg"));
     assert_eq!(symlink.size, 0);
-    assert_eq!(
-        symlink.sha256,
-        format!("{:x}", Sha256::digest(b".pnpm/pkg"))
-    );
+    assert_eq!(symlink.sha256, sha256_hex(b".pnpm/pkg"));
 
     let compressed = plan.read_all().await.unwrap();
     let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
@@ -409,7 +400,7 @@ fn source_bundle_plan_rejects_overlong_symlink_target() {
     let files = vec![FileEntry {
         path: "long-link".into(),
         size: 0,
-        content_hash: format!("{:x}", Sha256::digest(target.as_bytes())),
+        content_hash: sha256_hex(target.as_bytes()),
     }];
 
     let err = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap_err();

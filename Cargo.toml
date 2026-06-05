@@ -59,7 +59,7 @@ tar = "0.4"
 futures = "0.3"
 
 # Hashing (synthetic commit SHA, SOURCE_BUNDLE_V1 content/address planning)
-sha2 = "0.10"
+sha2 = "0.11"
 
 # Base64 (encoding SHA-256 for `x-amz-checksum-sha256` PUT header)
 base64 = "0.22"

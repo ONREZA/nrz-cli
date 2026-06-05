@@ -1,6 +1,6 @@
 import { argument, dag, type Directory, type File, func, object, type Secret } from "@dagger.io/dagger";
 
-const RUST_IMAGE = "rust:1.92-bookworm";
+const RUST_IMAGE = "rust:1.96-bookworm";
 const BUN_IMAGE = "oven/bun:1.3.14-debian";
 const ALPINE_IMAGE = "alpine:3.20";
 const RELEASE_GIT_METADATA_SCRIPT = ".dagger/scripts/capture-git-metadata.ts";

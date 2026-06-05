@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use uuid::Uuid;
 
+use super::hash::{sha256_finalize_hex, sha256_hex};
 use super::{FileEntry, hash_file_streaming};
 use crate::build::manifest::{LayerTarget, Manifest};
 
@@ -835,10 +836,6 @@ pub(crate) fn source_bundle_contract_characters(value: &str) -> usize {
     value.encode_utf16().count()
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
 fn write_source_bundle(
     source_path: &Path,
     logical_manifest_json: &[u8],
@@ -1106,7 +1103,7 @@ fn describe_multipart(
         parts.push(SourceBundleMultipartPart {
             part_number,
             size_bytes: part_size,
-            sha256: format!("{:x}", hasher.finalize()),
+            sha256: sha256_finalize_hex(hasher),
         });
         remaining -= part_size;
         part_number += 1;
@@ -1135,7 +1132,7 @@ impl<W> HashingWriter<W> {
     }
 
     fn finish(self) -> (String, u64) {
-        (format!("{:x}", self.hasher.finalize()), self.bytes_written)
+        (sha256_finalize_hex(self.hasher), self.bytes_written)
     }
 }
 

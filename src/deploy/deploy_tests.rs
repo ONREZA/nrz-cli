@@ -5,9 +5,9 @@ use axum::Router;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::put;
-use sha2::Digest;
 use tempfile::tempdir;
 
+use super::hash::sha256_hex;
 use super::*;
 
 fn fe(path: &str, size: u64, content_hash: &str) -> FileEntry {
@@ -152,7 +152,7 @@ fn scan_files_handles_file_larger_than_chunk() {
 
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].size, content.len() as u64);
-    let expected = format!("{:x}", sha2::Sha256::digest(&content));
+    let expected = sha256_hex(&content);
     assert_eq!(files[0].content_hash, expected);
 }
 
@@ -220,10 +220,7 @@ fn scan_files_preserves_safe_relative_symlinks() {
 
     let link = files.iter().find(|file| file.path == "link.txt").unwrap();
     assert_eq!(link.size, 0);
-    assert_eq!(
-        link.content_hash,
-        format!("{:x}", sha2::Sha256::digest(b"real.txt"))
-    );
+    assert_eq!(link.content_hash, sha256_hex(b"real.txt"));
 }
 
 #[cfg(unix)]
@@ -1317,7 +1314,7 @@ fn retry_delay_caps_only_fallback_backoff_and_remaining_budget() {
 #[tokio::test]
 async fn source_single_put_sends_conditional_header_from_wire_hint() {
     let content = Bytes::from_static(b"hello source");
-    let sha256 = format!("{:x}", sha2::Sha256::digest(&content));
+    let sha256 = sha256_hex(&content);
     let (url, _server) = spawn_conditional_pack_put_mock().await;
     let client = ApiClient::anonymous().unwrap();
     let headers = PresignedPutHeaders::if_none_match_any();

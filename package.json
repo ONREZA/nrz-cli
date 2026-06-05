@@ -14,7 +14,7 @@
     "commitlint": "commitlint"
   },
   "devDependencies": {
-    "@commitlint/cli": "^18.6.0",
-    "lefthook": "^1.6.0"
+    "@commitlint/cli": "^21.0.2",
+    "lefthook": "^2.1.9"
   }
 }

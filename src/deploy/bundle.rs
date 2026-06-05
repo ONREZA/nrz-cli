@@ -4,6 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::Context;
 use sha2::{Digest, Sha256};
 
+use super::hash::sha256_finalize_hex;
 use crate::output;
 
 const ZSTD_LEVEL: i32 = 3;
@@ -86,7 +87,7 @@ pub fn create_bundle_excluding_dirs(
 
     let mut hasher = Sha256::new();
     hasher.update(&compressed);
-    let sha256_hex = format!("{:x}", hasher.finalize());
+    let sha256_hex = sha256_finalize_hex(hasher);
 
     Ok(BundleStats {
         bytes: compressed,

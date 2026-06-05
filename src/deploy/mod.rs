@@ -5,6 +5,7 @@ pub(crate) mod bundle;
 mod bundle_tests;
 #[cfg(test)]
 mod deploy_tests;
+pub(crate) mod hash;
 pub(crate) mod health_check;
 #[cfg(test)]
 mod health_check_tests;
@@ -28,6 +29,7 @@ use crate::auth;
 use crate::build;
 use crate::build::manifest as build_manifest;
 use crate::cli::{BuildArgs, DeployArgs};
+use crate::deploy::hash::{sha256_finalize_hex, sha256_hex};
 use crate::deploy::source_bundle_v1::{
     CLI_PROTOCOL_VERSION, CompletedMultipartPart, PresignedSourceMultipartChunk,
     SOURCE_BUNDLE_FORMAT, SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, SourceBundlePlan,
@@ -2026,7 +2028,7 @@ fn verify_upload_payload(
             bytes.len()
         );
     }
-    let actual_sha = format!("{:x}", Sha256::digest(bytes));
+    let actual_sha = sha256_hex(bytes);
     if actual_sha != sha256 {
         bail!(
             "{label} SHA drifted between prepare-upload and upload (server signed {sha256}, local materialized {actual_sha})"
@@ -3784,7 +3786,7 @@ fn scan_dir_recursive(
             files.push(FileEntry {
                 path: rel,
                 size: 0,
-                content_hash: format!("{:x}", Sha256::digest(link_target.as_bytes())),
+                content_hash: sha256_hex(link_target.as_bytes()),
             });
             continue;
         }
@@ -3917,7 +3919,7 @@ fn hash_file_streaming(path: &Path) -> anyhow::Result<(u64, String)> {
         hasher.update(&buf[..n]);
         size += n as u64;
     }
-    Ok((size, format!("{:x}", hasher.finalize())))
+    Ok((size, sha256_finalize_hex(hasher)))
 }
 
 // ── Synthetic commit SHA ─────────────────────────────────────
@@ -3934,7 +3936,7 @@ fn synthetic_sha(files: &[FileEntry]) -> String {
         hasher.update(f.content_hash.as_bytes());
         hasher.update(b"\n");
     }
-    format!("{:x}", hasher.finalize())
+    sha256_finalize_hex(hasher)
 }
 
 // ── Compute type resolution ──────────────────────────────────
