@@ -1,6 +1,6 @@
 [package]
 name = "nrz-fn-policy"
-version = "0.33.0-beta.0"
+version = "0.33.0-beta.1"
 edition = "2024"
 license = "MIT"
 description = "Static ONREZA Functions policy analyzer used by nrz CLI binary builds"
