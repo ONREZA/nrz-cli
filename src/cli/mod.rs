@@ -10,6 +10,8 @@ pub mod env;
 pub mod env_handler;
 #[cfg(test)]
 mod env_handler_tests;
+pub mod functions;
+pub mod functions_handler;
 pub mod kv;
 pub mod kv_handler;
 pub mod projects;
@@ -24,6 +26,7 @@ pub use db::DbArgs;
 pub use detect::DetectArgs;
 pub use domains::DomainsArgs;
 pub use env::EnvArgs;
+pub use functions::FunctionsArgs;
 pub use kv::KvArgs;
 pub use projects::ProjectsArgs;
 pub use workspace::WorkspaceArgs;
@@ -123,6 +126,9 @@ pub enum Command {
 
     /// Detect framework, package manager, and project features
     Detect(DetectArgs),
+
+    /// Manage ONREZA Functions (policy check, ...)
+    Functions(FunctionsArgs),
 }
 
 #[derive(Parser)]
@@ -260,7 +266,7 @@ pub struct DeployArgs {
     #[arg(long)]
     pub resume_deployment: Option<String>,
 
-    /// Override compute type: static, isolate, process
+    /// Override compute type: static, process
     #[arg(long)]
     pub compute: Option<String>,
 

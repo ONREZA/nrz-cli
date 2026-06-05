@@ -97,8 +97,6 @@ pub(crate) struct SourceLogicalManifest {
     pub(crate) files: Vec<SourceLogicalManifestFile>,
     pub(crate) layers: Vec<SourceLogicalManifestLayer>,
     pub(crate) routes: Vec<SourceLogicalManifestRoute>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) middleware: Option<Vec<SourceLogicalManifestMiddleware>>,
     pub(crate) entrypoints: Vec<String>,
 }
 
@@ -132,10 +130,7 @@ pub(crate) enum SourceLogicalManifestEntryType {
 pub(crate) enum SourceLogicalManifestFileRole {
     Static,
     Compute,
-    Isolate,
-    Middleware,
     Prerender,
-    Config,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,7 +151,6 @@ pub(crate) struct SourceLogicalManifestLayer {
 pub(crate) enum SourceLogicalManifestLayerTarget {
     Static,
     Compute,
-    Isolate,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,16 +162,6 @@ pub(crate) struct SourceLogicalManifestRoute {
     pub(crate) priority: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) methods: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SourceLogicalManifestMiddleware {
-    pub(crate) name: String,
-    pub(crate) bundle_path: String,
-    pub(crate) code_hash: String,
-    pub(crate) matchers: Vec<String>,
-    pub(crate) priority: i32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -205,30 +189,7 @@ pub(crate) struct SourceLogicalManifestSummary {
     pub(crate) max_static_file_size_bytes: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct PresignedSourceSinglePut {
-    pub(crate) url: String,
-    pub(crate) content_length: u64,
-    pub(crate) sha256: String,
-    #[serde(default)]
-    pub(crate) headers: crate::api::PresignedPutHeaders,
-    #[serde(rename = "verifyHead")]
-    pub(crate) verify_head: Option<crate::api::PresignedHeadVerify>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct PresignedSourceMultipart {
-    #[serde(rename = "uploadId")]
-    pub(crate) upload_id: String,
-    #[serde(rename = "chunkSize")]
-    pub(crate) chunk_size: u64,
-    pub(crate) chunks: Vec<PresignedSourceMultipartChunk>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub(crate) struct PresignedSourceMultipartChunk {
     pub(crate) part_number: u32,
     pub(crate) url: String,
@@ -344,9 +305,7 @@ fn summarize_logical_manifest(manifest: &SourceLogicalManifest) -> SourceLogical
         }
         if matches!(
             file.role,
-            SourceLogicalManifestFileRole::Static
-                | SourceLogicalManifestFileRole::Prerender
-                | SourceLogicalManifestFileRole::Config
+            SourceLogicalManifestFileRole::Static | SourceLogicalManifestFileRole::Prerender
         ) {
             max_static_file_size_bytes = max_static_file_size_bytes.max(file.size);
         }
@@ -430,8 +389,12 @@ fn build_logical_manifest(
     manifest: &Manifest,
     entries: &[SourceBundleEntry],
 ) -> anyhow::Result<SourceLogicalManifest> {
+    if manifest.middleware.is_some() {
+        bail!(
+            "manifest middleware is no longer supported; use a *.nrz-fn.* entry with export const config and a middleware trigger"
+        );
+    }
     let mut logical_files = Vec::with_capacity(entries.len());
-    let middleware_paths = middleware_paths(manifest);
     let prerender_paths = prerender_paths(manifest);
 
     for entry in entries {
@@ -441,7 +404,6 @@ fn build_logical_manifest(
             manifest,
             &entry.path,
             matched_layer.as_ref(),
-            &middleware_paths,
             &prerender_paths,
         );
         let (entry_type, link_target) = match &entry.kind {
@@ -483,43 +445,6 @@ fn build_logical_manifest(
             methods: route.methods.clone(),
         })
         .collect();
-    let middleware = manifest
-        .middleware
-        .as_ref()
-        .map(|items| {
-            items
-                .iter()
-                .map(|item| {
-                    let code_hash = normalize_middleware_code_hash(&item.name, &item.code_hash)?;
-                    let bundle_file_sha256 = logical_files
-                        .iter()
-                        .find(|file| file.path == item.bundle_path)
-                        .map(|file| file.sha256.as_str())
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "middleware '{}' bundlePath '{}' was not found in the output directory",
-                                item.name,
-                                item.bundle_path
-                            )
-                        })?;
-                    if code_hash != bundle_file_sha256 {
-                        anyhow::bail!(
-                            "middleware '{}' codeHash does not match bundlePath '{}'",
-                            item.name,
-                            item.bundle_path
-                        );
-                    }
-                    Ok(SourceLogicalManifestMiddleware {
-                        name: item.name.clone(),
-                        bundle_path: item.bundle_path.clone(),
-                        code_hash,
-                        matchers: item.matchers.clone(),
-                        priority: item.priority.unwrap_or(0),
-                    })
-                })
-                .collect::<anyhow::Result<Vec<_>>>()
-        })
-        .transpose()?;
 
     Ok(SourceLogicalManifest {
         schema_version: SOURCE_BUNDLE_SCHEMA_VERSION.to_string(),
@@ -527,17 +452,8 @@ fn build_logical_manifest(
         files: logical_files,
         layers,
         routes,
-        middleware,
         entrypoints,
     })
-}
-
-fn normalize_middleware_code_hash(name: &str, value: &str) -> anyhow::Result<String> {
-    let hash = value.strip_prefix("sha256-").unwrap_or(value);
-    if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        anyhow::bail!("middleware '{name}' codeHash must be a SHA-256 hex digest");
-    }
-    Ok(hash.to_ascii_lowercase())
 }
 
 fn ensure_manifest_covers_entries(
@@ -569,14 +485,6 @@ fn ensure_manifest_covers_entries(
         }
     }
     Ok(())
-}
-
-fn middleware_paths(manifest: &Manifest) -> Vec<String> {
-    manifest
-        .middleware
-        .as_ref()
-        .map(|items| items.iter().map(|item| item.bundle_path.clone()).collect())
-        .unwrap_or_default()
 }
 
 fn prerender_paths(manifest: &Manifest) -> Vec<String> {
@@ -616,12 +524,8 @@ fn file_role(
     manifest: &Manifest,
     path: &str,
     matched_layer: Option<&LayerMatch<'_>>,
-    middleware_paths: &[String],
     prerender_paths: &[String],
 ) -> (SourceLogicalManifestFileRole, Option<String>) {
-    if middleware_paths.iter().any(|candidate| candidate == path) {
-        return (SourceLogicalManifestFileRole::Middleware, None);
-    }
     if prerender_paths.iter().any(|candidate| candidate == path) {
         return (
             SourceLogicalManifestFileRole::Prerender,
@@ -642,10 +546,8 @@ fn file_role(
     };
 
     let role = match layer_match.layer.target {
-        LayerTarget::Static if is_static_config_path(path) => SourceLogicalManifestFileRole::Config,
         LayerTarget::Static => SourceLogicalManifestFileRole::Static,
         LayerTarget::Compute => SourceLogicalManifestFileRole::Compute,
-        LayerTarget::Isolate => SourceLogicalManifestFileRole::Isolate,
     };
     (role, Some(layer_match.layer.name.clone()))
 }
@@ -665,7 +567,6 @@ fn source_layer_from_manifest(
         target: match layer.target {
             LayerTarget::Static => SourceLogicalManifestLayerTarget::Static,
             LayerTarget::Compute => SourceLogicalManifestLayerTarget::Compute,
-            LayerTarget::Isolate => SourceLogicalManifestLayerTarget::Isolate,
         },
         root_path: (root_path != ".").then_some(root_path),
         entrypoint,
@@ -757,6 +658,9 @@ impl SourceArchivePathIndex {
 
     fn insert_entry(&mut self, entry: &SourceBundleEntry) -> anyhow::Result<()> {
         validate_source_path(&entry.path)?;
+        if self.files.contains(&entry.path) || self.symlinks.contains_key(&entry.path) {
+            bail!("SOURCE_BUNDLE_V1 duplicate archive path: {}", entry.path);
+        }
         match &entry.kind {
             SourceBundleEntryKind::File { .. } => {
                 self.files.insert(entry.path.clone());
@@ -1311,10 +1215,6 @@ fn content_type_from_path(path: &str) -> Option<&'static str> {
         "pdf" => "application/pdf",
         _ => return None,
     })
-}
-
-fn is_static_config_path(path: &str) -> bool {
-    path == "_headers" || path == "_redirects"
 }
 
 async fn read_file_slice(path: &Path, offset: u64, size: u64) -> anyhow::Result<Bytes> {

@@ -8,11 +8,9 @@ use serde::{Deserialize, Serialize};
 // ── Spec limits ───────────────────────────────────────────────
 const MAX_LAYERS: usize = 10;
 const MAX_ROUTES: usize = 200;
-const MAX_MIDDLEWARE: usize = 10;
 const MAX_NAME_LEN: usize = 64;
 const MAX_DIRECTORY_LEN: usize = 256;
 const MAX_ENTRY_LEN: usize = 512;
-const MAX_BUNDLE_PATH_LEN: usize = 512;
 const MAX_META_BYTES: usize = 16_384;
 const MAX_REVALIDATE_SECS: u64 = 31_536_000; // 1 year in seconds
 
@@ -75,7 +73,6 @@ pub struct Layer {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum LayerTarget {
     Static,
-    Isolate,
     Compute,
 }
 
@@ -83,7 +80,6 @@ impl std::fmt::Display for LayerTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Static => write!(f, "STATIC"),
-            Self::Isolate => write!(f, "ISOLATE"),
             Self::Compute => write!(f, "COMPUTE"),
         }
     }
@@ -155,7 +151,7 @@ pub struct Middleware {
 /// Returns the primary layer target implied by this manifest's layers.
 ///
 /// Used to bridge the manifest-based model with the legacy `compute_type` API contract.
-/// Priority: COMPUTE > ISOLATE > STATIC.
+/// Priority: COMPUTE > STATIC.
 pub fn primary_compute_target(manifest: &Manifest) -> LayerTarget {
     if manifest
         .layers
@@ -163,12 +159,6 @@ pub fn primary_compute_target(manifest: &Manifest) -> LayerTarget {
         .any(|l| l.target == LayerTarget::Compute)
     {
         LayerTarget::Compute
-    } else if manifest
-        .layers
-        .iter()
-        .any(|l| l.target == LayerTarget::Isolate)
-    {
-        LayerTarget::Isolate
     } else {
         LayerTarget::Static
     }
@@ -277,42 +267,13 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                     anyhow::bail!("STATIC layer '{}' must not have 'runtime'", layer.name);
                 }
             }
-            LayerTarget::Isolate => {
-                let entry = layer.entry.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!("layer '{}' (target=ISOLATE) requires 'entry'", layer.name)
-                })?;
-                if entry.is_empty() {
-                    anyhow::bail!("layer '{}' entry must not be empty", layer.name);
-                }
-                if entry.chars().count() > MAX_ENTRY_LEN {
-                    anyhow::bail!(
-                        "layer '{}' entry path exceeds {} chars",
-                        layer.name,
-                        MAX_ENTRY_LEN
-                    );
-                }
-                if entry.starts_with('/') || has_path_traversal(entry) {
-                    anyhow::bail!(
-                        "path traversal in layer '{}' entry: '{}'",
-                        layer.name,
-                        entry
-                    );
-                }
-                match layer.export_format.as_deref() {
-                    None => {
-                        anyhow::bail!("ISOLATE layer '{}' requires export: \"fetch\"", layer.name)
-                    }
-                    Some("fetch") => {}
-                    Some(other) => anyhow::bail!(
-                        "ISOLATE layer '{}' requires export: \"fetch\", got: \"{}\"",
-                        layer.name,
-                        other
-                    ),
-                }
-            }
             LayerTarget::Compute => {
                 let entry = layer.entry.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!("layer '{}' (target=COMPUTE) requires 'entry'", layer.name)
+                    anyhow::anyhow!(
+                        "layer '{}' (target={}) requires 'entry'",
+                        layer.name,
+                        layer.target
+                    )
                 })?;
                 if entry.is_empty() {
                     anyhow::bail!("layer '{}' entry must not be empty", layer.name);
@@ -332,7 +293,11 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                     );
                 }
                 if layer.export_format.is_some() {
-                    anyhow::bail!("COMPUTE layer '{}' must not have 'export'", layer.name);
+                    anyhow::bail!(
+                        "{} layer '{}' must not have 'export'",
+                        layer.target,
+                        layer.name
+                    );
                 }
             }
         }
@@ -412,7 +377,7 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
         {
             anyhow::bail!(
                 "route pattern '{}' has multiple terminal (non-STATIC) layers: '{}' and '{}'. \
-                 The second route is unreachable because COMPUTE/ISOLATE routes never fallthrough.",
+                 The second route is unreachable because COMPUTE routes never fallthrough.",
                 route.pattern,
                 existing_layer,
                 route.layer
@@ -451,76 +416,10 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
         }
     }
 
-    // ── Middleware ────────────────────────────────────────────
-
-    if let Some(middlewares) = &manifest.middleware {
-        if middlewares.len() > MAX_MIDDLEWARE {
-            anyhow::bail!(
-                "too many middleware: {} (max {})",
-                middlewares.len(),
-                MAX_MIDDLEWARE
-            );
-        }
-        let mut mw_seen: HashSet<&str> = HashSet::new();
-        for mw in middlewares {
-            if mw.name.is_empty() {
-                anyhow::bail!("middleware name must not be empty");
-            }
-            if mw.name.chars().count() > MAX_NAME_LEN {
-                anyhow::bail!(
-                    "middleware name exceeds {} chars: '{}'",
-                    MAX_NAME_LEN,
-                    mw.name
-                );
-            }
-            if !mw_seen.insert(mw.name.as_str()) {
-                anyhow::bail!("duplicate middleware name: '{}'", mw.name);
-            }
-            if mw.code_hash.is_empty() {
-                anyhow::bail!("middleware '{}' codeHash must not be empty", mw.name);
-            }
-            if mw.bundle_path.is_empty() {
-                anyhow::bail!("middleware '{}' bundlePath must not be empty", mw.name);
-            }
-            if mw.bundle_path.chars().count() > MAX_BUNDLE_PATH_LEN {
-                anyhow::bail!(
-                    "middleware '{}' bundlePath exceeds {} chars",
-                    mw.name,
-                    MAX_BUNDLE_PATH_LEN
-                );
-            }
-            if mw.bundle_path.starts_with('/') || has_path_traversal(&mw.bundle_path) {
-                anyhow::bail!(
-                    "path traversal in middleware '{}' bundlePath: '{}'",
-                    mw.name,
-                    mw.bundle_path
-                );
-            }
-            if mw.matchers.is_empty() {
-                anyhow::bail!("middleware '{}' must have at least one matcher", mw.name);
-            }
-            for matcher in &mw.matchers {
-                if matcher.is_empty() {
-                    anyhow::bail!("middleware '{}' matcher must not be empty", mw.name);
-                }
-                if has_js_only_regex_features(matcher) {
-                    anyhow::bail!(
-                        "middleware '{}' matcher uses JS-only regex features \
-                         (lookahead, lookbehind, or backreferences): '{}'",
-                        mw.name,
-                        matcher
-                    );
-                }
-                if let Err(e) = Regex::new(matcher) {
-                    anyhow::bail!(
-                        "invalid regex in middleware '{}' matcher '{}': {}",
-                        mw.name,
-                        matcher,
-                        e
-                    );
-                }
-            }
-        }
+    if manifest.middleware.is_some() {
+        anyhow::bail!(
+            "manifest middleware is no longer supported; use a *.nrz-fn.* entry with export const config and a middleware trigger"
+        );
     }
 
     // ── Meta ──────────────────────────────────────────────────

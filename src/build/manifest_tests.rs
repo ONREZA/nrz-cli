@@ -15,8 +15,8 @@ const ASTRO_MANIFEST: &str = r#"{
     "version": 1,
     "layers": [
         { "name": "assets", "target": "STATIC", "directory": "client" },
-        { "name": "server", "target": "ISOLATE", "directory": "server",
-          "entry": "entry.mjs", "export": "fetch" }
+        { "name": "server", "target": "COMPUTE", "directory": "server",
+          "entry": "entry.mjs" }
     ],
     "routes": [
         { "pattern": "^/_astro/.*$", "layer": "assets", "priority": 100 },
@@ -69,9 +69,8 @@ fn valid_astro_manifest_parses() {
     assert_eq!(m.layers[0].name, "assets");
     assert_eq!(m.layers[0].target, LayerTarget::Static);
     assert_eq!(m.layers[1].name, "server");
-    assert_eq!(m.layers[1].target, LayerTarget::Isolate);
+    assert_eq!(m.layers[1].target, LayerTarget::Compute);
     assert_eq!(m.layers[1].entry.as_deref(), Some("entry.mjs"));
-    assert_eq!(m.layers[1].export_format.as_deref(), Some("fetch"));
     assert_eq!(m.routes.len(), 2);
     assert_eq!(m.routes[0].priority, Some(100));
 }
@@ -102,7 +101,7 @@ fn route_fallthrough_parses() {
         }],
         "routes": [{ "pattern": "^/.*$", "layer": "server", "fallthrough": true }]
     }"#;
-    let path = write_manifest(dir.path(), &json);
+    let path = write_manifest(dir.path(), json);
     let m = load_and_validate(&path).unwrap();
     assert_eq!(m.routes[0].fallthrough, Some(true));
 }
@@ -286,53 +285,6 @@ fn static_with_export_is_error() {
 }
 
 #[test]
-fn isolate_without_entry_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "ISOLATE", "directory": "server", "export": "fetch" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("(target=ISOLATE) requires 'entry'"),
-        "{err}"
-    );
-}
-
-#[test]
-fn isolate_without_export_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "ISOLATE", "directory": "server", "entry": "e.mjs" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(
-        err.to_string().contains("requires export: \"fetch\""),
-        "{err}"
-    );
-}
-
-#[test]
-fn isolate_with_wrong_export_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "ISOLATE", "directory": "server",
-                     "entry": "e.mjs", "export": "default" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(err.to_string().contains("got: \"default\""), "{err}");
-}
-
-#[test]
 fn compute_without_entry_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
@@ -449,8 +401,8 @@ fn revalidate_zero_is_error() {
     let json = r#"{
         "version": 1,
         "layers": [
-            { "name": "server", "target": "ISOLATE", "directory": "server",
-              "entry": "e.mjs", "export": "fetch" }
+            { "name": "server", "target": "COMPUTE", "directory": "server",
+              "entry": "e.mjs" }
         ],
         "routes": [{ "pattern": "^/.*$", "layer": "server", "revalidate": 0 }]
     }"#;
@@ -468,8 +420,8 @@ fn revalidate_valid_parses() {
     let json = r#"{
         "version": 1,
         "layers": [
-            { "name": "server", "target": "ISOLATE", "directory": "server",
-              "entry": "e.mjs", "export": "fetch" }
+            { "name": "server", "target": "COMPUTE", "directory": "server",
+              "entry": "e.mjs" }
         ],
         "routes": [{ "pattern": "^/blog/.*$", "layer": "server", "revalidate": 60 }]
     }"#;
@@ -497,7 +449,7 @@ fn missing_file() {
 // ── Optional sections ─────────────────────────────────────────
 
 #[test]
-fn manifest_with_middleware_parses() {
+fn manifest_with_legacy_middleware_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
         "version": 1,
@@ -513,10 +465,12 @@ fn manifest_with_middleware_parses() {
         ]
     }"#;
     let path = write_manifest(dir.path(), json);
-    let m = load_and_validate(&path).unwrap();
-    let mw = m.middleware.unwrap();
-    assert_eq!(mw.len(), 1);
-    assert_eq!(mw[0].name, "auth");
+    let err = load_and_validate(&path).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("manifest middleware is no longer supported"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -526,8 +480,8 @@ fn manifest_with_prerender_parses() {
         "version": 1,
         "layers": [
             { "name": "prerendered", "target": "STATIC", "directory": "prerender" },
-            { "name": "server", "target": "ISOLATE", "directory": "server",
-              "entry": "entry.mjs", "export": "fetch" }
+            { "name": "server", "target": "COMPUTE", "directory": "server",
+              "entry": "entry.mjs" }
         ],
         "routes": [
             { "pattern": "^/about/?$", "layer": "prerendered", "priority": 50 },
@@ -548,7 +502,7 @@ fn manifest_with_prerender_parses() {
 // ── verify_files ──────────────────────────────────────────────
 
 #[test]
-fn verify_files_ok_isolate() {
+fn verify_files_ok_astro() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_manifest(dir.path(), ASTRO_MANIFEST);
     let m = load_and_validate(&path).unwrap();
@@ -635,8 +589,8 @@ fn verify_files_prerender_pages_exist() {
         "version": 1,
         "layers": [
             { "name": "prerendered", "target": "STATIC", "directory": "prerender" },
-            { "name": "server", "target": "ISOLATE", "directory": "server",
-              "entry": "entry.mjs", "export": "fetch" }
+            { "name": "server", "target": "COMPUTE", "directory": "server",
+              "entry": "entry.mjs" }
         ],
         "routes": [
             { "pattern": "^/about/?$", "layer": "prerendered", "priority": 50 },
@@ -694,10 +648,7 @@ fn make_manifest_with_targets(targets: &[(&str, &str)]) -> crate::build::manifes
         .iter()
         .map(|(name, target)| {
             let mut obj = json!({ "name": name, "target": target, "directory": "." });
-            if *target == "ISOLATE" {
-                obj["entry"] = json!("e.mjs");
-                obj["export"] = json!("fetch");
-            } else if *target == "COMPUTE" {
+            if *target == "COMPUTE" {
                 obj["entry"] = json!("server.js");
             }
             obj
@@ -718,25 +669,9 @@ fn primary_compute_target_returns_compute_when_present() {
 }
 
 #[test]
-fn primary_compute_target_returns_isolate_when_no_compute() {
-    let m = make_manifest_with_targets(&[("assets", "STATIC"), ("server", "ISOLATE")]);
-    assert_eq!(primary_compute_target(&m), LayerTarget::Isolate);
-}
-
-#[test]
 fn primary_compute_target_returns_static_when_only_static() {
     let m = make_manifest_with_targets(&[("site", "STATIC")]);
     assert_eq!(primary_compute_target(&m), LayerTarget::Static);
-}
-
-#[test]
-fn primary_compute_target_prefers_compute_over_isolate() {
-    let m = make_manifest_with_targets(&[
-        ("assets", "STATIC"),
-        ("edge", "ISOLATE"),
-        ("api", "COMPUTE"),
-    ]);
-    assert_eq!(primary_compute_target(&m), LayerTarget::Compute);
 }
 
 // ── Spec limits: layer count ───────────────────────────────────
@@ -847,97 +782,6 @@ fn directory_path_traversal_encoded_backslash_not_blocked() {
     load_and_validate(&path).unwrap();
 }
 
-// ── Middleware validation ──────────────────────────────────────
-
-#[test]
-fn too_many_middleware_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let mws: String = (0..=10)
-        .map(|i| {
-            format!(
-                r#"{{"name":"mw{i}","bundlePath":"mw{i}.mjs","codeHash":"h","matchers":["^/.*$"]}}"#
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let json = format!(
-        r#"{{"version":1,"layers":[{{"name":"s","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"^/.*$","layer":"s"}}],"middleware":[{mws}]}}"#
-    );
-    let path = write_manifest(dir.path(), &json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(err.to_string().contains("too many middleware"), "{err}");
-}
-
-#[test]
-fn duplicate_middleware_names_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "middleware": [
-            { "name": "auth", "bundlePath": "a.mjs", "codeHash": "h", "matchers": ["^/.*$"] },
-            { "name": "auth", "bundlePath": "b.mjs", "codeHash": "h", "matchers": ["^/.*$"] }
-        ]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("duplicate middleware name: 'auth'"),
-        "{err}"
-    );
-}
-
-#[test]
-fn middleware_bundle_path_traversal_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "middleware": [
-            { "name": "evil", "bundlePath": "../outside/evil.mjs", "codeHash": "h",
-              "matchers": ["^/.*$"] }
-        ]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(err.to_string().contains("path traversal"), "{err}");
-}
-
-#[test]
-fn middleware_bundle_path_too_long_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let long_path = "a".repeat(513); // MAX_BUNDLE_PATH_LEN = 512
-    let json = format!(
-        r#"{{"version":1,"layers":[{{"name":"s","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"^/.*$","layer":"s"}}],"middleware":[{{"name":"m","bundlePath":"{long_path}","codeHash":"h","matchers":[]}}]}}"#
-    );
-    let path = write_manifest(dir.path(), &json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(err.to_string().contains("bundlePath exceeds"), "{err}");
-}
-
-#[test]
-fn middleware_invalid_matcher_regex_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "middleware": [
-            { "name": "bad", "bundlePath": "bad.mjs", "codeHash": "h",
-              "matchers": ["^/[broken"] }
-        ]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(
-        err.to_string().contains("invalid regex in middleware"),
-        "{err}"
-    );
-}
-
 // ── Prerender: layer must be STATIC ───────────────────────────
 
 #[test]
@@ -946,8 +790,8 @@ fn prerender_layer_must_be_static() {
     let json = r#"{
         "version": 1,
         "layers": [
-            { "name": "server", "target": "ISOLATE", "directory": "server",
-              "entry": "e.mjs", "export": "fetch" }
+            { "name": "server", "target": "COMPUTE", "directory": "server",
+              "entry": "e.mjs" }
         ],
         "routes": [{ "pattern": "^/.*$", "layer": "server" }],
         "prerender": {
@@ -1072,8 +916,8 @@ fn runtime_max_concurrency_zero_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
         "version": 1,
-        "layers": [{ "name": "s", "target": "ISOLATE", "directory": "server",
-                     "entry": "e.mjs", "export": "fetch",
+        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "server",
+                     "entry": "e.mjs",
                      "runtime": { "maxConcurrency": 0 } }],
         "routes": [{ "pattern": "^/.*$", "layer": "s" }]
     }"#;
@@ -1105,8 +949,8 @@ fn runtime_valid_values_parse() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
         "version": 1,
-        "layers": [{ "name": "s", "target": "ISOLATE", "directory": "server",
-                     "entry": "e.mjs", "export": "fetch",
+        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "server",
+                     "entry": "e.mjs",
                      "runtime": { "timeoutMs": 5000, "memoryMb": 256, "maxConcurrency": 10 } }],
         "routes": [{ "pattern": "^/.*$", "layer": "s" }]
     }"#;
@@ -1236,7 +1080,7 @@ fn duplicate_terminal_non_static_pattern_is_error() {
         "version": 1,
         "layers": [
             { "name": "srv", "target": "COMPUTE", "directory": ".", "entry": "server.js" },
-            { "name": "edge", "target": "ISOLATE", "directory": "edge", "entry": "worker.mjs", "export": "fetch" }
+            { "name": "edge", "target": "COMPUTE", "directory": "edge", "entry": "worker.mjs" }
         ],
         "routes": [
             { "pattern": "^/.*$", "layer": "srv" },
@@ -1325,88 +1169,6 @@ fn empty_layer_entry_is_error() {
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("entry must not be empty"), "{err}");
-}
-
-#[test]
-fn empty_middleware_name_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "middleware": [{ "name": "", "bundlePath": "mw.mjs", "codeHash": "h", "matchers": [] }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("middleware name must not be empty"),
-        "{err}"
-    );
-}
-
-#[test]
-fn middleware_name_too_long_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let long_name = "m".repeat(65); // MAX_NAME_LEN = 64
-    let json = format!(
-        r#"{{"version":1,"layers":[{{"name":"s","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"^/.*$","layer":"s"}}],"middleware":[{{"name":"{long_name}","bundlePath":"mw.mjs","codeHash":"h","matchers":[]}}]}}"#
-    );
-    let path = write_manifest(dir.path(), &json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(err.to_string().contains("middleware name exceeds"), "{err}");
-}
-
-#[test]
-fn empty_middleware_code_hash_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "middleware": [{ "name": "m", "bundlePath": "mw.mjs", "codeHash": "", "matchers": [] }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(
-        err.to_string().contains("codeHash must not be empty"),
-        "{err}"
-    );
-}
-
-#[test]
-fn empty_middleware_bundle_path_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "middleware": [{ "name": "m", "bundlePath": "", "codeHash": "h", "matchers": [] }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(
-        err.to_string().contains("bundlePath must not be empty"),
-        "{err}"
-    );
-}
-
-#[test]
-fn empty_middleware_matcher_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "middleware": [{ "name": "m", "bundlePath": "mw.mjs", "codeHash": "h",
-                         "matchers": ["^/api/.*$", ""] }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(
-        err.to_string().contains("matcher must not be empty"),
-        "{err}"
-    );
 }
 
 // ── Prerender page key must start with '/' ─────────────────────
@@ -1505,8 +1267,8 @@ fn revalidate_exceeds_max_is_error() {
     let json = r#"{
         "version": 1,
         "layers": [
-            { "name": "server", "target": "ISOLATE", "directory": "server",
-              "entry": "e.mjs", "export": "fetch" }
+            { "name": "server", "target": "COMPUTE", "directory": "server",
+              "entry": "e.mjs" }
         ],
         "routes": [{ "pattern": "^/.*$", "layer": "server", "revalidate": 31536001 }]
     }"#;
@@ -1524,8 +1286,8 @@ fn revalidate_exactly_max_is_ok() {
     let json = r#"{
         "version": 1,
         "layers": [
-            { "name": "server", "target": "ISOLATE", "directory": "server",
-              "entry": "e.mjs", "export": "fetch" }
+            { "name": "server", "target": "COMPUTE", "directory": "server",
+              "entry": "e.mjs" }
         ],
         "routes": [{ "pattern": "^/.*$", "layer": "server", "revalidate": 31536000 }]
     }"#;
@@ -1582,25 +1344,6 @@ fn route_valid_methods_parse() {
     assert_eq!(m.routes[0].methods.as_deref().unwrap().len(), 7);
 }
 
-// ── #6: middleware must have at least one matcher ──────────────
-
-#[test]
-fn middleware_empty_matchers_array_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "middleware": [{ "name": "m", "bundlePath": "mw.mjs", "codeHash": "h", "matchers": [] }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(
-        err.to_string().contains("must have at least one matcher"),
-        "{err}"
-    );
-}
-
 // ── #7: JS-only regex features rejected ───────────────────────
 
 #[test]
@@ -1636,21 +1379,6 @@ fn route_pattern_backreference_is_error() {
         "version": 1,
         "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
         "routes": [{ "pattern": "^/(\\w+)/\\1$", "layer": "s" }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
-    let err = load_and_validate(&path).unwrap_err();
-    assert!(err.to_string().contains("JS-only regex features"), "{err}");
-}
-
-#[test]
-fn middleware_matcher_lookahead_is_error() {
-    let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "middleware": [{ "name": "m", "bundlePath": "mw.mjs", "codeHash": "h",
-                         "matchers": ["^/(?!public/).*$"] }]
     }"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();

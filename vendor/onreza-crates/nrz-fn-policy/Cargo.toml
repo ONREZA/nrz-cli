@@ -1,0 +1,15 @@
+[package]
+name = "nrz-fn-policy"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Static ONREZA Functions policy analyzer used by nrz CLI binary builds"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+oxc_allocator = "0.134"
+oxc_ast = "0.134"
+oxc_ast_visit = "0.134"
+oxc_parser = "0.134"
+oxc_span = "0.134"

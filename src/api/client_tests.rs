@@ -560,13 +560,16 @@ async fn fails_when_budget_expires_before_attempts() {
 
 #[tokio::test]
 async fn retries_transport_error_then_exhausts() {
-    // Bind and immediately drop — port is free, connections get refused deterministically.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    drop(listener);
     let url = format!(
         "http://{addr}/upload?X-Amz-Signature=signature-secret&X-Amz-Credential=credential-secret"
     );
+    let handle = tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            drop(stream);
+        }
+    });
 
     let client = test_client();
     let policy = UploadRetryPolicy::fast_for_tests();
@@ -576,6 +579,7 @@ async fn retries_transport_error_then_exhausts() {
         .await
         .expect_err("connection refused must eventually bail");
     let elapsed = start.elapsed();
+    handle.abort();
 
     // We should have retried (took non-trivial time, but bounded by budget).
     assert!(

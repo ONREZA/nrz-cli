@@ -15,6 +15,7 @@ pub enum Phase {
     Detect,
     Domains,
     Env,
+    Functions,
     Init,
     Install,
     Link,
@@ -33,6 +34,7 @@ impl Phase {
             Phase::Detect => "detect",
             Phase::Domains => "domains",
             Phase::Env => "env",
+            Phase::Functions => "functions",
             Phase::Init => "init",
             Phase::Install => "install",
             Phase::Link => "link",
@@ -192,6 +194,21 @@ impl std::error::Error for CodedError {
 /// Build an `anyhow::Error` carrying a `CodedError` in its chain.
 pub fn coded_error(code: impl Into<String>, message: impl Into<String>) -> anyhow::Error {
     anyhow::Error::new(CodedError::new(code, message))
+}
+
+#[derive(Debug)]
+pub struct AlreadyReportedError;
+
+impl std::fmt::Display for AlreadyReportedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("command output already reported")
+    }
+}
+
+impl std::error::Error for AlreadyReportedError {}
+
+pub fn already_reported_error() -> anyhow::Error {
+    anyhow::Error::new(AlreadyReportedError)
 }
 
 /// Attach a default `CodedError(code)` to an error only if the chain doesn't

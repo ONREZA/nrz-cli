@@ -4,6 +4,7 @@ const RUST_IMAGE = "rust:1.92-bookworm";
 const BUN_IMAGE = "oven/bun:1.3.14-debian";
 const ALPINE_IMAGE = "alpine:3.20";
 const RELEASE_GIT_METADATA_SCRIPT = ".dagger/scripts/capture-git-metadata.ts";
+const CLI_CRATES_VENDOR_DIR = "vendor/onreza-crates";
 
 const PLATFORMS = new Set(["linux-x64", "darwin-x64", "darwin-arm64", "win32-x64"]);
 const CHANNELS = new Set(["stable", "beta", "rc", "canary"]);
@@ -178,11 +179,25 @@ export class NrzCli {
   ): Promise<Directory> {
     requireChannel(channel);
     const releaseSource = sourceWithReleaseGitMetadata(source);
-    return bunContainer(releaseSource)
+    const releaseDir = bunContainer(releaseSource)
+      .withExec([
+        "sh",
+        "-ceu",
+        [
+          `if ! test -f ${CLI_CRATES_VENDOR_DIR}/nrz-contract/Cargo.toml || ! test -f ${CLI_CRATES_VENDOR_DIR}/nrz-fn-policy/Cargo.toml; then`,
+          "  echo 'prepare-release requires vendor/onreza-crates from deployment scripts/sync-nrz-cli-crates.ts' >&2",
+          "  exit 1",
+          "fi",
+        ].join("\n"),
+      ])
       .withEnvVariable("NRZ_RELEASE_CHANNEL", channel)
       .withEnvVariable("NRZ_RELEASE_VERSION", version)
       .withEnvVariable("NRZ_RELEASE_BUMP", bump)
       .withExec(["bun", ".dagger/scripts/release-plan.ts", "--write"])
+      .directory("/work");
+
+    return rustContainer(releaseDir)
+      .withExec(["cargo", "metadata", "--locked", "--format-version", "1"])
       .directory("/work")
       .withoutDirectory(".git")
       .withoutDirectory("target")

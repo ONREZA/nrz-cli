@@ -108,7 +108,7 @@ jobs:
       - name: Commit and tag release
         run: |
           rm -rf .nrz-release
-          git add Cargo.toml Cargo.lock CHANGELOG.md package.json package-lock.json
+          git add Cargo.toml Cargo.lock CHANGELOG.md package.json package-lock.json vendor/onreza-crates
           git diff --cached --check
           if git diff --cached --quiet; then
             echo "No release file changes were produced"

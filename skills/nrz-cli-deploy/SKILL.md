@@ -8,7 +8,7 @@ description: Use when users need to deploy ONREZA projects with nrz, troubleshoo
 ## When to use
 - First deployment of a project
 - Failed `nrz deploy` in local or CI
-- Compute mismatch (`static`, `isolate`, `process`)
+- Compute mismatch (`static`, `process`)
 
 ## Standard workflow
 1. Detect framework and persist it:
@@ -30,7 +30,6 @@ nrz deploy --prod --project-id <project_id> --json --token "$NRZ_TOKEN" --worksp
 
 ## Troubleshooting map
 - Build output or manifest issue:
-  - For isolate deployments, ensure adapter-generated `.onreza/manifest.json` exists in output.
   - For static/process deployments, set `[deploy].compute` in `onreza.toml`.
 - Process entrypoint error (common for Next.js/Nuxt):
   - Set `[deploy].entry` in `onreza.toml`.

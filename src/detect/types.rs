@@ -57,7 +57,6 @@ impl std::fmt::Display for ComputeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Static => f.write_str("STATIC"),
-            Self::Isolate => f.write_str("ISOLATE"),
             Self::Process => f.write_str("PROCESS"),
         }
     }
@@ -219,8 +218,6 @@ pub struct DetectionMetadata {
 pub enum ComputeType {
     /// Pure static files, no server runtime needed.
     Static,
-    /// Edge/isolate runtime via @onreza adapter (V8 isolate).
-    Isolate,
     /// Full runtime with fs access (standalone Next.js, custom servers, binaries).
     Process,
 }

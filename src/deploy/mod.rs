@@ -13,6 +13,7 @@ pub(crate) mod source_bundle_v1;
 mod source_bundle_v1_tests;
 
 use std::io::Read;
+use std::num::NonZeroU64;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -28,15 +29,20 @@ use crate::build;
 use crate::build::manifest as build_manifest;
 use crate::cli::{BuildArgs, DeployArgs};
 use crate::deploy::source_bundle_v1::{
-    CLI_PROTOCOL_VERSION, CompletedMultipartPart, PresignedSourceMultipart,
-    PresignedSourceMultipartChunk, PresignedSourceSinglePut, SOURCE_BUNDLE_FORMAT,
-    SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, SourceBundlePlan, build_source_bundle_plan,
-    source_bundle_contract_characters,
+    CLI_PROTOCOL_VERSION, CompletedMultipartPart, PresignedSourceMultipartChunk,
+    SOURCE_BUNDLE_FORMAT, SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, SourceBundlePlan,
+    build_source_bundle_plan, source_bundle_contract_characters,
 };
 use crate::detect::types::ComputeType;
 use crate::link;
 use crate::output;
 use nrz::config::{EffectiveProjectConfig, HealthCheckPathConfig, ProjectConfig};
+use nrz_contract::{
+    CliMultipartCompleteResponse, CliPrepareUploadRequiredComplete, CliPrepareUploadResponse,
+    CliPrepareUploadResponseMultipartChunk, CliPrepareUploadResponsePresignedPutHeaders,
+    CliPrepareUploadResponsePresignedPutVerifyHead, CliUploadCompleteResponse,
+    CliUploadFailedResponse,
+};
 use url::Url;
 use uuid::Uuid;
 
@@ -105,6 +111,10 @@ struct CreateDeploymentBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     branch: Option<String>,
     commit_sha: String,
+    /// ONREZA Functions published alongside this deployment. Function source is
+    /// DB-backed and intentionally not part of SOURCE_BUNDLE_V1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    functions: Option<crate::functions::FunctionPublishPayload>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -316,6 +326,64 @@ impl ResolvedHealthCheck {
 
 // ── Main deploy flow ─────────────────────────────────────────
 
+/// Discover ONREZA Functions, run the local policy preview (fail-fast before
+/// upload), and assemble the publish payload. Returns `None` when the project
+/// has neither functions nor edge rules.
+fn build_functions_payload(
+    _config: &ProjectConfig,
+    project_dir: &Path,
+    json: bool,
+) -> anyhow::Result<Option<crate::functions::FunctionPublishPayload>> {
+    let collected = crate::functions::collect(project_dir)?;
+    let edge_rules = crate::functions::load_edge_rules(project_dir)?;
+    let edge_rule_count = edge_rules
+        .as_ref()
+        .map_or(0, crate::functions::edge_rule_count);
+
+    if collected.is_empty() && edge_rules.is_none() {
+        return Ok(None);
+    }
+
+    let mut violation_count = 0usize;
+    for function in &collected.functions {
+        let report = crate::functions::run_policy_preview(&function.entrypoint, &function.sources)?;
+        if report.status == nrz_fn_policy::PolicyStatus::Failed {
+            violation_count += report.violations.len();
+            for violation in &report.violations {
+                let location = violation.importer.as_deref().unwrap_or(&report.entrypoint);
+                output::warn(
+                    json,
+                    format!(
+                        "{} ({location}): {} — {}",
+                        function.name, violation.capability, violation.reason
+                    ),
+                    output::Phase::Deploy,
+                );
+            }
+        }
+    }
+    if violation_count > 0 {
+        return Err(output::coded_error(
+            "ONREZA_FUNCTIONS_POLICY",
+            format!("function policy check failed with {violation_count} violation(s)"),
+        ));
+    }
+    output::success(
+        json,
+        format_function_publish_summary(
+            collected.functions.len(),
+            collected.source_file_count(),
+            edge_rule_count,
+        ),
+        output::Phase::Deploy,
+    );
+    Ok(Some(crate::functions::build_payload(
+        "DEPLOYMENT",
+        &collected,
+        edge_rules,
+    )))
+}
+
 pub async fn run(
     args: DeployArgs,
     json: bool,
@@ -523,7 +591,6 @@ pub async fn run(
                  For server-side rendering, use --compute process.",
                 detection.name
             ),
-            _ => format!("{} deploying as {}.", detection.name, compute),
         };
         output::warn(json, &msg, output::Phase::Deploy);
         warnings.push(msg);
@@ -584,7 +651,7 @@ pub async fn run(
         }
     }
 
-    let manifest_raw = resolve_manifest_for_compute(compute, manifest_raw, &detection)?;
+    let manifest_raw = resolve_manifest_for_compute(compute, manifest_raw)?;
     let manifest_for_planning: build_manifest::Manifest =
         serde_json::from_value(manifest_raw.clone())
             .context("failed to parse resolved deployment manifest")?;
@@ -598,6 +665,7 @@ pub async fn run(
             ),
         ));
     }
+    let functions = build_functions_payload(effective.config(), &project_dir, json)?;
     let has_compute_layer = manifest_has_compute_layer(&manifest_for_planning);
 
     // Resolve health check path (PROCESS only)
@@ -642,6 +710,7 @@ pub async fn run(
             deployment_id,
             &ws_info.id,
             &project_id,
+            functions,
             manifest_raw,
             manifest_for_planning,
             files,
@@ -750,6 +819,7 @@ pub async fn run(
         production: args.prod,
         branch,
         commit_sha,
+        functions,
     };
 
     let deployment: CreateDeploymentResponse = client
@@ -1051,14 +1121,15 @@ async fn prepare_upload_and_complete(
     )
     .await?;
 
+    let upload_session_id = prepared.upload_session_id.to_string();
     complete_upload_with_retry(
         client,
         deployment_id,
-        prepared.upload_session_id(),
+        &upload_session_id,
         deployment_attempt_id,
         json,
         plan,
-        prepared.source_artifact_id(),
+        prepared.source_artifact_id.as_str(),
     )
     .await?;
 
@@ -1086,31 +1157,8 @@ struct PrepareUploadBody {
     multipart: Option<source_bundle_v1::SourceBundleMultipartDescriptor>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PrepareUploadResponse {
-    kind: String,
-    upload_session_id: String,
-    source_artifact_id: String,
-    #[allow(dead_code)]
-    source_object_key: String,
-    #[allow(dead_code)]
-    bucket: String,
-    fast_path: bool,
-    #[allow(dead_code)]
-    expires_at: String,
-    presigned_put: Option<PresignedSourceSinglePut>,
-    multipart: Option<PresignedSourceMultipart>,
-    required_complete: RequiredComplete,
-}
-
-#[derive(Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-enum RequiredComplete {
-    UploadComplete,
-    #[serde(rename = "multipart-complete+upload-complete")]
-    MultipartCompleteUploadComplete,
-}
+type PrepareUploadResponse = CliPrepareUploadResponse;
+type RequiredComplete = CliPrepareUploadRequiredComplete;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1139,69 +1187,9 @@ struct UploadFailedBody {
     error_log: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "kebab-case",
-    rename_all_fields = "camelCase"
-)]
-enum UploadCompleteResponse {
-    SourceUploadCompleted {
-        #[allow(dead_code)]
-        deployment_id: String,
-        #[allow(dead_code)]
-        upload_session_id: String,
-    },
-    SourceFastPathCompleted {
-        #[allow(dead_code)]
-        deployment_id: String,
-        #[allow(dead_code)]
-        upload_session_id: String,
-    },
-    SourceVerifiedAwaitingRuntime {
-        #[allow(dead_code)]
-        deployment_id: String,
-        #[allow(dead_code)]
-        upload_session_id: String,
-    },
-    Expired {
-        #[allow(dead_code)]
-        deployment_id: String,
-        #[allow(dead_code)]
-        expired_at: String,
-    },
-    Incomplete {
-        #[allow(dead_code)]
-        missing_source_object: bool,
-    },
-    #[serde(rename = "noop_already_completed")]
-    NoopAlreadyCompleted {
-        #[allow(dead_code)]
-        deployment_id: String,
-    },
-}
+type UploadCompleteResponse = CliUploadCompleteResponse;
 
-#[derive(Debug, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "kebab-case",
-    rename_all_fields = "camelCase"
-)]
-enum UploadFailedResponse {
-    SourceUploadFailed {
-        #[allow(dead_code)]
-        deployment_id: String,
-        #[allow(dead_code)]
-        upload_session_id: String,
-    },
-    #[serde(rename = "noop_already_accepted")]
-    NoopAlreadyAccepted {
-        #[allow(dead_code)]
-        deployment_id: String,
-        #[allow(dead_code)]
-        upload_session_id: String,
-    },
-}
+type UploadFailedResponse = CliUploadFailedResponse;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1216,37 +1204,7 @@ struct MultipartCompleteBody {
     parts: Vec<CompletedMultipartPart>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "kebab-case",
-    rename_all_fields = "camelCase"
-)]
-enum MultipartCompleteResponse {
-    Completed {
-        #[allow(dead_code)]
-        deployment_id: String,
-        #[allow(dead_code)]
-        upload_session_id: String,
-        #[allow(dead_code)]
-        completed_targets: u32,
-    },
-    #[serde(rename = "noop_already_completed")]
-    NoopAlreadyCompleted {
-        #[allow(dead_code)]
-        deployment_id: String,
-    },
-}
-
-impl PrepareUploadResponse {
-    fn upload_session_id(&self) -> &str {
-        &self.upload_session_id
-    }
-
-    fn source_artifact_id(&self) -> &str {
-        &self.source_artifact_id
-    }
-}
+type MultipartCompleteResponse = CliMultipartCompleteResponse;
 
 struct SourceMultipartCompletion {
     upload_id: String,
@@ -1556,6 +1514,63 @@ fn retry_delay_with_hint(
         .min(remaining)
 }
 
+fn signed_content_length(value: i64, label: &str) -> anyhow::Result<u64> {
+    u64::try_from(value).with_context(|| format!("server returned negative {label}: {value}"))
+}
+
+fn signed_part_number(value: NonZeroU64, label: &str) -> anyhow::Result<u32> {
+    u32::try_from(value.get())
+        .with_context(|| format!("server returned {label} outside u32 range: {}", value.get()))
+}
+
+fn presigned_put_headers(
+    headers: Option<&CliPrepareUploadResponsePresignedPutHeaders>,
+) -> PresignedPutHeaders {
+    match headers {
+        Some(headers) => PresignedPutHeaders {
+            content_type: Some(headers.content_type.clone()),
+            if_none_match: headers.if_none_match.clone(),
+        },
+        None => PresignedPutHeaders::empty(),
+    }
+}
+
+fn presigned_head_verify(
+    verify_head: Option<&CliPrepareUploadResponsePresignedPutVerifyHead>,
+) -> anyhow::Result<Option<PresignedHeadVerify>> {
+    verify_head
+        .map(|verify_head| {
+            Ok(PresignedHeadVerify {
+                url: verify_head.url.clone(),
+                content_length: signed_content_length(
+                    verify_head.content_length,
+                    "verifyHead.contentLength",
+                )?,
+                sha256: verify_head.sha256.as_str().to_string(),
+            })
+        })
+        .transpose()
+}
+
+fn presigned_multipart_chunks(
+    chunks: &[CliPrepareUploadResponseMultipartChunk],
+) -> anyhow::Result<Vec<PresignedSourceMultipartChunk>> {
+    chunks
+        .iter()
+        .map(|chunk| {
+            Ok(PresignedSourceMultipartChunk {
+                part_number: signed_part_number(chunk.part_number, "multipart partNumber")?,
+                url: chunk.url.clone(),
+                content_length: signed_content_length(
+                    chunk.content_length,
+                    "multipart contentLength",
+                )?,
+                sha256: chunk.sha256.as_str().to_string(),
+            })
+        })
+        .collect()
+}
+
 async fn upload_source_object(
     client: &ApiClient,
     prepared: &PrepareUploadResponse,
@@ -1589,15 +1604,20 @@ async fn upload_source_object(
                 bail!("server requested multipart complete without a multipart upload target");
             }
             let bytes = plan.read_all().await?;
+            let headers = presigned_put_headers(single.headers.as_ref());
+            let verify_head = presigned_head_verify(single.verify_head.as_ref())?;
             upload_single_put(
                 client,
                 SinglePutUpload {
                     url: &single.url,
                     bytes,
-                    content_length: single.content_length,
-                    sha256: &single.sha256,
-                    headers: &single.headers,
-                    verify_head: single.verify_head.as_ref(),
+                    content_length: signed_content_length(
+                        single.content_length,
+                        "presignedPut.contentLength",
+                    )?,
+                    sha256: single.sha256.as_str(),
+                    headers: &headers,
+                    verify_head: verify_head.as_ref(),
                     label: "SOURCE_BUNDLE_V1 source object".to_string(),
                 },
             )
@@ -1609,17 +1629,18 @@ async fn upload_source_object(
             if prepared.required_complete != RequiredComplete::MultipartCompleteUploadComplete {
                 bail!("server returned multipart target but requiredComplete is upload-complete");
             }
+            let chunks = presigned_multipart_chunks(&multipart.chunks)?;
             let parts = upload_multipart_chunks(
                 client,
-                &multipart.chunks,
-                multipart.chunk_size,
+                &chunks,
+                multipart.chunk_size.get(),
                 "SOURCE_BUNDLE_V1 source object",
                 |offset, size| plan.read_chunk(offset, size),
             )
             .await?;
             finish_spinner(spinner, "Uploaded SOURCE_BUNDLE_V1 source");
             Ok(Some(SourceMultipartCompletion {
-                upload_id: multipart.upload_id.clone(),
+                upload_id: multipart.upload_id.as_str().to_string(),
                 parts,
             }))
         }
@@ -1648,11 +1669,11 @@ async fn complete_source_multipart_if_needed(
 
     let body = MultipartCompleteBody {
         deployment_id: deployment_id.to_string(),
-        upload_session_id: prepared.upload_session_id().to_string(),
+        upload_session_id: prepared.upload_session_id.to_string(),
         deployment_attempt_id: deployment_attempt_id.to_string(),
         operation_id: Uuid::now_v7().to_string(),
         artifact_format: "SOURCE_BUNDLE_V1".to_string(),
-        source_artifact_id: prepared.source_artifact_id().to_string(),
+        source_artifact_id: prepared.source_artifact_id.as_str().to_string(),
         upload_id: completion.upload_id,
         parts: completion.parts,
     };
@@ -1741,11 +1762,11 @@ async fn report_source_object_upload_failed(
 ) {
     let body = UploadFailedBody {
         deployment_id: deployment_id.to_string(),
-        upload_session_id: prepared.upload_session_id().to_string(),
+        upload_session_id: prepared.upload_session_id.to_string(),
         deployment_attempt_id: deployment_attempt_id.to_string(),
         operation_id: Uuid::now_v7().to_string(),
         artifact_format: "SOURCE_BUNDLE_V1".to_string(),
-        source_artifact_id: prepared.source_artifact_id().to_string(),
+        source_artifact_id: prepared.source_artifact_id.as_str().to_string(),
         error_code: SOURCE_UPLOAD_PUT_FAILED.to_string(),
         error_log: upload_failure_log(error),
     };
@@ -2065,6 +2086,7 @@ async fn resume_deploy(
     deployment_id: &str,
     workspace_id: &str,
     project_id: &str,
+    functions: Option<crate::functions::FunctionPublishPayload>,
     _manifest: serde_json::Value,
     manifest_for_planning: build_manifest::Manifest,
     files: Vec<FileEntry>,
@@ -2078,6 +2100,10 @@ async fn resume_deploy(
         format!("Resuming deployment {deployment_id}"),
         output::Phase::Deploy,
     );
+
+    if let Some(functions) = &functions {
+        stage_deployment_functions(client, deployment_id, project_id, functions, json).await?;
+    }
 
     output::status(
         json,
@@ -2123,6 +2149,115 @@ async fn resume_deploy(
     Ok(())
 }
 
+async fn stage_deployment_functions(
+    client: &ApiClient,
+    deployment_id: &str,
+    project_id: &str,
+    functions: &crate::functions::FunctionPublishPayload,
+    json: bool,
+) -> anyhow::Result<()> {
+    let edge_rule_count = functions
+        .edge_rules
+        .as_ref()
+        .map_or(0, crate::functions::edge_rule_count);
+    output::status(
+        json,
+        "~",
+        function_stage_message(functions.functions.len(), edge_rule_count),
+        output::Phase::Deploy,
+    );
+    let stage_result: anyhow::Result<serde_json::Value> = client
+        .post(
+            &stage_deployment_functions_path(project_id, deployment_id),
+            functions,
+        )
+        .await;
+    if let Err(error) = stage_result {
+        return Err(map_function_stage_error(error, json));
+    }
+    output::success(
+        json,
+        function_stage_success_message(functions.functions.len(), edge_rule_count),
+        output::Phase::Deploy,
+    );
+    Ok(())
+}
+
+fn map_function_stage_error(error: anyhow::Error, json: bool) -> anyhow::Error {
+    let Some(api_error) = error.downcast_ref::<crate::api::StructuredApiError>() else {
+        return error.context("failed to stage ONREZA Functions for deployment");
+    };
+    if api_error.code != "FUNCTION_PUBLISH_FAILED" {
+        return error.context("failed to stage ONREZA Functions for deployment");
+    }
+
+    let message = format_function_publish_failure(api_error);
+    if json {
+        output::log_error_structured(
+            "deploy",
+            &message,
+            &api_error.code,
+            api_error.details.as_ref(),
+        );
+        return output::already_reported_error();
+    }
+    anyhow::anyhow!(message).context("failed to stage ONREZA Functions for deployment")
+}
+
+fn format_function_publish_failure(error: &crate::api::StructuredApiError) -> String {
+    let Some(details) = error.details.as_ref() else {
+        return error.message.clone();
+    };
+    let category = details
+        .get("category")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("UNKNOWN");
+    let message = details
+        .get("message")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(error.message.as_str());
+    let mut rendered = format!("ONREZA Functions publish failed [{category}]: {message}");
+    if let Some(attempt_id) = details.get("attemptId").and_then(serde_json::Value::as_str) {
+        rendered.push_str(&format!(" (attempt {attempt_id})"));
+    }
+    rendered
+}
+
+fn stage_deployment_functions_path(project_id: &str, deployment_id: &str) -> String {
+    format!(
+        "/v1/projects/{project_id}/function-activations/deployments/{deployment_id}/functions/stage"
+    )
+}
+
+fn format_function_publish_summary(
+    function_count: usize,
+    source_file_count: usize,
+    edge_rule_count: usize,
+) -> String {
+    if edge_rule_count == 0 {
+        return format!("{function_count} function(s), {source_file_count} source file(s) ready");
+    }
+    format!(
+        "{function_count} function(s), {source_file_count} source file(s), {edge_rule_count} edge rule(s) ready"
+    )
+}
+
+fn function_stage_message(function_count: usize, edge_rule_count: usize) -> &'static str {
+    match (function_count > 0, edge_rule_count > 0) {
+        (true, true) => "Staging ONREZA Functions and Edge Rules...",
+        (false, true) => "Staging Edge Rules...",
+        _ => "Staging ONREZA Functions...",
+    }
+}
+
+fn function_stage_success_message(function_count: usize, edge_rule_count: usize) -> &'static str {
+    match (function_count > 0, edge_rule_count > 0) {
+        (true, true) => "ONREZA Functions and Edge Rules staged for deployment",
+        (false, true) => "Edge Rules staged for deployment",
+        _ => "ONREZA Functions staged for deployment",
+    }
+}
+
 // ── PROCESS validation ───────────────────────────────────────
 
 fn manifest_has_compute_layer(manifest: &build_manifest::Manifest) -> bool {
@@ -2141,20 +2276,19 @@ fn manifest_has_compute_layer(manifest: &build_manifest::Manifest) -> bool {
 ///   (guards compute/manifest combinations) and is returned as-is.
 /// - STATIC without manifest → auto-gen via `generate_static_manifest()`. The
 ///   build step auto-gens this only when detection suggested Static; this branch
-///   covers `--compute static` overrides for projects detected as Process/Isolate.
-/// - ISOLATE/PROCESS without manifest → `validate_compute_manifest_contract`
-///   bails with a user-facing error (PROCESS auto-gen runs earlier in `run()`,
-///   so this case here means PROCESS auto-gen failed somewhere upstream).
+///   covers `--compute static` overrides for projects detected as Process.
+/// - PROCESS without manifest → `validate_compute_manifest_contract` bails with a
+///   user-facing error (PROCESS auto-gen runs earlier in `run()`, so this case
+///   here means PROCESS auto-gen failed somewhere upstream).
 ///
 /// Replaces the `manifest_raw.expect(...)` runtime invariant with a typed
 /// signature, so missing-manifest bugs surface at type-check time on call-sites.
 fn resolve_manifest_for_compute(
     compute: ComputeType,
     manifest_raw: Option<serde_json::Value>,
-    detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<serde_json::Value> {
     if let Some(manifest) = manifest_raw {
-        validate_compute_manifest_contract(compute, true, detection)?;
+        validate_compute_manifest_contract(compute, true)?;
         return Ok(manifest);
     }
 
@@ -2164,8 +2298,8 @@ fn resolve_manifest_for_compute(
             .context("failed to serialize auto-generated STATIC manifest");
     }
 
-    // ISOLATE/PROCESS without manifest: defer to validate for the user-facing message.
-    validate_compute_manifest_contract(compute, false, detection)?;
+    // PROCESS without manifest: defer to validate for the user-facing message.
+    validate_compute_manifest_contract(compute, false)?;
     // validate_compute_manifest_contract must return Err for these; reaching here
     // means its contract was changed. Surface as a bug, not a panic.
     bail!(
@@ -2177,24 +2311,7 @@ fn resolve_manifest_for_compute(
 fn validate_compute_manifest_contract(
     compute: ComputeType,
     has_manifest: bool,
-    detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<()> {
-    // ISOLATE without a manifest is always an error — it requires a pre-built manifest.
-    if compute == ComputeType::Isolate && !has_manifest {
-        let framework = &detection.name;
-        return Err(output::coded_error(
-            "MISSING_MANIFEST",
-            format!(
-                "{framework} project detected but no .onreza/manifest.json found.\n\n\
-                 ISOLATE compute requires a manifest with ISOLATE layers.\n\n\
-                 Options:\n\
-                 \x20 1. Create .onreza/manifest.json manually\n\
-                 \x20 2. Use --compute static if your build output is static files only\n\
-                 \x20 3. Use --compute process for standalone server deployment"
-            ),
-        ));
-    }
-
     // Safety net: PROCESS auto-generation should have produced a manifest
     // before this point. Reaching here without one is an unexpected internal state.
     if compute == ComputeType::Process && !has_manifest {
@@ -3856,7 +3973,6 @@ fn resolve_explicit_compute_type(
 fn compute_type_from_manifest(manifest: &build_manifest::Manifest) -> ComputeType {
     match build_manifest::primary_compute_target(manifest) {
         build_manifest::LayerTarget::Compute => ComputeType::Process,
-        build_manifest::LayerTarget::Isolate => ComputeType::Isolate,
         build_manifest::LayerTarget::Static => ComputeType::Static,
     }
 }
@@ -3864,11 +3980,10 @@ fn compute_type_from_manifest(manifest: &build_manifest::Manifest) -> ComputeTyp
 fn parse_compute_type(s: &str) -> anyhow::Result<ComputeType> {
     match s.to_lowercase().as_str() {
         "static" => Ok(ComputeType::Static),
-        "isolate" => Ok(ComputeType::Isolate),
         "process" => Ok(ComputeType::Process),
         _ => Err(output::coded_error(
             "INVALID_COMPUTE_TYPE",
-            format!("invalid compute type: \"{s}\". Must be one of: static, isolate, process"),
+            format!("invalid compute type: \"{s}\". Must be one of: static, process"),
         )),
     }
 }

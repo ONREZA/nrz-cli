@@ -14,6 +14,11 @@ name = "nrz"
 path = "src/main.rs"
 
 [dependencies]
+# Shared ONREZA contract + static function policy.
+# Source of truth lives in ../deployment/crates; sync copies the snapshot here.
+nrz-contract = { path = "vendor/onreza-crates/nrz-contract" }
+nrz-fn-policy = { path = "vendor/onreza-crates/nrz-fn-policy" }
+
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
 
@@ -65,8 +70,8 @@ zstd = "0.13"
 # URL encoding
 percent-encoding = "2"
 
-# Config
-toml = "0.8"
+# Config (onreza.toml + onreza.rules.toml authoring → JSON transport)
+toml = "1"
 
 # Errors
 thiserror = "2"

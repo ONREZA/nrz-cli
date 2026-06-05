@@ -2,7 +2,13 @@ import * as assert from "node:assert/strict";
 import { test } from "bun:test";
 
 import { createPackageJson, createPostinstall, releaseAssets } from "./create-npm-package";
-import { filterReleaseCommits, resolveVersion, type ReleaseCommit } from "./release-plan";
+import {
+  filterReleaseCommits,
+  releaseCargoToml,
+  releaseVendorCargoToml,
+  resolveVersion,
+  type ReleaseCommit,
+} from "./release-plan";
 
 const fixCommit: ReleaseCommit = {
   hash: "1111111111111111111111111111111111111111",
@@ -58,6 +64,40 @@ test("postinstall fails when no binary exists for the host platform", () => {
 
   assert.match(script, /No binary available for/);
   assert.match(script, /process\.exit\(1\);/);
+});
+
+test("release cargo manifest points nrz crates at sanitized vendor snapshot", () => {
+  const cargo = [
+    '[package]',
+    'name = "nrz"',
+    'version = "0.32.4"',
+    '',
+    '[dependencies]',
+    'nrz-contract = { version = "0.1", path = "../deployment/crates/nrz-contract" }',
+    'nrz-fn-policy = { version = "0.1", path = "../deployment/crates/nrz-fn-policy" }',
+    '',
+  ].join("\n");
+
+  const updated = releaseCargoToml(cargo, "0.33.0-beta.0");
+
+  assert.match(updated, /^version = "0\.33\.0-beta\.0"$/m);
+  assert.match(updated, /^nrz-contract = \{ path = "vendor\/onreza-crates\/nrz-contract" \}$/m);
+  assert.match(updated, /^nrz-fn-policy = \{ path = "vendor\/onreza-crates\/nrz-fn-policy" \}$/m);
+  assert.doesNotMatch(updated, /\.\.\/deployment/);
+});
+
+test("release vendored crate manifests follow the CLI version", () => {
+  const cargo = [
+    '[package]',
+    'name = "nrz-contract"',
+    'version = "0.0.0"',
+    'edition = "2024"',
+    '',
+  ].join("\n");
+
+  const updated = releaseVendorCargoToml(cargo, "0.33.0-beta.0");
+
+  assert.match(updated, /^version = "0\.33\.0-beta\.0"$/m);
 });
 
 test("stable auto release promotes an active prerelease train without another bump", () => {

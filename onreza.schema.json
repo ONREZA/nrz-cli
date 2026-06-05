@@ -99,7 +99,7 @@
         "compute": {
           "type": "string",
           "description": "Compute type override. If not set, inferred automatically from framework detection. Use when auto-detection is incorrect.",
-          "enum": ["static", "isolate", "process"]
+          "enum": ["static", "process"]
         },
         "entry": {
           "type": "string",

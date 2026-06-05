@@ -117,7 +117,7 @@ pub struct BuildSection {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct DeploySection {
-    /// Compute type override: "static", "isolate", "process".
+    /// Compute type override: "static", "process".
     pub compute: Option<String>,
     /// Explicit entry point for PROCESS deployments (e.g. "server.ts").
     pub entry: Option<String>,
@@ -958,7 +958,7 @@ pub fn generate_template(
 # output_dirs = ["dist", ".output", "build", "out", "_site", "www", ".vitepress/dist"]
 
 # [deploy]
-# compute = "static"    # "static", "isolate", or "process"
+# compute = "static"    # "static" or "process"
 # entry = "server.ts"   # entry point for PROCESS deployments
 # health_check_path = "/health"  # HTTP health check path, or false for TCP only
 

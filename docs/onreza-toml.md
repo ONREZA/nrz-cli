@@ -100,7 +100,7 @@ output_dirs = ["dist"]
 | Поле | Тип | По умолчанию | Описание |
 |------|-----|-------------|---------|
 | `skip_migrations` | boolean | `false` | Пропустить применение DB-миграций при деплое. Полезно если миграции применяются отдельным CI-шагом. |
-| `compute` | string | авто | Принудительно задать compute type вместо авто-определения. Значения: `"static"`, `"isolate"`, `"process"`. Используйте только если авто-определение даёт неверный результат. |
+| `compute` | string | авто | Принудительно задать compute type вместо авто-определения. Значения: `"static"`, `"process"`. Используйте только если авто-определение даёт неверный результат. |
 | `entry` | string | авто | Точка входа для `PROCESS`-деплоев (Node.js/Bun сервер). Должна быть относительным путём без `..`. Пример: `"server.ts"`, `"dist/index.js"`. Если не задана, CLI определяет автоматически. |
 | `app` | string | нет | Монорепо: какой workspace/пакет деплоить. Матчится по имени пакета из `package.json`, имени директории, или относительному пути. Эквивалент CLI флага `--app` / `--filter`. |
 
@@ -117,7 +117,6 @@ output_dirs = ["dist"]
 | Тип | Когда использовать |
 |-----|--------------------|
 | `static` | Статические сайты без серверного кода (Vite, CRA, Astro static) |
-| `isolate` | Edge-функции через @onreza адаптер (Next.js Edge, Nuxt с адаптером) |
 | `process` | Полноценный Node.js/Bun сервер (Next.js standalone, Hono, Elysia, кастомный сервер) |
 
 Матрица приоритетов `frameworkPreset`/`compute`/`outputDirectory` описана в
@@ -125,9 +124,7 @@ output_dirs = ["dist"]
 пользовательский `outputDirectory` из server settings является authoritative и
 не допускает silent fallback; preset/default значения могут уточняться SSR-анализом.
 
-`.onreza/manifest.json` поддерживается только для `isolate`:
-- `compute = "isolate"` требует manifest в build output
-- `compute = "process"` и `compute = "static"` выполняются без manifest
+`compute = "process"` и `compute = "static"` выполняются без `.onreza/manifest.json`.
 
 **Приоритет entry point для PROCESS:**
 `[deploy] entry` > авто-определение по фреймворку > `package.json "main"/"module"` > `scripts.start/serve/...` > `index.*` (Bun default) > heuristic scan по build output

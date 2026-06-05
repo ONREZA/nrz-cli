@@ -707,6 +707,96 @@ fn build_uses_onreza_toml_from_dir_argument() {
 }
 
 #[test]
+fn functions_check_json_emits_single_report_object() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(temp.path().join("functions")).unwrap();
+    fs::write(
+        temp.path().join("functions/api.nrz-fn.ts"),
+        "export const config = {};\nexport default { fetch() { return new Response('ok'); } };\n",
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["functions", "check", "--json"]);
+    let output = cmd.output().unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1, "expected one JSON object, got: {stdout}");
+    let value: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(value["functions"][0]["name"], "api");
+    assert_eq!(value["functions"][0]["report"]["status"], "passed");
+    assert_eq!(
+        value["functions"][0]["report"]["entrypoint"],
+        "functions/api.nrz-fn.ts"
+    );
+}
+
+#[test]
+fn functions_check_json_failure_emits_single_report_object() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(temp.path().join("functions")).unwrap();
+    fs::write(
+        temp.path().join("functions/api.nrz-fn.ts"),
+        "export const config = {};\nexport default { fetch() { return Bun.sql`select 1`; } };\n",
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["functions", "check", "--json"]);
+    let output = cmd.output().unwrap();
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1, "expected one JSON object, got: {stdout}");
+    let value: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(value["code"], "ONREZA_FUNCTIONS_POLICY");
+    assert!(
+        value["error"]
+            .as_str()
+            .unwrap()
+            .contains("function policy check failed")
+    );
+    assert_eq!(value["functions"][0]["report"]["status"], "failed");
+}
+
+#[test]
+fn functions_check_json_accepts_static_rules_only_project() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("onreza.rules.toml"),
+        r#"
+schemaVersion = "EDGE_RULE_SET_V1"
+source = { origin = "build" }
+
+[[rules]]
+id = "redirect-old"
+condition.path = { type = "prefix", value = "/old" }
+action = { type = "redirect", target = "/new" }
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["functions", "check", "--json"]);
+    let output = cmd.output().unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let value: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(value["functions"].as_array().unwrap().len(), 0);
+    assert_eq!(value["edgeRules"]["ruleCount"], 1);
+    assert_eq!(value["edgeRules"]["rules"][0]["id"], "redirect-old");
+    assert_eq!(value["edgeRules"]["rules"][0]["position"], 0);
+    assert_eq!(value["edgeRules"]["rules"][0]["action"], "redirect");
+}
+
+#[test]
 fn detect_nonexistent_directory_returns_error() {
     let mut cmd = nrz();
     cmd.args(["detect", "--json", "/tmp/nrz_test_nonexistent_dir_12345"]);

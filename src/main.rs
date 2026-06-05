@@ -9,6 +9,7 @@ mod deployments_tests;
 mod detect;
 mod detect_sync;
 mod dev;
+mod functions;
 mod init;
 mod link;
 mod logs;
@@ -79,11 +80,17 @@ fn config_dir_for_command(command: &Command) -> PathBuf {
         },
         Command::Link(args) => Path::new(&args.dir).to_path_buf(),
         Command::Detect(args) => Path::new(&args.dir).to_path_buf(),
+        Command::Functions(args) => match &args.command {
+            cli::functions::FunctionsCommand::Check(args) => Path::new(&args.dir).to_path_buf(),
+        },
         _ => std::env::current_dir().unwrap_or_default(),
     }
 }
 
 fn emit_terminal_error(json: bool, err: &anyhow::Error) {
+    if err.chain().any(|c| c.is::<output::AlreadyReportedError>()) {
+        return;
+    }
     if !json {
         eprintln!("Error: {err:#}");
         return;
@@ -133,5 +140,6 @@ async fn run_command(
         Command::Workspace(args) => cli::workspace_handler::run(args, json).await,
         Command::Init(args) => init::run(args, json, token, workspace, config).await,
         Command::Detect(args) => Ok(cli::detect_handler::run(args, json)?),
+        Command::Functions(args) => cli::functions_handler::run(args, json).await,
     }
 }

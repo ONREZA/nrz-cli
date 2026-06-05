@@ -983,37 +983,20 @@ fn static_hint_unknown_returns_empty() {
 // ── compute/manifest contract tests ─────────────────────────
 
 #[test]
-fn isolate_without_manifest_is_error() {
-    let detection = make_detection("nextjs", None);
-    let err = validate_compute_manifest_contract(ComputeType::Isolate, false, &detection)
-        .expect_err("ISOLATE without manifest should fail");
-    assert!(err.to_string().contains("ISOLATE"));
-}
-
-#[test]
 fn process_with_manifest_is_ok() {
     // Manifest can declare COMPUTE layers — PROCESS + manifest is valid.
-    let detection = make_detection("nextjs", None);
-    assert!(validate_compute_manifest_contract(ComputeType::Process, true, &detection).is_ok());
-}
-
-#[test]
-fn isolate_with_manifest_is_ok() {
-    let detection = make_detection("nextjs", None);
-    assert!(validate_compute_manifest_contract(ComputeType::Isolate, true, &detection).is_ok());
+    assert!(validate_compute_manifest_contract(ComputeType::Process, true).is_ok());
 }
 
 #[test]
 fn static_without_manifest_is_ok() {
-    let detection = make_detection("vite", None);
-    assert!(validate_compute_manifest_contract(ComputeType::Static, false, &detection).is_ok());
+    assert!(validate_compute_manifest_contract(ComputeType::Static, false).is_ok());
 }
 
 #[test]
 fn static_with_manifest_is_ok() {
     // Manifest can declare only STATIC layers — STATIC + manifest is valid.
-    let detection = make_detection("vite", None);
-    assert!(validate_compute_manifest_contract(ComputeType::Static, true, &detection).is_ok());
+    assert!(validate_compute_manifest_contract(ComputeType::Static, true).is_ok());
 }
 
 #[test]
@@ -1021,8 +1004,7 @@ fn process_without_manifest_is_error() {
     // Safety net: PROCESS auto-generation should always produce a manifest before
     // validate_compute_manifest_contract is called, so reaching here with has_manifest=false
     // is an unexpected state.
-    let detection = make_detection("nextjs", None);
-    let err = validate_compute_manifest_contract(ComputeType::Process, false, &detection)
+    let err = validate_compute_manifest_contract(ComputeType::Process, false)
         .expect_err("PROCESS without manifest should fail");
     assert!(
         err.to_string().contains("Internal error"),
@@ -1038,6 +1020,7 @@ fn create_deployment_body_serializes_required_fields() {
         production: false,
         branch: None,
         commit_sha: "deadbeef".into(),
+        functions: None,
     };
 
     let value = serde_json::to_value(&body).unwrap();
@@ -1049,6 +1032,40 @@ fn create_deployment_body_serializes_required_fields() {
     assert!(value.get("computeType").is_none());
     assert!(value.get("processEntry").is_none());
     assert!(value.get("bundle").is_none());
+    assert!(value.get("functions").is_none());
+}
+
+#[test]
+fn create_deployment_body_serializes_functions_payload() {
+    let body = CreateDeploymentBody {
+        manifest: serde_json::json!({ "version": 1 }),
+        files: vec![],
+        production: false,
+        branch: None,
+        commit_sha: "deadbeef".into(),
+        functions: Some(crate::functions::FunctionPublishPayload {
+            origin: "DEPLOYMENT",
+            functions: vec![],
+            edge_rules: None,
+        }),
+    };
+
+    let value = serde_json::to_value(&body).unwrap();
+    assert_eq!(
+        value
+            .get("functions")
+            .and_then(|functions| functions.get("origin"))
+            .and_then(|origin| origin.as_str()),
+        Some("DEPLOYMENT")
+    );
+}
+
+#[test]
+fn stage_deployment_functions_path_targets_project_activation_family() {
+    assert_eq!(
+        stage_deployment_functions_path("project-1", "deployment-1"),
+        "/v1/projects/project-1/function-activations/deployments/deployment-1/functions/stage"
+    );
 }
 
 #[test]
@@ -1074,7 +1091,6 @@ fn prepare_upload_body_serializes_source_bundle_v1_contract() {
             runtime_config: None,
         }],
         routes: vec![],
-        middleware: None,
         entrypoints: vec![],
     };
     let logical_manifest_sha256 =
@@ -1135,6 +1151,8 @@ fn prepare_upload_body_serializes_source_bundle_v1_contract() {
             "workspaceId",
         ]
     );
+    serde_json::from_value::<nrz_contract::CliPrepareUploadRequest>(value)
+        .expect("prepare-upload body must match generated CLI API contract");
 }
 
 #[test]
@@ -1156,6 +1174,52 @@ fn upload_failed_body_serializes_source_bundle_v1_contract() {
     assert_eq!(value["errorLog"], "S3 rejected the upload");
     assert!(value.get("sourceSha256").is_none());
     assert!(value.get("sourceSizeBytes").is_none());
+    serde_json::from_value::<nrz_contract::CliUploadFailedRequest>(value)
+        .expect("upload-failed body must match generated CLI API contract");
+}
+
+#[test]
+fn upload_complete_body_serializes_source_bundle_v1_contract() {
+    let body = UploadCompleteBody {
+        deployment_id: Uuid::now_v7().to_string(),
+        upload_session_id: Uuid::now_v7().to_string(),
+        deployment_attempt_id: Uuid::now_v7().to_string(),
+        operation_id: Uuid::now_v7().to_string(),
+        artifact_format: "SOURCE_BUNDLE_V1".into(),
+        source_artifact_id: "c".repeat(64),
+        source_sha256: "d".repeat(64),
+        source_size_bytes: "4096".into(),
+        logical_manifest_sha256: "e".repeat(64),
+    };
+
+    let value = serde_json::to_value(&body).unwrap();
+    assert_eq!(value["artifactFormat"], "SOURCE_BUNDLE_V1");
+    assert_eq!(value["sourceSizeBytes"], "4096");
+    serde_json::from_value::<nrz_contract::CliUploadCompleteRequest>(value)
+        .expect("upload-complete body must match generated CLI API contract");
+}
+
+#[test]
+fn multipart_complete_body_serializes_source_bundle_v1_contract() {
+    let body = MultipartCompleteBody {
+        deployment_id: Uuid::now_v7().to_string(),
+        upload_session_id: Uuid::now_v7().to_string(),
+        deployment_attempt_id: Uuid::now_v7().to_string(),
+        operation_id: Uuid::now_v7().to_string(),
+        artifact_format: "SOURCE_BUNDLE_V1".into(),
+        source_artifact_id: "c".repeat(64),
+        upload_id: "upload-id".into(),
+        parts: vec![CompletedMultipartPart {
+            part_number: 1,
+            e_tag: "\"etag\"".into(),
+        }],
+    };
+
+    let value = serde_json::to_value(&body).unwrap();
+    assert_eq!(value["artifactFormat"], "SOURCE_BUNDLE_V1");
+    assert_eq!(value["parts"][0]["partNumber"], 1);
+    serde_json::from_value::<nrz_contract::CliMultipartCompleteRequest>(value)
+        .expect("multipart-complete body must match generated CLI API contract");
 }
 
 #[test]
@@ -1500,7 +1564,7 @@ fn file_entry_serializes_with_camel_case_content_hash() {
 // ── manifest → compute type mapping tests ────────────────────
 //
 // Verifies the contract: primary_compute_target(manifest) → LayerTarget,
-// which deploy maps as: Compute→Process, Isolate→Isolate, Static→Static.
+// which deploy maps as: Compute→Process, Static→Static.
 
 #[test]
 fn manifest_compute_layer_maps_to_process() {
@@ -1519,34 +1583,9 @@ fn manifest_compute_layer_maps_to_process() {
     let target = crate::build::manifest::primary_compute_target(&manifest);
     let compute = match target {
         crate::build::manifest::LayerTarget::Compute => ComputeType::Process,
-        crate::build::manifest::LayerTarget::Isolate => ComputeType::Isolate,
         crate::build::manifest::LayerTarget::Static => ComputeType::Static,
     };
     assert_eq!(compute, ComputeType::Process);
-}
-
-#[test]
-fn manifest_isolate_layer_maps_to_isolate() {
-    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
-        r#"{
-        "version": 1,
-        "layers": [
-            {"name": "assets", "target": "STATIC", "directory": "client"},
-            {"name": "server", "target": "ISOLATE", "directory": "server",
-             "entry": "entry.mjs", "export": "fetch"}
-        ],
-        "routes": [{"pattern": "^/.*$", "layer": "server"}]
-    }"#,
-    )
-    .unwrap();
-
-    let target = crate::build::manifest::primary_compute_target(&manifest);
-    let compute = match target {
-        crate::build::manifest::LayerTarget::Compute => ComputeType::Process,
-        crate::build::manifest::LayerTarget::Isolate => ComputeType::Isolate,
-        crate::build::manifest::LayerTarget::Static => ComputeType::Static,
-    };
-    assert_eq!(compute, ComputeType::Isolate);
 }
 
 #[test]
@@ -1563,7 +1602,6 @@ fn manifest_static_only_maps_to_static() {
     let target = crate::build::manifest::primary_compute_target(&manifest);
     let compute = match target {
         crate::build::manifest::LayerTarget::Compute => ComputeType::Process,
-        crate::build::manifest::LayerTarget::Isolate => ComputeType::Isolate,
         crate::build::manifest::LayerTarget::Static => ComputeType::Static,
     };
     assert_eq!(compute, ComputeType::Static);
@@ -2639,6 +2677,29 @@ fn expect_code(err: &anyhow::Error, expected: &str) {
 }
 
 #[test]
+fn function_stage_error_preserves_publish_failure_details() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: StatusCode::BAD_REQUEST,
+        code: "FUNCTION_PUBLISH_FAILED".to_string(),
+        message: "Ошибка валидации".to_string(),
+        retry_after_seconds: None,
+        details: Some(serde_json::json!({
+            "attemptId": "11111111-1111-1111-1111-111111111111",
+            "category": "POLICY",
+            "message": "function 'api' failed the function policy check",
+        })),
+    }
+    .into();
+
+    let mapped = map_function_stage_error(error, false);
+    let rendered = format!("{mapped:#}");
+
+    assert!(rendered.contains("failed to stage ONREZA Functions for deployment"));
+    assert!(rendered.contains("ONREZA Functions publish failed [POLICY]"));
+    assert!(rendered.contains("11111111-1111-1111-1111-111111111111"));
+}
+
+#[test]
 fn boundary_wrap_nuxt_missing_server_is_missing_process_entry() {
     // validate_process_output is an internal helper; the boundary wrap that
     // tags its failures with MISSING_PROCESS_ENTRY lives at the call site in
@@ -2766,14 +2827,6 @@ fn validate_health_path_rejects_query_string_with_code() {
     let err =
         validate_health_path("/health?x=1", "--health-check-path").expect_err("query must fail");
     expect_code(&err, "INVALID_ARGUMENT");
-}
-
-#[test]
-fn validate_compute_manifest_contract_isolate_without_manifest_is_missing_manifest() {
-    let detection = make_detection("remix", None);
-    let err = validate_compute_manifest_contract(ComputeType::Isolate, false, &detection)
-        .expect_err("ISOLATE without manifest must fail");
-    expect_code(&err, "MISSING_MANIFEST");
 }
 
 #[test]

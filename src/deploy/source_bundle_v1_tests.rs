@@ -85,6 +85,32 @@ async fn source_bundle_embeds_canonical_logical_manifest_first() {
 }
 
 #[test]
+fn source_bundle_treats_header_and_redirect_files_as_static_content() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("_headers"), b"plain user file").unwrap();
+    fs::write(dir.path().join("_redirects"), b"plain user file").unwrap();
+    let manifest = static_manifest();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+
+    let headers = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "_headers")
+        .unwrap();
+    let redirects = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "_redirects")
+        .unwrap();
+    assert_eq!(headers.role, SourceLogicalManifestFileRole::Static);
+    assert_eq!(redirects.role, SourceLogicalManifestFileRole::Static);
+}
+
+#[test]
 fn source_bundle_plan_rejects_reserved_metadata_namespace() {
     let manifest = static_manifest();
 
@@ -137,7 +163,6 @@ fn logical_manifest_sha_uses_stable_key_ordering() {
             runtime_config: None,
         }],
         routes: vec![],
-        middleware: None,
         entrypoints: vec![],
     };
     let mut right_value = serde_json::json!({
@@ -393,12 +418,11 @@ fn source_bundle_plan_rejects_overlong_symlink_target() {
 }
 
 #[test]
-fn logical_manifest_defaults_middleware_priority_for_server_digest() {
+fn source_bundle_plan_rejects_legacy_manifest_middleware() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("middleware")).unwrap();
     let middleware_body = b"export default function middleware() {}";
     fs::write(dir.path().join("middleware/auth.mjs"), middleware_body).unwrap();
-    let middleware_sha = format!("{:x}", Sha256::digest(middleware_body));
     let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
         "version": 1,
         "layers": [
@@ -408,42 +432,7 @@ fn logical_manifest_defaults_middleware_priority_for_server_digest() {
         "middleware": [{
             "name": "auth",
             "bundlePath": "middleware/auth.mjs",
-            "codeHash": format!("sha256-{middleware_sha}"),
-            "matchers": ["^/.*$"]
-        }]
-    }))
-    .unwrap();
-    let files = scan_dir(dir.path()).unwrap();
-
-    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
-    let middleware = plan.logical_manifest.middleware.as_ref().unwrap();
-    assert_eq!(middleware[0].priority, 0);
-    assert_eq!(middleware[0].code_hash, middleware_sha);
-
-    let value = serde_json::to_value(&plan.logical_manifest).unwrap();
-    assert_eq!(value["middleware"][0]["priority"], 0);
-    assert_eq!(value["middleware"][0]["codeHash"], middleware_sha);
-}
-
-#[test]
-fn logical_manifest_rejects_middleware_code_hash_mismatch() {
-    let dir = tempdir().unwrap();
-    fs::create_dir_all(dir.path().join("middleware")).unwrap();
-    fs::write(
-        dir.path().join("middleware/auth.mjs"),
-        b"export default function middleware() {}",
-    )
-    .unwrap();
-    let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version": 1,
-        "layers": [
-            { "name": "static", "target": "STATIC", "directory": "." }
-        ],
-        "routes": [],
-        "middleware": [{
-            "name": "auth",
-            "bundlePath": "middleware/auth.mjs",
-            "codeHash": format!("sha256-{}", "0".repeat(64)),
+            "codeHash": "sha256-abc",
             "matchers": ["^/.*$"]
         }]
     }))
@@ -452,7 +441,11 @@ fn logical_manifest_rejects_middleware_code_hash_mismatch() {
 
     let err = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap_err();
 
-    assert!(err.to_string().contains("codeHash does not match"), "{err}");
+    assert!(
+        err.to_string()
+            .contains("manifest middleware is no longer supported"),
+        "{err}"
+    );
 }
 
 #[test]
