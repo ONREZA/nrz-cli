@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.0-beta.2] - 2026-06-05
+
+### 🐛 Bug Fixes
+
+- **release:** publish draft releases by id ([fcc82ea](https://github.com/ONREZA/nrz-cli/commit/fcc82ea415cde4e016639db3eb9ee42f8540302e))
+- **release:** restrict channels and prepare vendored deps ([ac362a5](https://github.com/ONREZA/nrz-cli/commit/ac362a5096cd336ac1443b6a56c8b725ce68be44))
+- **ci:** install configured dagger version ([4d8eae7](https://github.com/ONREZA/nrz-cli/commit/4d8eae765100e8a8a75f140a38bf034811c8352b))
+
+### ✨ Features
+
+- **cli:** add ONREZA Functions ([f09d2ff](https://github.com/ONREZA/nrz-cli/commit/f09d2ff49a791d1a78a109041c75a7e68883a7ec))
+- **release:** move release flow to dagger ([80bc0fe](https://github.com/ONREZA/nrz-cli/commit/80bc0feaa47af43c6039501e7e4a5adee7f9b574))
+
+### 🔧 Changed
+
+- **ci:** update github actions ([f9b1b0c](https://github.com/ONREZA/nrz-cli/commit/f9b1b0ce1ace96422cd4ba70c662fc40786c8845))
+
 ## [0.33.0-beta.1] - 2026-06-05
 
 ### 🐛 Bug Fixes
