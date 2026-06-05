@@ -2,6 +2,7 @@ import * as assert from "node:assert/strict";
 import { test } from "bun:test";
 
 import { createPackageJson, createPostinstall, releaseAssets } from "./create-npm-package";
+import { findReleaseByTag, type GitHubRelease } from "./publish-github-release";
 import {
   filterReleaseCommits,
   releaseCargoToml,
@@ -54,6 +55,34 @@ test("release assets are tied to the selected GitHub release tag", () => {
     releaseAssets("v0.33.0-beta.1")["linux-x64"],
     "https://github.com/ONREZA/nrz-cli/releases/download/v0.33.0-beta.1/nrz-linux-x64.tar.gz",
   );
+});
+
+test("GitHub release lookup includes draft releases by tag", async () => {
+  const draft: GitHubRelease = {
+    id: 123,
+    tag_name: "v0.33.0-beta.1",
+    draft: true,
+    html_url: "https://github.com/ONREZA/nrz-cli/releases/tag/untagged-draft",
+    assets: [],
+  };
+  const calls: string[] = [];
+
+  const release = await findReleaseByTag("ONREZA/nrz-cli", "v0.33.0-beta.1", async <T>(
+    method: string,
+    path: string,
+  ): Promise<T | null> => {
+    calls.push(`${method} ${path}`);
+    if (path.endsWith("/releases/tags/v0.33.0-beta.1")) {
+      return null;
+    }
+    return [draft] as T;
+  });
+
+  assert.equal(release?.id, draft.id);
+  assert.deepEqual(calls, [
+    "GET /repos/ONREZA/nrz-cli/releases/tags/v0.33.0-beta.1",
+    "GET /repos/ONREZA/nrz-cli/releases?per_page=100",
+  ]);
 });
 
 test("postinstall fails when no binary exists for the host platform", () => {

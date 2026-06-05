@@ -24,16 +24,15 @@ interface GitHubAsset {
   name: string;
 }
 
-interface GitHubRelease {
+export interface GitHubRelease {
   id: number;
+  tag_name: string;
   draft: boolean;
   html_url: string;
   assets?: GitHubAsset[];
 }
 
-if (!token || !version || !tag) {
-  throw new Error("GITHUB_TOKEN, NRZ_RELEASE_VERSION, and NRZ_RELEASE_TAG are required");
-}
+type Requester = <T>(method: string, path: string, body?: unknown) => Promise<T | null>;
 
 function walk(dir: string): string[] {
   const entries: string[] = [];
@@ -73,6 +72,23 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new Error(`${method} ${path} failed: ${response.status} ${text}`);
   }
   return data;
+}
+
+export async function findReleaseByTag(
+  repositoryName: string,
+  releaseTag: string,
+  requester: Requester = request,
+): Promise<GitHubRelease | null> {
+  const published = await requester<GitHubRelease>(
+    "GET",
+    `/repos/${repositoryName}/releases/tags/${releaseTag}`,
+  );
+  if (published) {
+    return published;
+  }
+
+  const releases = await requester<GitHubRelease[]>("GET", `/repos/${repositoryName}/releases?per_page=100`);
+  return releases?.find((release) => release.tag_name === releaseTag) ?? null;
 }
 
 async function uploadAsset(releaseId: number, filePath: string, name: string): Promise<void> {
@@ -124,72 +140,84 @@ function requireAsset(name: string): string {
   return assetPath;
 }
 
-const assetPaths = requiredAssets.map((asset) => requireAsset(asset));
-const checksumPath = createChecksums(assetPaths);
-const allUploads = [...assetPaths, checksumPath];
-const allNames = [...requiredAssets, "checksums-sha256.txt"];
-
-let release = await request<GitHubRelease>("GET", `/repos/${repository}/releases/tags/${tag}`);
-if (release && !release.draft) {
-  const existingNames = new Set((release.assets || []).map((asset) => asset.name));
-  const complete = allNames.every((name) => existingNames.has(name));
-  if (complete) {
-    process.stdout.write(
-      `${JSON.stringify({ tag, version, channel, releaseUrl: release.html_url, status: "already-published" }, null, 2)}\n`,
-    );
-    process.exit(0);
+async function main(): Promise<void> {
+  if (!token || !version || !tag) {
+    throw new Error("GITHUB_TOKEN, NRZ_RELEASE_VERSION, and NRZ_RELEASE_TAG are required");
   }
-  throw new Error(`Release ${tag} already exists and is published but does not have a complete asset set`);
-}
 
-if (!release) {
-  release = await request<GitHubRelease>("POST", `/repos/${repository}/releases`, {
-    tag_name: tag,
-    name: `nrz ${tag}`,
-    body: releaseNotes(),
-    draft: true,
-    prerelease,
-    generate_release_notes: false,
-  });
+  const assetPaths = requiredAssets.map((asset) => requireAsset(asset));
+  const checksumPath = createChecksums(assetPaths);
+  const allUploads = [...assetPaths, checksumPath];
+  const allNames = [...requiredAssets, "checksums-sha256.txt"];
+
+  let release = await findReleaseByTag(repository, tag);
+  if (release && !release.draft) {
+    const existingNames = new Set((release.assets || []).map((asset) => asset.name));
+    const complete = allNames.every((name) => existingNames.has(name));
+    if (complete) {
+      process.stdout.write(
+        `${JSON.stringify({ tag, version, channel, releaseUrl: release.html_url, status: "already-published" }, null, 2)}\n`,
+      );
+      return;
+    }
+    throw new Error(`Release ${tag} already exists and is published but does not have a complete asset set`);
+  }
+
   if (!release) {
-    throw new Error(`Could not create release ${tag}`);
+    release = await request<GitHubRelease>("POST", `/repos/${repository}/releases`, {
+      tag_name: tag,
+      name: `nrz ${tag}`,
+      body: releaseNotes(),
+      draft: true,
+      prerelease,
+      generate_release_notes: false,
+    });
+    if (!release) {
+      throw new Error(`Could not create release ${tag}`);
+    }
   }
-}
 
-for (const asset of release.assets || []) {
-  if (allNames.includes(asset.name)) {
-    await request<Record<string, never>>("DELETE", `/repos/${repository}/releases/assets/${asset.id}`);
+  for (const asset of release.assets || []) {
+    if (allNames.includes(asset.name)) {
+      await request<Record<string, never>>("DELETE", `/repos/${repository}/releases/assets/${asset.id}`);
+    }
   }
-}
 
-for (let index = 0; index < allUploads.length; index += 1) {
-  const filePath = allUploads[index];
-  if (!existsSync(filePath)) {
-    throw new Error(`Upload path does not exist: ${filePath}`);
+  for (let index = 0; index < allUploads.length; index += 1) {
+    const filePath = allUploads[index];
+    if (!existsSync(filePath)) {
+      throw new Error(`Upload path does not exist: ${filePath}`);
+    }
+    await uploadAsset(release.id, filePath, allNames[index]);
   }
-  await uploadAsset(release.id, filePath, allNames[index]);
+
+  release = await request<GitHubRelease>("GET", `/repos/${repository}/releases/${release.id}`);
+  if (!release) {
+    throw new Error(`Release ${tag} disappeared after upload`);
+  }
+  const uploadedNames = new Set((release.assets || []).map((asset) => asset.name));
+  const missing = allNames.filter((name) => !uploadedNames.has(name));
+  if (missing.length > 0) {
+    throw new Error(`Release ${tag} is missing uploaded assets: ${missing.join(", ")}`);
+  }
+
+  const finalizeBody: { draft: boolean; prerelease: boolean; make_latest?: "true" } = {
+    draft: false,
+    prerelease,
+  };
+  if (!prerelease) {
+    finalizeBody.make_latest = "true";
+  }
+
+  release = await request<GitHubRelease>("PATCH", `/repos/${repository}/releases/${release.id}`, finalizeBody);
+  if (!release) {
+    throw new Error(`Release ${tag} disappeared after finalize`);
+  }
+  process.stdout.write(
+    `${JSON.stringify({ tag, version, channel, releaseUrl: release.html_url, status: "published" }, null, 2)}\n`,
+  );
 }
 
-release = await request<GitHubRelease>("GET", `/repos/${repository}/releases/tags/${tag}`);
-if (!release) {
-  throw new Error(`Release ${tag} disappeared after upload`);
+if (import.meta.main) {
+  await main();
 }
-const uploadedNames = new Set((release.assets || []).map((asset) => asset.name));
-const missing = allNames.filter((name) => !uploadedNames.has(name));
-if (missing.length > 0) {
-  throw new Error(`Release ${tag} is missing uploaded assets: ${missing.join(", ")}`);
-}
-
-const finalizeBody: { draft: boolean; prerelease: boolean; make_latest?: "true" } = {
-  draft: false,
-  prerelease,
-};
-if (!prerelease) {
-  finalizeBody.make_latest = "true";
-}
-
-release = await request<GitHubRelease>("PATCH", `/repos/${repository}/releases/${release.id}`, finalizeBody);
-if (!release) {
-  throw new Error(`Release ${tag} disappeared after finalize`);
-}
-process.stdout.write(`${JSON.stringify({ tag, version, channel, releaseUrl: release.html_url, status: "published" }, null, 2)}\n`);
