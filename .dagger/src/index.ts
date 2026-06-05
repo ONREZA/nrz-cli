@@ -7,7 +7,7 @@ const RELEASE_GIT_METADATA_SCRIPT = ".dagger/scripts/capture-git-metadata.ts";
 const CLI_CRATES_VENDOR_DIR = "vendor/onreza-crates";
 
 const PLATFORMS = new Set(["linux-x64", "darwin-x64", "darwin-arm64", "win32-x64"]);
-const CHANNELS = new Set(["stable", "beta", "rc", "canary"]);
+const CHANNELS = new Set(["stable", "beta"]);
 
 function requirePlatform(platform: string): void {
   if (!PLATFORMS.has(platform)) {
@@ -132,7 +132,7 @@ export class NrzCli {
       ],
     })
     source: Directory,
-    /** Release channel: stable, beta, rc, or canary. */
+    /** Release channel: stable or beta. */
     channel = "stable",
     /** Optional explicit version. Accepts 1.2.3, v1.2.3, or full prerelease versions. */
     version = "",
@@ -170,7 +170,7 @@ export class NrzCli {
       ],
     })
     source: Directory,
-    /** Release channel: stable, beta, rc, or canary. */
+    /** Release channel: stable or beta. */
     channel = "stable",
     /** Optional explicit version. Accepts 1.2.3, v1.2.3, or full prerelease versions. */
     version = "",

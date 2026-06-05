@@ -72,7 +72,7 @@ nrz deploy --prod
 | Domains | `nrz domains list`, `nrz domains add example.com`, `nrz domains verify <domain_id>` |
 | Account | `nrz whoami`, `nrz workspace list`, `nrz workspace switch <slug>`, `nrz upgrade` |
 
-Prerelease binaries can be tested with `nrz upgrade --channel beta`, `nrz upgrade --channel rc`,
+Prerelease binaries can be tested with `nrz upgrade --channel beta`,
 or a pinned version such as `nrz upgrade --version v0.33.0-beta.0`.
 
 ## Agent Skills

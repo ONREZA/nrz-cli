@@ -86,6 +86,25 @@ test("release cargo manifest points nrz crates at sanitized vendor snapshot", ()
   assert.doesNotMatch(updated, /\.\.\/deployment/);
 });
 
+test("release cargo manifest accepts already sanitized nrz crate dependencies", () => {
+  const cargo = [
+    '[package]',
+    'name = "nrz"',
+    'version = "0.32.4"',
+    '',
+    '[dependencies]',
+    'nrz-contract = { path = "vendor/onreza-crates/nrz-contract" }',
+    'nrz-fn-policy = { path = "vendor/onreza-crates/nrz-fn-policy" }',
+    '',
+  ].join("\n");
+
+  const updated = releaseCargoToml(cargo, "0.33.0-beta.0");
+
+  assert.match(updated, /^version = "0\.33\.0-beta\.0"$/m);
+  assert.match(updated, /^nrz-contract = \{ path = "vendor\/onreza-crates\/nrz-contract" \}$/m);
+  assert.match(updated, /^nrz-fn-policy = \{ path = "vendor\/onreza-crates\/nrz-fn-policy" \}$/m);
+});
+
 test("release vendored crate manifests follow the CLI version", () => {
   const cargo = [
     '[package]',
@@ -185,10 +204,10 @@ test("explicit prerelease version must match the selected channel", () => {
       resolveVersion("0.32.4", [fixCommit], {
         channel: "beta",
         bumpInput: "auto",
-        explicitVersion: "0.33.0-rc.0",
+        explicitVersion: "0.33.0-alpha.0",
         tags: [],
       }),
-    /belongs to channel rc, not beta/,
+    /belongs to channel alpha, not beta/,
   );
 });
 

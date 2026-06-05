@@ -313,10 +313,10 @@ export function releaseCargoToml(cargo: string, version: string): string {
   let updated = cargo.replace(/^version\s*=\s*"[^"]+"/m, `version = "${version}"`);
   for (const crate of cliCrateDependencies) {
     const re = new RegExp(`^${escapeRegExp(crate.name)}\\s*=.*$`, "m");
-    const next = updated.replace(re, `${crate.name} = { path = "${crate.path}" }`);
-    if (next === updated) {
+    if (!re.test(updated)) {
       throw new Error(`Could not update ${crate.name} dependency in Cargo.toml`);
     }
+    const next = updated.replace(re, `${crate.name} = { path = "${crate.path}" }`);
     updated = next;
   }
   return updated;

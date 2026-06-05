@@ -11,8 +11,6 @@ on:
         options:
           - stable
           - beta
-          - rc
-          - canary
       bump:
         description: Version bump when version is not provided
         type: choice

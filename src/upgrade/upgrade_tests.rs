@@ -33,7 +33,7 @@ fn stable_channel_skips_incomplete_latest_release() {
 fn prerelease_channel_requires_matching_channel_and_asset() {
     let releases = vec![
         release(
-            "v0.34.0-rc.0",
+            "v0.34.0-alpha.0",
             true,
             false,
             vec![asset("nrz-linux-x64.tar.gz")],

@@ -26,8 +26,6 @@ const GITHUB_API: &str = "https://api.github.com/repos";
 pub enum UpgradeChannel {
     Stable,
     Beta,
-    Rc,
-    Canary,
 }
 
 impl UpgradeChannel {
@@ -35,8 +33,6 @@ impl UpgradeChannel {
         match self {
             Self::Stable => "stable",
             Self::Beta => "beta",
-            Self::Rc => "rc",
-            Self::Canary => "canary",
         }
     }
 }
