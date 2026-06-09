@@ -144,7 +144,7 @@ struct CreateDeploymentBody {
     /// ONREZA Functions published alongside this deployment. Function source is
     /// DB-backed and intentionally not part of SOURCE_BUNDLE_V1.
     #[serde(skip_serializing_if = "Option::is_none")]
-    functions: Option<crate::functions::FunctionPublishPayload>,
+    functions: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -874,7 +874,7 @@ pub async fn run(
         production,
         branch,
         commit_sha,
-        functions,
+        functions: conform_functions_to_wire_contract(functions)?,
     };
 
     let deployment: CreateDeploymentResponse = match client
@@ -2818,6 +2818,31 @@ fn conform_manifest_to_wire_contract(
             )
         })?;
     serde_json::to_value(&wire).context("failed to serialize wire manifest")
+}
+
+/// Wire boundary for the ONREZA Functions publish payload, which rides in
+/// `CreateDeploymentBody.functions` and is re-validated by the platform against its
+/// `FunctionPublishPayloadSchema`. Round-trip through the generated contract type so an
+/// unknown field or a bad origin is rejected before the bytes leave the CLI. The edge
+/// rule set is passed through opaquely — the platform owns its validation.
+fn conform_functions_to_wire_contract(
+    payload: Option<crate::functions::FunctionPublishPayload>,
+) -> anyhow::Result<Option<serde_json::Value>> {
+    let Some(payload) = payload else {
+        return Ok(None);
+    };
+    let value =
+        serde_json::to_value(&payload).context("failed to serialize functions publish payload")?;
+    let wire: nrz_contract::onreza_functions_publish::OnrezaFunctionsPublishPayloadV1 =
+        serde_json::from_value(value).map_err(|error| {
+            anyhow::anyhow!(
+                "functions publish payload does not match the server contract: {error}.\n\
+                 This nrz may be behind the platform — try upgrading with `nrz upgrade`."
+            )
+        })?;
+    Ok(Some(
+        serde_json::to_value(&wire).context("failed to serialize wire functions payload")?,
+    ))
 }
 
 fn validate_compute_manifest_contract(

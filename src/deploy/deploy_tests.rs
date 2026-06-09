@@ -1417,11 +1417,14 @@ fn create_deployment_body_serializes_functions_payload() {
         production: Some(false),
         branch: None,
         commit_sha: "deadbeef".into(),
-        functions: Some(crate::functions::FunctionPublishPayload {
-            origin: "DEPLOYMENT",
-            functions: vec![],
-            edge_rules: None,
-        }),
+        functions: conform_functions_to_wire_contract(Some(
+            crate::functions::FunctionPublishPayload {
+                origin: "DEPLOYMENT",
+                functions: vec![],
+                edge_rules: None,
+            },
+        ))
+        .unwrap(),
     };
 
     let value = serde_json::to_value(&body).unwrap();
@@ -3295,5 +3298,31 @@ fn wire_manifest_contract_rejects_unknown_layer_fields() {
     assert!(
         conform_manifest_to_wire_contract(with_unknown).is_err(),
         "unknown manifest fields must not reach the server"
+    );
+}
+
+#[test]
+fn wire_functions_contract_validates_origin_against_server_enum() {
+    let ok = crate::functions::FunctionPublishPayload {
+        origin: "DEPLOYMENT",
+        functions: vec![],
+        edge_rules: None,
+    };
+    assert!(
+        conform_functions_to_wire_contract(Some(ok))
+            .unwrap()
+            .is_some()
+    );
+    assert!(conform_functions_to_wire_contract(None).unwrap().is_none());
+
+    // An origin value the server contract does not define must be rejected at the wire.
+    let bad = crate::functions::FunctionPublishPayload {
+        origin: "BOGUS",
+        functions: vec![],
+        edge_rules: None,
+    };
+    assert!(
+        conform_functions_to_wire_contract(Some(bad)).is_err(),
+        "an unknown functions origin must not reach the server"
     );
 }
