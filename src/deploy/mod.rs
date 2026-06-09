@@ -680,8 +680,10 @@ pub async fn run(
         &detection,
         json,
     )?;
-    let manifest_raw = serde_json::to_value(&runtime_artifact.manifest)
-        .context("failed to serialize runtime artifact manifest")?;
+    let manifest_raw = conform_manifest_to_wire_contract(
+        serde_json::to_value(&runtime_artifact.manifest)
+            .context("failed to serialize runtime artifact manifest")?,
+    )?;
 
     // Scan the deployable runtime artifact into a flat file list with streaming
     // SHA-256 + size per file. Build output and runtime artifact root are separate:
@@ -2797,6 +2799,25 @@ fn resolve_manifest_for_compute(
         "Internal error: validate_compute_manifest_contract accepted {compute:?} without a manifest.\n\
          This is a CLI bug — please report at github.com/onreza/nrz-cli/issues."
     );
+}
+
+/// Wire boundary for the build manifest. `CreateDeploymentBody.manifest` is parsed
+/// by the platform against its `ManifestSchema`, so the bytes the CLI sends must
+/// match the server contract regardless of how the manifest is modelled internally.
+/// Round-tripping through the generated contract type rejects unknown or legacy
+/// fields (`deny_unknown_fields`) and enforces the schema's limits before anything
+/// leaves the CLI; the internal `build_manifest::Manifest` stays ergonomic.
+fn conform_manifest_to_wire_contract(
+    manifest: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    let wire: nrz_contract::manifest::OnrezaBuildOutputManifest = serde_json::from_value(manifest)
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "built manifest does not match the server manifest contract: {error}.\n\
+                 This nrz may be behind the platform — try upgrading with `nrz upgrade`."
+            )
+        })?;
+    serde_json::to_value(&wire).context("failed to serialize wire manifest")
 }
 
 fn validate_compute_manifest_contract(

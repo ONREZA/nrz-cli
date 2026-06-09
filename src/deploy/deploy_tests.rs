@@ -3272,3 +3272,28 @@ fn with_default_code_skips_io_errors_so_platform_faults_reach_sentry() {
         "io::Error paths must stay uncoded: {result:#}"
     );
 }
+
+#[test]
+fn wire_manifest_contract_rejects_unknown_layer_fields() {
+    let conformant = serde_json::json!({
+        "version": 1,
+        "layers": [{ "name": "static", "target": "STATIC", "directory": "." }],
+        "routes": [{ "pattern": "^/.*", "layer": "static" }],
+    });
+    let wire = conform_manifest_to_wire_contract(conformant)
+        .expect("a conformant manifest must pass the wire contract");
+    assert!(wire["version"].is_number());
+    assert_eq!(wire["layers"][0]["target"], "STATIC");
+
+    // A field the platform ManifestSchema does not define (e.g. the legacy `export`)
+    // must be rejected at the wire instead of forwarded for the server to reject.
+    let with_unknown = serde_json::json!({
+        "version": 1,
+        "layers": [{ "name": "static", "target": "STATIC", "directory": ".", "export": "esm" }],
+        "routes": [{ "pattern": "^/.*", "layer": "static" }],
+    });
+    assert!(
+        conform_manifest_to_wire_contract(with_unknown).is_err(),
+        "unknown manifest fields must not reach the server"
+    );
+}
