@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 `nrz` is a Rust CLI. Entrypoints are `src/main.rs` (binary) and `src/lib.rs` (shared exports). Core domains are split under `src/`: `cli/`, `deploy/`, `build/`, `detect/`, `dev/`, `emulator/`, `auth/`, `config/`, `init/`, and `upgrade/`.
 
-Integration tests are in `tests/` (for example `tests/cli_integration_test.rs`). Unit tests are colocated as dedicated `*_tests.rs` files (for example `src/build/manifest_tests.rs`). Operational docs live in `docs/`; root config includes `onreza.schema.json`, `lefthook.yml`, and `commitlint.config.js`.
+Integration tests are in `tests/` (for example `tests/cli_integration_test.rs`). Unit tests are colocated as dedicated `*_tests.rs` files (for example `src/build/manifest_tests.rs`). Operational docs live in `docs/`; root config includes `lefthook.yml` and `commitlint.config.js`. The `onreza.toml` JSON Schema is generated in the platform repo and served at `https://docs.onreza.ru/schemas/onreza-project-v1.schema.json` (`nrz init` wires it via `#:schema`).
 
 ## LLM-First CLI Contract
 Every command must support machine and human modes:

@@ -699,11 +699,21 @@ fn build_uses_onreza_toml_from_dir_argument() {
 
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["build", "app", "--json"]);
-    cmd.assert()
-        .success()
-        .stdout(contains("Auto-generated STATIC manifest"))
-        .stdout(contains("\\\"framework\\\":\\\"vite\\\""))
-        .stdout(contains("\\\"target\\\":\\\"STATIC\\\""));
+    let output = cmd.output().unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1, "expected one JSON object, got: {stdout}");
+    let value: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(value["framework"], "vite");
+    assert_eq!(value["layers"][0]["target"], "STATIC");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("Auto-generated STATIC manifest"),
+        "expected build progress in stderr, got: {stderr}"
+    );
 }
 
 #[test]

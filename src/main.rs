@@ -13,6 +13,8 @@ mod functions;
 mod init;
 mod link;
 mod logs;
+#[cfg(test)]
+mod logs_tests;
 mod output;
 #[cfg(test)]
 mod output_tests;
@@ -101,7 +103,7 @@ fn emit_terminal_error(json: bool, err: &anyhow::Error) {
         .find_map(|c| c.downcast_ref::<output::CodedError>());
     match coded {
         Some(c) => output::log_error_structured("error", &message, &c.code, None),
-        None => output::log_line("user", "error", "error", &message),
+        None => output::json_output(&serde_json::json!({ "error": message })),
     }
 }
 
@@ -116,7 +118,7 @@ async fn run_command(
     match command {
         Command::Dev(args) => dev::run(args, config).await,
         Command::Build(args) => build::run(args, json, config).await.map(|_| ()),
-        Command::Deploy(args) => deploy::run(args, json, token, workspace, config).await,
+        Command::Deploy(args) => deploy::run(args, json, token, workspace, env, config).await,
         Command::Db(args) => cli::db_handler::run(args, json, token, workspace, config).await,
         Command::Kv(args) => cli::kv_handler::run(args, json).await,
         Command::Login => auth::login(json, token).await,

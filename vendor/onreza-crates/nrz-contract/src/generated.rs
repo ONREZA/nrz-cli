@@ -94,28 +94,13 @@ pub mod edge_rules {
     ///        "type"
     ///      ],
     ///      "properties": {
-    ///        "force": {
+    ///        "ifNoFile": {
     ///          "type": "boolean"
     ///        },
     ///        "statusCode": {
-    ///          "anyOf": [
-    ///            {
-    ///              "type": "number",
-    ///              "const": 301
-    ///            },
-    ///            {
-    ///              "type": "number",
-    ///              "const": 302
-    ///            },
-    ///            {
-    ///              "type": "number",
-    ///              "const": 307
-    ///            },
-    ///            {
-    ///              "type": "number",
-    ///              "const": 308
-    ///            }
-    ///          ]
+    ///          "type": "integer",
+    ///          "maximum": 9007199254740991.0,
+    ///          "minimum": -9007199254740991.0
     ///        },
     ///        "target": {
     ///          "type": "string",
@@ -138,7 +123,7 @@ pub mod edge_rules {
     ///        "external": {
     ///          "type": "boolean"
     ///        },
-    ///        "force": {
+    ///        "ifNoFile": {
     ///          "type": "boolean"
     ///        },
     ///        "target": {
@@ -224,6 +209,7 @@ pub mod edge_rules {
     ///            "type": "string",
     ///            "enum": [
     ///              "geo",
+    ///              "asn",
     ///              "device",
     ///              "header",
     ///              "cookie",
@@ -243,6 +229,121 @@ pub mod edge_rules {
     ///        "type": {
     ///          "type": "string",
     ///          "const": "bypass_cache"
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "steps",
+    ///        "type"
+    ///      ],
+    ///      "properties": {
+    ///        "inheritGate": {
+    ///          "type": "boolean"
+    ///        },
+    ///        "override": {
+    ///          "type": "boolean"
+    ///        },
+    ///        "steps": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "anyOf": [
+    ///              {
+    ///                "type": "object",
+    ///                "required": [
+    ///                  "mode",
+    ///                  "use"
+    ///                ],
+    ///                "properties": {
+    ///                  "as": {
+    ///                    "type": "string",
+    ///                    "maxLength": 64,
+    ///                    "minLength": 1
+    ///                  },
+    ///                  "cachePosition": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "before",
+    ///                      "after"
+    ///                    ]
+    ///                  },
+    ///                  "failure": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "closed",
+    ///                      "open"
+    ///                    ]
+    ///                  },
+    ///                  "mode": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "request",
+    ///                      "response",
+    ///                      "observe"
+    ///                    ]
+    ///                  },
+    ///                  "use": {
+    ///                    "type": "string",
+    ///                    "maxLength": 64,
+    ///                    "minLength": 1,
+    ///                    "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+    ///                  }
+    ///                },
+    ///                "additionalProperties": false
+    ///              },
+    ///              {
+    ///                "$ref": "#/definitions/PipelineHandleStep"
+    ///              }
+    ///            ]
+    ///          },
+    ///          "minItems": 1
+    ///        },
+    ///        "type": {
+    ///          "type": "string",
+    ///          "const": "pipeline"
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "limit",
+    ///        "type",
+    ///        "windowSeconds"
+    ///      ],
+    ///      "properties": {
+    ///        "key": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "ip",
+    ///            "ip_path",
+    ///            "ip_host",
+    ///            "host"
+    ///          ]
+    ///        },
+    ///        "limit": {
+    ///          "type": "integer",
+    ///          "maximum": 100000.0,
+    ///          "minimum": 1.0
+    ///        },
+    ///        "mode": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "shadow",
+    ///            "enforce"
+    ///          ]
+    ///        },
+    ///        "type": {
+    ///          "type": "string",
+    ///          "const": "rate_limit"
+    ///        },
+    ///        "windowSeconds": {
+    ///          "type": "integer",
+    ///          "maximum": 600.0,
+    ///          "minimum": 10.0
     ///        }
     ///      },
     ///      "additionalProperties": false
@@ -271,22 +372,30 @@ pub mod edge_rules {
         },
         #[serde(rename = "redirect")]
         Redirect {
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-            force: ::std::option::Option<bool>,
+            #[serde(
+                rename = "ifNoFile",
+                default,
+                skip_serializing_if = "::std::option::Option::is_none"
+            )]
+            if_no_file: ::std::option::Option<bool>,
             #[serde(
                 rename = "statusCode",
                 default,
                 skip_serializing_if = "::std::option::Option::is_none"
             )]
-            status_code: ::std::option::Option<EdgeRuleActionAuthoringStatusCode>,
+            status_code: ::std::option::Option<i64>,
             target: EdgeRuleActionAuthoringTarget,
         },
         #[serde(rename = "rewrite")]
         Rewrite {
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             external: ::std::option::Option<bool>,
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-            force: ::std::option::Option<bool>,
+            #[serde(
+                rename = "ifNoFile",
+                default,
+                skip_serializing_if = "::std::option::Option::is_none"
+            )]
+            if_no_file: ::std::option::Option<bool>,
             target: EdgeRuleActionAuthoringTarget,
         },
         #[serde(rename = "set_headers")]
@@ -315,6 +424,32 @@ pub mod edge_rules {
         },
         #[serde(rename = "bypass_cache")]
         BypassCache,
+        #[serde(rename = "pipeline")]
+        Pipeline {
+            #[serde(
+                rename = "inheritGate",
+                default,
+                skip_serializing_if = "::std::option::Option::is_none"
+            )]
+            inherit_gate: ::std::option::Option<bool>,
+            #[serde(
+                rename = "override",
+                default,
+                skip_serializing_if = "::std::option::Option::is_none"
+            )]
+            override_: ::std::option::Option<bool>,
+            steps: ::std::vec::Vec<EdgeRuleActionAuthoringStepsItem>,
+        },
+        #[serde(rename = "rate_limit")]
+        RateLimit {
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            key: ::std::option::Option<EdgeRuleActionAuthoringKey>,
+            limit: ::std::num::NonZeroU64,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            mode: ::std::option::Option<EdgeRuleActionAuthoringMode>,
+            #[serde(rename = "windowSeconds")]
+            window_seconds: i64,
+        },
     }
     ///`EdgeRuleActionAuthoringHeadersItem`
     ///
@@ -452,6 +587,88 @@ pub mod edge_rules {
                 })
         }
     }
+    ///`EdgeRuleActionAuthoringKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "ip",
+    ///    "ip_path",
+    ///    "ip_host",
+    ///    "host"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleActionAuthoringKey {
+        #[serde(rename = "ip")]
+        Ip,
+        #[serde(rename = "ip_path")]
+        IpPath,
+        #[serde(rename = "ip_host")]
+        IpHost,
+        #[serde(rename = "host")]
+        Host,
+    }
+    impl ::std::fmt::Display for EdgeRuleActionAuthoringKey {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Ip => f.write_str("ip"),
+                Self::IpPath => f.write_str("ip_path"),
+                Self::IpHost => f.write_str("ip_host"),
+                Self::Host => f.write_str("host"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleActionAuthoringKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "ip" => Ok(Self::Ip),
+                "ip_path" => Ok(Self::IpPath),
+                "ip_host" => Ok(Self::IpHost),
+                "host" => Ok(Self::Host),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
     ///`EdgeRuleActionAuthoringMode`
     ///
     /// <details><summary>JSON schema</summary>
@@ -524,7 +741,7 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    ///`EdgeRuleActionAuthoringStatusCode`
+    ///`EdgeRuleActionAuthoringStepsItem`
     ///
     /// <details><summary>JSON schema</summary>
     ///
@@ -532,56 +749,130 @@ pub mod edge_rules {
     ///{
     ///  "anyOf": [
     ///    {
-    ///      "type": "number",
-    ///      "const": 301
+    ///      "type": "object",
+    ///      "required": [
+    ///        "mode",
+    ///        "use"
+    ///      ],
+    ///      "properties": {
+    ///        "as": {
+    ///          "type": "string",
+    ///          "maxLength": 64,
+    ///          "minLength": 1
+    ///        },
+    ///        "cachePosition": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "before",
+    ///            "after"
+    ///          ]
+    ///        },
+    ///        "failure": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "closed",
+    ///            "open"
+    ///          ]
+    ///        },
+    ///        "mode": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "request",
+    ///            "response",
+    ///            "observe"
+    ///          ]
+    ///        },
+    ///        "use": {
+    ///          "type": "string",
+    ///          "maxLength": 64,
+    ///          "minLength": 1,
+    ///          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
     ///    },
     ///    {
-    ///      "type": "number",
-    ///      "const": 302
-    ///    },
-    ///    {
-    ///      "type": "number",
-    ///      "const": 307
-    ///    },
-    ///    {
-    ///      "type": "number",
-    ///      "const": 308
+    ///      "$ref": "#/definitions/PipelineHandleStep"
     ///    }
     ///  ]
     ///}
     /// ```
     /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-    #[serde(untagged)]
-    pub enum EdgeRuleActionAuthoringStatusCode {
-        Variant0(f64),
-        Variant1(f64),
-        Variant2(f64),
-        Variant3(f64),
+    #[serde(untagged, deny_unknown_fields)]
+    pub enum EdgeRuleActionAuthoringStepsItem {
+        Object {
+            #[serde(
+                rename = "as",
+                default,
+                skip_serializing_if = "::std::option::Option::is_none"
+            )]
+            as_: ::std::option::Option<EdgeRuleActionAuthoringStepsItemObjectAs>,
+            #[serde(
+                rename = "cachePosition",
+                default,
+                skip_serializing_if = "::std::option::Option::is_none"
+            )]
+            cache_position:
+                ::std::option::Option<EdgeRuleActionAuthoringStepsItemObjectCachePosition>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            failure: ::std::option::Option<EdgeRuleActionAuthoringStepsItemObjectFailure>,
+            mode: EdgeRuleActionAuthoringStepsItemObjectMode,
+            #[serde(rename = "use")]
+            use_: EdgeRuleActionAuthoringStepsItemObjectUse,
+        },
+        PipelineHandleStep(PipelineHandleStep),
     }
-    impl ::std::str::FromStr for EdgeRuleActionAuthoringStatusCode {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if let Ok(v) = value.parse() {
-                Ok(Self::Variant0(v))
-            } else if let Ok(v) = value.parse() {
-                Ok(Self::Variant1(v))
-            } else if let Ok(v) = value.parse() {
-                Ok(Self::Variant2(v))
-            } else if let Ok(v) = value.parse() {
-                Ok(Self::Variant3(v))
-            } else {
-                Err("string conversion failed for all variants".into())
-            }
+    impl ::std::convert::From<PipelineHandleStep> for EdgeRuleActionAuthoringStepsItem {
+        fn from(value: PipelineHandleStep) -> Self {
+            Self::PipelineHandleStep(value)
         }
     }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringStatusCode {
+    ///`EdgeRuleActionAuthoringStepsItemObjectAs`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 64,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleActionAuthoringStepsItemObjectAs(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleActionAuthoringStepsItemObjectAs {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleActionAuthoringStepsItemObjectAs> for ::std::string::String {
+        fn from(value: EdgeRuleActionAuthoringStepsItemObjectAs) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleActionAuthoringStepsItemObjectAs {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 64usize {
+                return Err("longer than 64 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringStepsItemObjectAs {
         type Error = self::error::ConversionError;
         fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringStatusCode {
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectAs {
         type Error = self::error::ConversionError;
         fn try_from(
             value: &::std::string::String,
@@ -589,7 +880,7 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringStatusCode {
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectAs {
         type Error = self::error::ConversionError;
         fn try_from(
             value: ::std::string::String,
@@ -597,14 +888,327 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::fmt::Display for EdgeRuleActionAuthoringStatusCode {
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleActionAuthoringStepsItemObjectAs {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleActionAuthoringStepsItemObjectCachePosition`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "before",
+    ///    "after"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleActionAuthoringStepsItemObjectCachePosition {
+        #[serde(rename = "before")]
+        Before,
+        #[serde(rename = "after")]
+        After,
+    }
+    impl ::std::fmt::Display for EdgeRuleActionAuthoringStepsItemObjectCachePosition {
         fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-            match self {
-                Self::Variant0(x) => x.fmt(f),
-                Self::Variant1(x) => x.fmt(f),
-                Self::Variant2(x) => x.fmt(f),
-                Self::Variant3(x) => x.fmt(f),
+            match *self {
+                Self::Before => f.write_str("before"),
+                Self::After => f.write_str("after"),
             }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleActionAuthoringStepsItemObjectCachePosition {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "before" => Ok(Self::Before),
+                "after" => Ok(Self::After),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringStepsItemObjectCachePosition {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleActionAuthoringStepsItemObjectCachePosition
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleActionAuthoringStepsItemObjectCachePosition
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleActionAuthoringStepsItemObjectFailure`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "closed",
+    ///    "open"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleActionAuthoringStepsItemObjectFailure {
+        #[serde(rename = "closed")]
+        Closed,
+        #[serde(rename = "open")]
+        Open,
+    }
+    impl ::std::fmt::Display for EdgeRuleActionAuthoringStepsItemObjectFailure {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Closed => f.write_str("closed"),
+                Self::Open => f.write_str("open"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleActionAuthoringStepsItemObjectFailure {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "closed" => Ok(Self::Closed),
+                "open" => Ok(Self::Open),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringStepsItemObjectFailure {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleActionAuthoringStepsItemObjectFailure
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleActionAuthoringStepsItemObjectFailure
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleActionAuthoringStepsItemObjectMode`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "request",
+    ///    "response",
+    ///    "observe"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleActionAuthoringStepsItemObjectMode {
+        #[serde(rename = "request")]
+        Request,
+        #[serde(rename = "response")]
+        Response,
+        #[serde(rename = "observe")]
+        Observe,
+    }
+    impl ::std::fmt::Display for EdgeRuleActionAuthoringStepsItemObjectMode {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Request => f.write_str("request"),
+                Self::Response => f.write_str("response"),
+                Self::Observe => f.write_str("observe"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleActionAuthoringStepsItemObjectMode {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "request" => Ok(Self::Request),
+                "response" => Ok(Self::Response),
+                "observe" => Ok(Self::Observe),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringStepsItemObjectMode {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleActionAuthoringStepsItemObjectMode
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectMode {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleActionAuthoringStepsItemObjectUse`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 64,
+    ///  "minLength": 1,
+    ///  "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleActionAuthoringStepsItemObjectUse(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleActionAuthoringStepsItemObjectUse {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleActionAuthoringStepsItemObjectUse> for ::std::string::String {
+        fn from(value: EdgeRuleActionAuthoringStepsItemObjectUse) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleActionAuthoringStepsItemObjectUse {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 64usize {
+                return Err("longer than 64 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| {
+                    ::regress::Regex::new("^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$").unwrap()
+                });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringStepsItemObjectUse {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectUse {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectUse {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleActionAuthoringStepsItemObjectUse {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
         }
     }
     ///`EdgeRuleActionAuthoringTarget`
@@ -684,6 +1288,7 @@ pub mod edge_rules {
     ///  "type": "string",
     ///  "enum": [
     ///    "geo",
+    ///    "asn",
     ///    "device",
     ///    "header",
     ///    "cookie",
@@ -707,6 +1312,8 @@ pub mod edge_rules {
     pub enum EdgeRuleActionAuthoringVaryItem {
         #[serde(rename = "geo")]
         Geo,
+        #[serde(rename = "asn")]
+        Asn,
         #[serde(rename = "device")]
         Device,
         #[serde(rename = "header")]
@@ -720,6 +1327,7 @@ pub mod edge_rules {
         fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
             match *self {
                 Self::Geo => f.write_str("geo"),
+                Self::Asn => f.write_str("asn"),
                 Self::Device => f.write_str("device"),
                 Self::Header => f.write_str("header"),
                 Self::Cookie => f.write_str("cookie"),
@@ -732,6 +1340,7 @@ pub mod edge_rules {
         fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
             match value {
                 "geo" => Ok(Self::Geo),
+                "asn" => Ok(Self::Asn),
                 "device" => Ok(Self::Device),
                 "header" => Ok(Self::Header),
                 "cookie" => Ok(Self::Cookie),
@@ -778,7 +1387,380 @@ pub mod edge_rules {
     ///      "$ref": "#/definitions/EdgeRuleActionAuthoring"
     ///    },
     ///    "condition": {
-    ///      "$ref": "#/definitions/EdgeRuleCondition"
+    ///      "type": "object",
+    ///      "properties": {
+    ///        "any": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "object",
+    ///            "properties": {
+    ///              "asn": {
+    ///                "type": "array",
+    ///                "items": {
+    ///                  "type": "integer",
+    ///                  "maximum": 4294967295.0,
+    ///                  "minimum": 1.0
+    ///                }
+    ///              },
+    ///              "cookies": {
+    ///                "type": "object",
+    ///                "additionalProperties": {
+    ///                  "type": "string"
+    ///                },
+    ///                "propertyNames": {
+    ///                  "type": "string",
+    ///                  "minLength": 1
+    ///                }
+    ///              },
+    ///              "device": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "desktop",
+    ///                  "mobile",
+    ///                  "tablet",
+    ///                  "bot"
+    ///                ]
+    ///              },
+    ///              "geo": {
+    ///                "type": "array",
+    ///                "items": {
+    ///                  "type": "string",
+    ///                  "maxLength": 2,
+    ///                  "minLength": 2
+    ///                }
+    ///              },
+    ///              "headers": {
+    ///                "type": "object",
+    ///                "additionalProperties": {
+    ///                  "type": "string"
+    ///                },
+    ///                "propertyNames": {
+    ///                  "type": "string",
+    ///                  "minLength": 1
+    ///                }
+    ///              },
+    ///              "host": {
+    ///                "type": "string",
+    ///                "minLength": 1
+    ///              },
+    ///              "method": {
+    ///                "type": "array",
+    ///                "items": {
+    ///                  "type": "string",
+    ///                  "enum": [
+    ///                    "GET",
+    ///                    "POST",
+    ///                    "PUT",
+    ///                    "DELETE",
+    ///                    "PATCH",
+    ///                    "HEAD",
+    ///                    "OPTIONS"
+    ///                  ]
+    ///                }
+    ///              },
+    ///              "methods": {
+    ///                "type": "array",
+    ///                "items": {
+    ///                  "type": "string",
+    ///                  "enum": [
+    ///                    "GET",
+    ///                    "POST",
+    ///                    "PUT",
+    ///                    "DELETE",
+    ///                    "PATCH",
+    ///                    "HEAD",
+    ///                    "OPTIONS"
+    ///                  ]
+    ///                }
+    ///              },
+    ///              "path": {
+    ///                "type": "object",
+    ///                "required": [
+    ///                  "type",
+    ///                  "value"
+    ///                ],
+    ///                "properties": {
+    ///                  "type": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "exact",
+    ///                      "prefix",
+    ///                      "glob"
+    ///                    ]
+    ///                  },
+    ///                  "value": {
+    ///                    "type": "string",
+    ///                    "minLength": 1
+    ///                  }
+    ///                },
+    ///                "additionalProperties": false
+    ///              },
+    ///              "query": {
+    ///                "type": "object",
+    ///                "additionalProperties": {
+    ///                  "type": "string"
+    ///                },
+    ///                "propertyNames": {
+    ///                  "type": "string",
+    ///                  "minLength": 1
+    ///                }
+    ///              },
+    ///              "sourceIpCidrs": {
+    ///                "type": "array",
+    ///                "items": {
+    ///                  "type": "string",
+    ///                  "minLength": 1
+    ///                }
+    ///              }
+    ///            },
+    ///            "additionalProperties": false
+    ///          },
+    ///          "minItems": 1
+    ///        },
+    ///        "asn": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "integer",
+    ///            "maximum": 4294967295.0,
+    ///            "minimum": 1.0
+    ///          }
+    ///        },
+    ///        "cookies": {
+    ///          "type": "object",
+    ///          "additionalProperties": {
+    ///            "type": "string"
+    ///          },
+    ///          "propertyNames": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "device": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "desktop",
+    ///            "mobile",
+    ///            "tablet",
+    ///            "bot"
+    ///          ]
+    ///        },
+    ///        "geo": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "maxLength": 2,
+    ///            "minLength": 2
+    ///          }
+    ///        },
+    ///        "headers": {
+    ///          "type": "object",
+    ///          "additionalProperties": {
+    ///            "type": "string"
+    ///          },
+    ///          "propertyNames": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "host": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        },
+    ///        "method": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "enum": [
+    ///              "GET",
+    ///              "POST",
+    ///              "PUT",
+    ///              "DELETE",
+    ///              "PATCH",
+    ///              "HEAD",
+    ///              "OPTIONS"
+    ///            ]
+    ///          }
+    ///        },
+    ///        "methods": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "enum": [
+    ///              "GET",
+    ///              "POST",
+    ///              "PUT",
+    ///              "DELETE",
+    ///              "PATCH",
+    ///              "HEAD",
+    ///              "OPTIONS"
+    ///            ]
+    ///          }
+    ///        },
+    ///        "not": {
+    ///          "type": "object",
+    ///          "properties": {
+    ///            "asn": {
+    ///              "type": "array",
+    ///              "items": {
+    ///                "type": "integer",
+    ///                "maximum": 4294967295.0,
+    ///                "minimum": 1.0
+    ///              }
+    ///            },
+    ///            "cookies": {
+    ///              "type": "object",
+    ///              "additionalProperties": {
+    ///                "type": "string"
+    ///              },
+    ///              "propertyNames": {
+    ///                "type": "string",
+    ///                "minLength": 1
+    ///              }
+    ///            },
+    ///            "device": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "desktop",
+    ///                "mobile",
+    ///                "tablet",
+    ///                "bot"
+    ///              ]
+    ///            },
+    ///            "geo": {
+    ///              "type": "array",
+    ///              "items": {
+    ///                "type": "string",
+    ///                "maxLength": 2,
+    ///                "minLength": 2
+    ///              }
+    ///            },
+    ///            "headers": {
+    ///              "type": "object",
+    ///              "additionalProperties": {
+    ///                "type": "string"
+    ///              },
+    ///              "propertyNames": {
+    ///                "type": "string",
+    ///                "minLength": 1
+    ///              }
+    ///            },
+    ///            "host": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            },
+    ///            "method": {
+    ///              "type": "array",
+    ///              "items": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "GET",
+    ///                  "POST",
+    ///                  "PUT",
+    ///                  "DELETE",
+    ///                  "PATCH",
+    ///                  "HEAD",
+    ///                  "OPTIONS"
+    ///                ]
+    ///              }
+    ///            },
+    ///            "methods": {
+    ///              "type": "array",
+    ///              "items": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "GET",
+    ///                  "POST",
+    ///                  "PUT",
+    ///                  "DELETE",
+    ///                  "PATCH",
+    ///                  "HEAD",
+    ///                  "OPTIONS"
+    ///                ]
+    ///              }
+    ///            },
+    ///            "path": {
+    ///              "type": "object",
+    ///              "required": [
+    ///                "type",
+    ///                "value"
+    ///              ],
+    ///              "properties": {
+    ///                "type": {
+    ///                  "type": "string",
+    ///                  "enum": [
+    ///                    "exact",
+    ///                    "prefix",
+    ///                    "glob"
+    ///                  ]
+    ///                },
+    ///                "value": {
+    ///                  "type": "string",
+    ///                  "minLength": 1
+    ///                }
+    ///              },
+    ///              "additionalProperties": false
+    ///            },
+    ///            "query": {
+    ///              "type": "object",
+    ///              "additionalProperties": {
+    ///                "type": "string"
+    ///              },
+    ///              "propertyNames": {
+    ///                "type": "string",
+    ///                "minLength": 1
+    ///              }
+    ///            },
+    ///            "sourceIpCidrs": {
+    ///              "type": "array",
+    ///              "items": {
+    ///                "type": "string",
+    ///                "minLength": 1
+    ///              }
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        "path": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "type",
+    ///            "value"
+    ///          ],
+    ///          "properties": {
+    ///            "type": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "exact",
+    ///                "prefix",
+    ///                "glob"
+    ///              ]
+    ///            },
+    ///            "value": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        "query": {
+    ///          "type": "object",
+    ///          "additionalProperties": {
+    ///            "type": "string"
+    ///          },
+    ///          "propertyNames": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "sourceIpCidrs": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
     ///    },
     ///    "enabled": {
     ///      "type": "boolean"
@@ -801,12 +1783,3497 @@ pub mod edge_rules {
     pub struct EdgeRuleAuthoring {
         pub action: EdgeRuleActionAuthoring,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-        pub condition: ::std::option::Option<EdgeRuleCondition>,
+        pub condition: ::std::option::Option<EdgeRuleAuthoringCondition>,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub enabled: ::std::option::Option<bool>,
         pub id: EdgeRuleAuthoringId,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub name: ::std::option::Option<EdgeRuleAuthoringName>,
+    }
+    ///`EdgeRuleAuthoringCondition`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "properties": {
+    ///    "any": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "object",
+    ///        "properties": {
+    ///          "asn": {
+    ///            "type": "array",
+    ///            "items": {
+    ///              "type": "integer",
+    ///              "maximum": 4294967295.0,
+    ///              "minimum": 1.0
+    ///            }
+    ///          },
+    ///          "cookies": {
+    ///            "type": "object",
+    ///            "additionalProperties": {
+    ///              "type": "string"
+    ///            },
+    ///            "propertyNames": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          },
+    ///          "device": {
+    ///            "type": "string",
+    ///            "enum": [
+    ///              "desktop",
+    ///              "mobile",
+    ///              "tablet",
+    ///              "bot"
+    ///            ]
+    ///          },
+    ///          "geo": {
+    ///            "type": "array",
+    ///            "items": {
+    ///              "type": "string",
+    ///              "maxLength": 2,
+    ///              "minLength": 2
+    ///            }
+    ///          },
+    ///          "headers": {
+    ///            "type": "object",
+    ///            "additionalProperties": {
+    ///              "type": "string"
+    ///            },
+    ///            "propertyNames": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          },
+    ///          "host": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          },
+    ///          "method": {
+    ///            "type": "array",
+    ///            "items": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "GET",
+    ///                "POST",
+    ///                "PUT",
+    ///                "DELETE",
+    ///                "PATCH",
+    ///                "HEAD",
+    ///                "OPTIONS"
+    ///              ]
+    ///            }
+    ///          },
+    ///          "methods": {
+    ///            "type": "array",
+    ///            "items": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "GET",
+    ///                "POST",
+    ///                "PUT",
+    ///                "DELETE",
+    ///                "PATCH",
+    ///                "HEAD",
+    ///                "OPTIONS"
+    ///              ]
+    ///            }
+    ///          },
+    ///          "path": {
+    ///            "type": "object",
+    ///            "required": [
+    ///              "type",
+    ///              "value"
+    ///            ],
+    ///            "properties": {
+    ///              "type": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "exact",
+    ///                  "prefix",
+    ///                  "glob"
+    ///                ]
+    ///              },
+    ///              "value": {
+    ///                "type": "string",
+    ///                "minLength": 1
+    ///              }
+    ///            },
+    ///            "additionalProperties": false
+    ///          },
+    ///          "query": {
+    ///            "type": "object",
+    ///            "additionalProperties": {
+    ///              "type": "string"
+    ///            },
+    ///            "propertyNames": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          },
+    ///          "sourceIpCidrs": {
+    ///            "type": "array",
+    ///            "items": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          }
+    ///        },
+    ///        "additionalProperties": false
+    ///      },
+    ///      "minItems": 1
+    ///    },
+    ///    "asn": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "integer",
+    ///        "maximum": 4294967295.0,
+    ///        "minimum": 1.0
+    ///      }
+    ///    },
+    ///    "cookies": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "device": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "desktop",
+    ///        "mobile",
+    ///        "tablet",
+    ///        "bot"
+    ///      ]
+    ///    },
+    ///    "geo": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "maxLength": 2,
+    ///        "minLength": 2
+    ///      }
+    ///    },
+    ///    "headers": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "host": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    },
+    ///    "method": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "enum": [
+    ///          "GET",
+    ///          "POST",
+    ///          "PUT",
+    ///          "DELETE",
+    ///          "PATCH",
+    ///          "HEAD",
+    ///          "OPTIONS"
+    ///        ]
+    ///      }
+    ///    },
+    ///    "methods": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "enum": [
+    ///          "GET",
+    ///          "POST",
+    ///          "PUT",
+    ///          "DELETE",
+    ///          "PATCH",
+    ///          "HEAD",
+    ///          "OPTIONS"
+    ///        ]
+    ///      }
+    ///    },
+    ///    "not": {
+    ///      "type": "object",
+    ///      "properties": {
+    ///        "asn": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "integer",
+    ///            "maximum": 4294967295.0,
+    ///            "minimum": 1.0
+    ///          }
+    ///        },
+    ///        "cookies": {
+    ///          "type": "object",
+    ///          "additionalProperties": {
+    ///            "type": "string"
+    ///          },
+    ///          "propertyNames": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "device": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "desktop",
+    ///            "mobile",
+    ///            "tablet",
+    ///            "bot"
+    ///          ]
+    ///        },
+    ///        "geo": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "maxLength": 2,
+    ///            "minLength": 2
+    ///          }
+    ///        },
+    ///        "headers": {
+    ///          "type": "object",
+    ///          "additionalProperties": {
+    ///            "type": "string"
+    ///          },
+    ///          "propertyNames": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "host": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        },
+    ///        "method": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "enum": [
+    ///              "GET",
+    ///              "POST",
+    ///              "PUT",
+    ///              "DELETE",
+    ///              "PATCH",
+    ///              "HEAD",
+    ///              "OPTIONS"
+    ///            ]
+    ///          }
+    ///        },
+    ///        "methods": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "enum": [
+    ///              "GET",
+    ///              "POST",
+    ///              "PUT",
+    ///              "DELETE",
+    ///              "PATCH",
+    ///              "HEAD",
+    ///              "OPTIONS"
+    ///            ]
+    ///          }
+    ///        },
+    ///        "path": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "type",
+    ///            "value"
+    ///          ],
+    ///          "properties": {
+    ///            "type": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "exact",
+    ///                "prefix",
+    ///                "glob"
+    ///              ]
+    ///            },
+    ///            "value": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        "query": {
+    ///          "type": "object",
+    ///          "additionalProperties": {
+    ///            "type": "string"
+    ///          },
+    ///          "propertyNames": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "sourceIpCidrs": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "path": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "type",
+    ///        "value"
+    ///      ],
+    ///      "properties": {
+    ///        "type": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "exact",
+    ///            "prefix",
+    ///            "glob"
+    ///          ]
+    ///        },
+    ///        "value": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "query": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "sourceIpCidrs": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct EdgeRuleAuthoringCondition {
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub any: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItem>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub asn: ::std::vec::Vec<::std::num::NonZeroU64>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub cookies: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionCookiesKey,
+            ::std::string::String,
+        >,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub device: ::std::option::Option<EdgeRuleAuthoringConditionDevice>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub geo: ::std::vec::Vec<EdgeRuleAuthoringConditionGeoItem>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub headers: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionHeadersKey,
+            ::std::string::String,
+        >,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub host: ::std::option::Option<EdgeRuleAuthoringConditionHost>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub method: ::std::vec::Vec<EdgeRuleAuthoringConditionMethodItem>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub methods: ::std::vec::Vec<EdgeRuleAuthoringConditionMethodsItem>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub not: ::std::option::Option<EdgeRuleAuthoringConditionNot>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub path: ::std::option::Option<EdgeRuleAuthoringConditionPath>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub query:
+            ::std::collections::HashMap<EdgeRuleAuthoringConditionQueryKey, ::std::string::String>,
+        #[serde(
+            rename = "sourceIpCidrs",
+            default,
+            skip_serializing_if = "::std::vec::Vec::is_empty"
+        )]
+        pub source_ip_cidrs: ::std::vec::Vec<EdgeRuleAuthoringConditionSourceIpCidrsItem>,
+    }
+    impl ::std::default::Default for EdgeRuleAuthoringCondition {
+        fn default() -> Self {
+            Self {
+                any: Default::default(),
+                asn: Default::default(),
+                cookies: Default::default(),
+                device: Default::default(),
+                geo: Default::default(),
+                headers: Default::default(),
+                host: Default::default(),
+                method: Default::default(),
+                methods: Default::default(),
+                not: Default::default(),
+                path: Default::default(),
+                query: Default::default(),
+                source_ip_cidrs: Default::default(),
+            }
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "properties": {
+    ///    "asn": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "integer",
+    ///        "maximum": 4294967295.0,
+    ///        "minimum": 1.0
+    ///      }
+    ///    },
+    ///    "cookies": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "device": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "desktop",
+    ///        "mobile",
+    ///        "tablet",
+    ///        "bot"
+    ///      ]
+    ///    },
+    ///    "geo": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "maxLength": 2,
+    ///        "minLength": 2
+    ///      }
+    ///    },
+    ///    "headers": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "host": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    },
+    ///    "method": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "enum": [
+    ///          "GET",
+    ///          "POST",
+    ///          "PUT",
+    ///          "DELETE",
+    ///          "PATCH",
+    ///          "HEAD",
+    ///          "OPTIONS"
+    ///        ]
+    ///      }
+    ///    },
+    ///    "methods": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "enum": [
+    ///          "GET",
+    ///          "POST",
+    ///          "PUT",
+    ///          "DELETE",
+    ///          "PATCH",
+    ///          "HEAD",
+    ///          "OPTIONS"
+    ///        ]
+    ///      }
+    ///    },
+    ///    "path": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "type",
+    ///        "value"
+    ///      ],
+    ///      "properties": {
+    ///        "type": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "exact",
+    ///            "prefix",
+    ///            "glob"
+    ///          ]
+    ///        },
+    ///        "value": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "query": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "sourceIpCidrs": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct EdgeRuleAuthoringConditionAnyItem {
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub asn: ::std::vec::Vec<::std::num::NonZeroU64>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub cookies: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionAnyItemCookiesKey,
+            ::std::string::String,
+        >,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub device: ::std::option::Option<EdgeRuleAuthoringConditionAnyItemDevice>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub geo: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItemGeoItem>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub headers: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionAnyItemHeadersKey,
+            ::std::string::String,
+        >,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub host: ::std::option::Option<EdgeRuleAuthoringConditionAnyItemHost>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub method: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItemMethodItem>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub methods: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItemMethodsItem>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub path: ::std::option::Option<EdgeRuleAuthoringConditionAnyItemPath>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub query: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionAnyItemQueryKey,
+            ::std::string::String,
+        >,
+        #[serde(
+            rename = "sourceIpCidrs",
+            default,
+            skip_serializing_if = "::std::vec::Vec::is_empty"
+        )]
+        pub source_ip_cidrs: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem>,
+    }
+    impl ::std::default::Default for EdgeRuleAuthoringConditionAnyItem {
+        fn default() -> Self {
+            Self {
+                asn: Default::default(),
+                cookies: Default::default(),
+                device: Default::default(),
+                geo: Default::default(),
+                headers: Default::default(),
+                host: Default::default(),
+                method: Default::default(),
+                methods: Default::default(),
+                path: Default::default(),
+                query: Default::default(),
+                source_ip_cidrs: Default::default(),
+            }
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemCookiesKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemCookiesKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemCookiesKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemCookiesKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemCookiesKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemCookiesKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemCookiesKey
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemCookiesKey
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemCookiesKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemDevice`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "desktop",
+    ///    "mobile",
+    ///    "tablet",
+    ///    "bot"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionAnyItemDevice {
+        #[serde(rename = "desktop")]
+        Desktop,
+        #[serde(rename = "mobile")]
+        Mobile,
+        #[serde(rename = "tablet")]
+        Tablet,
+        #[serde(rename = "bot")]
+        Bot,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionAnyItemDevice {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Desktop => f.write_str("desktop"),
+                Self::Mobile => f.write_str("mobile"),
+                Self::Tablet => f.write_str("tablet"),
+                Self::Bot => f.write_str("bot"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemDevice {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "desktop" => Ok(Self::Desktop),
+                "mobile" => Ok(Self::Mobile),
+                "tablet" => Ok(Self::Tablet),
+                "bot" => Ok(Self::Bot),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemGeoItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 2,
+    ///  "minLength": 2
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemGeoItem(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemGeoItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemGeoItem> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemGeoItem) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemGeoItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 2usize {
+                return Err("longer than 2 characters".into());
+            }
+            if value.chars().count() < 2usize {
+                return Err("shorter than 2 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemGeoItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemHeadersKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemHeadersKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemHeadersKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemHeadersKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemHeadersKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemHeadersKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemHeadersKey
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemHeadersKey
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemHeadersKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemHost`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemHost(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemHost {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemHost> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemHost) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemHost {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemHost {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemHost {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemHost {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemHost {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemMethodItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionAnyItemMethodItem {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionAnyItemMethodItem {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemMethodItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemMethodItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemMethodItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemMethodsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionAnyItemMethodsItem {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionAnyItemMethodsItem {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemMethodsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemMethodsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemMethodsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemPath`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "type",
+    ///    "value"
+    ///  ],
+    ///  "properties": {
+    ///    "type": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "exact",
+    ///        "prefix",
+    ///        "glob"
+    ///      ]
+    ///    },
+    ///    "value": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct EdgeRuleAuthoringConditionAnyItemPath {
+        #[serde(rename = "type")]
+        pub type_: EdgeRuleAuthoringConditionAnyItemPathType,
+        pub value: EdgeRuleAuthoringConditionAnyItemPathValue,
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemPathType`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "exact",
+    ///    "prefix",
+    ///    "glob"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionAnyItemPathType {
+        #[serde(rename = "exact")]
+        Exact,
+        #[serde(rename = "prefix")]
+        Prefix,
+        #[serde(rename = "glob")]
+        Glob,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionAnyItemPathType {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Exact => f.write_str("exact"),
+                Self::Prefix => f.write_str("prefix"),
+                Self::Glob => f.write_str("glob"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemPathType {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "exact" => Ok(Self::Exact),
+                "prefix" => Ok(Self::Prefix),
+                "glob" => Ok(Self::Glob),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemPathValue`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemPathValue(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemPathValue {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemPathValue> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemPathValue) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemPathValue {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemPathValue
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemPathValue {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemQueryKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemQueryKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemQueryKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemQueryKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemQueryKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemQueryKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemQueryKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem>
+        for ::std::string::String
+    {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionCookiesKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionCookiesKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionCookiesKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionCookiesKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionCookiesKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionCookiesKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionCookiesKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionDevice`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "desktop",
+    ///    "mobile",
+    ///    "tablet",
+    ///    "bot"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionDevice {
+        #[serde(rename = "desktop")]
+        Desktop,
+        #[serde(rename = "mobile")]
+        Mobile,
+        #[serde(rename = "tablet")]
+        Tablet,
+        #[serde(rename = "bot")]
+        Bot,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionDevice {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Desktop => f.write_str("desktop"),
+                Self::Mobile => f.write_str("mobile"),
+                Self::Tablet => f.write_str("tablet"),
+                Self::Bot => f.write_str("bot"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionDevice {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "desktop" => Ok(Self::Desktop),
+                "mobile" => Ok(Self::Mobile),
+                "tablet" => Ok(Self::Tablet),
+                "bot" => Ok(Self::Bot),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionGeoItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 2,
+    ///  "minLength": 2
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionGeoItem(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionGeoItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionGeoItem> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionGeoItem) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionGeoItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 2usize {
+                return Err("longer than 2 characters".into());
+            }
+            if value.chars().count() < 2usize {
+                return Err("shorter than 2 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionGeoItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionHeadersKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionHeadersKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionHeadersKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionHeadersKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionHeadersKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionHeadersKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionHeadersKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionHost`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionHost(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionHost {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionHost> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionHost) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionHost {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionHost {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionHost {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionHost {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionHost {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionMethodItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionMethodItem {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionMethodItem {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionMethodItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionMethodsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionMethodsItem {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionMethodsItem {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionMethodsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNot`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "properties": {
+    ///    "asn": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "integer",
+    ///        "maximum": 4294967295.0,
+    ///        "minimum": 1.0
+    ///      }
+    ///    },
+    ///    "cookies": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "device": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "desktop",
+    ///        "mobile",
+    ///        "tablet",
+    ///        "bot"
+    ///      ]
+    ///    },
+    ///    "geo": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "maxLength": 2,
+    ///        "minLength": 2
+    ///      }
+    ///    },
+    ///    "headers": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "host": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    },
+    ///    "method": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "enum": [
+    ///          "GET",
+    ///          "POST",
+    ///          "PUT",
+    ///          "DELETE",
+    ///          "PATCH",
+    ///          "HEAD",
+    ///          "OPTIONS"
+    ///        ]
+    ///      }
+    ///    },
+    ///    "methods": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "enum": [
+    ///          "GET",
+    ///          "POST",
+    ///          "PUT",
+    ///          "DELETE",
+    ///          "PATCH",
+    ///          "HEAD",
+    ///          "OPTIONS"
+    ///        ]
+    ///      }
+    ///    },
+    ///    "path": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "type",
+    ///        "value"
+    ///      ],
+    ///      "properties": {
+    ///        "type": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "exact",
+    ///            "prefix",
+    ///            "glob"
+    ///          ]
+    ///        },
+    ///        "value": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "query": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "sourceIpCidrs": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct EdgeRuleAuthoringConditionNot {
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub asn: ::std::vec::Vec<::std::num::NonZeroU64>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub cookies: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionNotCookiesKey,
+            ::std::string::String,
+        >,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub device: ::std::option::Option<EdgeRuleAuthoringConditionNotDevice>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub geo: ::std::vec::Vec<EdgeRuleAuthoringConditionNotGeoItem>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub headers: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionNotHeadersKey,
+            ::std::string::String,
+        >,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub host: ::std::option::Option<EdgeRuleAuthoringConditionNotHost>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub method: ::std::vec::Vec<EdgeRuleAuthoringConditionNotMethodItem>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub methods: ::std::vec::Vec<EdgeRuleAuthoringConditionNotMethodsItem>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub path: ::std::option::Option<EdgeRuleAuthoringConditionNotPath>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub query: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionNotQueryKey,
+            ::std::string::String,
+        >,
+        #[serde(
+            rename = "sourceIpCidrs",
+            default,
+            skip_serializing_if = "::std::vec::Vec::is_empty"
+        )]
+        pub source_ip_cidrs: ::std::vec::Vec<EdgeRuleAuthoringConditionNotSourceIpCidrsItem>,
+    }
+    impl ::std::default::Default for EdgeRuleAuthoringConditionNot {
+        fn default() -> Self {
+            Self {
+                asn: Default::default(),
+                cookies: Default::default(),
+                device: Default::default(),
+                geo: Default::default(),
+                headers: Default::default(),
+                host: Default::default(),
+                method: Default::default(),
+                methods: Default::default(),
+                path: Default::default(),
+                query: Default::default(),
+                source_ip_cidrs: Default::default(),
+            }
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotCookiesKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotCookiesKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotCookiesKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotCookiesKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionNotCookiesKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotCookiesKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotCookiesKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotDevice`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "desktop",
+    ///    "mobile",
+    ///    "tablet",
+    ///    "bot"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionNotDevice {
+        #[serde(rename = "desktop")]
+        Desktop,
+        #[serde(rename = "mobile")]
+        Mobile,
+        #[serde(rename = "tablet")]
+        Tablet,
+        #[serde(rename = "bot")]
+        Bot,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionNotDevice {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Desktop => f.write_str("desktop"),
+                Self::Mobile => f.write_str("mobile"),
+                Self::Tablet => f.write_str("tablet"),
+                Self::Bot => f.write_str("bot"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotDevice {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "desktop" => Ok(Self::Desktop),
+                "mobile" => Ok(Self::Mobile),
+                "tablet" => Ok(Self::Tablet),
+                "bot" => Ok(Self::Bot),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotGeoItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 2,
+    ///  "minLength": 2
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotGeoItem(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotGeoItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotGeoItem> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionNotGeoItem) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotGeoItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 2usize {
+                return Err("longer than 2 characters".into());
+            }
+            if value.chars().count() < 2usize {
+                return Err("shorter than 2 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotGeoItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotHeadersKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotHeadersKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotHeadersKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotHeadersKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionNotHeadersKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotHeadersKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotHeadersKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotHost`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotHost(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotHost {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotHost> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionNotHost) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotHost {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotHost {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotHost {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotHost {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotHost {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotMethodItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionNotMethodItem {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionNotMethodItem {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotMethodItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotMethodsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionNotMethodsItem {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionNotMethodsItem {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotMethodsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotPath`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "type",
+    ///    "value"
+    ///  ],
+    ///  "properties": {
+    ///    "type": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "exact",
+    ///        "prefix",
+    ///        "glob"
+    ///      ]
+    ///    },
+    ///    "value": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct EdgeRuleAuthoringConditionNotPath {
+        #[serde(rename = "type")]
+        pub type_: EdgeRuleAuthoringConditionNotPathType,
+        pub value: EdgeRuleAuthoringConditionNotPathValue,
+    }
+    ///`EdgeRuleAuthoringConditionNotPathType`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "exact",
+    ///    "prefix",
+    ///    "glob"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionNotPathType {
+        #[serde(rename = "exact")]
+        Exact,
+        #[serde(rename = "prefix")]
+        Prefix,
+        #[serde(rename = "glob")]
+        Glob,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionNotPathType {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Exact => f.write_str("exact"),
+                Self::Prefix => f.write_str("prefix"),
+                Self::Glob => f.write_str("glob"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotPathType {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "exact" => Ok(Self::Exact),
+                "prefix" => Ok(Self::Prefix),
+                "glob" => Ok(Self::Glob),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotPathValue`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotPathValue(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotPathValue {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotPathValue> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionNotPathValue) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotPathValue {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotPathValue {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotQueryKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotQueryKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotQueryKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotQueryKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionNotQueryKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotQueryKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotQueryKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotSourceIpCidrsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotSourceIpCidrsItem(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotSourceIpCidrsItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotSourceIpCidrsItem>
+        for ::std::string::String
+    {
+        fn from(value: EdgeRuleAuthoringConditionNotSourceIpCidrsItem) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotSourceIpCidrsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotSourceIpCidrsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionNotSourceIpCidrsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionNotSourceIpCidrsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotSourceIpCidrsItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionPath`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "type",
+    ///    "value"
+    ///  ],
+    ///  "properties": {
+    ///    "type": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "exact",
+    ///        "prefix",
+    ///        "glob"
+    ///      ]
+    ///    },
+    ///    "value": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct EdgeRuleAuthoringConditionPath {
+        #[serde(rename = "type")]
+        pub type_: EdgeRuleAuthoringConditionPathType,
+        pub value: EdgeRuleAuthoringConditionPathValue,
+    }
+    ///`EdgeRuleAuthoringConditionPathType`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "exact",
+    ///    "prefix",
+    ///    "glob"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionPathType {
+        #[serde(rename = "exact")]
+        Exact,
+        #[serde(rename = "prefix")]
+        Prefix,
+        #[serde(rename = "glob")]
+        Glob,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionPathType {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Exact => f.write_str("exact"),
+                Self::Prefix => f.write_str("prefix"),
+                Self::Glob => f.write_str("glob"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionPathType {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "exact" => Ok(Self::Exact),
+                "prefix" => Ok(Self::Prefix),
+                "glob" => Ok(Self::Glob),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionPathValue`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionPathValue(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionPathValue {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionPathValue> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionPathValue) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionPathValue {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionPathValue {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionQueryKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionQueryKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionQueryKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionQueryKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionQueryKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionQueryKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionQueryKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionSourceIpCidrsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionSourceIpCidrsItem(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionSourceIpCidrsItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionSourceIpCidrsItem> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionSourceIpCidrsItem) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionSourceIpCidrsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionSourceIpCidrsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionSourceIpCidrsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionSourceIpCidrsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionSourceIpCidrsItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
     }
     ///`EdgeRuleAuthoringId`
     ///
@@ -944,938 +5411,6 @@ pub mod edge_rules {
                 })
         }
     }
-    ///`EdgeRuleCondition`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "properties": {
-    ///    "cookies": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "device": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "desktop",
-    ///        "mobile",
-    ///        "tablet",
-    ///        "bot"
-    ///      ]
-    ///    },
-    ///    "geo": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "maxLength": 2,
-    ///        "minLength": 2
-    ///      }
-    ///    },
-    ///    "headers": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "host": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    },
-    ///    "methods": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "enum": [
-    ///          "GET",
-    ///          "POST",
-    ///          "PUT",
-    ///          "DELETE",
-    ///          "PATCH",
-    ///          "HEAD",
-    ///          "OPTIONS"
-    ///        ]
-    ///      }
-    ///    },
-    ///    "path": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "type",
-    ///        "value"
-    ///      ],
-    ///      "properties": {
-    ///        "type": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "exact",
-    ///            "prefix",
-    ///            "regex"
-    ///          ]
-    ///        },
-    ///        "value": {
-    ///          "type": "string",
-    ///          "minLength": 1
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "query": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "sourceIpCidrs": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-    #[serde(deny_unknown_fields)]
-    pub struct EdgeRuleCondition {
-        #[serde(
-            default,
-            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
-        )]
-        pub cookies:
-            ::std::collections::HashMap<EdgeRuleConditionCookiesKey, ::std::string::String>,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-        pub device: ::std::option::Option<EdgeRuleConditionDevice>,
-        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
-        pub geo: ::std::vec::Vec<EdgeRuleConditionGeoItem>,
-        #[serde(
-            default,
-            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
-        )]
-        pub headers:
-            ::std::collections::HashMap<EdgeRuleConditionHeadersKey, ::std::string::String>,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-        pub host: ::std::option::Option<EdgeRuleConditionHost>,
-        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
-        pub methods: ::std::vec::Vec<EdgeRuleConditionMethodsItem>,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-        pub path: ::std::option::Option<EdgeRuleConditionPath>,
-        #[serde(
-            default,
-            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
-        )]
-        pub query: ::std::collections::HashMap<EdgeRuleConditionQueryKey, ::std::string::String>,
-        #[serde(
-            rename = "sourceIpCidrs",
-            default,
-            skip_serializing_if = "::std::vec::Vec::is_empty"
-        )]
-        pub source_ip_cidrs: ::std::vec::Vec<EdgeRuleConditionSourceIpCidrsItem>,
-    }
-    impl ::std::default::Default for EdgeRuleCondition {
-        fn default() -> Self {
-            Self {
-                cookies: Default::default(),
-                device: Default::default(),
-                geo: Default::default(),
-                headers: Default::default(),
-                host: Default::default(),
-                methods: Default::default(),
-                path: Default::default(),
-                query: Default::default(),
-                source_ip_cidrs: Default::default(),
-            }
-        }
-    }
-    ///`EdgeRuleConditionCookiesKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionCookiesKey(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionCookiesKey {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionCookiesKey> for ::std::string::String {
-        fn from(value: EdgeRuleConditionCookiesKey) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionCookiesKey {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() < 1usize {
-                return Err("shorter than 1 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionCookiesKey {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionCookiesKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionCookiesKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionCookiesKey {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleConditionDevice`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "desktop",
-    ///    "mobile",
-    ///    "tablet",
-    ///    "bot"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
-    #[derive(
-        ::serde::Deserialize,
-        ::serde::Serialize,
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        Hash,
-        Ord,
-        PartialEq,
-        PartialOrd,
-    )]
-    pub enum EdgeRuleConditionDevice {
-        #[serde(rename = "desktop")]
-        Desktop,
-        #[serde(rename = "mobile")]
-        Mobile,
-        #[serde(rename = "tablet")]
-        Tablet,
-        #[serde(rename = "bot")]
-        Bot,
-    }
-    impl ::std::fmt::Display for EdgeRuleConditionDevice {
-        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-            match *self {
-                Self::Desktop => f.write_str("desktop"),
-                Self::Mobile => f.write_str("mobile"),
-                Self::Tablet => f.write_str("tablet"),
-                Self::Bot => f.write_str("bot"),
-            }
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionDevice {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            match value {
-                "desktop" => Ok(Self::Desktop),
-                "mobile" => Ok(Self::Mobile),
-                "tablet" => Ok(Self::Tablet),
-                "bot" => Ok(Self::Bot),
-                _ => Err("invalid value".into()),
-            }
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionDevice {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionDevice {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionDevice {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    ///`EdgeRuleConditionGeoItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 2,
-    ///  "minLength": 2
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionGeoItem(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionGeoItem {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionGeoItem> for ::std::string::String {
-        fn from(value: EdgeRuleConditionGeoItem) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionGeoItem {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() > 2usize {
-                return Err("longer than 2 characters".into());
-            }
-            if value.chars().count() < 2usize {
-                return Err("shorter than 2 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionGeoItem {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionGeoItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionGeoItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionGeoItem {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleConditionHeadersKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionHeadersKey(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionHeadersKey {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionHeadersKey> for ::std::string::String {
-        fn from(value: EdgeRuleConditionHeadersKey) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionHeadersKey {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() < 1usize {
-                return Err("shorter than 1 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionHeadersKey {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionHeadersKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionHeadersKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionHeadersKey {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleConditionHost`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionHost(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionHost {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionHost> for ::std::string::String {
-        fn from(value: EdgeRuleConditionHost) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionHost {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() < 1usize {
-                return Err("shorter than 1 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionHost {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionHost {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionHost {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionHost {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleConditionMethodsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "GET",
-    ///    "POST",
-    ///    "PUT",
-    ///    "DELETE",
-    ///    "PATCH",
-    ///    "HEAD",
-    ///    "OPTIONS"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
-    #[derive(
-        ::serde::Deserialize,
-        ::serde::Serialize,
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        Hash,
-        Ord,
-        PartialEq,
-        PartialOrd,
-    )]
-    pub enum EdgeRuleConditionMethodsItem {
-        #[serde(rename = "GET")]
-        Get,
-        #[serde(rename = "POST")]
-        Post,
-        #[serde(rename = "PUT")]
-        Put,
-        #[serde(rename = "DELETE")]
-        Delete,
-        #[serde(rename = "PATCH")]
-        Patch,
-        #[serde(rename = "HEAD")]
-        Head,
-        #[serde(rename = "OPTIONS")]
-        Options,
-    }
-    impl ::std::fmt::Display for EdgeRuleConditionMethodsItem {
-        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-            match *self {
-                Self::Get => f.write_str("GET"),
-                Self::Post => f.write_str("POST"),
-                Self::Put => f.write_str("PUT"),
-                Self::Delete => f.write_str("DELETE"),
-                Self::Patch => f.write_str("PATCH"),
-                Self::Head => f.write_str("HEAD"),
-                Self::Options => f.write_str("OPTIONS"),
-            }
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionMethodsItem {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            match value {
-                "GET" => Ok(Self::Get),
-                "POST" => Ok(Self::Post),
-                "PUT" => Ok(Self::Put),
-                "DELETE" => Ok(Self::Delete),
-                "PATCH" => Ok(Self::Patch),
-                "HEAD" => Ok(Self::Head),
-                "OPTIONS" => Ok(Self::Options),
-                _ => Err("invalid value".into()),
-            }
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionMethodsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionMethodsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionMethodsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    ///`EdgeRuleConditionPath`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "type",
-    ///    "value"
-    ///  ],
-    ///  "properties": {
-    ///    "type": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "exact",
-    ///        "prefix",
-    ///        "regex"
-    ///      ]
-    ///    },
-    ///    "value": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-    #[serde(deny_unknown_fields)]
-    pub struct EdgeRuleConditionPath {
-        #[serde(rename = "type")]
-        pub type_: EdgeRuleConditionPathType,
-        pub value: EdgeRuleConditionPathValue,
-    }
-    ///`EdgeRuleConditionPathType`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "exact",
-    ///    "prefix",
-    ///    "regex"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
-    #[derive(
-        ::serde::Deserialize,
-        ::serde::Serialize,
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        Hash,
-        Ord,
-        PartialEq,
-        PartialOrd,
-    )]
-    pub enum EdgeRuleConditionPathType {
-        #[serde(rename = "exact")]
-        Exact,
-        #[serde(rename = "prefix")]
-        Prefix,
-        #[serde(rename = "regex")]
-        Regex,
-    }
-    impl ::std::fmt::Display for EdgeRuleConditionPathType {
-        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-            match *self {
-                Self::Exact => f.write_str("exact"),
-                Self::Prefix => f.write_str("prefix"),
-                Self::Regex => f.write_str("regex"),
-            }
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionPathType {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            match value {
-                "exact" => Ok(Self::Exact),
-                "prefix" => Ok(Self::Prefix),
-                "regex" => Ok(Self::Regex),
-                _ => Err("invalid value".into()),
-            }
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionPathType {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionPathType {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionPathType {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    ///`EdgeRuleConditionPathValue`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionPathValue(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionPathValue {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionPathValue> for ::std::string::String {
-        fn from(value: EdgeRuleConditionPathValue) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionPathValue {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() < 1usize {
-                return Err("shorter than 1 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionPathValue {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionPathValue {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionPathValue {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionPathValue {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleConditionQueryKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionQueryKey(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionQueryKey {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionQueryKey> for ::std::string::String {
-        fn from(value: EdgeRuleConditionQueryKey) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionQueryKey {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() < 1usize {
-                return Err("shorter than 1 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionQueryKey {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionQueryKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionQueryKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionQueryKey {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleConditionSourceIpCidrsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionSourceIpCidrsItem(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionSourceIpCidrsItem {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionSourceIpCidrsItem> for ::std::string::String {
-        fn from(value: EdgeRuleConditionSourceIpCidrsItem) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionSourceIpCidrsItem {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() < 1usize {
-                return Err("shorter than 1 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionSourceIpCidrsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionSourceIpCidrsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionSourceIpCidrsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionSourceIpCidrsItem {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
     ///Authoring contract for onreza.rules.toml. nrz-cli and the publish platform validate this shape, then the platform normalizes it into the runtime EdgeRuleSet served by the edge runtime. Server validation additionally enforces unique rule ids and cache-rule Vary coverage.
     ///
     /// <details><summary>JSON schema</summary>
@@ -1890,6 +5425,7 @@ pub mod edge_rules {
     ///      "rules": [
     ///        {
     ///          "action": {
+    ///            "ifNoFile": false,
     ///            "statusCode": 301,
     ///            "target": "/docs",
     ///            "type": "redirect"
@@ -1915,6 +5451,27 @@ pub mod edge_rules {
     ///            }
     ///          },
     ///          "id": "cache-assets"
+    ///        },
+    ///        {
+    ///          "action": {
+    ///            "steps": [
+    ///              {
+    ///                "mode": "request",
+    ///                "use": "require-session"
+    ///              },
+    ///              {
+    ///                "handle": "@app"
+    ///              }
+    ///            ],
+    ///            "type": "pipeline"
+    ///          },
+    ///          "condition": {
+    ///            "path": {
+    ///              "type": "prefix",
+    ///              "value": "/dashboard"
+    ///            }
+    ///          },
+    ///          "id": "dashboard-auth"
     ///        }
     ///      ],
     ///      "schemaVersion": "EDGE_RULE_SET_V1",
@@ -1964,7 +5521,10 @@ pub mod edge_rules {
     ///  "additionalProperties": false,
     ///  "x-onreza-refinements": [
     ///    "unique rule ids per set",
-    ///    "cache rule must Vary by request-dependent condition dimensions"
+    ///    "cache rule must Vary by request-dependent condition dimensions",
+    ///    "pipeline actions must declare exactly one terminal handle step",
+    ///    "pipeline response/observe steps must appear after the terminal handle",
+    ///    "a narrower pipeline rule must re-declare a broader failure=closed request gate or set inherit_gate=false"
     ///  ]
     ///}
     /// ```
@@ -2144,6 +5704,104 @@ pub mod edge_rules {
         }
     }
     impl<'de> ::serde::Deserialize<'de> for OnrezaEdgeRuleSetV1SourceRevisionId {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`PipelineHandleStep`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "handle"
+    ///  ],
+    ///  "properties": {
+    ///    "handle": {
+    ///      "type": "string",
+    ///      "maxLength": 64,
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct PipelineHandleStep {
+        pub handle: PipelineHandleStepHandle,
+    }
+    ///`PipelineHandleStepHandle`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 64,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct PipelineHandleStepHandle(::std::string::String);
+    impl ::std::ops::Deref for PipelineHandleStepHandle {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<PipelineHandleStepHandle> for ::std::string::String {
+        fn from(value: PipelineHandleStepHandle) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for PipelineHandleStepHandle {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 64usize {
+                return Err("longer than 64 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for PipelineHandleStepHandle {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for PipelineHandleStepHandle {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for PipelineHandleStepHandle {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for PipelineHandleStepHandle {
         fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
         where
             D: ::serde::Deserializer<'de>,
@@ -6584,28 +10242,13 @@ pub mod onreza_functions_publish {
     ///        "type"
     ///      ],
     ///      "properties": {
-    ///        "force": {
+    ///        "ifNoFile": {
     ///          "type": "boolean"
     ///        },
     ///        "statusCode": {
-    ///          "anyOf": [
-    ///            {
-    ///              "type": "number",
-    ///              "const": 301
-    ///            },
-    ///            {
-    ///              "type": "number",
-    ///              "const": 302
-    ///            },
-    ///            {
-    ///              "type": "number",
-    ///              "const": 307
-    ///            },
-    ///            {
-    ///              "type": "number",
-    ///              "const": 308
-    ///            }
-    ///          ]
+    ///          "type": "integer",
+    ///          "maximum": 9007199254740991.0,
+    ///          "minimum": -9007199254740991.0
     ///        },
     ///        "target": {
     ///          "type": "string",
@@ -6628,7 +10271,7 @@ pub mod onreza_functions_publish {
     ///        "external": {
     ///          "type": "boolean"
     ///        },
-    ///        "force": {
+    ///        "ifNoFile": {
     ///          "type": "boolean"
     ///        },
     ///        "target": {
@@ -6714,6 +10357,7 @@ pub mod onreza_functions_publish {
     ///            "type": "string",
     ///            "enum": [
     ///              "geo",
+    ///              "asn",
     ///              "device",
     ///              "header",
     ///              "cookie",
@@ -6733,6 +10377,121 @@ pub mod onreza_functions_publish {
     ///        "type": {
     ///          "type": "string",
     ///          "const": "bypass_cache"
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "steps",
+    ///        "type"
+    ///      ],
+    ///      "properties": {
+    ///        "inheritGate": {
+    ///          "type": "boolean"
+    ///        },
+    ///        "override": {
+    ///          "type": "boolean"
+    ///        },
+    ///        "steps": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "anyOf": [
+    ///              {
+    ///                "type": "object",
+    ///                "required": [
+    ///                  "mode",
+    ///                  "use"
+    ///                ],
+    ///                "properties": {
+    ///                  "as": {
+    ///                    "type": "string",
+    ///                    "maxLength": 64,
+    ///                    "minLength": 1
+    ///                  },
+    ///                  "cachePosition": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "before",
+    ///                      "after"
+    ///                    ]
+    ///                  },
+    ///                  "failure": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "closed",
+    ///                      "open"
+    ///                    ]
+    ///                  },
+    ///                  "mode": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "request",
+    ///                      "response",
+    ///                      "observe"
+    ///                    ]
+    ///                  },
+    ///                  "use": {
+    ///                    "type": "string",
+    ///                    "maxLength": 64,
+    ///                    "minLength": 1,
+    ///                    "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+    ///                  }
+    ///                },
+    ///                "additionalProperties": false
+    ///              },
+    ///              {
+    ///                "$ref": "#/definitions/PipelineHandleStep"
+    ///              }
+    ///            ]
+    ///          },
+    ///          "minItems": 1
+    ///        },
+    ///        "type": {
+    ///          "type": "string",
+    ///          "const": "pipeline"
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "limit",
+    ///        "type",
+    ///        "windowSeconds"
+    ///      ],
+    ///      "properties": {
+    ///        "key": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "ip",
+    ///            "ip_path",
+    ///            "ip_host",
+    ///            "host"
+    ///          ]
+    ///        },
+    ///        "limit": {
+    ///          "type": "integer",
+    ///          "maximum": 100000.0,
+    ///          "minimum": 1.0
+    ///        },
+    ///        "mode": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "shadow",
+    ///            "enforce"
+    ///          ]
+    ///        },
+    ///        "type": {
+    ///          "type": "string",
+    ///          "const": "rate_limit"
+    ///        },
+    ///        "windowSeconds": {
+    ///          "type": "integer",
+    ///          "maximum": 600.0,
+    ///          "minimum": 10.0
     ///        }
     ///      },
     ///      "additionalProperties": false
@@ -6761,22 +10520,30 @@ pub mod onreza_functions_publish {
         },
         #[serde(rename = "redirect")]
         Redirect {
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-            force: ::std::option::Option<bool>,
+            #[serde(
+                rename = "ifNoFile",
+                default,
+                skip_serializing_if = "::std::option::Option::is_none"
+            )]
+            if_no_file: ::std::option::Option<bool>,
             #[serde(
                 rename = "statusCode",
                 default,
                 skip_serializing_if = "::std::option::Option::is_none"
             )]
-            status_code: ::std::option::Option<EdgeRuleActionAuthoringStatusCode>,
+            status_code: ::std::option::Option<i64>,
             target: EdgeRuleActionAuthoringTarget,
         },
         #[serde(rename = "rewrite")]
         Rewrite {
             #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
             external: ::std::option::Option<bool>,
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-            force: ::std::option::Option<bool>,
+            #[serde(
+                rename = "ifNoFile",
+                default,
+                skip_serializing_if = "::std::option::Option::is_none"
+            )]
+            if_no_file: ::std::option::Option<bool>,
             target: EdgeRuleActionAuthoringTarget,
         },
         #[serde(rename = "set_headers")]
@@ -6805,6 +10572,32 @@ pub mod onreza_functions_publish {
         },
         #[serde(rename = "bypass_cache")]
         BypassCache,
+        #[serde(rename = "pipeline")]
+        Pipeline {
+            #[serde(
+                rename = "inheritGate",
+                default,
+                skip_serializing_if = "::std::option::Option::is_none"
+            )]
+            inherit_gate: ::std::option::Option<bool>,
+            #[serde(
+                rename = "override",
+                default,
+                skip_serializing_if = "::std::option::Option::is_none"
+            )]
+            override_: ::std::option::Option<bool>,
+            steps: ::std::vec::Vec<EdgeRuleActionAuthoringStepsItem>,
+        },
+        #[serde(rename = "rate_limit")]
+        RateLimit {
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            key: ::std::option::Option<EdgeRuleActionAuthoringKey>,
+            limit: ::std::num::NonZeroU64,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            mode: ::std::option::Option<EdgeRuleActionAuthoringMode>,
+            #[serde(rename = "windowSeconds")]
+            window_seconds: i64,
+        },
     }
     ///`EdgeRuleActionAuthoringHeadersItem`
     ///
@@ -6942,6 +10735,88 @@ pub mod onreza_functions_publish {
                 })
         }
     }
+    ///`EdgeRuleActionAuthoringKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "ip",
+    ///    "ip_path",
+    ///    "ip_host",
+    ///    "host"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleActionAuthoringKey {
+        #[serde(rename = "ip")]
+        Ip,
+        #[serde(rename = "ip_path")]
+        IpPath,
+        #[serde(rename = "ip_host")]
+        IpHost,
+        #[serde(rename = "host")]
+        Host,
+    }
+    impl ::std::fmt::Display for EdgeRuleActionAuthoringKey {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Ip => f.write_str("ip"),
+                Self::IpPath => f.write_str("ip_path"),
+                Self::IpHost => f.write_str("ip_host"),
+                Self::Host => f.write_str("host"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleActionAuthoringKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "ip" => Ok(Self::Ip),
+                "ip_path" => Ok(Self::IpPath),
+                "ip_host" => Ok(Self::IpHost),
+                "host" => Ok(Self::Host),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
     ///`EdgeRuleActionAuthoringMode`
     ///
     /// <details><summary>JSON schema</summary>
@@ -7014,7 +10889,7 @@ pub mod onreza_functions_publish {
             value.parse()
         }
     }
-    ///`EdgeRuleActionAuthoringStatusCode`
+    ///`EdgeRuleActionAuthoringStepsItem`
     ///
     /// <details><summary>JSON schema</summary>
     ///
@@ -7022,56 +10897,130 @@ pub mod onreza_functions_publish {
     ///{
     ///  "anyOf": [
     ///    {
-    ///      "type": "number",
-    ///      "const": 301
+    ///      "type": "object",
+    ///      "required": [
+    ///        "mode",
+    ///        "use"
+    ///      ],
+    ///      "properties": {
+    ///        "as": {
+    ///          "type": "string",
+    ///          "maxLength": 64,
+    ///          "minLength": 1
+    ///        },
+    ///        "cachePosition": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "before",
+    ///            "after"
+    ///          ]
+    ///        },
+    ///        "failure": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "closed",
+    ///            "open"
+    ///          ]
+    ///        },
+    ///        "mode": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "request",
+    ///            "response",
+    ///            "observe"
+    ///          ]
+    ///        },
+    ///        "use": {
+    ///          "type": "string",
+    ///          "maxLength": 64,
+    ///          "minLength": 1,
+    ///          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
     ///    },
     ///    {
-    ///      "type": "number",
-    ///      "const": 302
-    ///    },
-    ///    {
-    ///      "type": "number",
-    ///      "const": 307
-    ///    },
-    ///    {
-    ///      "type": "number",
-    ///      "const": 308
+    ///      "$ref": "#/definitions/PipelineHandleStep"
     ///    }
     ///  ]
     ///}
     /// ```
     /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-    #[serde(untagged)]
-    pub enum EdgeRuleActionAuthoringStatusCode {
-        Variant0(f64),
-        Variant1(f64),
-        Variant2(f64),
-        Variant3(f64),
+    #[serde(untagged, deny_unknown_fields)]
+    pub enum EdgeRuleActionAuthoringStepsItem {
+        Object {
+            #[serde(
+                rename = "as",
+                default,
+                skip_serializing_if = "::std::option::Option::is_none"
+            )]
+            as_: ::std::option::Option<EdgeRuleActionAuthoringStepsItemObjectAs>,
+            #[serde(
+                rename = "cachePosition",
+                default,
+                skip_serializing_if = "::std::option::Option::is_none"
+            )]
+            cache_position:
+                ::std::option::Option<EdgeRuleActionAuthoringStepsItemObjectCachePosition>,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            failure: ::std::option::Option<EdgeRuleActionAuthoringStepsItemObjectFailure>,
+            mode: EdgeRuleActionAuthoringStepsItemObjectMode,
+            #[serde(rename = "use")]
+            use_: EdgeRuleActionAuthoringStepsItemObjectUse,
+        },
+        PipelineHandleStep(PipelineHandleStep),
     }
-    impl ::std::str::FromStr for EdgeRuleActionAuthoringStatusCode {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if let Ok(v) = value.parse() {
-                Ok(Self::Variant0(v))
-            } else if let Ok(v) = value.parse() {
-                Ok(Self::Variant1(v))
-            } else if let Ok(v) = value.parse() {
-                Ok(Self::Variant2(v))
-            } else if let Ok(v) = value.parse() {
-                Ok(Self::Variant3(v))
-            } else {
-                Err("string conversion failed for all variants".into())
-            }
+    impl ::std::convert::From<PipelineHandleStep> for EdgeRuleActionAuthoringStepsItem {
+        fn from(value: PipelineHandleStep) -> Self {
+            Self::PipelineHandleStep(value)
         }
     }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringStatusCode {
+    ///`EdgeRuleActionAuthoringStepsItemObjectAs`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 64,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleActionAuthoringStepsItemObjectAs(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleActionAuthoringStepsItemObjectAs {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleActionAuthoringStepsItemObjectAs> for ::std::string::String {
+        fn from(value: EdgeRuleActionAuthoringStepsItemObjectAs) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleActionAuthoringStepsItemObjectAs {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 64usize {
+                return Err("longer than 64 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringStepsItemObjectAs {
         type Error = self::error::ConversionError;
         fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringStatusCode {
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectAs {
         type Error = self::error::ConversionError;
         fn try_from(
             value: &::std::string::String,
@@ -7079,7 +11028,7 @@ pub mod onreza_functions_publish {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringStatusCode {
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectAs {
         type Error = self::error::ConversionError;
         fn try_from(
             value: ::std::string::String,
@@ -7087,14 +11036,327 @@ pub mod onreza_functions_publish {
             value.parse()
         }
     }
-    impl ::std::fmt::Display for EdgeRuleActionAuthoringStatusCode {
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleActionAuthoringStepsItemObjectAs {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleActionAuthoringStepsItemObjectCachePosition`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "before",
+    ///    "after"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleActionAuthoringStepsItemObjectCachePosition {
+        #[serde(rename = "before")]
+        Before,
+        #[serde(rename = "after")]
+        After,
+    }
+    impl ::std::fmt::Display for EdgeRuleActionAuthoringStepsItemObjectCachePosition {
         fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-            match self {
-                Self::Variant0(x) => x.fmt(f),
-                Self::Variant1(x) => x.fmt(f),
-                Self::Variant2(x) => x.fmt(f),
-                Self::Variant3(x) => x.fmt(f),
+            match *self {
+                Self::Before => f.write_str("before"),
+                Self::After => f.write_str("after"),
             }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleActionAuthoringStepsItemObjectCachePosition {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "before" => Ok(Self::Before),
+                "after" => Ok(Self::After),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringStepsItemObjectCachePosition {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleActionAuthoringStepsItemObjectCachePosition
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleActionAuthoringStepsItemObjectCachePosition
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleActionAuthoringStepsItemObjectFailure`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "closed",
+    ///    "open"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleActionAuthoringStepsItemObjectFailure {
+        #[serde(rename = "closed")]
+        Closed,
+        #[serde(rename = "open")]
+        Open,
+    }
+    impl ::std::fmt::Display for EdgeRuleActionAuthoringStepsItemObjectFailure {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Closed => f.write_str("closed"),
+                Self::Open => f.write_str("open"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleActionAuthoringStepsItemObjectFailure {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "closed" => Ok(Self::Closed),
+                "open" => Ok(Self::Open),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringStepsItemObjectFailure {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleActionAuthoringStepsItemObjectFailure
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleActionAuthoringStepsItemObjectFailure
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleActionAuthoringStepsItemObjectMode`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "request",
+    ///    "response",
+    ///    "observe"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleActionAuthoringStepsItemObjectMode {
+        #[serde(rename = "request")]
+        Request,
+        #[serde(rename = "response")]
+        Response,
+        #[serde(rename = "observe")]
+        Observe,
+    }
+    impl ::std::fmt::Display for EdgeRuleActionAuthoringStepsItemObjectMode {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Request => f.write_str("request"),
+                Self::Response => f.write_str("response"),
+                Self::Observe => f.write_str("observe"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleActionAuthoringStepsItemObjectMode {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "request" => Ok(Self::Request),
+                "response" => Ok(Self::Response),
+                "observe" => Ok(Self::Observe),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringStepsItemObjectMode {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleActionAuthoringStepsItemObjectMode
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectMode {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleActionAuthoringStepsItemObjectUse`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 64,
+    ///  "minLength": 1,
+    ///  "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleActionAuthoringStepsItemObjectUse(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleActionAuthoringStepsItemObjectUse {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleActionAuthoringStepsItemObjectUse> for ::std::string::String {
+        fn from(value: EdgeRuleActionAuthoringStepsItemObjectUse) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleActionAuthoringStepsItemObjectUse {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 64usize {
+                return Err("longer than 64 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| {
+                    ::regress::Regex::new("^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$").unwrap()
+                });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleActionAuthoringStepsItemObjectUse {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectUse {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectUse {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleActionAuthoringStepsItemObjectUse {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
         }
     }
     ///`EdgeRuleActionAuthoringTarget`
@@ -7174,6 +11436,7 @@ pub mod onreza_functions_publish {
     ///  "type": "string",
     ///  "enum": [
     ///    "geo",
+    ///    "asn",
     ///    "device",
     ///    "header",
     ///    "cookie",
@@ -7197,6 +11460,8 @@ pub mod onreza_functions_publish {
     pub enum EdgeRuleActionAuthoringVaryItem {
         #[serde(rename = "geo")]
         Geo,
+        #[serde(rename = "asn")]
+        Asn,
         #[serde(rename = "device")]
         Device,
         #[serde(rename = "header")]
@@ -7210,6 +11475,7 @@ pub mod onreza_functions_publish {
         fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
             match *self {
                 Self::Geo => f.write_str("geo"),
+                Self::Asn => f.write_str("asn"),
                 Self::Device => f.write_str("device"),
                 Self::Header => f.write_str("header"),
                 Self::Cookie => f.write_str("cookie"),
@@ -7222,6 +11488,7 @@ pub mod onreza_functions_publish {
         fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
             match value {
                 "geo" => Ok(Self::Geo),
+                "asn" => Ok(Self::Asn),
                 "device" => Ok(Self::Device),
                 "header" => Ok(Self::Header),
                 "cookie" => Ok(Self::Cookie),
@@ -7268,7 +11535,380 @@ pub mod onreza_functions_publish {
     ///      "$ref": "#/definitions/EdgeRuleActionAuthoring"
     ///    },
     ///    "condition": {
-    ///      "$ref": "#/definitions/EdgeRuleCondition"
+    ///      "type": "object",
+    ///      "properties": {
+    ///        "any": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "object",
+    ///            "properties": {
+    ///              "asn": {
+    ///                "type": "array",
+    ///                "items": {
+    ///                  "type": "integer",
+    ///                  "maximum": 4294967295.0,
+    ///                  "minimum": 1.0
+    ///                }
+    ///              },
+    ///              "cookies": {
+    ///                "type": "object",
+    ///                "additionalProperties": {
+    ///                  "type": "string"
+    ///                },
+    ///                "propertyNames": {
+    ///                  "type": "string",
+    ///                  "minLength": 1
+    ///                }
+    ///              },
+    ///              "device": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "desktop",
+    ///                  "mobile",
+    ///                  "tablet",
+    ///                  "bot"
+    ///                ]
+    ///              },
+    ///              "geo": {
+    ///                "type": "array",
+    ///                "items": {
+    ///                  "type": "string",
+    ///                  "maxLength": 2,
+    ///                  "minLength": 2
+    ///                }
+    ///              },
+    ///              "headers": {
+    ///                "type": "object",
+    ///                "additionalProperties": {
+    ///                  "type": "string"
+    ///                },
+    ///                "propertyNames": {
+    ///                  "type": "string",
+    ///                  "minLength": 1
+    ///                }
+    ///              },
+    ///              "host": {
+    ///                "type": "string",
+    ///                "minLength": 1
+    ///              },
+    ///              "method": {
+    ///                "type": "array",
+    ///                "items": {
+    ///                  "type": "string",
+    ///                  "enum": [
+    ///                    "GET",
+    ///                    "POST",
+    ///                    "PUT",
+    ///                    "DELETE",
+    ///                    "PATCH",
+    ///                    "HEAD",
+    ///                    "OPTIONS"
+    ///                  ]
+    ///                }
+    ///              },
+    ///              "methods": {
+    ///                "type": "array",
+    ///                "items": {
+    ///                  "type": "string",
+    ///                  "enum": [
+    ///                    "GET",
+    ///                    "POST",
+    ///                    "PUT",
+    ///                    "DELETE",
+    ///                    "PATCH",
+    ///                    "HEAD",
+    ///                    "OPTIONS"
+    ///                  ]
+    ///                }
+    ///              },
+    ///              "path": {
+    ///                "type": "object",
+    ///                "required": [
+    ///                  "type",
+    ///                  "value"
+    ///                ],
+    ///                "properties": {
+    ///                  "type": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "exact",
+    ///                      "prefix",
+    ///                      "glob"
+    ///                    ]
+    ///                  },
+    ///                  "value": {
+    ///                    "type": "string",
+    ///                    "minLength": 1
+    ///                  }
+    ///                },
+    ///                "additionalProperties": false
+    ///              },
+    ///              "query": {
+    ///                "type": "object",
+    ///                "additionalProperties": {
+    ///                  "type": "string"
+    ///                },
+    ///                "propertyNames": {
+    ///                  "type": "string",
+    ///                  "minLength": 1
+    ///                }
+    ///              },
+    ///              "sourceIpCidrs": {
+    ///                "type": "array",
+    ///                "items": {
+    ///                  "type": "string",
+    ///                  "minLength": 1
+    ///                }
+    ///              }
+    ///            },
+    ///            "additionalProperties": false
+    ///          },
+    ///          "minItems": 1
+    ///        },
+    ///        "asn": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "integer",
+    ///            "maximum": 4294967295.0,
+    ///            "minimum": 1.0
+    ///          }
+    ///        },
+    ///        "cookies": {
+    ///          "type": "object",
+    ///          "additionalProperties": {
+    ///            "type": "string"
+    ///          },
+    ///          "propertyNames": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "device": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "desktop",
+    ///            "mobile",
+    ///            "tablet",
+    ///            "bot"
+    ///          ]
+    ///        },
+    ///        "geo": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "maxLength": 2,
+    ///            "minLength": 2
+    ///          }
+    ///        },
+    ///        "headers": {
+    ///          "type": "object",
+    ///          "additionalProperties": {
+    ///            "type": "string"
+    ///          },
+    ///          "propertyNames": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "host": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        },
+    ///        "method": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "enum": [
+    ///              "GET",
+    ///              "POST",
+    ///              "PUT",
+    ///              "DELETE",
+    ///              "PATCH",
+    ///              "HEAD",
+    ///              "OPTIONS"
+    ///            ]
+    ///          }
+    ///        },
+    ///        "methods": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "enum": [
+    ///              "GET",
+    ///              "POST",
+    ///              "PUT",
+    ///              "DELETE",
+    ///              "PATCH",
+    ///              "HEAD",
+    ///              "OPTIONS"
+    ///            ]
+    ///          }
+    ///        },
+    ///        "not": {
+    ///          "type": "object",
+    ///          "properties": {
+    ///            "asn": {
+    ///              "type": "array",
+    ///              "items": {
+    ///                "type": "integer",
+    ///                "maximum": 4294967295.0,
+    ///                "minimum": 1.0
+    ///              }
+    ///            },
+    ///            "cookies": {
+    ///              "type": "object",
+    ///              "additionalProperties": {
+    ///                "type": "string"
+    ///              },
+    ///              "propertyNames": {
+    ///                "type": "string",
+    ///                "minLength": 1
+    ///              }
+    ///            },
+    ///            "device": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "desktop",
+    ///                "mobile",
+    ///                "tablet",
+    ///                "bot"
+    ///              ]
+    ///            },
+    ///            "geo": {
+    ///              "type": "array",
+    ///              "items": {
+    ///                "type": "string",
+    ///                "maxLength": 2,
+    ///                "minLength": 2
+    ///              }
+    ///            },
+    ///            "headers": {
+    ///              "type": "object",
+    ///              "additionalProperties": {
+    ///                "type": "string"
+    ///              },
+    ///              "propertyNames": {
+    ///                "type": "string",
+    ///                "minLength": 1
+    ///              }
+    ///            },
+    ///            "host": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            },
+    ///            "method": {
+    ///              "type": "array",
+    ///              "items": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "GET",
+    ///                  "POST",
+    ///                  "PUT",
+    ///                  "DELETE",
+    ///                  "PATCH",
+    ///                  "HEAD",
+    ///                  "OPTIONS"
+    ///                ]
+    ///              }
+    ///            },
+    ///            "methods": {
+    ///              "type": "array",
+    ///              "items": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "GET",
+    ///                  "POST",
+    ///                  "PUT",
+    ///                  "DELETE",
+    ///                  "PATCH",
+    ///                  "HEAD",
+    ///                  "OPTIONS"
+    ///                ]
+    ///              }
+    ///            },
+    ///            "path": {
+    ///              "type": "object",
+    ///              "required": [
+    ///                "type",
+    ///                "value"
+    ///              ],
+    ///              "properties": {
+    ///                "type": {
+    ///                  "type": "string",
+    ///                  "enum": [
+    ///                    "exact",
+    ///                    "prefix",
+    ///                    "glob"
+    ///                  ]
+    ///                },
+    ///                "value": {
+    ///                  "type": "string",
+    ///                  "minLength": 1
+    ///                }
+    ///              },
+    ///              "additionalProperties": false
+    ///            },
+    ///            "query": {
+    ///              "type": "object",
+    ///              "additionalProperties": {
+    ///                "type": "string"
+    ///              },
+    ///              "propertyNames": {
+    ///                "type": "string",
+    ///                "minLength": 1
+    ///              }
+    ///            },
+    ///            "sourceIpCidrs": {
+    ///              "type": "array",
+    ///              "items": {
+    ///                "type": "string",
+    ///                "minLength": 1
+    ///              }
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        "path": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "type",
+    ///            "value"
+    ///          ],
+    ///          "properties": {
+    ///            "type": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "exact",
+    ///                "prefix",
+    ///                "glob"
+    ///              ]
+    ///            },
+    ///            "value": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        "query": {
+    ///          "type": "object",
+    ///          "additionalProperties": {
+    ///            "type": "string"
+    ///          },
+    ///          "propertyNames": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "sourceIpCidrs": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
     ///    },
     ///    "enabled": {
     ///      "type": "boolean"
@@ -7291,12 +11931,3497 @@ pub mod onreza_functions_publish {
     pub struct EdgeRuleAuthoring {
         pub action: EdgeRuleActionAuthoring,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-        pub condition: ::std::option::Option<EdgeRuleCondition>,
+        pub condition: ::std::option::Option<EdgeRuleAuthoringCondition>,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub enabled: ::std::option::Option<bool>,
         pub id: EdgeRuleAuthoringId,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub name: ::std::option::Option<EdgeRuleAuthoringName>,
+    }
+    ///`EdgeRuleAuthoringCondition`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "properties": {
+    ///    "any": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "object",
+    ///        "properties": {
+    ///          "asn": {
+    ///            "type": "array",
+    ///            "items": {
+    ///              "type": "integer",
+    ///              "maximum": 4294967295.0,
+    ///              "minimum": 1.0
+    ///            }
+    ///          },
+    ///          "cookies": {
+    ///            "type": "object",
+    ///            "additionalProperties": {
+    ///              "type": "string"
+    ///            },
+    ///            "propertyNames": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          },
+    ///          "device": {
+    ///            "type": "string",
+    ///            "enum": [
+    ///              "desktop",
+    ///              "mobile",
+    ///              "tablet",
+    ///              "bot"
+    ///            ]
+    ///          },
+    ///          "geo": {
+    ///            "type": "array",
+    ///            "items": {
+    ///              "type": "string",
+    ///              "maxLength": 2,
+    ///              "minLength": 2
+    ///            }
+    ///          },
+    ///          "headers": {
+    ///            "type": "object",
+    ///            "additionalProperties": {
+    ///              "type": "string"
+    ///            },
+    ///            "propertyNames": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          },
+    ///          "host": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          },
+    ///          "method": {
+    ///            "type": "array",
+    ///            "items": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "GET",
+    ///                "POST",
+    ///                "PUT",
+    ///                "DELETE",
+    ///                "PATCH",
+    ///                "HEAD",
+    ///                "OPTIONS"
+    ///              ]
+    ///            }
+    ///          },
+    ///          "methods": {
+    ///            "type": "array",
+    ///            "items": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "GET",
+    ///                "POST",
+    ///                "PUT",
+    ///                "DELETE",
+    ///                "PATCH",
+    ///                "HEAD",
+    ///                "OPTIONS"
+    ///              ]
+    ///            }
+    ///          },
+    ///          "path": {
+    ///            "type": "object",
+    ///            "required": [
+    ///              "type",
+    ///              "value"
+    ///            ],
+    ///            "properties": {
+    ///              "type": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "exact",
+    ///                  "prefix",
+    ///                  "glob"
+    ///                ]
+    ///              },
+    ///              "value": {
+    ///                "type": "string",
+    ///                "minLength": 1
+    ///              }
+    ///            },
+    ///            "additionalProperties": false
+    ///          },
+    ///          "query": {
+    ///            "type": "object",
+    ///            "additionalProperties": {
+    ///              "type": "string"
+    ///            },
+    ///            "propertyNames": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          },
+    ///          "sourceIpCidrs": {
+    ///            "type": "array",
+    ///            "items": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          }
+    ///        },
+    ///        "additionalProperties": false
+    ///      },
+    ///      "minItems": 1
+    ///    },
+    ///    "asn": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "integer",
+    ///        "maximum": 4294967295.0,
+    ///        "minimum": 1.0
+    ///      }
+    ///    },
+    ///    "cookies": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "device": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "desktop",
+    ///        "mobile",
+    ///        "tablet",
+    ///        "bot"
+    ///      ]
+    ///    },
+    ///    "geo": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "maxLength": 2,
+    ///        "minLength": 2
+    ///      }
+    ///    },
+    ///    "headers": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "host": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    },
+    ///    "method": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "enum": [
+    ///          "GET",
+    ///          "POST",
+    ///          "PUT",
+    ///          "DELETE",
+    ///          "PATCH",
+    ///          "HEAD",
+    ///          "OPTIONS"
+    ///        ]
+    ///      }
+    ///    },
+    ///    "methods": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "enum": [
+    ///          "GET",
+    ///          "POST",
+    ///          "PUT",
+    ///          "DELETE",
+    ///          "PATCH",
+    ///          "HEAD",
+    ///          "OPTIONS"
+    ///        ]
+    ///      }
+    ///    },
+    ///    "not": {
+    ///      "type": "object",
+    ///      "properties": {
+    ///        "asn": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "integer",
+    ///            "maximum": 4294967295.0,
+    ///            "minimum": 1.0
+    ///          }
+    ///        },
+    ///        "cookies": {
+    ///          "type": "object",
+    ///          "additionalProperties": {
+    ///            "type": "string"
+    ///          },
+    ///          "propertyNames": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "device": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "desktop",
+    ///            "mobile",
+    ///            "tablet",
+    ///            "bot"
+    ///          ]
+    ///        },
+    ///        "geo": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "maxLength": 2,
+    ///            "minLength": 2
+    ///          }
+    ///        },
+    ///        "headers": {
+    ///          "type": "object",
+    ///          "additionalProperties": {
+    ///            "type": "string"
+    ///          },
+    ///          "propertyNames": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "host": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        },
+    ///        "method": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "enum": [
+    ///              "GET",
+    ///              "POST",
+    ///              "PUT",
+    ///              "DELETE",
+    ///              "PATCH",
+    ///              "HEAD",
+    ///              "OPTIONS"
+    ///            ]
+    ///          }
+    ///        },
+    ///        "methods": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "enum": [
+    ///              "GET",
+    ///              "POST",
+    ///              "PUT",
+    ///              "DELETE",
+    ///              "PATCH",
+    ///              "HEAD",
+    ///              "OPTIONS"
+    ///            ]
+    ///          }
+    ///        },
+    ///        "path": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "type",
+    ///            "value"
+    ///          ],
+    ///          "properties": {
+    ///            "type": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "exact",
+    ///                "prefix",
+    ///                "glob"
+    ///              ]
+    ///            },
+    ///            "value": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        "query": {
+    ///          "type": "object",
+    ///          "additionalProperties": {
+    ///            "type": "string"
+    ///          },
+    ///          "propertyNames": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "sourceIpCidrs": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "minLength": 1
+    ///          }
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "path": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "type",
+    ///        "value"
+    ///      ],
+    ///      "properties": {
+    ///        "type": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "exact",
+    ///            "prefix",
+    ///            "glob"
+    ///          ]
+    ///        },
+    ///        "value": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "query": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "sourceIpCidrs": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct EdgeRuleAuthoringCondition {
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub any: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItem>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub asn: ::std::vec::Vec<::std::num::NonZeroU64>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub cookies: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionCookiesKey,
+            ::std::string::String,
+        >,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub device: ::std::option::Option<EdgeRuleAuthoringConditionDevice>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub geo: ::std::vec::Vec<EdgeRuleAuthoringConditionGeoItem>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub headers: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionHeadersKey,
+            ::std::string::String,
+        >,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub host: ::std::option::Option<EdgeRuleAuthoringConditionHost>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub method: ::std::vec::Vec<EdgeRuleAuthoringConditionMethodItem>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub methods: ::std::vec::Vec<EdgeRuleAuthoringConditionMethodsItem>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub not: ::std::option::Option<EdgeRuleAuthoringConditionNot>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub path: ::std::option::Option<EdgeRuleAuthoringConditionPath>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub query:
+            ::std::collections::HashMap<EdgeRuleAuthoringConditionQueryKey, ::std::string::String>,
+        #[serde(
+            rename = "sourceIpCidrs",
+            default,
+            skip_serializing_if = "::std::vec::Vec::is_empty"
+        )]
+        pub source_ip_cidrs: ::std::vec::Vec<EdgeRuleAuthoringConditionSourceIpCidrsItem>,
+    }
+    impl ::std::default::Default for EdgeRuleAuthoringCondition {
+        fn default() -> Self {
+            Self {
+                any: Default::default(),
+                asn: Default::default(),
+                cookies: Default::default(),
+                device: Default::default(),
+                geo: Default::default(),
+                headers: Default::default(),
+                host: Default::default(),
+                method: Default::default(),
+                methods: Default::default(),
+                not: Default::default(),
+                path: Default::default(),
+                query: Default::default(),
+                source_ip_cidrs: Default::default(),
+            }
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "properties": {
+    ///    "asn": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "integer",
+    ///        "maximum": 4294967295.0,
+    ///        "minimum": 1.0
+    ///      }
+    ///    },
+    ///    "cookies": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "device": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "desktop",
+    ///        "mobile",
+    ///        "tablet",
+    ///        "bot"
+    ///      ]
+    ///    },
+    ///    "geo": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "maxLength": 2,
+    ///        "minLength": 2
+    ///      }
+    ///    },
+    ///    "headers": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "host": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    },
+    ///    "method": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "enum": [
+    ///          "GET",
+    ///          "POST",
+    ///          "PUT",
+    ///          "DELETE",
+    ///          "PATCH",
+    ///          "HEAD",
+    ///          "OPTIONS"
+    ///        ]
+    ///      }
+    ///    },
+    ///    "methods": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "enum": [
+    ///          "GET",
+    ///          "POST",
+    ///          "PUT",
+    ///          "DELETE",
+    ///          "PATCH",
+    ///          "HEAD",
+    ///          "OPTIONS"
+    ///        ]
+    ///      }
+    ///    },
+    ///    "path": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "type",
+    ///        "value"
+    ///      ],
+    ///      "properties": {
+    ///        "type": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "exact",
+    ///            "prefix",
+    ///            "glob"
+    ///          ]
+    ///        },
+    ///        "value": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "query": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "sourceIpCidrs": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct EdgeRuleAuthoringConditionAnyItem {
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub asn: ::std::vec::Vec<::std::num::NonZeroU64>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub cookies: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionAnyItemCookiesKey,
+            ::std::string::String,
+        >,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub device: ::std::option::Option<EdgeRuleAuthoringConditionAnyItemDevice>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub geo: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItemGeoItem>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub headers: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionAnyItemHeadersKey,
+            ::std::string::String,
+        >,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub host: ::std::option::Option<EdgeRuleAuthoringConditionAnyItemHost>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub method: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItemMethodItem>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub methods: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItemMethodsItem>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub path: ::std::option::Option<EdgeRuleAuthoringConditionAnyItemPath>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub query: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionAnyItemQueryKey,
+            ::std::string::String,
+        >,
+        #[serde(
+            rename = "sourceIpCidrs",
+            default,
+            skip_serializing_if = "::std::vec::Vec::is_empty"
+        )]
+        pub source_ip_cidrs: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem>,
+    }
+    impl ::std::default::Default for EdgeRuleAuthoringConditionAnyItem {
+        fn default() -> Self {
+            Self {
+                asn: Default::default(),
+                cookies: Default::default(),
+                device: Default::default(),
+                geo: Default::default(),
+                headers: Default::default(),
+                host: Default::default(),
+                method: Default::default(),
+                methods: Default::default(),
+                path: Default::default(),
+                query: Default::default(),
+                source_ip_cidrs: Default::default(),
+            }
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemCookiesKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemCookiesKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemCookiesKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemCookiesKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemCookiesKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemCookiesKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemCookiesKey
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemCookiesKey
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemCookiesKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemDevice`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "desktop",
+    ///    "mobile",
+    ///    "tablet",
+    ///    "bot"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionAnyItemDevice {
+        #[serde(rename = "desktop")]
+        Desktop,
+        #[serde(rename = "mobile")]
+        Mobile,
+        #[serde(rename = "tablet")]
+        Tablet,
+        #[serde(rename = "bot")]
+        Bot,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionAnyItemDevice {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Desktop => f.write_str("desktop"),
+                Self::Mobile => f.write_str("mobile"),
+                Self::Tablet => f.write_str("tablet"),
+                Self::Bot => f.write_str("bot"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemDevice {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "desktop" => Ok(Self::Desktop),
+                "mobile" => Ok(Self::Mobile),
+                "tablet" => Ok(Self::Tablet),
+                "bot" => Ok(Self::Bot),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemGeoItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 2,
+    ///  "minLength": 2
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemGeoItem(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemGeoItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemGeoItem> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemGeoItem) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemGeoItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 2usize {
+                return Err("longer than 2 characters".into());
+            }
+            if value.chars().count() < 2usize {
+                return Err("shorter than 2 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemGeoItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemHeadersKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemHeadersKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemHeadersKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemHeadersKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemHeadersKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemHeadersKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemHeadersKey
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemHeadersKey
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemHeadersKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemHost`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemHost(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemHost {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemHost> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemHost) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemHost {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemHost {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemHost {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemHost {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemHost {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemMethodItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionAnyItemMethodItem {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionAnyItemMethodItem {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemMethodItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemMethodItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemMethodItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemMethodsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionAnyItemMethodsItem {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionAnyItemMethodsItem {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemMethodsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemMethodsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemMethodsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemPath`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "type",
+    ///    "value"
+    ///  ],
+    ///  "properties": {
+    ///    "type": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "exact",
+    ///        "prefix",
+    ///        "glob"
+    ///      ]
+    ///    },
+    ///    "value": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct EdgeRuleAuthoringConditionAnyItemPath {
+        #[serde(rename = "type")]
+        pub type_: EdgeRuleAuthoringConditionAnyItemPathType,
+        pub value: EdgeRuleAuthoringConditionAnyItemPathValue,
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemPathType`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "exact",
+    ///    "prefix",
+    ///    "glob"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionAnyItemPathType {
+        #[serde(rename = "exact")]
+        Exact,
+        #[serde(rename = "prefix")]
+        Prefix,
+        #[serde(rename = "glob")]
+        Glob,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionAnyItemPathType {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Exact => f.write_str("exact"),
+                Self::Prefix => f.write_str("prefix"),
+                Self::Glob => f.write_str("glob"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemPathType {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "exact" => Ok(Self::Exact),
+                "prefix" => Ok(Self::Prefix),
+                "glob" => Ok(Self::Glob),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemPathValue`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemPathValue(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemPathValue {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemPathValue> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemPathValue) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemPathValue {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemPathValue
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemPathValue {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemQueryKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemQueryKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemQueryKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemQueryKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemQueryKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemQueryKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemQueryKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem>
+        for ::std::string::String
+    {
+        fn from(value: EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionCookiesKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionCookiesKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionCookiesKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionCookiesKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionCookiesKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionCookiesKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionCookiesKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionDevice`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "desktop",
+    ///    "mobile",
+    ///    "tablet",
+    ///    "bot"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionDevice {
+        #[serde(rename = "desktop")]
+        Desktop,
+        #[serde(rename = "mobile")]
+        Mobile,
+        #[serde(rename = "tablet")]
+        Tablet,
+        #[serde(rename = "bot")]
+        Bot,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionDevice {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Desktop => f.write_str("desktop"),
+                Self::Mobile => f.write_str("mobile"),
+                Self::Tablet => f.write_str("tablet"),
+                Self::Bot => f.write_str("bot"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionDevice {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "desktop" => Ok(Self::Desktop),
+                "mobile" => Ok(Self::Mobile),
+                "tablet" => Ok(Self::Tablet),
+                "bot" => Ok(Self::Bot),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionGeoItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 2,
+    ///  "minLength": 2
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionGeoItem(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionGeoItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionGeoItem> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionGeoItem) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionGeoItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 2usize {
+                return Err("longer than 2 characters".into());
+            }
+            if value.chars().count() < 2usize {
+                return Err("shorter than 2 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionGeoItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionHeadersKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionHeadersKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionHeadersKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionHeadersKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionHeadersKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionHeadersKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionHeadersKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionHost`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionHost(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionHost {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionHost> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionHost) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionHost {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionHost {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionHost {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionHost {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionHost {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionMethodItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionMethodItem {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionMethodItem {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionMethodItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionMethodsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionMethodsItem {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionMethodsItem {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionMethodsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNot`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "properties": {
+    ///    "asn": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "integer",
+    ///        "maximum": 4294967295.0,
+    ///        "minimum": 1.0
+    ///      }
+    ///    },
+    ///    "cookies": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "device": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "desktop",
+    ///        "mobile",
+    ///        "tablet",
+    ///        "bot"
+    ///      ]
+    ///    },
+    ///    "geo": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "maxLength": 2,
+    ///        "minLength": 2
+    ///      }
+    ///    },
+    ///    "headers": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "host": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    },
+    ///    "method": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "enum": [
+    ///          "GET",
+    ///          "POST",
+    ///          "PUT",
+    ///          "DELETE",
+    ///          "PATCH",
+    ///          "HEAD",
+    ///          "OPTIONS"
+    ///        ]
+    ///      }
+    ///    },
+    ///    "methods": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "enum": [
+    ///          "GET",
+    ///          "POST",
+    ///          "PUT",
+    ///          "DELETE",
+    ///          "PATCH",
+    ///          "HEAD",
+    ///          "OPTIONS"
+    ///        ]
+    ///      }
+    ///    },
+    ///    "path": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "type",
+    ///        "value"
+    ///      ],
+    ///      "properties": {
+    ///        "type": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "exact",
+    ///            "prefix",
+    ///            "glob"
+    ///          ]
+    ///        },
+    ///        "value": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "query": {
+    ///      "type": "object",
+    ///      "additionalProperties": {
+    ///        "type": "string"
+    ///      },
+    ///      "propertyNames": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    },
+    ///    "sourceIpCidrs": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "minLength": 1
+    ///      }
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct EdgeRuleAuthoringConditionNot {
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub asn: ::std::vec::Vec<::std::num::NonZeroU64>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub cookies: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionNotCookiesKey,
+            ::std::string::String,
+        >,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub device: ::std::option::Option<EdgeRuleAuthoringConditionNotDevice>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub geo: ::std::vec::Vec<EdgeRuleAuthoringConditionNotGeoItem>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub headers: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionNotHeadersKey,
+            ::std::string::String,
+        >,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub host: ::std::option::Option<EdgeRuleAuthoringConditionNotHost>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub method: ::std::vec::Vec<EdgeRuleAuthoringConditionNotMethodItem>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub methods: ::std::vec::Vec<EdgeRuleAuthoringConditionNotMethodsItem>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub path: ::std::option::Option<EdgeRuleAuthoringConditionNotPath>,
+        #[serde(
+            default,
+            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
+        )]
+        pub query: ::std::collections::HashMap<
+            EdgeRuleAuthoringConditionNotQueryKey,
+            ::std::string::String,
+        >,
+        #[serde(
+            rename = "sourceIpCidrs",
+            default,
+            skip_serializing_if = "::std::vec::Vec::is_empty"
+        )]
+        pub source_ip_cidrs: ::std::vec::Vec<EdgeRuleAuthoringConditionNotSourceIpCidrsItem>,
+    }
+    impl ::std::default::Default for EdgeRuleAuthoringConditionNot {
+        fn default() -> Self {
+            Self {
+                asn: Default::default(),
+                cookies: Default::default(),
+                device: Default::default(),
+                geo: Default::default(),
+                headers: Default::default(),
+                host: Default::default(),
+                method: Default::default(),
+                methods: Default::default(),
+                path: Default::default(),
+                query: Default::default(),
+                source_ip_cidrs: Default::default(),
+            }
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotCookiesKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotCookiesKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotCookiesKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotCookiesKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionNotCookiesKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotCookiesKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotCookiesKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotCookiesKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotDevice`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "desktop",
+    ///    "mobile",
+    ///    "tablet",
+    ///    "bot"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionNotDevice {
+        #[serde(rename = "desktop")]
+        Desktop,
+        #[serde(rename = "mobile")]
+        Mobile,
+        #[serde(rename = "tablet")]
+        Tablet,
+        #[serde(rename = "bot")]
+        Bot,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionNotDevice {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Desktop => f.write_str("desktop"),
+                Self::Mobile => f.write_str("mobile"),
+                Self::Tablet => f.write_str("tablet"),
+                Self::Bot => f.write_str("bot"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotDevice {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "desktop" => Ok(Self::Desktop),
+                "mobile" => Ok(Self::Mobile),
+                "tablet" => Ok(Self::Tablet),
+                "bot" => Ok(Self::Bot),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotDevice {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotGeoItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 2,
+    ///  "minLength": 2
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotGeoItem(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotGeoItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotGeoItem> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionNotGeoItem) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotGeoItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 2usize {
+                return Err("longer than 2 characters".into());
+            }
+            if value.chars().count() < 2usize {
+                return Err("shorter than 2 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotGeoItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotGeoItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotHeadersKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotHeadersKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotHeadersKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotHeadersKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionNotHeadersKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotHeadersKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotHeadersKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotHost`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotHost(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotHost {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotHost> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionNotHost) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotHost {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotHost {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotHost {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotHost {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotHost {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotMethodItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionNotMethodItem {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionNotMethodItem {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotMethodItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotMethodItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotMethodsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionNotMethodsItem {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionNotMethodsItem {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotMethodsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotMethodsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotPath`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "type",
+    ///    "value"
+    ///  ],
+    ///  "properties": {
+    ///    "type": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "exact",
+    ///        "prefix",
+    ///        "glob"
+    ///      ]
+    ///    },
+    ///    "value": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct EdgeRuleAuthoringConditionNotPath {
+        #[serde(rename = "type")]
+        pub type_: EdgeRuleAuthoringConditionNotPathType,
+        pub value: EdgeRuleAuthoringConditionNotPathValue,
+    }
+    ///`EdgeRuleAuthoringConditionNotPathType`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "exact",
+    ///    "prefix",
+    ///    "glob"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionNotPathType {
+        #[serde(rename = "exact")]
+        Exact,
+        #[serde(rename = "prefix")]
+        Prefix,
+        #[serde(rename = "glob")]
+        Glob,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionNotPathType {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Exact => f.write_str("exact"),
+                Self::Prefix => f.write_str("prefix"),
+                Self::Glob => f.write_str("glob"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotPathType {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "exact" => Ok(Self::Exact),
+                "prefix" => Ok(Self::Prefix),
+                "glob" => Ok(Self::Glob),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotPathValue`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotPathValue(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotPathValue {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotPathValue> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionNotPathValue) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotPathValue {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotPathValue {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotQueryKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotQueryKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotQueryKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotQueryKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionNotQueryKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotQueryKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotQueryKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionNotSourceIpCidrsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionNotSourceIpCidrsItem(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionNotSourceIpCidrsItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionNotSourceIpCidrsItem>
+        for ::std::string::String
+    {
+        fn from(value: EdgeRuleAuthoringConditionNotSourceIpCidrsItem) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionNotSourceIpCidrsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionNotSourceIpCidrsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionNotSourceIpCidrsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionNotSourceIpCidrsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionNotSourceIpCidrsItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionPath`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "type",
+    ///    "value"
+    ///  ],
+    ///  "properties": {
+    ///    "type": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "exact",
+    ///        "prefix",
+    ///        "glob"
+    ///      ]
+    ///    },
+    ///    "value": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct EdgeRuleAuthoringConditionPath {
+        #[serde(rename = "type")]
+        pub type_: EdgeRuleAuthoringConditionPathType,
+        pub value: EdgeRuleAuthoringConditionPathValue,
+    }
+    ///`EdgeRuleAuthoringConditionPathType`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "exact",
+    ///    "prefix",
+    ///    "glob"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum EdgeRuleAuthoringConditionPathType {
+        #[serde(rename = "exact")]
+        Exact,
+        #[serde(rename = "prefix")]
+        Prefix,
+        #[serde(rename = "glob")]
+        Glob,
+    }
+    impl ::std::fmt::Display for EdgeRuleAuthoringConditionPathType {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Exact => f.write_str("exact"),
+                Self::Prefix => f.write_str("prefix"),
+                Self::Glob => f.write_str("glob"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionPathType {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "exact" => Ok(Self::Exact),
+                "prefix" => Ok(Self::Prefix),
+                "glob" => Ok(Self::Glob),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionPathType {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`EdgeRuleAuthoringConditionPathValue`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionPathValue(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionPathValue {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionPathValue> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionPathValue) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionPathValue {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionPathValue {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionPathValue {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionQueryKey`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionQueryKey(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionQueryKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionQueryKey> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionQueryKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionQueryKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionQueryKey {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionQueryKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`EdgeRuleAuthoringConditionSourceIpCidrsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct EdgeRuleAuthoringConditionSourceIpCidrsItem(::std::string::String);
+    impl ::std::ops::Deref for EdgeRuleAuthoringConditionSourceIpCidrsItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<EdgeRuleAuthoringConditionSourceIpCidrsItem> for ::std::string::String {
+        fn from(value: EdgeRuleAuthoringConditionSourceIpCidrsItem) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for EdgeRuleAuthoringConditionSourceIpCidrsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for EdgeRuleAuthoringConditionSourceIpCidrsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for EdgeRuleAuthoringConditionSourceIpCidrsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for EdgeRuleAuthoringConditionSourceIpCidrsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringConditionSourceIpCidrsItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
     }
     ///`EdgeRuleAuthoringId`
     ///
@@ -7423,938 +15548,6 @@ pub mod onreza_functions_publish {
         }
     }
     impl<'de> ::serde::Deserialize<'de> for EdgeRuleAuthoringName {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleCondition`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "properties": {
-    ///    "cookies": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "device": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "desktop",
-    ///        "mobile",
-    ///        "tablet",
-    ///        "bot"
-    ///      ]
-    ///    },
-    ///    "geo": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "maxLength": 2,
-    ///        "minLength": 2
-    ///      }
-    ///    },
-    ///    "headers": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "host": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    },
-    ///    "methods": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "enum": [
-    ///          "GET",
-    ///          "POST",
-    ///          "PUT",
-    ///          "DELETE",
-    ///          "PATCH",
-    ///          "HEAD",
-    ///          "OPTIONS"
-    ///        ]
-    ///      }
-    ///    },
-    ///    "path": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "type",
-    ///        "value"
-    ///      ],
-    ///      "properties": {
-    ///        "type": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "exact",
-    ///            "prefix",
-    ///            "regex"
-    ///          ]
-    ///        },
-    ///        "value": {
-    ///          "type": "string",
-    ///          "minLength": 1
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "query": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "sourceIpCidrs": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-    #[serde(deny_unknown_fields)]
-    pub struct EdgeRuleCondition {
-        #[serde(
-            default,
-            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
-        )]
-        pub cookies:
-            ::std::collections::HashMap<EdgeRuleConditionCookiesKey, ::std::string::String>,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-        pub device: ::std::option::Option<EdgeRuleConditionDevice>,
-        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
-        pub geo: ::std::vec::Vec<EdgeRuleConditionGeoItem>,
-        #[serde(
-            default,
-            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
-        )]
-        pub headers:
-            ::std::collections::HashMap<EdgeRuleConditionHeadersKey, ::std::string::String>,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-        pub host: ::std::option::Option<EdgeRuleConditionHost>,
-        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
-        pub methods: ::std::vec::Vec<EdgeRuleConditionMethodsItem>,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-        pub path: ::std::option::Option<EdgeRuleConditionPath>,
-        #[serde(
-            default,
-            skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
-        )]
-        pub query: ::std::collections::HashMap<EdgeRuleConditionQueryKey, ::std::string::String>,
-        #[serde(
-            rename = "sourceIpCidrs",
-            default,
-            skip_serializing_if = "::std::vec::Vec::is_empty"
-        )]
-        pub source_ip_cidrs: ::std::vec::Vec<EdgeRuleConditionSourceIpCidrsItem>,
-    }
-    impl ::std::default::Default for EdgeRuleCondition {
-        fn default() -> Self {
-            Self {
-                cookies: Default::default(),
-                device: Default::default(),
-                geo: Default::default(),
-                headers: Default::default(),
-                host: Default::default(),
-                methods: Default::default(),
-                path: Default::default(),
-                query: Default::default(),
-                source_ip_cidrs: Default::default(),
-            }
-        }
-    }
-    ///`EdgeRuleConditionCookiesKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionCookiesKey(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionCookiesKey {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionCookiesKey> for ::std::string::String {
-        fn from(value: EdgeRuleConditionCookiesKey) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionCookiesKey {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() < 1usize {
-                return Err("shorter than 1 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionCookiesKey {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionCookiesKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionCookiesKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionCookiesKey {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleConditionDevice`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "desktop",
-    ///    "mobile",
-    ///    "tablet",
-    ///    "bot"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
-    #[derive(
-        ::serde::Deserialize,
-        ::serde::Serialize,
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        Hash,
-        Ord,
-        PartialEq,
-        PartialOrd,
-    )]
-    pub enum EdgeRuleConditionDevice {
-        #[serde(rename = "desktop")]
-        Desktop,
-        #[serde(rename = "mobile")]
-        Mobile,
-        #[serde(rename = "tablet")]
-        Tablet,
-        #[serde(rename = "bot")]
-        Bot,
-    }
-    impl ::std::fmt::Display for EdgeRuleConditionDevice {
-        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-            match *self {
-                Self::Desktop => f.write_str("desktop"),
-                Self::Mobile => f.write_str("mobile"),
-                Self::Tablet => f.write_str("tablet"),
-                Self::Bot => f.write_str("bot"),
-            }
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionDevice {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            match value {
-                "desktop" => Ok(Self::Desktop),
-                "mobile" => Ok(Self::Mobile),
-                "tablet" => Ok(Self::Tablet),
-                "bot" => Ok(Self::Bot),
-                _ => Err("invalid value".into()),
-            }
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionDevice {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionDevice {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionDevice {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    ///`EdgeRuleConditionGeoItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 2,
-    ///  "minLength": 2
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionGeoItem(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionGeoItem {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionGeoItem> for ::std::string::String {
-        fn from(value: EdgeRuleConditionGeoItem) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionGeoItem {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() > 2usize {
-                return Err("longer than 2 characters".into());
-            }
-            if value.chars().count() < 2usize {
-                return Err("shorter than 2 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionGeoItem {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionGeoItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionGeoItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionGeoItem {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleConditionHeadersKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionHeadersKey(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionHeadersKey {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionHeadersKey> for ::std::string::String {
-        fn from(value: EdgeRuleConditionHeadersKey) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionHeadersKey {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() < 1usize {
-                return Err("shorter than 1 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionHeadersKey {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionHeadersKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionHeadersKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionHeadersKey {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleConditionHost`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionHost(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionHost {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionHost> for ::std::string::String {
-        fn from(value: EdgeRuleConditionHost) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionHost {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() < 1usize {
-                return Err("shorter than 1 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionHost {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionHost {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionHost {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionHost {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleConditionMethodsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "GET",
-    ///    "POST",
-    ///    "PUT",
-    ///    "DELETE",
-    ///    "PATCH",
-    ///    "HEAD",
-    ///    "OPTIONS"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
-    #[derive(
-        ::serde::Deserialize,
-        ::serde::Serialize,
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        Hash,
-        Ord,
-        PartialEq,
-        PartialOrd,
-    )]
-    pub enum EdgeRuleConditionMethodsItem {
-        #[serde(rename = "GET")]
-        Get,
-        #[serde(rename = "POST")]
-        Post,
-        #[serde(rename = "PUT")]
-        Put,
-        #[serde(rename = "DELETE")]
-        Delete,
-        #[serde(rename = "PATCH")]
-        Patch,
-        #[serde(rename = "HEAD")]
-        Head,
-        #[serde(rename = "OPTIONS")]
-        Options,
-    }
-    impl ::std::fmt::Display for EdgeRuleConditionMethodsItem {
-        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-            match *self {
-                Self::Get => f.write_str("GET"),
-                Self::Post => f.write_str("POST"),
-                Self::Put => f.write_str("PUT"),
-                Self::Delete => f.write_str("DELETE"),
-                Self::Patch => f.write_str("PATCH"),
-                Self::Head => f.write_str("HEAD"),
-                Self::Options => f.write_str("OPTIONS"),
-            }
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionMethodsItem {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            match value {
-                "GET" => Ok(Self::Get),
-                "POST" => Ok(Self::Post),
-                "PUT" => Ok(Self::Put),
-                "DELETE" => Ok(Self::Delete),
-                "PATCH" => Ok(Self::Patch),
-                "HEAD" => Ok(Self::Head),
-                "OPTIONS" => Ok(Self::Options),
-                _ => Err("invalid value".into()),
-            }
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionMethodsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionMethodsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionMethodsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    ///`EdgeRuleConditionPath`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "type",
-    ///    "value"
-    ///  ],
-    ///  "properties": {
-    ///    "type": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "exact",
-    ///        "prefix",
-    ///        "regex"
-    ///      ]
-    ///    },
-    ///    "value": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-    #[serde(deny_unknown_fields)]
-    pub struct EdgeRuleConditionPath {
-        #[serde(rename = "type")]
-        pub type_: EdgeRuleConditionPathType,
-        pub value: EdgeRuleConditionPathValue,
-    }
-    ///`EdgeRuleConditionPathType`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "exact",
-    ///    "prefix",
-    ///    "regex"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
-    #[derive(
-        ::serde::Deserialize,
-        ::serde::Serialize,
-        Clone,
-        Copy,
-        Debug,
-        Eq,
-        Hash,
-        Ord,
-        PartialEq,
-        PartialOrd,
-    )]
-    pub enum EdgeRuleConditionPathType {
-        #[serde(rename = "exact")]
-        Exact,
-        #[serde(rename = "prefix")]
-        Prefix,
-        #[serde(rename = "regex")]
-        Regex,
-    }
-    impl ::std::fmt::Display for EdgeRuleConditionPathType {
-        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-            match *self {
-                Self::Exact => f.write_str("exact"),
-                Self::Prefix => f.write_str("prefix"),
-                Self::Regex => f.write_str("regex"),
-            }
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionPathType {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            match value {
-                "exact" => Ok(Self::Exact),
-                "prefix" => Ok(Self::Prefix),
-                "regex" => Ok(Self::Regex),
-                _ => Err("invalid value".into()),
-            }
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionPathType {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionPathType {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionPathType {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    ///`EdgeRuleConditionPathValue`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionPathValue(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionPathValue {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionPathValue> for ::std::string::String {
-        fn from(value: EdgeRuleConditionPathValue) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionPathValue {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() < 1usize {
-                return Err("shorter than 1 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionPathValue {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionPathValue {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionPathValue {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionPathValue {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleConditionQueryKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionQueryKey(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionQueryKey {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionQueryKey> for ::std::string::String {
-        fn from(value: EdgeRuleConditionQueryKey) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionQueryKey {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() < 1usize {
-                return Err("shorter than 1 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionQueryKey {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionQueryKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionQueryKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionQueryKey {
-        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
-        where
-            D: ::serde::Deserializer<'de>,
-        {
-            ::std::string::String::deserialize(deserializer)?
-                .parse()
-                .map_err(|e: self::error::ConversionError| {
-                    <D::Error as ::serde::de::Error>::custom(e.to_string())
-                })
-        }
-    }
-    ///`EdgeRuleConditionSourceIpCidrsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    #[serde(transparent)]
-    pub struct EdgeRuleConditionSourceIpCidrsItem(::std::string::String);
-    impl ::std::ops::Deref for EdgeRuleConditionSourceIpCidrsItem {
-        type Target = ::std::string::String;
-        fn deref(&self) -> &::std::string::String {
-            &self.0
-        }
-    }
-    impl ::std::convert::From<EdgeRuleConditionSourceIpCidrsItem> for ::std::string::String {
-        fn from(value: EdgeRuleConditionSourceIpCidrsItem) -> Self {
-            value.0
-        }
-    }
-    impl ::std::str::FromStr for EdgeRuleConditionSourceIpCidrsItem {
-        type Err = self::error::ConversionError;
-        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            if value.chars().count() < 1usize {
-                return Err("shorter than 1 characters".into());
-            }
-            Ok(Self(value.to_string()))
-        }
-    }
-    impl ::std::convert::TryFrom<&str> for EdgeRuleConditionSourceIpCidrsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleConditionSourceIpCidrsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleConditionSourceIpCidrsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: ::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
-    impl<'de> ::serde::Deserialize<'de> for EdgeRuleConditionSourceIpCidrsItem {
         fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
         where
             D: ::serde::Deserializer<'de>,
@@ -8612,7 +15805,28 @@ pub mod onreza_functions_publish {
     ///  "examples": [
     ///    {
     ///      "edgeRules": {
-    ///        "rules": [],
+    ///        "rules": [
+    ///          {
+    ///            "action": {
+    ///              "steps": [
+    ///                {
+    ///                  "handle": "hello-api"
+    ///                }
+    ///              ],
+    ///              "type": "pipeline"
+    ///            },
+    ///            "condition": {
+    ///              "method": [
+    ///                "GET"
+    ///              ],
+    ///              "path": {
+    ///                "type": "exact",
+    ///                "value": "/api/hello"
+    ///              }
+    ///            },
+    ///            "id": "hello-api"
+    ///          }
+    ///        ],
     ///        "schemaVersion": "EDGE_RULE_SET_V1",
     ///        "source": {
     ///          "origin": "build"
@@ -8621,7 +15835,7 @@ pub mod onreza_functions_publish {
     ///      "functions": [
     ///        {
     ///          "source": {
-    ///            "contentText": "export const config = { triggers: [{ type: \"http\", matchers: [\"/api/hello\"], methods: [\"GET\"] }] } as const;\\n\\nexport default { fetch() { return Response.json({ ok: true }); } };\\n",
+    ///            "contentText": "export const config = { name: \"hello-api\" } as const;\\n\\nexport default { fetch() { return Response.json({ ok: true }); } };\\n",
     ///            "path": "api/hello.nrz-fn.ts"
     ///          }
     ///        }
@@ -9021,6 +16235,104 @@ pub mod onreza_functions_publish {
             value: ::std::string::String,
         ) -> ::std::result::Result<Self, self::error::ConversionError> {
             value.parse()
+        }
+    }
+    ///`PipelineHandleStep`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "handle"
+    ///  ],
+    ///  "properties": {
+    ///    "handle": {
+    ///      "type": "string",
+    ///      "maxLength": 64,
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct PipelineHandleStep {
+        pub handle: PipelineHandleStepHandle,
+    }
+    ///`PipelineHandleStepHandle`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 64,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct PipelineHandleStepHandle(::std::string::String);
+    impl ::std::ops::Deref for PipelineHandleStepHandle {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<PipelineHandleStepHandle> for ::std::string::String {
+        fn from(value: PipelineHandleStepHandle) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for PipelineHandleStepHandle {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 64usize {
+                return Err("longer than 64 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for PipelineHandleStepHandle {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for PipelineHandleStepHandle {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for PipelineHandleStepHandle {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for PipelineHandleStepHandle {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
         }
     }
 }

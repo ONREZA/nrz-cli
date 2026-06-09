@@ -7,11 +7,14 @@ mod collect;
 mod payload;
 mod policy;
 mod rules;
+mod rules_authoring;
 
 #[cfg(test)]
 mod collect_tests;
 #[cfg(test)]
 mod publish_tests;
+#[cfg(test)]
+mod rules_authoring_tests;
 
 pub use collect::{CollectedFunction, CollectedFunctions, collect};
 pub use payload::{FunctionPublishPayload, build_payload};

@@ -433,8 +433,9 @@ fn source_bundle_plan_rejects_legacy_manifest_middleware() {
     let err = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap_err();
 
     assert!(
-        err.to_string()
-            .contains("manifest middleware is no longer supported"),
+        err.to_string().contains(
+            "manifest middleware is no longer supported; declare HTTP function wiring in onreza.rules.toml with a pipeline action"
+        ),
         "{err}"
     );
 }

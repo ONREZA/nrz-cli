@@ -1,8 +1,16 @@
 import * as assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "bun:test";
 
 import { createPackageJson, createPostinstall, releaseAssets } from "./create-npm-package";
-import { findReleaseByTag, type GitHubRelease } from "./publish-github-release";
+import {
+  appendChecksumsToReleaseNotes,
+  createChecksums,
+  findReleaseByTag,
+  type GitHubRelease,
+} from "./publish-github-release";
 import {
   filterReleaseCommits,
   releaseCargoToml,
@@ -83,6 +91,26 @@ test("GitHub release lookup includes draft releases by tag", async () => {
     "GET /repos/ONREZA/nrz-cli/releases/tags/v0.33.0-beta.1",
     "GET /repos/ONREZA/nrz-cli/releases?per_page=100",
   ]);
+});
+
+test("GitHub release notes include the same checksum text as the uploaded checksum file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nrz-release-"));
+  try {
+    const asset = join(dir, "nrz-linux-x64.tar.gz");
+    writeFileSync(asset, "binary");
+
+    const checksums = createChecksums([asset]);
+    const notes = appendChecksumsToReleaseNotes("## [0.33.0-beta.2]\n\n- Add ONREZA Functions", checksums.text);
+
+    assert.equal(readFileSync(checksums.path, "utf8"), checksums.text);
+    assert.match(checksums.text, /^[a-f0-9]{64}  nrz-linux-x64\.tar\.gz\n$/);
+    assert.equal(
+      notes,
+      `## [0.33.0-beta.2]\n\n- Add ONREZA Functions\n\n### Checksums (SHA-256)\n\n\`\`\`text\n${checksums.text.trim()}\n\`\`\``,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("postinstall fails when no binary exists for the host platform", () => {

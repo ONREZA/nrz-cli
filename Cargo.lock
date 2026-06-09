@@ -1258,7 +1258,7 @@ dependencies = [
 
 [[package]]
 name = "nrz-contract"
-version = "0.33.0-beta.2"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "regress",
@@ -1269,7 +1269,7 @@ dependencies = [
 
 [[package]]
 name = "nrz-fn-policy"
-version = "0.33.0-beta.2"
+version = "0.1.0"
 dependencies = [
  "oxc_allocator",
  "oxc_ast",

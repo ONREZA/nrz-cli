@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
@@ -77,6 +78,7 @@ pub fn collect(project_dir: &Path) -> anyhow::Result<CollectedFunctions> {
     }
 
     let mut functions = Vec::with_capacity(entries.len());
+    let mut seen_names = HashMap::new();
     for path in entries {
         let relative = relative_path(project_dir, &path);
         let size = path.metadata()?.len();
@@ -92,6 +94,12 @@ pub fn collect(project_dir: &Path) -> anyhow::Result<CollectedFunctions> {
             Some(name) => name.to_string(),
             None => function_name_from_entry(&relative)?,
         };
+        if let Some(previous_entrypoint) = seen_names.get(&name) {
+            bail!(
+                "duplicate ONREZA Function name '{name}' in '{relative}' and '{previous_entrypoint}'"
+            );
+        }
+        seen_names.insert(name.clone(), relative.clone());
 
         if !analysis.imports.is_empty() {
             bail!(

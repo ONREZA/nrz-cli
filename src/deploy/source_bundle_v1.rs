@@ -392,7 +392,7 @@ fn build_logical_manifest(
 ) -> anyhow::Result<SourceLogicalManifest> {
     if manifest.middleware.is_some() {
         bail!(
-            "manifest middleware is no longer supported; use a *.nrz-fn.* entry with export const config and a middleware trigger"
+            "manifest middleware is no longer supported; declare HTTP function wiring in onreza.rules.toml with a pipeline action"
         );
     }
     let mut logical_files = Vec::with_capacity(entries.len());

@@ -1014,7 +1014,7 @@ fn create_deployment_body_serializes_required_fields() {
     let body = CreateDeploymentBody {
         manifest: serde_json::json!({ "version": 1 }),
         files: vec![],
-        production: false,
+        production: None,
         branch: None,
         commit_sha: "deadbeef".into(),
         functions: None,
@@ -1022,6 +1022,7 @@ fn create_deployment_body_serializes_required_fields() {
 
     let value = serde_json::to_value(&body).unwrap();
     assert!(value.get("manifest").is_some());
+    assert!(value.get("production").is_none());
     assert_eq!(
         value.get("commitSha").and_then(|v| v.as_str()),
         Some("deadbeef")
@@ -1037,7 +1038,7 @@ fn create_deployment_body_serializes_functions_payload() {
     let body = CreateDeploymentBody {
         manifest: serde_json::json!({ "version": 1 }),
         files: vec![],
-        production: false,
+        production: Some(false),
         branch: None,
         commit_sha: "deadbeef".into(),
         functions: Some(crate::functions::FunctionPublishPayload {
@@ -1055,6 +1056,30 @@ fn create_deployment_body_serializes_functions_payload() {
             .and_then(|origin| origin.as_str()),
         Some("DEPLOYMENT")
     );
+}
+
+#[test]
+fn deploy_env_preview_forces_preview_override() {
+    let env = vec!["preview".to_string()];
+    assert_eq!(
+        resolve_deploy_production_override(false, &env).unwrap(),
+        Some(false)
+    );
+}
+
+#[test]
+fn deploy_without_env_preserves_branch_inference() {
+    assert_eq!(
+        resolve_deploy_production_override(false, &[]).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn deploy_prod_conflicts_with_preview_env() {
+    let env = vec!["preview".to_string()];
+    let error = resolve_deploy_production_override(true, &env).unwrap_err();
+    assert!(error.to_string().contains("conflicts"));
 }
 
 #[test]
@@ -1806,6 +1831,7 @@ async fn postbuild_detection_preserves_generated_root_static_html() {
         true,
         &effective,
         Some(&stale_detection),
+        false,
     )
     .await;
     assert!(
@@ -1825,6 +1851,7 @@ async fn postbuild_detection_preserves_generated_root_static_html() {
         true,
         &effective,
         Some(&postbuild_detection),
+        false,
     )
     .await
     .unwrap();

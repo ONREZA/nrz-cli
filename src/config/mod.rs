@@ -919,7 +919,7 @@ pub fn generate_template(
     workspace_slug: Option<&str>,
 ) -> String {
     let mut project_lines = String::from(
-        "#:schema https://raw.githubusercontent.com/onreza/nrz-cli/main/onreza.schema.json\n\n[project]\n",
+        "#:schema https://docs.onreza.ru/schemas/onreza-project-v1.schema.json\n\n[project]\n",
     );
     if let Some(id) = project_id {
         let id = escape_toml_value(id);

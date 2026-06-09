@@ -10,16 +10,19 @@ use nrz::config;
 use nrz::config::ProjectConfig;
 
 #[derive(Debug, Deserialize, Serialize)]
-struct LogsResponse {
-    logs: Vec<LogEntry>,
-    total: u64,
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LogsResponse {
+    pub(crate) entries: Vec<serde_json::Value>,
+    pagination: LogsPagination,
+    filters: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct LogEntry {
-    timestamp: Option<String>,
-    level: Option<String>,
-    message: String,
+#[serde(rename_all = "camelCase")]
+struct LogsPagination {
+    limit: u32,
+    offset: u32,
+    has_more: bool,
 }
 
 pub async fn run(
@@ -60,17 +63,56 @@ pub async fn run(
     if json {
         output::json_output(&resp);
     } else {
-        if resp.logs.is_empty() {
+        if resp.entries.is_empty() {
             eprintln!("  No logs found.");
             return Ok(());
         }
 
-        for entry in &resp.logs {
-            let ts = entry.timestamp.as_deref().unwrap_or("-");
-            let level = entry.level.as_deref().unwrap_or("info");
-            eprintln!("[{}] [{}] {}", ts, level, entry.message);
+        for entry in &resp.entries {
+            eprintln!("{}", format_log_entry(entry));
         }
     }
 
     Ok(())
+}
+
+pub(crate) fn format_log_entry(entry: &serde_json::Value) -> String {
+    let ts = string_field(entry, "timestamp").unwrap_or("-");
+
+    if let Some(message) = string_field(entry, "message") {
+        let level = string_field(entry, "functionLogLevel")
+            .or_else(|| string_field(entry, "level"))
+            .or_else(|| string_field(entry, "source"))
+            .unwrap_or("info");
+        return format!("[{ts}] [{level}] {message}");
+    }
+
+    let method = string_field(entry, "method").unwrap_or("-");
+    let path = string_field(entry, "path").unwrap_or("-");
+    let status = number_field(entry, "status")
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let duration = duration_field(entry).unwrap_or_default();
+    let function = string_field(entry, "functionName")
+        .map(|value| format!(" function={value}"))
+        .unwrap_or_default();
+
+    format!("[{ts}] [{status}] {method} {path}{duration}{function}")
+}
+
+fn string_field<'a>(entry: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    entry.get(key)?.as_str()
+}
+
+fn number_field(entry: &serde_json::Value, key: &str) -> Option<i64> {
+    entry.get(key)?.as_i64()
+}
+
+fn duration_field(entry: &serde_json::Value) -> Option<String> {
+    let value = entry.get("durationMs")?.as_f64()?;
+    Some(if value.fract() == 0.0 {
+        format!(" {:.0}ms", value)
+    } else {
+        format!(" {:.1}ms", value)
+    })
 }

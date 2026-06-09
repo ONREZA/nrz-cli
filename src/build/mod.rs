@@ -105,7 +105,7 @@ pub async fn run(
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
     let effective = EffectiveProjectConfig::from_project_config(project_dir, config.clone());
-    run_with_effective_config(args, json, &effective, None).await
+    run_with_effective_config(args, json, &effective, None, true).await
 }
 
 #[cfg(test)]
@@ -129,7 +129,7 @@ pub async fn run_with_hint(
         effective.apply_server_settings(Some(&settings));
     }
 
-    run_with_effective_config(args, json, &effective, detection).await
+    run_with_effective_config(args, json, &effective, detection, true).await
 }
 
 pub(crate) async fn run_with_effective_config(
@@ -137,6 +137,7 @@ pub(crate) async fn run_with_effective_config(
     json: bool,
     effective: &EffectiveProjectConfig,
     detection: Option<&crate::detect::types::DetectionResult>,
+    emit_json_result: bool,
 ) -> anyhow::Result<BuildResult> {
     let project_dir = effective.project_dir();
 
@@ -213,8 +214,8 @@ pub(crate) async fn run_with_effective_config(
                 framework,
                 framework_version,
             };
-            if let Ok(s) = serde_json::to_string(&data) {
-                output::log_line("debug", "info", "build", &s);
+            if emit_json_result {
+                output::json_output(&data);
             }
         } else {
             let layers_display: Vec<String> = manifest
@@ -280,7 +281,7 @@ pub(crate) async fn run_with_effective_config(
             manifest::verify_files(&output_dir, &auto)
                 .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
-        emit_build_output(json, &auto, &output_dir, Some(detection));
+        emit_build_output(json, emit_json_result, &auto, &output_dir, Some(detection));
         Some(auto)
     } else if let Some(auto) = try_generate_ssr_manifest(detection, &output_dir) {
         output::status(
@@ -296,7 +297,7 @@ pub(crate) async fn run_with_effective_config(
             manifest::verify_files(&output_dir, &auto)
                 .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
-        emit_build_output(json, &auto, &output_dir, Some(detection));
+        emit_build_output(json, emit_json_result, &auto, &output_dir, Some(detection));
         Some(auto)
     } else if detection.suggested_compute == crate::detect::types::ComputeType::Static {
         let auto = manifest::generate_static_manifest();
@@ -306,7 +307,7 @@ pub(crate) async fn run_with_effective_config(
             "Auto-generated STATIC manifest",
             output::Phase::Build,
         );
-        emit_build_output(json, &auto, &output_dir, Some(detection));
+        emit_build_output(json, emit_json_result, &auto, &output_dir, Some(detection));
         Some(auto)
     } else {
         if !json {
@@ -328,6 +329,7 @@ pub(crate) async fn run_with_effective_config(
 
 fn emit_build_output(
     json: bool,
+    emit_json_result: bool,
     manifest: &manifest::Manifest,
     output_dir: &Path,
     detection: Option<&crate::detect::types::DetectionResult>,
@@ -352,8 +354,8 @@ fn emit_build_output(
             framework,
             framework_version,
         };
-        if let Ok(s) = serde_json::to_string(&data) {
-            output::log_line("debug", "info", "build", &s);
+        if emit_json_result {
+            output::json_output(&data);
         }
     } else {
         let layers_display: Vec<String> = manifest

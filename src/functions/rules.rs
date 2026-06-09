@@ -4,7 +4,13 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use super::rules_authoring;
+
 const RULES_FILENAME: &str = "onreza.rules.toml";
+const RATE_LIMIT_MAX_REQUESTS: u64 = 100_000;
+const RATE_LIMIT_MIN_WINDOW_SECONDS: u64 = 10;
+const RATE_LIMIT_MAX_WINDOW_SECONDS: u64 = 600;
+const REDIRECT_STATUS_CODES: [u64; 4] = [301, 302, 307, 308];
 
 /// Load `onreza.rules.toml` (sibling of `onreza.toml`) as a JSON value.
 ///
@@ -60,8 +66,10 @@ fn read_edge_rules_value(project_dir: &Path) -> anyhow::Result<Option<(PathBuf, 
         }
     };
 
-    let value: Value = toml::from_str(&content)
+    let raw: Value = toml::from_str(&content)
         .map_err(|error| anyhow::anyhow!("failed to parse {} as TOML: {error}", path.display()))?;
+    let value = rules_authoring::normalize_authoring_value(&raw)
+        .map_err(|error| anyhow::anyhow!("{}: {error}", path.display()))?;
     validate_edge_rules_authoring_value(&path, &value)?;
     Ok(Some((path, value)))
 }
@@ -130,7 +138,17 @@ fn validate_edge_rules_refinements(path: &Path, value: &Value) -> anyhow::Result
         let Some(action) = rule.get("action").and_then(Value::as_object) else {
             continue;
         };
-        if action.get("type").and_then(Value::as_str) != Some("cache") {
+        let action_type = action.get("type").and_then(Value::as_str);
+        if action_type == Some("rate_limit") {
+            validate_rate_limit_bounds(path, rule_id, action)?;
+        }
+        if action_type == Some("redirect") {
+            validate_redirect_status(path, rule_id, action)?;
+        }
+        if action_type == Some("pipeline") {
+            validate_pipeline_action(path, rule_id, action)?;
+        }
+        if action_type != Some("cache") {
             continue;
         }
 
@@ -153,8 +171,262 @@ fn validate_edge_rules_refinements(path: &Path, value: &Value) -> anyhow::Result
             }
         }
     }
+    validate_pipeline_security_gate_shadowing(path, rules)?;
 
     Ok(())
+}
+
+/// The generated contract types rate_limit `limit`/`windowSeconds` as plain
+/// integers (typify emits no range validation), so bounds must be checked here to
+/// match the platform's authoring schema and fail fast in `nrz functions check`.
+fn validate_rate_limit_bounds(
+    path: &Path,
+    rule_id: &str,
+    action: &Map<String, Value>,
+) -> anyhow::Result<()> {
+    let limit = action.get("limit").and_then(Value::as_u64);
+    if !limit.is_some_and(|limit| (1..=RATE_LIMIT_MAX_REQUESTS).contains(&limit)) {
+        return Err(anyhow::anyhow!(
+            "{} rate_limit rule '{rule_id}' limit must be an integer between 1 and {RATE_LIMIT_MAX_REQUESTS}",
+            path.display()
+        ));
+    }
+    let window = action.get("windowSeconds").and_then(Value::as_u64);
+    if !window.is_some_and(|window| {
+        (RATE_LIMIT_MIN_WINDOW_SECONDS..=RATE_LIMIT_MAX_WINDOW_SECONDS).contains(&window)
+    }) {
+        return Err(anyhow::anyhow!(
+            "{} rate_limit rule '{rule_id}' windowSeconds must be an integer between {RATE_LIMIT_MIN_WINDOW_SECONDS} and {RATE_LIMIT_MAX_WINDOW_SECONDS}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// The generated contract types redirect `statusCode` as a plain integer (typify
+/// emits no value constraint for it), so the allowed set must be checked here to
+/// match the platform's authoring schema and fail fast in `nrz functions check`.
+fn validate_redirect_status(
+    path: &Path,
+    rule_id: &str,
+    action: &Map<String, Value>,
+) -> anyhow::Result<()> {
+    let Some(status) = action.get("statusCode") else {
+        return Ok(());
+    };
+    if !status
+        .as_u64()
+        .is_some_and(|code| REDIRECT_STATUS_CODES.contains(&code))
+    {
+        return Err(anyhow::anyhow!(
+            "{} redirect rule '{rule_id}' statusCode must be one of 301, 302, 307, 308",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn validate_pipeline_action(
+    path: &Path,
+    rule_id: &str,
+    action: &Map<String, Value>,
+) -> anyhow::Result<()> {
+    let Some(steps) = action.get("steps").and_then(Value::as_array) else {
+        return Err(anyhow::anyhow!(
+            "{} pipeline rule '{rule_id}' must declare steps",
+            path.display()
+        ));
+    };
+
+    let terminal_indexes = steps
+        .iter()
+        .enumerate()
+        .filter_map(|(index, step)| {
+            step.as_object()
+                .and_then(|step| step.contains_key("handle").then_some(index))
+        })
+        .collect::<Vec<_>>();
+    if terminal_indexes.len() != 1 {
+        return Err(anyhow::anyhow!(
+            "{} pipeline rule '{rule_id}' must declare exactly one terminal handle step",
+            path.display()
+        ));
+    }
+
+    let terminal_index = terminal_indexes[0];
+    let terminal_handle = steps[terminal_index]
+        .as_object()
+        .and_then(|step| step.get("handle"))
+        .and_then(Value::as_str);
+    if terminal_handle.is_some_and(|handle| handle != "@app")
+        && action.get("override").and_then(Value::as_bool) != Some(true)
+    {
+        return Err(anyhow::anyhow!(
+            "{} pipeline rule '{rule_id}' function terminal must set override = true",
+            path.display()
+        ));
+    }
+    for (index, step) in steps.iter().enumerate() {
+        let Some(step) = step.as_object() else {
+            continue;
+        };
+        let Some(mode) = step.get("mode").and_then(Value::as_str) else {
+            continue;
+        };
+        if mode == "request" && index > terminal_index {
+            return Err(anyhow::anyhow!(
+                "{} pipeline rule '{rule_id}' request step at steps[{index}] must appear before the terminal handle",
+                path.display()
+            ));
+        }
+        if matches!(mode, "response" | "observe") && index < terminal_index {
+            return Err(anyhow::anyhow!(
+                "{} pipeline rule '{rule_id}' {mode} step at steps[{index}] must appear after the terminal handle",
+                path.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_pipeline_security_gate_shadowing(path: &Path, rules: &[Value]) -> anyhow::Result<()> {
+    for (broader_index, broader) in rules.iter().enumerate() {
+        let Some(broader) = broader.as_object() else {
+            continue;
+        };
+        let broader_id = rule_id(broader);
+        let Some(broader_action) = broader.get("action").and_then(Value::as_object) else {
+            continue;
+        };
+        if broader_action.get("type").and_then(Value::as_str) != Some("pipeline") {
+            continue;
+        }
+        let broader_gates = pipeline_security_gate_uses(broader_action);
+        if broader_gates.is_empty() {
+            continue;
+        }
+
+        for (narrower_index, narrower) in rules.iter().enumerate() {
+            if narrower_index == broader_index {
+                continue;
+            }
+            let Some(narrower) = narrower.as_object() else {
+                continue;
+            };
+            let narrower_id = rule_id(narrower);
+            let Some(narrower_action) = narrower.get("action").and_then(Value::as_object) else {
+                continue;
+            };
+            if narrower_action.get("type").and_then(Value::as_str) != Some("pipeline") {
+                continue;
+            }
+            if narrower_action.get("inheritGate").and_then(Value::as_bool) == Some(false) {
+                continue;
+            }
+            if !is_more_specific_path_within(narrower.get("condition"), broader.get("condition")) {
+                continue;
+            }
+
+            let narrower_gates = pipeline_security_gate_uses(narrower_action);
+            for gate in &broader_gates {
+                if narrower_gates.contains(gate) {
+                    continue;
+                }
+                return Err(anyhow::anyhow!(
+                    "{} pipeline rule '{narrower_id}' shadows security gate '{gate}' from broader rule '{broader_id}'; re-declare the gate or set inherit_gate = false",
+                    path.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn rule_id(rule: &Map<String, Value>) -> &str {
+    rule.get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>")
+}
+
+fn pipeline_security_gate_uses(action: &Map<String, Value>) -> HashSet<String> {
+    action
+        .get("steps")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter_map(|step| {
+            let function_name = step.get("use").and_then(Value::as_str)?;
+            let mode = step.get("mode").and_then(Value::as_str)?;
+            if mode != "request" {
+                return None;
+            }
+            let failure = step
+                .get("failure")
+                .and_then(Value::as_str)
+                .unwrap_or("closed");
+            let cache_position = step.get("cachePosition").and_then(Value::as_str);
+            if failure == "closed" && cache_position.unwrap_or("before") == "before" {
+                Some(function_name.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn is_more_specific_path_within(
+    maybe_narrower_condition: Option<&Value>,
+    maybe_broader_condition: Option<&Value>,
+) -> bool {
+    let narrower_path = maybe_narrower_condition
+        .and_then(Value::as_object)
+        .and_then(|condition| condition.get("path"));
+    let broader_path = maybe_broader_condition
+        .and_then(Value::as_object)
+        .and_then(|condition| condition.get("path"));
+    match (narrower_path, broader_path) {
+        (Some(_), None) => true,
+        (Some(narrower), Some(broader)) => {
+            let Some(narrower_prefix) = static_path_prefix(narrower) else {
+                return false;
+            };
+            let Some(broader_prefix) = static_path_prefix(broader) else {
+                return false;
+            };
+            if narrower_prefix == broader_prefix {
+                return path_specificity(narrower) > path_specificity(broader);
+            }
+            narrower_prefix.starts_with(&broader_prefix)
+        }
+        _ => false,
+    }
+}
+
+fn path_specificity(path: &Value) -> usize {
+    let prefix = static_path_prefix(path).unwrap_or_default();
+    let kind_weight = match path.get("type").and_then(Value::as_str).unwrap_or_default() {
+        "exact" => 3,
+        "prefix" => 2,
+        "glob" => 1,
+        _ => 0,
+    };
+    prefix.len() * 10 + kind_weight
+}
+
+fn static_path_prefix(path: &Value) -> Option<String> {
+    let path = path.as_object()?;
+    let kind = path.get("type").and_then(Value::as_str)?;
+    let value = path.get("value").and_then(Value::as_str)?;
+    match kind {
+        "exact" | "prefix" => Some(value.to_string()),
+        "glob" => {
+            let wildcard_index = value.find(['*', '?', '[', '{']).unwrap_or(value.len());
+            Some(value[..wildcard_index].to_string())
+        }
+        _ => None,
+    }
 }
 
 fn edge_rules_contract_validation_value(value: &Value) -> Value {
@@ -196,16 +468,16 @@ fn normalize_edge_rule_action_authoring_value(rule: &mut Map<String, Value>) {
                 .entry("statusCode".to_string())
                 .or_insert(Value::from(301_u16));
             action
-                .entry("force".to_string())
-                .or_insert(Value::Bool(false));
+                .entry("ifNoFile".to_string())
+                .or_insert(Value::Bool(true));
         }
         Some("rewrite") => {
             action
                 .entry("external".to_string())
                 .or_insert(Value::Bool(false));
             action
-                .entry("force".to_string())
-                .or_insert(Value::Bool(false));
+                .entry("ifNoFile".to_string())
+                .or_insert(Value::Bool(true));
         }
         Some("cache") => {
             action
@@ -216,43 +488,60 @@ fn normalize_edge_rule_action_authoring_value(rule: &mut Map<String, Value>) {
     }
 }
 
+/// Request-dependent dimensions a cache rule must vary by, collected across the
+/// root condition plus every `any` branch and the `not` branch. Mirrors the Zod
+/// `requestDependentVaryDimensions`; an axis missed here would let one client's
+/// cached response leak to another (cache poisoning).
 fn request_dependent_vary_dimensions(condition: Option<&Value>) -> Vec<&'static str> {
     let Some(condition) = condition.and_then(Value::as_object) else {
         return Vec::new();
     };
     let mut dimensions = Vec::new();
-    if condition
-        .get("geo")
-        .and_then(Value::as_array)
-        .is_some_and(|items| !items.is_empty())
-    {
-        dimensions.push("geo");
+    collect_leaf_vary_dimensions(condition, &mut dimensions);
+    if let Some(branches) = condition.get("any").and_then(Value::as_array) {
+        for branch in branches {
+            if let Some(branch) = branch.as_object() {
+                collect_leaf_vary_dimensions(branch, &mut dimensions);
+            }
+        }
     }
-    if condition.get("device").is_some() {
-        dimensions.push("device");
-    }
-    if condition
-        .get("headers")
-        .and_then(Value::as_object)
-        .is_some_and(|headers| !headers.is_empty())
-    {
-        dimensions.push("header");
-    }
-    if condition
-        .get("cookies")
-        .and_then(Value::as_object)
-        .is_some_and(|cookies| !cookies.is_empty())
-    {
-        dimensions.push("cookie");
-    }
-    if condition
-        .get("query")
-        .and_then(Value::as_object)
-        .is_some_and(|query| !query.is_empty())
-    {
-        dimensions.push("query");
+    if let Some(not) = condition.get("not").and_then(Value::as_object) {
+        collect_leaf_vary_dimensions(not, &mut dimensions);
     }
     dimensions
+}
+
+fn collect_leaf_vary_dimensions(leaf: &Map<String, Value>, dimensions: &mut Vec<&'static str>) {
+    let mut push = |dimension: &'static str| {
+        if !dimensions.contains(&dimension) {
+            dimensions.push(dimension);
+        }
+    };
+    for (field, dimension) in [("geo", "geo"), ("asn", "asn")] {
+        if leaf
+            .get(field)
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty())
+        {
+            push(dimension);
+        }
+    }
+    if leaf.get("device").is_some() {
+        push("device");
+    }
+    for (field, dimension) in [
+        ("headers", "header"),
+        ("cookies", "cookie"),
+        ("query", "query"),
+    ] {
+        if leaf
+            .get(field)
+            .and_then(Value::as_object)
+            .is_some_and(|map| !map.is_empty())
+        {
+            push(dimension);
+        }
+    }
 }
 
 fn build_edge_rules_check_report(path: &Path, value: &Value) -> EdgeRulesCheckReport {

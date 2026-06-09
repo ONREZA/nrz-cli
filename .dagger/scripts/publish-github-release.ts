@@ -34,6 +34,11 @@ export interface GitHubRelease {
 
 type Requester = <T>(method: string, path: string, body?: unknown) => Promise<T | null>;
 
+export interface ChecksumArtifact {
+  path: string;
+  text: string;
+}
+
 function walk(dir: string): string[] {
   const entries: string[] = [];
   for (const name of readdirSync(dir)) {
@@ -111,25 +116,38 @@ async function uploadAsset(releaseId: number, filePath: string, name: string): P
   }
 }
 
-function releaseNotes(): string {
+export function appendChecksumsToReleaseNotes(notes: string, checksumText: string): string {
+  const checksums = checksumText.trim();
+  if (!checksums) {
+    return notes.trim();
+  }
+
+  return `${notes.trim()}\n\n### Checksums (SHA-256)\n\n\`\`\`text\n${checksums}\n\`\`\``;
+}
+
+function releaseNotes(checksumText: string): string {
   const changelog = readFileSync("CHANGELOG.md", "utf8");
   const startMarker = `## [${version}]`;
   const start = changelog.indexOf(startMarker);
+  let notes: string;
   if (start === -1) {
-    return `nrz ${tag}`;
+    notes = `nrz ${tag}`;
+  } else {
+    const next = changelog.indexOf("\n## [", start + startMarker.length);
+    notes = changelog.slice(start, next === -1 ? undefined : next).trim();
   }
-  const next = changelog.indexOf("\n## [", start + startMarker.length);
-  return changelog.slice(start, next === -1 ? undefined : next).trim();
+  return appendChecksumsToReleaseNotes(notes, checksumText);
 }
 
-function createChecksums(paths: string[]): string {
+export function createChecksums(paths: string[]): ChecksumArtifact {
   const lines = paths.map((path) => {
     const digest = createHash("sha256").update(readFileSync(path)).digest("hex");
     return `${digest}  ${basename(path)}`;
   });
   const checksumPath = "/tmp/checksums-sha256.txt";
-  writeFileSync(checksumPath, `${lines.join("\n")}\n`);
-  return checksumPath;
+  const text = `${lines.join("\n")}\n`;
+  writeFileSync(checksumPath, text);
+  return { path: checksumPath, text };
 }
 
 function requireAsset(name: string): string {
@@ -146,8 +164,9 @@ async function main(): Promise<void> {
   }
 
   const assetPaths = requiredAssets.map((asset) => requireAsset(asset));
-  const checksumPath = createChecksums(assetPaths);
-  const allUploads = [...assetPaths, checksumPath];
+  const checksum = createChecksums(assetPaths);
+  const releaseBody = releaseNotes(checksum.text);
+  const allUploads = [...assetPaths, checksum.path];
   const allNames = [...requiredAssets, "checksums-sha256.txt"];
 
   let release = await findReleaseByTag(repository, tag);
@@ -167,13 +186,22 @@ async function main(): Promise<void> {
     release = await request<GitHubRelease>("POST", `/repos/${repository}/releases`, {
       tag_name: tag,
       name: `nrz ${tag}`,
-      body: releaseNotes(),
+      body: releaseBody,
       draft: true,
       prerelease,
       generate_release_notes: false,
     });
     if (!release) {
       throw new Error(`Could not create release ${tag}`);
+    }
+  } else {
+    release = await request<GitHubRelease>("PATCH", `/repos/${repository}/releases/${release.id}`, {
+      name: `nrz ${tag}`,
+      body: releaseBody,
+      prerelease,
+    });
+    if (!release) {
+      throw new Error(`Release ${tag} disappeared while updating release notes`);
     }
   }
 

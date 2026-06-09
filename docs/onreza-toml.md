@@ -2,10 +2,10 @@
 
 Файл `onreza.toml` — единый конфиг проекта для ONREZA платформы. Коммитится в git (публичен), не содержит секретов.
 
-Создаётся автоматически при `nrz init`. Для IDE-подсказок подключите JSON-схему (если редактор поддерживает TOML + JSON Schema):
+Создаётся автоматически при `nrz init`. Для IDE-подсказок `nrz init` добавляет директиву схемы в начало файла (если редактор поддерживает TOML + JSON Schema):
 
 ```toml
-# $schema = "./onreza.schema.json"  # пока не поддерживается стандартно
+#:schema https://docs.onreza.ru/schemas/onreza-project-v1.schema.json
 ```
 
 ---

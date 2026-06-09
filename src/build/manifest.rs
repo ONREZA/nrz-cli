@@ -418,7 +418,7 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
 
     if manifest.middleware.is_some() {
         anyhow::bail!(
-            "manifest middleware is no longer supported; use a *.nrz-fn.* entry with export const config and a middleware trigger"
+            "manifest middleware is no longer supported; declare HTTP function wiring in onreza.rules.toml with a pipeline action"
         );
     }
 

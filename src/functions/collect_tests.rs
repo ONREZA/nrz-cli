@@ -22,7 +22,7 @@ fn discovers_branded_entries_under_default_root() {
         "functions/billing-webhook.nrz-fn.ts",
         r#"
 export const config = {
-  triggers: [{ name: "api", type: "http", matchers: ["^/api/.*$"] }],
+  name: "billing-webhook",
 } as const;
 export default { fetch() { return new Response("ok"); } };
 "#,
@@ -72,6 +72,39 @@ export default {};
         collected.functions[0].entrypoint,
         "functions/BillingWebhook.nrz-fn.ts"
     );
+}
+
+#[test]
+fn rejects_duplicate_function_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    write(
+        tmp.path(),
+        "functions/api.nrz-fn.ts",
+        r#"
+export const config = {
+  name: "api",
+} as const;
+export default {};
+"#,
+    );
+    write(
+        tmp.path(),
+        "functions/other.nrz-fn.ts",
+        r#"
+export const config = {
+  name: "api",
+} as const;
+export default {};
+"#,
+    );
+
+    let err = collect(tmp.path()).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("duplicate ONREZA Function name 'api'")
+    );
+    assert!(err.to_string().contains("functions/api.nrz-fn.ts"));
+    assert!(err.to_string().contains("functions/other.nrz-fn.ts"));
 }
 
 #[test]

@@ -62,7 +62,7 @@ pub fn json_output<T: Serialize>(data: &T) {
     }
 }
 
-/// Emit one structured JSON log line to stdout (JSON mode only).
+/// Emit one structured JSON progress log line to stderr (JSON mode only).
 ///
 /// Format: `{"s":"user|debug","p":"phase","l":"info|warn","m":"message"}`
 ///
@@ -71,7 +71,7 @@ pub fn json_output<T: Serialize>(data: &T) {
 /// - `l`: level — "info" or "warn"
 /// - `m`: message text
 pub fn log_line(stream: &str, level: &str, phase: &str, msg: &str) {
-    println!(
+    eprintln!(
         "{}",
         serde_json::json!({"s": stream, "p": phase, "l": level, "m": msg}),
     );

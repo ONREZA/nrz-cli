@@ -467,8 +467,9 @@ fn manifest_with_legacy_middleware_is_rejected() {
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
-        err.to_string()
-            .contains("manifest middleware is no longer supported"),
+        err.to_string().contains(
+            "manifest middleware is no longer supported; declare HTTP function wiring in onreza.rules.toml with a pipeline action"
+        ),
         "{err}"
     );
 }

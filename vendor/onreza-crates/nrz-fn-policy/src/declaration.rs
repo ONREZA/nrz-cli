@@ -197,22 +197,26 @@ fn validate_config_declaration(
             ));
         }
         match trigger.trigger_type.as_str() {
-            "http" | "middleware" | "scheduled" | "queue" | "manual" => {}
+            "scheduled" | "queue" | "manual" => {}
+            "http" | "middleware" => {
+                return Err(FunctionConfigError::new(
+                    "HTTP route wiring must be declared as an EdgeRuleSet pipeline action in onreza.rules.toml, not as a function trigger",
+                ));
+            }
             other => {
                 return Err(FunctionConfigError::new(format!(
                     "unsupported function trigger type: {other}"
                 )));
             }
         }
-        if trigger.trigger_type == "middleware" && trigger.matchers.is_empty() {
+        if !trigger.matchers.is_empty()
+            || trigger.methods.is_some()
+            || trigger.on_failure.is_some()
+            || trigger.priority.is_some()
+        {
             return Err(FunctionConfigError::new(
-                "middleware triggers must declare at least one matcher",
+                "function trigger routing fields are only valid in EdgeRuleSet pipeline actions",
             ));
-        }
-        if let Some(methods) = &mut trigger.methods {
-            for method in methods {
-                *method = method.to_ascii_uppercase();
-            }
         }
     }
     Ok(declaration)
@@ -235,6 +239,25 @@ fn validate_function_name(name: &str) -> Result<(), FunctionConfigError> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::analyze_function_entry;
+
+    #[test]
+    fn rejects_http_route_trigger_declarations() {
+        let error = analyze_function_entry(
+            "api.nrz-fn.ts",
+            r#"
+export const config = { triggers: [{ name: "api", type: "http" }] } as const;
+export default {};
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.message().contains("EdgeRuleSet pipeline"));
+    }
 }
 
 fn unwrap_ts_expression<'a>(expression: &'a Expression<'a>) -> &'a Expression<'a> {

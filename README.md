@@ -109,7 +109,7 @@ Project configuration is stored in `onreza.toml` (committed to git). Local runti
 
 Reference:
 - [`docs/onreza-toml.md`](docs/onreza-toml.md)
-- [`onreza.schema.json`](onreza.schema.json)
+- [JSON Schema](https://docs.onreza.ru/schemas/onreza-project-v1.schema.json) (generated; `nrz init` wires it via `#:schema`)
 
 ## Development
 

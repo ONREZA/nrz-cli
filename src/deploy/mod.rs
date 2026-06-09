@@ -109,7 +109,8 @@ pub(crate) struct FileEntry {
 struct CreateDeploymentBody {
     manifest: serde_json::Value,
     files: Vec<FileEntry>,
-    production: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    production: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     branch: Option<String>,
     commit_sha: String,
@@ -391,6 +392,7 @@ pub async fn run(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
+    env: &[String],
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let root_dir = Path::new(&args.dir)
@@ -545,6 +547,7 @@ pub async fn run(
         json,
         &effective,
         Some(&detection),
+        false,
     )
     .await?;
 
@@ -815,19 +818,23 @@ pub async fn run(
 
     // Create deployment
     output::status(json, "~", "Creating deployment...", output::Phase::Deploy);
+    let production = resolve_deploy_production_override(args.prod, env)?;
     let body = CreateDeploymentBody {
         manifest: manifest_raw,
         files: files.clone(),
-        production: args.prod,
+        production,
         branch,
         commit_sha,
         functions,
     };
 
-    let deployment: CreateDeploymentResponse = client
+    let deployment: CreateDeploymentResponse = match client
         .post(&format!("/v1/projects/{}/deployments", project_id), &body)
         .await
-        .context("failed to create deployment")?;
+    {
+        Ok(deployment) => deployment,
+        Err(error) => return Err(map_create_deployment_error(error, json)),
+    };
 
     prepare_upload_and_complete(
         &client,
@@ -1023,6 +1030,43 @@ fn validate_health_path(path: &str, source: &str) -> anyhow::Result<()> {
         ));
     }
     Ok(())
+}
+
+fn resolve_deploy_production_override(prod: bool, env: &[String]) -> anyhow::Result<Option<bool>> {
+    let mut selected = None;
+
+    for raw in env {
+        let value = raw.trim();
+        if value.is_empty() {
+            continue;
+        }
+        let production = match value.to_ascii_uppercase().as_str() {
+            "PRODUCTION" | "PROD" => true,
+            "PREVIEW" => false,
+            "DEVELOPMENT" | "DEV" => {
+                anyhow::bail!("nrz deploy supports only --env production or --env preview");
+            }
+            _ => {
+                anyhow::bail!(
+                    "nrz deploy does not support arbitrary environment IDs or names in --env yet; use --env production or --env preview"
+                );
+            }
+        };
+
+        if selected.is_some_and(|current| current != production) {
+            anyhow::bail!("nrz deploy accepts only one target environment");
+        }
+        selected = Some(production);
+    }
+
+    if prod {
+        if selected == Some(false) {
+            anyhow::bail!("--prod conflicts with --env preview");
+        }
+        return Ok(Some(true));
+    }
+
+    Ok(selected)
 }
 
 // ── Compute config sync ──────────────────────────────────────
@@ -2135,9 +2179,7 @@ async fn resume_deploy(
             status: "upload-complete".into(),
             warnings,
         };
-        if let Ok(s) = serde_json::to_string(&data) {
-            output::log_line("debug", "info", "deploy", &s);
-        }
+        output::json_output(&data);
     } else {
         eprintln!();
         eprintln!(
@@ -2204,6 +2246,27 @@ fn map_function_stage_error(error: anyhow::Error, json: bool) -> anyhow::Error {
         return output::already_reported_error();
     }
     anyhow::anyhow!(message).context("failed to stage ONREZA Functions for deployment")
+}
+
+fn map_create_deployment_error(error: anyhow::Error, json: bool) -> anyhow::Error {
+    let Some(api_error) = error.downcast_ref::<crate::api::StructuredApiError>() else {
+        return error.context("failed to create deployment");
+    };
+    if api_error.code != "FUNCTION_PUBLISH_FAILED" {
+        return error.context("failed to create deployment");
+    }
+
+    let message = format_function_publish_failure(api_error);
+    if json {
+        output::log_error_structured(
+            "deploy",
+            &message,
+            &api_error.code,
+            api_error.details.as_ref(),
+        );
+        return output::already_reported_error();
+    }
+    anyhow::anyhow!(message).context("failed to create deployment")
 }
 
 fn format_function_publish_failure(error: &crate::api::StructuredApiError) -> String {
@@ -3098,9 +3161,9 @@ fn is_sveltekit_with_adapter_auto(project_dir: &Path) -> bool {
     }
 }
 
-/// Run a shell command, streaming stdout/stderr through structured JSON in JSON mode.
+/// Run a shell command, streaming stdout/stderr through structured JSON progress logs in JSON mode.
 ///
-/// In JSON mode: pipes stdout/stderr, wraps each line via `output::log_line()`.
+/// In JSON mode: pipes stdout/stderr, wraps each line via `output::log_line()` on stderr.
 /// In non-JSON mode: inherits stdio (unchanged behavior).
 ///
 /// `child_stream` controls the `s` field for child stdout lines ("user" or "debug").
@@ -3150,7 +3213,7 @@ fn run_command_streaming(
         return Ok(());
     }
 
-    // JSON mode: capture stdout/stderr and emit structured log lines
+    // JSON mode: capture stdout/stderr and emit structured progress log lines
     let mut child = std::process::Command::new(shell)
         .args(shell_args)
         .current_dir(project_dir)
