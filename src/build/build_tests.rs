@@ -1629,11 +1629,15 @@ async fn nuxt_ssr_generates_manifest() {
     );
     assert_eq!(manifest.layers[1].directory, "server");
     assert_eq!(manifest.layers[1].entry.as_deref(), Some("index.mjs"));
-    assert_eq!(manifest.routes.len(), 2);
+    assert_eq!(manifest.routes.len(), 3);
     assert_eq!(manifest.routes[0].pattern, "^/_nuxt/.*$");
     assert_eq!(manifest.routes[0].priority, Some(100));
     assert_eq!(manifest.routes[1].pattern, "^/.*$");
-    assert_eq!(manifest.routes[1].priority, Some(0));
+    assert_eq!(manifest.routes[1].layer, "static-assets");
+    assert_eq!(manifest.routes[1].priority, Some(50));
+    assert_eq!(manifest.routes[2].pattern, "^/.*$");
+    assert_eq!(manifest.routes[2].layer, "server");
+    assert_eq!(manifest.routes[2].priority, Some(0));
 }
 
 #[tokio::test]
@@ -1768,8 +1772,15 @@ async fn sveltekit_ssr_generates_manifest() {
     );
     assert_eq!(manifest.layers[1].directory, ".");
     assert_eq!(manifest.layers[1].entry.as_deref(), Some("index.js"));
+    assert_eq!(manifest.routes.len(), 3);
     assert_eq!(manifest.routes[0].pattern, "^/_app/.*$");
     assert_eq!(manifest.routes[0].priority, Some(100));
+    assert_eq!(manifest.routes[1].pattern, "^/.*$");
+    assert_eq!(manifest.routes[1].layer, "static-assets");
+    assert_eq!(manifest.routes[1].priority, Some(50));
+    assert_eq!(manifest.routes[2].pattern, "^/.*$");
+    assert_eq!(manifest.routes[2].layer, "server");
+    assert_eq!(manifest.routes[2].priority, Some(0));
 }
 
 #[tokio::test]
@@ -1844,8 +1855,15 @@ async fn remix_ssr_generates_manifest() {
     assert_eq!(manifest.layers[0].directory, "client");
     assert_eq!(manifest.layers[1].directory, "server");
     assert_eq!(manifest.layers[1].entry.as_deref(), Some("index.js"));
+    assert_eq!(manifest.routes.len(), 3);
     assert_eq!(manifest.routes[0].pattern, "^/assets/.*$");
     assert_eq!(manifest.routes[0].priority, Some(100));
+    assert_eq!(manifest.routes[1].pattern, "^/.*$");
+    assert_eq!(manifest.routes[1].layer, "static-assets");
+    assert_eq!(manifest.routes[1].priority, Some(50));
+    assert_eq!(manifest.routes[2].pattern, "^/.*$");
+    assert_eq!(manifest.routes[2].layer, "server");
+    assert_eq!(manifest.routes[2].priority, Some(0));
 }
 
 #[tokio::test]
@@ -1884,6 +1902,15 @@ async fn react_router_ssr_generates_manifest() {
     assert_eq!(manifest.layers[0].directory, "client");
     assert_eq!(manifest.layers[1].directory, "server");
     assert_eq!(manifest.layers[1].entry.as_deref(), Some("index.js"));
+    assert_eq!(manifest.routes.len(), 3);
+    assert_eq!(manifest.routes[0].pattern, "^/assets/.*$");
+    assert_eq!(manifest.routes[0].priority, Some(100));
+    assert_eq!(manifest.routes[1].pattern, "^/.*$");
+    assert_eq!(manifest.routes[1].layer, "static-assets");
+    assert_eq!(manifest.routes[1].priority, Some(50));
+    assert_eq!(manifest.routes[2].pattern, "^/.*$");
+    assert_eq!(manifest.routes[2].layer, "server");
+    assert_eq!(manifest.routes[2].priority, Some(0));
 }
 
 #[test]
@@ -2001,8 +2028,15 @@ async fn astro_ssr_generates_manifest() {
     );
     assert_eq!(manifest.layers[1].directory, "server");
     assert_eq!(manifest.layers[1].entry.as_deref(), Some("entry.mjs"));
+    assert_eq!(manifest.routes.len(), 3);
     assert_eq!(manifest.routes[0].pattern, "^/_astro/.*$");
     assert_eq!(manifest.routes[0].priority, Some(100));
+    assert_eq!(manifest.routes[1].pattern, "^/.*$");
+    assert_eq!(manifest.routes[1].layer, "static-assets");
+    assert_eq!(manifest.routes[1].priority, Some(50));
+    assert_eq!(manifest.routes[2].pattern, "^/.*$");
+    assert_eq!(manifest.routes[2].layer, "server");
+    assert_eq!(manifest.routes[2].priority, Some(0));
 }
 
 #[tokio::test]

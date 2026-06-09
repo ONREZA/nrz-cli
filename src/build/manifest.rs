@@ -633,7 +633,9 @@ struct SsrManifestConfig {
     /// Static assets directory (e.g. "client", "public"). `None` to skip the static layer.
     static_dir: Option<&'static str>,
     /// CDN route pattern for hashed/immutable assets (e.g. "^/_nuxt/.*$").
-    static_route_pattern: Option<&'static str>,
+    static_asset_route_pattern: Option<&'static str>,
+    /// Whether the static directory also contains root-level public/client assets.
+    static_catch_all_route: bool,
     /// Server/compute directory (e.g. "server", ".").
     server_dir: &'static str,
     /// Server entry file (e.g. "index.mjs", "index.js").
@@ -643,13 +645,13 @@ struct SsrManifestConfig {
 /// Build an SSR manifest from the given configuration.
 ///
 /// Produces a two-layer manifest (STATIC + COMPUTE) when `static_dir` is set,
-/// or a single COMPUTE layer otherwise. The catch-all `/*` route always falls
-/// through to the server at priority 0.
+/// or a single COMPUTE layer otherwise. Static routes use priority-based routing:
+/// immutable asset prefix(100) > public/client catch-all(50) > server(0).
 fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
     let mut layers = Vec::new();
     let mut routes = Vec::new();
 
-    if let (Some(dir), Some(pattern)) = (config.static_dir, config.static_route_pattern) {
+    if let Some(dir) = config.static_dir {
         layers.push(Layer {
             name: "static-assets".to_string(),
             target: LayerTarget::Static,
@@ -658,15 +660,28 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
             export_format: None,
             runtime: None,
         });
-        routes.push(Route {
-            pattern: pattern.to_string(),
-            layer: "static-assets".to_string(),
-            priority: Some(100),
-            revalidate: None,
-            methods: None,
-            headers: None,
-            fallthrough: None,
-        });
+        if let Some(pattern) = config.static_asset_route_pattern {
+            routes.push(Route {
+                pattern: pattern.to_string(),
+                layer: "static-assets".to_string(),
+                priority: Some(100),
+                revalidate: None,
+                methods: None,
+                headers: None,
+                fallthrough: None,
+            });
+        }
+        if config.static_catch_all_route {
+            routes.push(Route {
+                pattern: "^/.*$".to_string(),
+                layer: "static-assets".to_string(),
+                priority: Some(50),
+                revalidate: None,
+                methods: None,
+                headers: None,
+                fallthrough: None,
+            });
+        }
     }
 
     layers.push(Layer {
@@ -701,11 +716,12 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
 pub fn generate_nuxt_manifest(has_public: bool) -> Manifest {
     generate_ssr_manifest(SsrManifestConfig {
         static_dir: if has_public { Some("public") } else { None },
-        static_route_pattern: if has_public {
+        static_asset_route_pattern: if has_public {
             Some("^/_nuxt/.*$")
         } else {
             None
         },
+        static_catch_all_route: has_public,
         server_dir: "server",
         server_entry: "index.mjs",
     })
@@ -715,7 +731,8 @@ pub fn generate_nuxt_manifest(has_public: bool) -> Manifest {
 pub fn generate_sveltekit_manifest(has_client: bool) -> Manifest {
     generate_ssr_manifest(SsrManifestConfig {
         static_dir: if has_client { Some("client") } else { None },
-        static_route_pattern: if has_client { Some("^/_app/.*$") } else { None },
+        static_asset_route_pattern: if has_client { Some("^/_app/.*$") } else { None },
+        static_catch_all_route: has_client,
         server_dir: ".",
         server_entry: "index.js",
     })
@@ -725,11 +742,12 @@ pub fn generate_sveltekit_manifest(has_client: bool) -> Manifest {
 pub fn generate_remix_manifest(has_client: bool) -> Manifest {
     generate_ssr_manifest(SsrManifestConfig {
         static_dir: if has_client { Some("client") } else { None },
-        static_route_pattern: if has_client {
+        static_asset_route_pattern: if has_client {
             Some("^/assets/.*$")
         } else {
             None
         },
+        static_catch_all_route: has_client,
         server_dir: "server",
         server_entry: "index.js",
     })
@@ -739,11 +757,12 @@ pub fn generate_remix_manifest(has_client: bool) -> Manifest {
 pub fn generate_astro_ssr_manifest(has_client: bool) -> Manifest {
     generate_ssr_manifest(SsrManifestConfig {
         static_dir: if has_client { Some("client") } else { None },
-        static_route_pattern: if has_client {
+        static_asset_route_pattern: if has_client {
             Some("^/_astro/.*$")
         } else {
             None
         },
+        static_catch_all_route: has_client,
         server_dir: "server",
         server_entry: "entry.mjs",
     })

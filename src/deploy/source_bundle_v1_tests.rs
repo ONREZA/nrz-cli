@@ -105,6 +105,59 @@ fn source_bundle_treats_header_and_redirect_files_as_static_content() {
 }
 
 #[test]
+fn nuxt_public_asset_maps_to_static_layer_root() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("public")).unwrap();
+    fs::write(dir.path().join("public/favicon.svg"), b"<svg/>").unwrap();
+    fs::create_dir_all(dir.path().join("server")).unwrap();
+    fs::write(dir.path().join("server/index.mjs"), b"// server").unwrap();
+
+    let manifest = crate::build::manifest::generate_nuxt_manifest(true);
+    crate::build::manifest::validate(&manifest).unwrap();
+    crate::build::manifest::verify_files(dir.path(), &manifest).unwrap();
+
+    let files = scan_dir(dir.path()).unwrap();
+    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+
+    let static_layer = plan
+        .logical_manifest
+        .layers
+        .iter()
+        .find(|layer| layer.name == "static-assets")
+        .unwrap();
+    assert_eq!(
+        static_layer.target,
+        SourceLogicalManifestLayerTarget::Static
+    );
+    assert_eq!(static_layer.root_path.as_deref(), Some("public"));
+
+    let favicon = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "public/favicon.svg")
+        .unwrap();
+    assert_eq!(favicon.role, SourceLogicalManifestFileRole::Static);
+    assert_eq!(favicon.layer_name.as_deref(), Some("static-assets"));
+
+    let static_catch_all = plan
+        .logical_manifest
+        .routes
+        .iter()
+        .find(|route| route.pattern == "^/.*$" && route.layer_name == "static-assets")
+        .unwrap();
+    assert_eq!(static_catch_all.priority, Some(50));
+
+    let server_catch_all = plan
+        .logical_manifest
+        .routes
+        .iter()
+        .find(|route| route.pattern == "^/.*$" && route.layer_name == "server")
+        .unwrap();
+    assert_eq!(server_catch_all.priority, Some(0));
+}
+
+#[test]
 fn source_bundle_plan_rejects_reserved_metadata_namespace() {
     let manifest = static_manifest();
 

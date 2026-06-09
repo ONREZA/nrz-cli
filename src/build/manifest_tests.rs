@@ -1498,6 +1498,19 @@ fn generate_nuxt_manifest_with_public_is_valid() {
     let m = generate_nuxt_manifest(true);
     validate(&m).unwrap();
     assert_eq!(m.layers.len(), 2);
+    assert_eq!(m.layers[0].target, LayerTarget::Static);
+    assert_eq!(m.layers[0].directory, "public");
+    assert_eq!(m.layers[1].target, LayerTarget::Compute);
+    assert_eq!(m.routes.len(), 3);
+    assert_eq!(m.routes[0].pattern, "^/_nuxt/.*$");
+    assert_eq!(m.routes[0].layer, "static-assets");
+    assert_eq!(m.routes[0].priority, Some(100));
+    assert_eq!(m.routes[1].pattern, "^/.*$");
+    assert_eq!(m.routes[1].layer, "static-assets");
+    assert_eq!(m.routes[1].priority, Some(50));
+    assert_eq!(m.routes[2].pattern, "^/.*$");
+    assert_eq!(m.routes[2].layer, "server");
+    assert_eq!(m.routes[2].priority, Some(0));
 }
 
 #[test]
@@ -1513,6 +1526,14 @@ fn generate_sveltekit_manifest_with_client_is_valid() {
     let m = generate_sveltekit_manifest(true);
     validate(&m).unwrap();
     assert_eq!(m.layers.len(), 2);
+    assert_eq!(m.routes.len(), 3);
+    assert_eq!(m.routes[0].pattern, "^/_app/.*$");
+    assert_eq!(m.routes[0].priority, Some(100));
+    assert_eq!(m.routes[1].pattern, "^/.*$");
+    assert_eq!(m.routes[1].layer, "static-assets");
+    assert_eq!(m.routes[1].priority, Some(50));
+    assert_eq!(m.routes[2].layer, "server");
+    assert_eq!(m.routes[2].priority, Some(0));
 }
 
 #[test]
@@ -1527,6 +1548,14 @@ fn generate_remix_manifest_with_client_is_valid() {
     let m = generate_remix_manifest(true);
     validate(&m).unwrap();
     assert_eq!(m.layers.len(), 2);
+    assert_eq!(m.routes.len(), 3);
+    assert_eq!(m.routes[0].pattern, "^/assets/.*$");
+    assert_eq!(m.routes[0].priority, Some(100));
+    assert_eq!(m.routes[1].pattern, "^/.*$");
+    assert_eq!(m.routes[1].layer, "static-assets");
+    assert_eq!(m.routes[1].priority, Some(50));
+    assert_eq!(m.routes[2].layer, "server");
+    assert_eq!(m.routes[2].priority, Some(0));
 }
 
 #[test]
@@ -1541,6 +1570,14 @@ fn generate_astro_ssr_manifest_with_client_is_valid() {
     let m = generate_astro_ssr_manifest(true);
     validate(&m).unwrap();
     assert_eq!(m.layers.len(), 2);
+    assert_eq!(m.routes.len(), 3);
+    assert_eq!(m.routes[0].pattern, "^/_astro/.*$");
+    assert_eq!(m.routes[0].priority, Some(100));
+    assert_eq!(m.routes[1].pattern, "^/.*$");
+    assert_eq!(m.routes[1].layer, "static-assets");
+    assert_eq!(m.routes[1].priority, Some(50));
+    assert_eq!(m.routes[2].layer, "server");
+    assert_eq!(m.routes[2].priority, Some(0));
 }
 
 #[test]
