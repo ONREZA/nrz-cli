@@ -289,9 +289,13 @@ pub(crate) fn compute_logical_manifest_sha256(
     ))
 }
 
-fn canonical_logical_manifest_json(manifest: &SourceLogicalManifest) -> anyhow::Result<String> {
+pub(crate) fn canonical_logical_manifest_json(
+    manifest: &SourceLogicalManifest,
+) -> anyhow::Result<String> {
     let value = serde_json::to_value(manifest).context("failed to serialize logical manifest")?;
-    stable_json_string(&value)
+    Ok(nrz_source_bundle::canonical_source_logical_manifest_json(
+        &value,
+    ))
 }
 
 fn summarize_logical_manifest(manifest: &SourceLogicalManifest) -> SourceLogicalManifestSummary {
@@ -1147,38 +1151,6 @@ impl<W: Write> Write for HashingWriter<W> {
     fn flush(&mut self) -> std::io::Result<()> {
         self.inner.flush()
     }
-}
-
-fn stable_json_string(value: &serde_json::Value) -> anyhow::Result<String> {
-    Ok(match value {
-        serde_json::Value::Null
-        | serde_json::Value::Bool(_)
-        | serde_json::Value::Number(_)
-        | serde_json::Value::String(_) => serde_json::to_string(value)?,
-        serde_json::Value::Array(items) => format!(
-            "[{}]",
-            items
-                .iter()
-                .map(stable_json_string)
-                .collect::<anyhow::Result<Vec<_>>>()?
-                .join(",")
-        ),
-        serde_json::Value::Object(object) => {
-            let mut entries = object.iter().collect::<Vec<_>>();
-            entries.sort_by_key(|(key, _)| *key);
-            let mut out = String::from("{");
-            for (idx, (key, entry_value)) in entries.iter().enumerate() {
-                if idx > 0 {
-                    out.push(',');
-                }
-                out.push_str(&serde_json::to_string(key)?);
-                out.push(':');
-                out.push_str(&stable_json_string(entry_value)?);
-            }
-            out.push('}');
-            out
-        }
-    })
 }
 
 fn compare_utf8(a: &str, b: &str) -> Ordering {

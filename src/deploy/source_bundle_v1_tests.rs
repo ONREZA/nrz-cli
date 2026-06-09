@@ -235,6 +235,83 @@ fn logical_manifest_sha_uses_stable_key_ordering() {
     );
 }
 
+#[test]
+fn canonical_logical_manifest_json_matches_source_bundle_v1_golden() {
+    let manifest = SourceLogicalManifest {
+        schema_version: SOURCE_BUNDLE_SCHEMA_VERSION.to_string(),
+        capabilities: vec![],
+        files: vec![
+            SourceLogicalManifestFile {
+                path: "api/handler.js".into(),
+                sha256: "b".repeat(64),
+                size: 128,
+                entry_type: None,
+                link_target: None,
+                content_type: Some("application/javascript; charset=utf-8".into()),
+                role: SourceLogicalManifestFileRole::Compute,
+                layer_name: Some("api".into()),
+            },
+            SourceLogicalManifestFile {
+                path: "index.html".into(),
+                sha256: "a".repeat(64),
+                size: 5,
+                entry_type: None,
+                link_target: None,
+                content_type: Some("text/html; charset=utf-8".into()),
+                role: SourceLogicalManifestFileRole::Static,
+                layer_name: Some("static".into()),
+            },
+            SourceLogicalManifestFile {
+                path: "link.html".into(),
+                sha256: sha256_hex(b"index.html"),
+                size: 0,
+                entry_type: Some(SourceLogicalManifestEntryType::Symlink),
+                link_target: Some("index.html".into()),
+                content_type: None,
+                role: SourceLogicalManifestFileRole::Static,
+                layer_name: Some("static".into()),
+            },
+        ],
+        layers: vec![
+            SourceLogicalManifestLayer {
+                name: "api".into(),
+                target: SourceLogicalManifestLayerTarget::Compute,
+                root_path: Some("api".into()),
+                entrypoint: Some("api/handler.js".into()),
+                runtime_config: Some(serde_json::json!({ "timeoutMs": 10000, "memoryMb": 256 })),
+            },
+            SourceLogicalManifestLayer {
+                name: "static".into(),
+                target: SourceLogicalManifestLayerTarget::Static,
+                root_path: None,
+                entrypoint: None,
+                runtime_config: None,
+            },
+        ],
+        routes: vec![SourceLogicalManifestRoute {
+            pattern: "/api/*".into(),
+            layer_name: "api".into(),
+            priority: Some(10),
+            methods: Some(vec!["GET".into(), "POST".into()]),
+        }],
+        entrypoints: vec!["api/handler.js".into()],
+    };
+
+    let canonical = canonical_logical_manifest_json(&manifest).unwrap();
+    assert_eq!(
+        canonical,
+        r#"{"capabilities":[],"entrypoints":["api/handler.js"],"files":[{"contentType":"application/javascript; charset=utf-8","layerName":"api","path":"api/handler.js","role":"compute","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":128},{"contentType":"text/html; charset=utf-8","layerName":"static","path":"index.html","role":"static","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":5},{"entryType":"symlink","layerName":"static","linkTarget":"index.html","path":"link.html","role":"static","sha256":"0eb547304658805aad788d320f10bf1f292797b5e6d745a3bf617584da017051","size":0}],"layers":[{"entrypoint":"api/handler.js","name":"api","rootPath":"api","runtimeConfig":{"memoryMb":256,"timeoutMs":10000},"target":"COMPUTE"},{"name":"static","target":"STATIC"}],"routes":[{"layerName":"api","methods":["GET","POST"],"pattern":"/api/*","priority":10}],"schemaVersion":"SOURCE_BUNDLE_V1.0"}"#
+    );
+    assert_eq!(
+        compute_logical_manifest_sha256(&manifest).unwrap(),
+        "9e8de07148ec4b8cd504c0c065439d12410bed9c0e2c14734e73527b4aa0d875"
+    );
+    assert_eq!(
+        compute_logical_manifest_sha256(&manifest).unwrap(),
+        sha256_hex(canonical.as_bytes())
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn source_bundle_plan_serializes_hardlinked_files_as_regular_files() {

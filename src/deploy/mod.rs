@@ -13,6 +13,7 @@ pub(crate) mod source_bundle_v1;
 #[cfg(test)]
 mod source_bundle_v1_tests;
 
+use std::collections::{HashSet, VecDeque};
 use std::io::Read;
 use std::num::NonZeroU64;
 use std::path::{Component, Path, PathBuf};
@@ -35,15 +36,22 @@ use crate::deploy::source_bundle_v1::{
     SOURCE_BUNDLE_FORMAT, SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, SourceBundlePlan,
     build_source_bundle_plan, source_bundle_contract_characters,
 };
-use crate::detect::types::ComputeType;
+use crate::detect::types::{ComputeType, RuntimeType};
 use crate::link;
 use crate::output;
 use nrz::config::{EffectiveProjectConfig, HealthCheckPathConfig, ProjectConfig};
+use nrz_contract::cli_api::{
+    OnrezaCliApiV1MultipartCompleteRequestPartsItem as CliMultipartCompletePart,
+    OnrezaCliApiV1PrepareUploadRequestLogicalManifestSummary as CliLogicalManifestSummary,
+    OnrezaCliApiV1PrepareUploadRequestMultipart as CliPrepareMultipart,
+    OnrezaCliApiV1PrepareUploadRequestMultipartPartsItem as CliPrepareMultipartPart,
+};
 use nrz_contract::{
-    CliMultipartCompleteResponse, CliPrepareUploadRequiredComplete, CliPrepareUploadResponse,
+    CliMultipartCompleteRequest, CliMultipartCompleteResponse, CliPrepareUploadRequest,
+    CliPrepareUploadRequiredComplete, CliPrepareUploadResponse,
     CliPrepareUploadResponseMultipartChunk, CliPrepareUploadResponsePresignedPutHeaders,
-    CliPrepareUploadResponsePresignedPutVerifyHead, CliUploadCompleteResponse,
-    CliUploadFailedResponse,
+    CliPrepareUploadResponsePresignedPutVerifyHead, CliUploadCompleteRequest,
+    CliUploadCompleteResponse, CliUploadFailedRequest, CliUploadFailedResponse,
 };
 use url::Url;
 use uuid::Uuid;
@@ -64,6 +72,25 @@ const PNPM_BUILD_SCRIPT_COMPAT_ENV: [(&str, &str); 2] = [
     ("npm_config_dangerously_allow_all_builds", "true"),
     ("pnpm_config_dangerously_allow_all_builds", "true"),
 ];
+
+#[derive(Debug)]
+struct RuntimeArtifact {
+    root_dir: PathBuf,
+    manifest: build_manifest::Manifest,
+    scan: RuntimeArtifactScan,
+}
+
+#[derive(Debug, Clone)]
+enum RuntimeArtifactScan {
+    All,
+    Selected { roots: Vec<String> },
+}
+
+#[derive(Debug)]
+struct DeploySymlinkTarget {
+    link_target: String,
+    resolved_path: String,
+}
 
 // ── Workspace / plan ─────────────────────────────────────────
 
@@ -551,24 +578,9 @@ pub async fn run(
     )
     .await?;
 
-    let output_dir = build_result.output_dir;
+    let build_output_dir = build_result.output_dir;
     let loaded_manifest = build_result.manifest;
     let has_manifest = loaded_manifest.is_some();
-
-    // Scan output directory into a flat file list with streaming SHA-256 + size per
-    // file. Pre-compression is gone (RFC: EDGE_DYNAMIC_ENCODING) — the edge serves
-    // identity bytes and compresses on the fly, so the CLI only ships raw content
-    // addressed by sha256. Run in a blocking task: filesystem I/O + CPU-bound hashing.
-    output::status(
-        json,
-        "~",
-        "Scanning output directory...",
-        output::Phase::Deploy,
-    );
-    let output_dir_for_scan = output_dir.clone();
-    let scanned_files = tokio::task::spawn_blocking(move || scan_dir(&output_dir_for_scan))
-        .await
-        .context("file scan task failed (panic or runtime shutdown)")??;
 
     let compute =
         resolve_deploy_compute_type(explicit_compute, loaded_manifest.as_ref(), &detection);
@@ -614,10 +626,10 @@ pub async fn run(
     // skip pre-flight validation and auto-detection.
     // When no manifest: find entry and auto-generate COMPUTE manifest.
     if is_process && !has_manifest {
-        validate_process_output(&output_dir, &project_dir, &detection)
+        validate_process_output(&build_output_dir, &project_dir, &detection)
             .map_err(|e| output::with_default_code(e, "MISSING_PROCESS_ENTRY"))?;
         let (entry, warning) = ensure_process_entry(
-            &output_dir,
+            &build_output_dir,
             &project_dir,
             effective.deploy_entry(),
             &detection,
@@ -649,7 +661,7 @@ pub async fn run(
                         "Cannot auto-generate COMPUTE manifest: entry point not detected in {}.\n\n\
                          Create .onreza/manifest.json manually.\n\
                          See: docs.onreza.ru/manifest",
-                        output_dir.display()
+                        build_output_dir.display()
                     ),
                 ));
             }
@@ -660,18 +672,47 @@ pub async fn run(
     let manifest_for_planning: build_manifest::Manifest =
         serde_json::from_value(manifest_raw.clone())
             .context("failed to parse resolved deployment manifest")?;
-    let files = prepare_deploy_files(&manifest_for_planning, scanned_files, &detection, json)?;
+    let runtime_artifact = resolve_runtime_artifact(
+        &project_context.root_dir,
+        &project_dir,
+        build_output_dir.clone(),
+        manifest_for_planning,
+        &detection,
+        json,
+    )?;
+    let manifest_raw = serde_json::to_value(&runtime_artifact.manifest)
+        .context("failed to serialize runtime artifact manifest")?;
+
+    // Scan the deployable runtime artifact into a flat file list with streaming
+    // SHA-256 + size per file. Build output and runtime artifact root are separate:
+    // PROCESS Node project builds may execute from a root that also carries
+    // package metadata and node_modules.
+    output::status(
+        json,
+        "~",
+        "Scanning runtime artifact...",
+        output::Phase::Deploy,
+    );
+    let runtime_artifact_root_for_scan = runtime_artifact.root_dir.clone();
+    let runtime_artifact_scan = runtime_artifact.scan.clone();
+    let scanned_files = tokio::task::spawn_blocking(move || {
+        scan_runtime_artifact(&runtime_artifact_root_for_scan, &runtime_artifact_scan)
+    })
+    .await
+    .context("file scan task failed (panic or runtime shutdown)")??;
+
+    let files = prepare_deploy_files(&runtime_artifact.manifest, scanned_files, &detection, json)?;
     if files.is_empty() {
         return Err(output::coded_error(
             "INVALID_BUILD_OUTPUT",
             format!(
                 "output directory has no deployable files after framework normalization: {}",
-                output_dir.display()
+                runtime_artifact.root_dir.display()
             ),
         ));
     }
     let functions = build_functions_payload(effective.config(), &project_dir, json)?;
-    let has_compute_layer = manifest_has_compute_layer(&manifest_for_planning);
+    let has_compute_layer = manifest_has_compute_layer(&runtime_artifact.manifest);
 
     // Resolve health check path (PROCESS only)
     let health_check = if has_compute_layer {
@@ -680,7 +721,7 @@ pub async fn run(
             config,
             &project_dir,
             &detection,
-            &output_dir,
+            &build_output_dir,
             json,
         )?)
     } else {
@@ -710,6 +751,8 @@ pub async fn run(
                 .await?
             }
         };
+        let runtime_artifact_root = runtime_artifact.root_dir;
+        let runtime_artifact_manifest = runtime_artifact.manifest;
         return resume_deploy(
             &client,
             deployment_id,
@@ -717,9 +760,9 @@ pub async fn run(
             &project_id,
             functions,
             manifest_raw,
-            manifest_for_planning,
+            runtime_artifact_manifest,
             files,
-            &output_dir,
+            &runtime_artifact_root,
             json,
             warnings,
         )
@@ -803,8 +846,12 @@ pub async fn run(
         "Creating SOURCE_BUNDLE_V1 archive...",
         output::Phase::Deploy,
     );
-    let upload_plan = build_source_bundle_plan(&output_dir, &manifest_for_planning, &files)
-        .context("failed to prepare SOURCE_BUNDLE_V1 upload plan")?;
+    let upload_plan = build_source_bundle_plan(
+        &runtime_artifact.root_dir,
+        &runtime_artifact.manifest,
+        &files,
+    )
+    .context("failed to prepare SOURCE_BUNDLE_V1 upload plan")?;
     output::success(
         json,
         format!(
@@ -1121,23 +1168,48 @@ async fn prepare_upload_and_complete(
         output::Phase::Deploy,
     );
 
-    let body = PrepareUploadBody {
-        deployment_id: deployment_id.to_string(),
-        workspace_id: workspace_id.to_string(),
-        project_id: project_id.to_string(),
-        deployment_attempt_id: deployment_attempt_id.to_string(),
-        operation_id: Uuid::now_v7().to_string(),
-        artifact_format: "SOURCE_BUNDLE_V1".to_string(),
-        cli_protocol_version: CLI_PROTOCOL_VERSION.to_string(),
-        logical_manifest_summary: plan.logical_manifest_summary.clone(),
-        logical_manifest_sha256: plan.logical_manifest_sha256.clone(),
-        source_format: SOURCE_BUNDLE_FORMAT.to_string(),
-        source_sha256: plan.source_sha256.clone(),
-        source_size_bytes: plan.source_size_string(),
-        multipart: plan.multipart.clone(),
-    };
+    let deployment_uuid = Uuid::parse_str(deployment_id)
+        .with_context(|| format!("deployment id is not a valid UUID: {deployment_id}"))?;
+    let workspace_uuid = Uuid::parse_str(workspace_id)
+        .with_context(|| format!("workspace id is not a valid UUID: {workspace_id}"))?;
+    let project_uuid = Uuid::parse_str(project_id)
+        .with_context(|| format!("project id is not a valid UUID: {project_id}"))?;
+    let attempt_uuid = Uuid::parse_str(deployment_attempt_id).with_context(|| {
+        format!("deployment attempt id is not a valid UUID: {deployment_attempt_id}")
+    })?;
+    let source_size_bytes = plan.source_size_string();
+    let body =
+        CliPrepareUploadRequest {
+            deployment_id: deployment_uuid,
+            workspace_id: workspace_uuid,
+            project_id: project_uuid,
+            deployment_attempt_id: attempt_uuid,
+            operation_id: Uuid::now_v7(),
+            artifact_format: "SOURCE_BUNDLE_V1".to_string(),
+            cli_protocol_version: CLI_PROTOCOL_VERSION
+                .try_into()
+                .map_err(|e| anyhow::anyhow!("invalid cli_protocol_version: {e}"))?,
+            logical_manifest_summary: to_contract_manifest_summary(&plan.logical_manifest_summary)?,
+            logical_manifest_sha256: plan.logical_manifest_sha256.as_str().try_into().map_err(
+                |e| anyhow::anyhow!("invalid logical_manifest_sha256 for prepare-upload: {e}"),
+            )?,
+            source_format: SOURCE_BUNDLE_FORMAT.to_string(),
+            source_sha256: plan
+                .source_sha256
+                .as_str()
+                .try_into()
+                .map_err(|e| anyhow::anyhow!("invalid source_sha256 for prepare-upload: {e}"))?,
+            source_size_bytes: source_size_bytes.as_str().try_into().map_err(|e| {
+                anyhow::anyhow!("invalid source_size_bytes for prepare-upload: {e}")
+            })?,
+            multipart: plan
+                .multipart
+                .as_ref()
+                .map(to_contract_multipart)
+                .transpose()?,
+        };
 
-    let prepared = prepare_upload_with_retry(client, deployment_id, &body, json).await?;
+    let prepared = prepare_upload_with_retry(client, deployment_uuid, &body, json).await?;
 
     let multipart_completion = match upload_source_object(client, &prepared, plan, json).await {
         Ok(completion) => completion,
@@ -1167,12 +1239,11 @@ async fn prepare_upload_and_complete(
     )
     .await?;
 
-    let upload_session_id = prepared.upload_session_id.to_string();
     complete_upload_with_retry(
         client,
-        deployment_id,
-        &upload_session_id,
-        deployment_attempt_id,
+        deployment_uuid,
+        prepared.upload_session_id,
+        attempt_uuid,
         json,
         plan,
         prepared.source_artifact_id.as_str(),
@@ -1182,73 +1253,67 @@ async fn prepare_upload_and_complete(
     Ok(())
 }
 
-// ── Resume deploy flow ───────────────────────────────────────
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PrepareUploadBody {
-    deployment_id: String,
-    workspace_id: String,
-    project_id: String,
-    deployment_attempt_id: String,
-    operation_id: String,
-    artifact_format: String,
-    cli_protocol_version: String,
-    logical_manifest_summary: source_bundle_v1::SourceLogicalManifestSummary,
-    logical_manifest_sha256: String,
-    source_format: String,
-    source_sha256: String,
-    source_size_bytes: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    multipart: Option<source_bundle_v1::SourceBundleMultipartDescriptor>,
+fn to_contract_manifest_summary(
+    summary: &source_bundle_v1::SourceLogicalManifestSummary,
+) -> anyhow::Result<CliLogicalManifestSummary> {
+    Ok(CliLogicalManifestSummary {
+        file_count: i64::try_from(summary.file_count)
+            .context("manifest file_count exceeds i64 range")?,
+        logical_static_bytes: summary
+            .logical_static_bytes
+            .as_str()
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("invalid logicalStaticBytes: {e}"))?,
+        artifact_size_bytes: summary
+            .artifact_size_bytes
+            .as_str()
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("invalid artifactSizeBytes: {e}"))?,
+        max_static_file_size_bytes: summary
+            .max_static_file_size_bytes
+            .as_str()
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("invalid maxStaticFileSizeBytes: {e}"))?,
+    })
 }
+
+fn to_contract_multipart(
+    multipart: &source_bundle_v1::SourceBundleMultipartDescriptor,
+) -> anyhow::Result<CliPrepareMultipart> {
+    let parts = multipart
+        .parts
+        .iter()
+        .map(|part| {
+            Ok(CliPrepareMultipartPart {
+                part_number: NonZeroU64::new(u64::from(part.part_number))
+                    .context("multipart part number must be non-zero")?,
+                size_bytes: NonZeroU64::new(part.size_bytes)
+                    .context("multipart part size must be non-zero")?,
+                sha256: part
+                    .sha256
+                    .as_str()
+                    .try_into()
+                    .map_err(|e| anyhow::anyhow!("invalid multipart part sha256: {e}"))?,
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(CliPrepareMultipart {
+        part_count: NonZeroU64::new(u64::from(multipart.part_count))
+            .context("multipart part count must be non-zero")?,
+        part_size_bytes: NonZeroU64::new(multipart.part_size_bytes)
+            .context("multipart part size must be non-zero")?,
+        parts,
+    })
+}
+
+// ── Resume deploy flow ───────────────────────────────────────
 
 type PrepareUploadResponse = CliPrepareUploadResponse;
 type RequiredComplete = CliPrepareUploadRequiredComplete;
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UploadCompleteBody {
-    deployment_id: String,
-    upload_session_id: String,
-    deployment_attempt_id: String,
-    operation_id: String,
-    artifact_format: String,
-    source_artifact_id: String,
-    source_sha256: String,
-    source_size_bytes: String,
-    logical_manifest_sha256: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UploadFailedBody {
-    deployment_id: String,
-    upload_session_id: String,
-    deployment_attempt_id: String,
-    operation_id: String,
-    artifact_format: String,
-    source_artifact_id: String,
-    error_code: String,
-    error_log: String,
-}
-
 type UploadCompleteResponse = CliUploadCompleteResponse;
 
 type UploadFailedResponse = CliUploadFailedResponse;
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MultipartCompleteBody {
-    deployment_id: String,
-    upload_session_id: String,
-    deployment_attempt_id: String,
-    operation_id: String,
-    artifact_format: String,
-    source_artifact_id: String,
-    upload_id: String,
-    parts: Vec<CompletedMultipartPart>,
-}
 
 type MultipartCompleteResponse = CliMultipartCompleteResponse;
 
@@ -1259,8 +1324,8 @@ struct SourceMultipartCompletion {
 
 async fn prepare_upload_with_retry(
     client: &ApiClient,
-    deployment_id: &str,
-    body: &PrepareUploadBody,
+    deployment_id: Uuid,
+    body: &CliPrepareUploadRequest,
     json: bool,
 ) -> anyhow::Result<PrepareUploadResponse> {
     let started = Instant::now();
@@ -1373,9 +1438,9 @@ fn classify_prepare_upload_retry_error(error: &anyhow::Error) -> Option<SourceCo
 
 async fn complete_upload_with_retry(
     client: &ApiClient,
-    deployment_id: &str,
-    upload_session_id: &str,
-    deployment_attempt_id: &str,
+    deployment_id: Uuid,
+    upload_session_id: Uuid,
+    deployment_attempt_id: Uuid,
     json: bool,
     plan: &SourceBundlePlan,
     source_artifact_id: &str,
@@ -1383,17 +1448,29 @@ async fn complete_upload_with_retry(
     let started = Instant::now();
     let mut delay = SOURCE_COMPLETION_INITIAL_RETRY_DELAY;
     let mut attempts = 0u32;
-    let body = UploadCompleteBody {
-        deployment_id: deployment_id.to_string(),
-        upload_session_id: upload_session_id.to_string(),
-        deployment_attempt_id: deployment_attempt_id.to_string(),
-        operation_id: Uuid::now_v7().to_string(),
-        artifact_format: "SOURCE_BUNDLE_V1".to_string(),
-        source_artifact_id: source_artifact_id.to_string(),
-        source_sha256: plan.source_sha256.clone(),
-        source_size_bytes: plan.source_size_string(),
-        logical_manifest_sha256: plan.logical_manifest_sha256.clone(),
-    };
+    let source_size_bytes = plan.source_size_string();
+    let body =
+        CliUploadCompleteRequest {
+            deployment_id,
+            upload_session_id,
+            deployment_attempt_id,
+            operation_id: Uuid::now_v7(),
+            artifact_format: "SOURCE_BUNDLE_V1".to_string(),
+            source_artifact_id: source_artifact_id.try_into().map_err(|e| {
+                anyhow::anyhow!("invalid source_artifact_id for upload-complete: {e}")
+            })?,
+            source_sha256: plan
+                .source_sha256
+                .as_str()
+                .try_into()
+                .map_err(|e| anyhow::anyhow!("invalid source_sha256 for upload-complete: {e}"))?,
+            source_size_bytes: source_size_bytes.as_str().try_into().map_err(|e| {
+                anyhow::anyhow!("invalid source_size_bytes for upload-complete: {e}")
+            })?,
+            logical_manifest_sha256: plan.logical_manifest_sha256.as_str().try_into().map_err(
+                |e| anyhow::anyhow!("invalid logical_manifest_sha256 for upload-complete: {e}"),
+            )?,
+        };
 
     loop {
         attempts += 1;
@@ -1436,8 +1513,8 @@ async fn complete_upload_with_retry(
 
 async fn post_upload_complete_once(
     client: &ApiClient,
-    deployment_id: &str,
-    body: &UploadCompleteBody,
+    deployment_id: Uuid,
+    body: &CliUploadCompleteRequest,
 ) -> anyhow::Result<SourceCompletionAttempt> {
     match client
         .post::<_, UploadCompleteResponse>(
@@ -1713,23 +1790,53 @@ async fn complete_source_multipart_if_needed(
         "server required multipart-complete but SOURCE_BUNDLE_V1 multipart upload was not performed",
     )?;
 
-    let body = MultipartCompleteBody {
-        deployment_id: deployment_id.to_string(),
-        upload_session_id: prepared.upload_session_id.to_string(),
-        deployment_attempt_id: deployment_attempt_id.to_string(),
-        operation_id: Uuid::now_v7().to_string(),
+    let deployment_uuid = Uuid::parse_str(deployment_id)
+        .with_context(|| format!("deployment id is not a valid UUID: {deployment_id}"))?;
+    let attempt_uuid = Uuid::parse_str(deployment_attempt_id).with_context(|| {
+        format!("deployment attempt id is not a valid UUID: {deployment_attempt_id}")
+    })?;
+    let parts = completion
+        .parts
+        .into_iter()
+        .map(|part| {
+            Ok(CliMultipartCompletePart {
+                part_number: NonZeroU64::new(u64::from(part.part_number))
+                    .context("multipart part number must be non-zero")?,
+                e_tag: part
+                    .e_tag
+                    .as_str()
+                    .try_into()
+                    .map_err(|e| anyhow::anyhow!("invalid multipart ETag: {e}"))?,
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let body = CliMultipartCompleteRequest {
+        deployment_id: deployment_uuid,
+        upload_session_id: prepared.upload_session_id,
+        deployment_attempt_id: attempt_uuid,
+        operation_id: Uuid::now_v7(),
         artifact_format: "SOURCE_BUNDLE_V1".to_string(),
-        source_artifact_id: prepared.source_artifact_id.as_str().to_string(),
-        upload_id: completion.upload_id,
-        parts: completion.parts,
+        source_artifact_id: prepared
+            .source_artifact_id
+            .as_str()
+            .try_into()
+            .map_err(|e| {
+                anyhow::anyhow!("invalid source_artifact_id for multipart-complete: {e}")
+            })?,
+        upload_id: completion
+            .upload_id
+            .as_str()
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("invalid multipart upload id: {e}"))?,
+        parts,
     };
-    complete_source_multipart_with_retry(client, deployment_id, &body, json).await
+    complete_source_multipart_with_retry(client, deployment_uuid, &body, json).await
 }
 
 async fn complete_source_multipart_with_retry(
     client: &ApiClient,
-    deployment_id: &str,
-    body: &MultipartCompleteBody,
+    deployment_id: Uuid,
+    body: &CliMultipartCompleteRequest,
     json: bool,
 ) -> anyhow::Result<()> {
     let started = Instant::now();
@@ -1780,8 +1887,8 @@ async fn complete_source_multipart_with_retry(
 
 async fn post_source_multipart_complete_once(
     client: &ApiClient,
-    deployment_id: &str,
-    body: &MultipartCompleteBody,
+    deployment_id: Uuid,
+    body: &CliMultipartCompleteRequest,
 ) -> anyhow::Result<SourceCompletionAttempt> {
     match client
         .post::<_, MultipartCompleteResponse>(
@@ -1806,19 +1913,21 @@ async fn report_source_object_upload_failed(
     error: &anyhow::Error,
     json: bool,
 ) {
-    let body = UploadFailedBody {
-        deployment_id: deployment_id.to_string(),
-        upload_session_id: prepared.upload_session_id.to_string(),
-        deployment_attempt_id: deployment_attempt_id.to_string(),
-        operation_id: Uuid::now_v7().to_string(),
-        artifact_format: "SOURCE_BUNDLE_V1".to_string(),
-        source_artifact_id: prepared.source_artifact_id.as_str().to_string(),
-        error_code: SOURCE_UPLOAD_PUT_FAILED.to_string(),
-        error_log: upload_failure_log(error),
-    };
+    let body =
+        match build_upload_failed_request(deployment_id, deployment_attempt_id, prepared, error) {
+            Ok(body) => body,
+            Err(build_error) => {
+                output::warn(
+                    json,
+                    format!("Failed to build SOURCE_BUNDLE_V1 upload-failed report: {build_error}"),
+                    output::Phase::Deploy,
+                );
+                return;
+            }
+        };
 
     if let Err(report_error) =
-        report_source_object_upload_failed_with_retry(client, deployment_id, &body, json).await
+        report_source_object_upload_failed_with_retry(client, body.deployment_id, &body, json).await
     {
         output::warn(
             json,
@@ -1828,10 +1937,40 @@ async fn report_source_object_upload_failed(
     }
 }
 
+fn build_upload_failed_request(
+    deployment_id: &str,
+    deployment_attempt_id: &str,
+    prepared: &PrepareUploadResponse,
+    error: &anyhow::Error,
+) -> anyhow::Result<CliUploadFailedRequest> {
+    Ok(CliUploadFailedRequest {
+        deployment_id: Uuid::parse_str(deployment_id)
+            .with_context(|| format!("deployment id is not a valid UUID: {deployment_id}"))?,
+        upload_session_id: prepared.upload_session_id,
+        deployment_attempt_id: Uuid::parse_str(deployment_attempt_id).with_context(|| {
+            format!("deployment attempt id is not a valid UUID: {deployment_attempt_id}")
+        })?,
+        operation_id: Uuid::now_v7(),
+        artifact_format: "SOURCE_BUNDLE_V1".to_string(),
+        source_artifact_id: prepared
+            .source_artifact_id
+            .as_str()
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("invalid source_artifact_id for upload-failed: {e}"))?,
+        error_code: SOURCE_UPLOAD_PUT_FAILED
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("invalid error_code for upload-failed: {e}"))?,
+        error_log: upload_failure_log(error)
+            .as_str()
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("invalid error_log for upload-failed: {e}"))?,
+    })
+}
+
 async fn report_source_object_upload_failed_with_retry(
     client: &ApiClient,
-    deployment_id: &str,
-    body: &UploadFailedBody,
+    deployment_id: Uuid,
+    body: &CliUploadFailedRequest,
     json: bool,
 ) -> anyhow::Result<()> {
     let started = Instant::now();
@@ -2320,6 +2459,293 @@ fn function_stage_success_message(function_count: usize, edge_rule_count: usize)
         (true, true) => "ONREZA Functions and Edge Rules staged for deployment",
         (false, true) => "Edge Rules staged for deployment",
         _ => "ONREZA Functions staged for deployment",
+    }
+}
+
+// ── Runtime artifact resolution ───────────────────────────────
+
+const NODE_RUNTIME_METADATA_FILES: &[&str] = &[
+    "package.json",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+];
+
+struct NodeProjectRuntimePlan {
+    runtime_root: PathBuf,
+    build_output_prefix: String,
+    project_prefix: String,
+}
+
+fn resolve_runtime_artifact(
+    workspace_root_dir: &Path,
+    project_dir: &Path,
+    build_output_dir: PathBuf,
+    manifest: build_manifest::Manifest,
+    detection: &crate::detect::types::DetectionResult,
+    json: bool,
+) -> anyhow::Result<RuntimeArtifact> {
+    let Some(plan) = plan_node_project_runtime_artifact(
+        workspace_root_dir,
+        project_dir,
+        &build_output_dir,
+        &manifest,
+        detection,
+    ) else {
+        return Ok(RuntimeArtifact {
+            root_dir: build_output_dir,
+            manifest,
+            scan: RuntimeArtifactScan::All,
+        });
+    };
+
+    validate_node_project_runtime_dependencies(&plan.runtime_root, project_dir)?;
+    let manifest = rewrite_manifest_for_node_project_runtime(manifest, &plan.build_output_prefix)?;
+    build_manifest::verify_files(&plan.runtime_root, &manifest)
+        .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
+    let roots = node_project_runtime_scan_roots(
+        &plan.runtime_root,
+        &plan.project_prefix,
+        &plan.build_output_prefix,
+    );
+
+    output::status(
+        json,
+        "~",
+        format!(
+            "Runtime artifact: Node runtime root {} (entry and dependencies share one runtime root)",
+            plan.runtime_root.display()
+        ),
+        output::Phase::Deploy,
+    );
+
+    Ok(RuntimeArtifact {
+        root_dir: plan.runtime_root,
+        manifest,
+        scan: RuntimeArtifactScan::Selected { roots },
+    })
+}
+
+/// Plans relocation of a Node PROCESS deploy onto a runtime root that carries
+/// `node_modules`. Returns `None` — scan the build output as-is — when the
+/// project isn't an eligible Node server project, or when the build output lives
+/// outside the runtime root (e.g. an out-of-tree `outputDirectory`).
+fn plan_node_project_runtime_artifact(
+    workspace_root_dir: &Path,
+    project_dir: &Path,
+    build_output_dir: &Path,
+    manifest: &build_manifest::Manifest,
+    detection: &crate::detect::types::DetectionResult,
+) -> Option<NodeProjectRuntimePlan> {
+    if !is_node_project_runtime_candidate(project_dir, build_output_dir, manifest, detection) {
+        return None;
+    }
+    let runtime_root = select_node_project_runtime_root(workspace_root_dir, project_dir);
+    let build_output_prefix =
+        relative_runtime_artifact_path(&runtime_root, build_output_dir).ok()?;
+    let project_prefix = relative_runtime_artifact_path(&runtime_root, project_dir).ok()?;
+    Some(NodeProjectRuntimePlan {
+        runtime_root,
+        build_output_prefix,
+        project_prefix,
+    })
+}
+
+fn is_node_project_runtime_candidate(
+    project_dir: &Path,
+    build_output_dir: &Path,
+    manifest: &build_manifest::Manifest,
+    detection: &crate::detect::types::DetectionResult,
+) -> bool {
+    if detection.metadata.runtime.runtime_type != RuntimeType::Node {
+        return false;
+    }
+    if !manifest_has_compute_layer(manifest) {
+        return false;
+    }
+    if compute_layer_count(manifest) != 1 {
+        return false;
+    }
+    if build_output_dir == project_dir || build_output_dir.join("node_modules").is_dir() {
+        return false;
+    }
+    is_node_project_runtime_framework(&detection.framework)
+}
+
+fn compute_layer_count(manifest: &build_manifest::Manifest) -> usize {
+    manifest
+        .layers
+        .iter()
+        .filter(|layer| layer.target == build_manifest::LayerTarget::Compute)
+        .count()
+}
+
+fn is_node_project_runtime_framework(framework: &str) -> bool {
+    if matches!(framework, "nextjs" | "blitzjs" | "payload" | "nitro") {
+        return false;
+    }
+    if framework == "other" {
+        return true;
+    }
+    crate::detect::presets::get_preset_by_slug(framework)
+        .is_some_and(|preset| preset.category == crate::detect::types::PresetCategory::Server)
+}
+
+fn select_node_project_runtime_root(workspace_root_dir: &Path, project_dir: &Path) -> PathBuf {
+    if workspace_root_dir != project_dir
+        && project_dir.starts_with(workspace_root_dir)
+        && workspace_root_dir.join("node_modules").is_dir()
+    {
+        // Node resolves modules by walking parent directories. In workspaces,
+        // root node_modules is part of the app runtime even when the app also
+        // has its own node_modules.
+        return workspace_root_dir.to_path_buf();
+    }
+    project_dir.to_path_buf()
+}
+
+fn validate_node_project_runtime_dependencies(
+    runtime_root: &Path,
+    project_dir: &Path,
+) -> anyhow::Result<()> {
+    let Some(package_json) = crate::detect::package_json::PackageJson::load_strict(project_dir)?
+    else {
+        return Ok(());
+    };
+    if package_json.dependencies.is_empty() {
+        return Ok(());
+    }
+    if project_dir.join("node_modules").is_dir() || runtime_root.join("node_modules").is_dir() {
+        return Ok(());
+    }
+    Err(output::coded_error(
+        "MISSING_RUNTIME_DEPENDENCIES",
+        format!(
+            "Node PROCESS runtime artifact requires node_modules, but none was found in {} or {}. \
+             Run the install step before deploy, or remove --skip-install.",
+            project_dir.display(),
+            runtime_root.display()
+        ),
+    ))
+}
+
+fn rewrite_manifest_for_node_project_runtime(
+    mut manifest: build_manifest::Manifest,
+    build_output_prefix: &str,
+) -> anyhow::Result<build_manifest::Manifest> {
+    for layer in &mut manifest.layers {
+        match layer.target {
+            build_manifest::LayerTarget::Compute => {
+                let entry = layer
+                    .entry
+                    .as_deref()
+                    .context("COMPUTE layer missing entry")?;
+                let entry = join_runtime_artifact_paths(
+                    &join_runtime_artifact_paths(build_output_prefix, &layer.directory)?,
+                    entry,
+                )?;
+                layer.directory = ".".to_string();
+                layer.entry = Some(entry);
+            }
+            build_manifest::LayerTarget::Static => {
+                layer.directory =
+                    join_runtime_artifact_paths(build_output_prefix, &layer.directory)?;
+            }
+        }
+    }
+    build_manifest::validate(&manifest)
+        .map_err(|e| output::with_default_code(e, "INVALID_MANIFEST"))?;
+    Ok(manifest)
+}
+
+fn relative_runtime_artifact_path(root: &Path, path: &Path) -> anyhow::Result<String> {
+    let relative = path.strip_prefix(root).with_context(|| {
+        format!(
+            "{} is not inside runtime root {}",
+            path.display(),
+            root.display()
+        )
+    })?;
+    path_to_runtime_artifact_string(relative)
+}
+
+fn path_to_runtime_artifact_string(path: &Path) -> anyhow::Result<String> {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => out.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                bail!("unsafe runtime artifact path: {}", path.display());
+            }
+        }
+    }
+    if out.as_os_str().is_empty() {
+        Ok(".".to_string())
+    } else {
+        Ok(out.to_string_lossy().replace('\\', "/"))
+    }
+}
+
+fn normalize_runtime_artifact_path(path: &str) -> anyhow::Result<String> {
+    path_to_runtime_artifact_string(Path::new(path))
+}
+
+fn join_runtime_artifact_paths(left: &str, right: &str) -> anyhow::Result<String> {
+    let left = normalize_runtime_artifact_path(left)?;
+    let right = normalize_runtime_artifact_path(right)?;
+    match (left.as_str(), right.as_str()) {
+        (".", ".") => Ok(".".to_string()),
+        (".", _) => Ok(right),
+        (_, ".") => Ok(left),
+        _ => Ok(format!("{left}/{right}")),
+    }
+}
+
+fn node_project_runtime_scan_roots(
+    runtime_root: &Path,
+    project_prefix: &str,
+    build_output_prefix: &str,
+) -> Vec<String> {
+    let mut roots = Vec::new();
+    push_existing_runtime_scan_root(&mut roots, runtime_root, build_output_prefix);
+    // Ship the whole node_modules tree. The transitive dependency closure can't
+    // be pruned without a package-manager-aware resolver, and under-shipping
+    // breaks the process at runtime — over-shipping is the safe trade-off.
+    push_existing_runtime_scan_root(&mut roots, runtime_root, "node_modules");
+    for file in NODE_RUNTIME_METADATA_FILES {
+        push_existing_runtime_scan_root(&mut roots, runtime_root, file);
+    }
+
+    if project_prefix != "." {
+        push_existing_runtime_scan_root(
+            &mut roots,
+            runtime_root,
+            &join_runtime_artifact_paths(project_prefix, "node_modules")
+                .expect("project node_modules path must be safe"),
+        );
+        for file in NODE_RUNTIME_METADATA_FILES {
+            push_existing_runtime_scan_root(
+                &mut roots,
+                runtime_root,
+                &join_runtime_artifact_paths(project_prefix, file)
+                    .expect("project metadata path must be safe"),
+            );
+        }
+    }
+
+    roots
+}
+
+fn push_existing_runtime_scan_root(roots: &mut Vec<String>, runtime_root: &Path, path: &str) {
+    if roots.iter().any(|existing| existing == path) {
+        return;
+    }
+    if runtime_root.join(path).exists() {
+        roots.push(path.to_string());
     }
 }
 
@@ -3728,9 +4154,68 @@ fn scan_dir(dir: &Path) -> anyhow::Result<Vec<FileEntry>> {
     let mut files = Vec::new();
     let canonical_base = std::fs::canonicalize(dir)
         .with_context(|| format!("failed to canonicalize {}", dir.display()))?;
-    scan_dir_recursive(dir, dir, &canonical_base, &mut files)?;
+    let mut symlink_targets = Vec::new();
+    scan_dir_recursive(dir, dir, &canonical_base, &mut files, &mut symlink_targets)?;
     files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
+}
+
+fn scan_runtime_artifact(
+    root_dir: &Path,
+    scan: &RuntimeArtifactScan,
+) -> anyhow::Result<Vec<FileEntry>> {
+    match scan {
+        RuntimeArtifactScan::All => scan_dir(root_dir),
+        RuntimeArtifactScan::Selected { roots } => scan_selected_runtime_roots(root_dir, roots),
+    }
+}
+
+fn scan_selected_runtime_roots(
+    root_dir: &Path,
+    roots: &[String],
+) -> anyhow::Result<Vec<FileEntry>> {
+    let mut files = Vec::new();
+    let canonical_base = std::fs::canonicalize(root_dir)
+        .with_context(|| format!("failed to canonicalize {}", root_dir.display()))?;
+
+    let mut queued_roots = roots
+        .iter()
+        .map(|root| normalize_runtime_artifact_path(root))
+        .collect::<anyhow::Result<VecDeque<_>>>()?;
+    let mut scheduled_roots = queued_roots.iter().cloned().collect::<HashSet<_>>();
+    let mut scanned_roots = HashSet::new();
+
+    while let Some(root) = queued_roots.pop_front() {
+        if !scanned_roots.insert(root.clone()) {
+            continue;
+        }
+        let path = root_dir.join(&root);
+        if !path.exists() {
+            continue;
+        }
+        let mut symlink_targets = Vec::new();
+        scan_runtime_path(
+            root_dir,
+            &path,
+            &canonical_base,
+            &mut files,
+            &mut symlink_targets,
+        )?;
+        for target in symlink_targets {
+            if runtime_scan_path_is_covered(&target, scheduled_roots.iter().map(String::as_str)) {
+                continue;
+            }
+            scheduled_roots.insert(target.clone());
+            queued_roots.push_back(target);
+        }
+    }
+    files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    files.dedup_by(|a, b| a.path == b.path);
+    Ok(files)
+}
+
+fn runtime_scan_path_is_covered<'a>(path: &str, mut roots: impl Iterator<Item = &'a str>) -> bool {
+    roots.any(|root| root == "." || path == root || path.starts_with(&format!("{root}/")))
 }
 
 fn prepare_deploy_files(
@@ -3827,6 +4312,7 @@ fn scan_dir_recursive(
     current: &Path,
     canonical_base: &Path,
     files: &mut Vec<FileEntry>,
+    symlink_targets: &mut Vec<String>,
 ) -> anyhow::Result<()> {
     let entries = std::fs::read_dir(current)
         .with_context(|| format!("failed to read directory {}", current.display()))?;
@@ -3839,36 +4325,63 @@ fn scan_dir_recursive(
             .file_type()
             .with_context(|| format!("failed to stat {}", path.display()))?;
 
-        if ft.is_symlink() {
-            let rel = path
-                .strip_prefix(base)
-                .context("failed to compute relative path")?
-                .to_string_lossy()
-                .replace('\\', "/");
-            let link_target = read_deploy_symlink_target(&path, &rel, canonical_base)?;
-            files.push(FileEntry {
-                path: rel,
-                size: 0,
-                content_hash: sha256_hex(link_target.as_bytes()),
-            });
-            continue;
-        }
+        scan_runtime_path_with_type(base, &path, ft, canonical_base, files, symlink_targets)?;
+    }
 
-        if ft.is_dir() {
-            scan_dir_recursive(base, &path, canonical_base, files)?;
-        } else if ft.is_file() {
-            let rel = path
-                .strip_prefix(base)
-                .context("failed to compute relative path")?;
-            let rel_str = rel.to_string_lossy().replace('\\', "/");
-            let (size, content_hash) = hash_file_streaming(&path)
-                .with_context(|| format!("failed to hash {}", rel_str))?;
-            files.push(FileEntry {
-                path: rel_str,
-                size,
-                content_hash,
-            });
-        }
+    Ok(())
+}
+
+fn scan_runtime_path(
+    base: &Path,
+    path: &Path,
+    canonical_base: &Path,
+    files: &mut Vec<FileEntry>,
+    symlink_targets: &mut Vec<String>,
+) -> anyhow::Result<()> {
+    let ft = std::fs::symlink_metadata(path)
+        .with_context(|| format!("failed to stat {}", path.display()))?
+        .file_type();
+    scan_runtime_path_with_type(base, path, ft, canonical_base, files, symlink_targets)
+}
+
+fn scan_runtime_path_with_type(
+    base: &Path,
+    path: &Path,
+    ft: std::fs::FileType,
+    canonical_base: &Path,
+    files: &mut Vec<FileEntry>,
+    symlink_targets: &mut Vec<String>,
+) -> anyhow::Result<()> {
+    if ft.is_symlink() {
+        let rel = path
+            .strip_prefix(base)
+            .context("failed to compute relative path")?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let symlink = read_deploy_symlink_target(path, &rel, canonical_base)?;
+        files.push(FileEntry {
+            path: rel,
+            size: 0,
+            content_hash: sha256_hex(symlink.link_target.as_bytes()),
+        });
+        symlink_targets.push(symlink.resolved_path);
+        return Ok(());
+    }
+
+    if ft.is_dir() {
+        scan_dir_recursive(base, path, canonical_base, files, symlink_targets)?;
+    } else if ft.is_file() {
+        let rel = path
+            .strip_prefix(base)
+            .context("failed to compute relative path")?;
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        let (size, content_hash) =
+            hash_file_streaming(path).with_context(|| format!("failed to hash {}", rel_str))?;
+        files.push(FileEntry {
+            path: rel_str,
+            size,
+            content_hash,
+        });
     }
 
     Ok(())
@@ -3878,7 +4391,7 @@ fn read_deploy_symlink_target(
     path: &Path,
     rel: &str,
     canonical_base: &Path,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<DeploySymlinkTarget> {
     let target = std::fs::read_link(path)
         .with_context(|| format!("failed to read SOURCE_BUNDLE_V1 symlink {}", path.display()))?;
     let target = target.to_str().ok_or_else(|| {
@@ -3890,9 +4403,12 @@ fn read_deploy_symlink_target(
             ),
         )
     })?;
-    validate_deploy_symlink_target(rel, target)?;
+    let resolved_path = resolve_deploy_symlink_target(rel, target)?;
     match std::fs::canonicalize(path) {
-        Ok(canonical) if canonical.starts_with(canonical_base) => Ok(target.to_string()),
+        Ok(canonical) if canonical.starts_with(canonical_base) => Ok(DeploySymlinkTarget {
+            link_target: target.to_string(),
+            resolved_path,
+        }),
         Ok(canonical) => Err(output::coded_error(
             "INVALID_BUILD_OUTPUT",
             format!(
@@ -3907,7 +4423,7 @@ fn read_deploy_symlink_target(
     }
 }
 
-fn validate_deploy_symlink_target(rel: &str, target: &str) -> anyhow::Result<()> {
+fn resolve_deploy_symlink_target(rel: &str, target: &str) -> anyhow::Result<String> {
     if target.is_empty() || target.contains('\\') || target.contains('\0') {
         return Err(output::coded_error(
             "INVALID_BUILD_OUTPUT",
@@ -3962,7 +4478,7 @@ fn validate_deploy_symlink_target(rel: &str, target: &str) -> anyhow::Result<()>
             format!("unsafe SOURCE_BUNDLE_V1 symlink target: {rel} -> {target}"),
         ));
     }
-    Ok(())
+    path_to_runtime_artifact_string(&resolved)
 }
 
 /// Streaming SHA-256 + size for a single file. Returns `(size, lowercase_hex_sha256)`.

@@ -870,6 +870,382 @@ fn prepare_deploy_files_prunes_next_cache_only() {
     );
 }
 
+#[test]
+fn node_process_runtime_artifact_uses_project_root_for_nestjs() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{
+            "main": "dist/src/main.js",
+            "dependencies": {
+                "@nestjs/core": "10.0.0",
+                "rxjs": "7.0.0"
+            }
+        }"#,
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("dist/src")).unwrap();
+    fs::write(
+        dir.path().join("dist/src/main.js"),
+        "require('@nestjs/core')",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("node_modules/@nestjs/core")).unwrap();
+    fs::write(
+        dir.path().join("node_modules/@nestjs/core/index.js"),
+        "module.exports = {}",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("src/main.ts"), "source only").unwrap();
+
+    let detection = crate::detect::detect_with_framework_override(dir.path(), None);
+    assert_eq!(detection.framework, "nestjs");
+    let manifest = build_manifest::generate_compute_manifest("src/main.js");
+
+    let artifact = resolve_runtime_artifact(
+        dir.path(),
+        dir.path(),
+        dir.path().join("dist"),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(artifact.root_dir, dir.path());
+    let compute_layer = artifact
+        .manifest
+        .layers
+        .iter()
+        .find(|layer| layer.target == build_manifest::LayerTarget::Compute)
+        .unwrap();
+    assert_eq!(compute_layer.directory, ".");
+    assert_eq!(compute_layer.entry.as_deref(), Some("dist/src/main.js"));
+
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let paths = scanned
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+    assert!(paths.contains(&"dist/src/main.js"));
+    assert!(paths.contains(&"node_modules/@nestjs/core/index.js"));
+    assert!(paths.contains(&"package.json"));
+    assert!(!paths.contains(&"src/main.ts"));
+
+    let deployable = prepare_deploy_files(&artifact.manifest, scanned, &detection, true).unwrap();
+    let plan = source_bundle_v1::build_source_bundle_plan(
+        &artifact.root_dir,
+        &artifact.manifest,
+        &deployable,
+    )
+    .unwrap();
+    assert_eq!(plan.logical_manifest.entrypoints, vec!["dist/src/main.js"]);
+    let nest_runtime = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "node_modules/@nestjs/core/index.js")
+        .unwrap();
+    assert_eq!(
+        nest_runtime.role,
+        source_bundle_v1::SourceLogicalManifestFileRole::Compute
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn node_process_runtime_artifact_prefers_workspace_root_for_hoisted_app_symlink() {
+    let workspace = tempdir().unwrap();
+    let app = workspace.path().join("apps/api");
+    fs::create_dir_all(app.join("dist/src")).unwrap();
+    fs::write(
+        app.join("package.json"),
+        r#"{
+            "dependencies": {
+                "@nestjs/core": "10.0.0"
+            }
+        }"#,
+    )
+    .unwrap();
+    fs::write(app.join("dist/src/main.js"), "require('@nestjs/core')").unwrap();
+
+    fs::create_dir_all(workspace.path().join("node_modules/@nestjs/core")).unwrap();
+    fs::write(
+        workspace.path().join("node_modules/@nestjs/core/index.js"),
+        "module.exports = {}",
+    )
+    .unwrap();
+    fs::create_dir_all(app.join("node_modules/@nestjs")).unwrap();
+    std::os::unix::fs::symlink(
+        "../../../../node_modules/@nestjs/core",
+        app.join("node_modules/@nestjs/core"),
+    )
+    .unwrap();
+
+    let detection = crate::detect::detect_with_framework_override(&app, None);
+    assert_eq!(detection.framework, "nestjs");
+    let manifest = build_manifest::generate_compute_manifest("src/main.js");
+
+    let artifact = resolve_runtime_artifact(
+        workspace.path(),
+        &app,
+        app.join("dist"),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(artifact.root_dir, workspace.path());
+    let compute_layer = artifact
+        .manifest
+        .layers
+        .iter()
+        .find(|layer| layer.target == build_manifest::LayerTarget::Compute)
+        .unwrap();
+    assert_eq!(compute_layer.directory, ".");
+    assert_eq!(
+        compute_layer.entry.as_deref(),
+        Some("apps/api/dist/src/main.js")
+    );
+
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let paths = scanned
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+    assert!(paths.contains(&"apps/api/node_modules/@nestjs/core"));
+    assert!(paths.contains(&"node_modules/@nestjs/core/index.js"));
+
+    let deployable = prepare_deploy_files(&artifact.manifest, scanned, &detection, true).unwrap();
+    let plan = source_bundle_v1::build_source_bundle_plan(
+        &artifact.root_dir,
+        &artifact.manifest,
+        &deployable,
+    )
+    .unwrap();
+    let symlink = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "apps/api/node_modules/@nestjs/core")
+        .unwrap();
+    assert_eq!(
+        symlink.entry_type,
+        Some(source_bundle_v1::SourceLogicalManifestEntryType::Symlink)
+    );
+    assert_eq!(
+        symlink.link_target.as_deref(),
+        Some("../../../../node_modules/@nestjs/core")
+    );
+}
+
+#[test]
+fn node_process_runtime_artifact_includes_workspace_hoisted_deps_with_app_node_modules() {
+    let workspace = tempdir().unwrap();
+    let app = workspace.path().join("apps/api");
+    fs::create_dir_all(app.join("dist/src")).unwrap();
+    fs::write(
+        app.join("package.json"),
+        r#"{
+            "dependencies": {
+                "@nestjs/core": "10.0.0",
+                "local-only": "1.0.0"
+            }
+        }"#,
+    )
+    .unwrap();
+    fs::write(
+        app.join("dist/src/main.js"),
+        "require('@nestjs/core'); require('local-only')",
+    )
+    .unwrap();
+
+    fs::create_dir_all(workspace.path().join("node_modules/@nestjs/core")).unwrap();
+    fs::write(
+        workspace.path().join("node_modules/@nestjs/core/index.js"),
+        "module.exports = {}",
+    )
+    .unwrap();
+    fs::create_dir_all(app.join("node_modules/local-only")).unwrap();
+    fs::write(
+        app.join("node_modules/local-only/index.js"),
+        "module.exports = {}",
+    )
+    .unwrap();
+
+    let detection = crate::detect::detect_with_framework_override(&app, None);
+    assert_eq!(detection.framework, "nestjs");
+    let manifest = build_manifest::generate_compute_manifest("src/main.js");
+
+    let artifact = resolve_runtime_artifact(
+        workspace.path(),
+        &app,
+        app.join("dist"),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(artifact.root_dir, workspace.path());
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let paths = scanned
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+    assert!(paths.contains(&"node_modules/@nestjs/core/index.js"));
+    assert!(paths.contains(&"apps/api/node_modules/local-only/index.js"));
+
+    let deployable = prepare_deploy_files(&artifact.manifest, scanned, &detection, true).unwrap();
+    let plan = source_bundle_v1::build_source_bundle_plan(
+        &artifact.root_dir,
+        &artifact.manifest,
+        &deployable,
+    )
+    .unwrap();
+    assert_eq!(
+        plan.logical_manifest.entrypoints,
+        vec!["apps/api/dist/src/main.js"]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn node_process_runtime_artifact_includes_workspace_package_symlink_targets() {
+    let workspace = tempdir().unwrap();
+    let app = workspace.path().join("apps/api");
+    let shared = workspace.path().join("packages/shared");
+    fs::create_dir_all(app.join("dist/src")).unwrap();
+    fs::create_dir_all(&shared).unwrap();
+    fs::write(
+        app.join("package.json"),
+        r#"{
+            "dependencies": {
+                "@nestjs/core": "10.0.0",
+                "@scope/shared": "workspace:*"
+            }
+        }"#,
+    )
+    .unwrap();
+    fs::write(
+        app.join("dist/src/main.js"),
+        "require('@nestjs/core'); require('@scope/shared')",
+    )
+    .unwrap();
+    fs::write(shared.join("package.json"), r#"{"main":"index.js"}"#).unwrap();
+    fs::write(shared.join("index.js"), "module.exports = {}").unwrap();
+
+    fs::create_dir_all(workspace.path().join("node_modules/@nestjs/core")).unwrap();
+    fs::write(
+        workspace.path().join("node_modules/@nestjs/core/index.js"),
+        "module.exports = {}",
+    )
+    .unwrap();
+    fs::create_dir_all(workspace.path().join("node_modules/@scope")).unwrap();
+    std::os::unix::fs::symlink(
+        "../../packages/shared",
+        workspace.path().join("node_modules/@scope/shared"),
+    )
+    .unwrap();
+
+    let detection = crate::detect::detect_with_framework_override(&app, None);
+    assert_eq!(detection.framework, "nestjs");
+    let manifest = build_manifest::generate_compute_manifest("src/main.js");
+
+    let artifact = resolve_runtime_artifact(
+        workspace.path(),
+        &app,
+        app.join("dist"),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(artifact.root_dir, workspace.path());
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let paths = scanned
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+    assert!(paths.contains(&"node_modules/@scope/shared"));
+    assert!(paths.contains(&"packages/shared/index.js"));
+
+    let deployable = prepare_deploy_files(&artifact.manifest, scanned, &detection, true).unwrap();
+    let plan = source_bundle_v1::build_source_bundle_plan(
+        &artifact.root_dir,
+        &artifact.manifest,
+        &deployable,
+    )
+    .unwrap();
+    let shared_runtime = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "packages/shared/index.js")
+        .unwrap();
+    assert_eq!(
+        shared_runtime.role,
+        source_bundle_v1::SourceLogicalManifestFileRole::Compute
+    );
+}
+
+#[test]
+fn node_process_runtime_artifact_falls_back_when_build_output_outside_project() {
+    let project = tempdir().unwrap();
+    let external_output = tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{
+            "dependencies": {
+                "@nestjs/core": "10.0.0"
+            }
+        }"#,
+    )
+    .unwrap();
+    fs::create_dir_all(project.path().join("node_modules/@nestjs/core")).unwrap();
+    fs::write(
+        project.path().join("node_modules/@nestjs/core/index.js"),
+        "module.exports = {}",
+    )
+    .unwrap();
+    fs::create_dir_all(external_output.path().join("src")).unwrap();
+    fs::write(
+        external_output.path().join("src/main.js"),
+        "require('@nestjs/core')",
+    )
+    .unwrap();
+
+    let detection = crate::detect::detect_with_framework_override(project.path(), None);
+    assert_eq!(detection.framework, "nestjs");
+    let manifest = build_manifest::generate_compute_manifest("src/main.js");
+
+    let artifact = resolve_runtime_artifact(
+        project.path(),
+        project.path(),
+        external_output.path().to_path_buf(),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+
+    // Build output lives outside the project, so relocation can't apply: the
+    // deploy degrades to scanning the build output as-is instead of erroring.
+    assert_eq!(artifact.root_dir, external_output.path());
+    assert!(matches!(artifact.scan, RuntimeArtifactScan::All));
+    let compute_layer = artifact
+        .manifest
+        .layers
+        .iter()
+        .find(|layer| layer.target == build_manifest::LayerTarget::Compute)
+        .unwrap();
+    assert_eq!(compute_layer.directory, ".");
+    assert_eq!(compute_layer.entry.as_deref(), Some("src/main.js"));
+}
+
 // ── framework preset source handling ─────────────────────────
 
 #[test]
@@ -1091,7 +1467,7 @@ fn stage_deployment_functions_path_targets_project_activation_family() {
 }
 
 #[test]
-fn prepare_upload_body_serializes_source_bundle_v1_contract() {
+fn prepare_upload_request_serializes_source_bundle_v1_contract() {
     let logical_manifest = source_bundle_v1::SourceLogicalManifest {
         schema_version: source_bundle_v1::SOURCE_BUNDLE_SCHEMA_VERSION.to_string(),
         capabilities: vec![],
@@ -1123,19 +1499,19 @@ fn prepare_upload_body_serializes_source_bundle_v1_contract() {
         artifact_size_bytes: "0".into(),
         max_static_file_size_bytes: "12".into(),
     };
-    let body = PrepareUploadBody {
-        deployment_id: Uuid::now_v7().to_string(),
-        workspace_id: Uuid::now_v7().to_string(),
-        project_id: Uuid::now_v7().to_string(),
-        deployment_attempt_id: Uuid::now_v7().to_string(),
-        operation_id: Uuid::now_v7().to_string(),
+    let body = CliPrepareUploadRequest {
+        deployment_id: Uuid::now_v7(),
+        workspace_id: Uuid::now_v7(),
+        project_id: Uuid::now_v7(),
+        deployment_attempt_id: Uuid::now_v7(),
+        operation_id: Uuid::now_v7(),
         artifact_format: "SOURCE_BUNDLE_V1".into(),
-        cli_protocol_version: source_bundle_v1::CLI_PROTOCOL_VERSION.into(),
-        logical_manifest_summary,
-        logical_manifest_sha256: logical_manifest_sha256.clone(),
+        cli_protocol_version: source_bundle_v1::CLI_PROTOCOL_VERSION.try_into().unwrap(),
+        logical_manifest_summary: to_contract_manifest_summary(&logical_manifest_summary).unwrap(),
+        logical_manifest_sha256: logical_manifest_sha256.as_str().try_into().unwrap(),
         source_format: source_bundle_v1::SOURCE_BUNDLE_FORMAT.into(),
-        source_sha256: "b".repeat(64),
-        source_size_bytes: "4096".into(),
+        source_sha256: "b".repeat(64).as_str().try_into().unwrap(),
+        source_size_bytes: "4096".try_into().unwrap(),
         multipart: None,
     };
 
@@ -1173,21 +1549,19 @@ fn prepare_upload_body_serializes_source_bundle_v1_contract() {
             "workspaceId",
         ]
     );
-    serde_json::from_value::<nrz_contract::CliPrepareUploadRequest>(value)
-        .expect("prepare-upload body must match generated CLI API contract");
 }
 
 #[test]
-fn upload_failed_body_serializes_source_bundle_v1_contract() {
-    let body = UploadFailedBody {
-        deployment_id: Uuid::now_v7().to_string(),
-        upload_session_id: Uuid::now_v7().to_string(),
-        deployment_attempt_id: Uuid::now_v7().to_string(),
-        operation_id: Uuid::now_v7().to_string(),
+fn upload_failed_request_serializes_source_bundle_v1_contract() {
+    let body = CliUploadFailedRequest {
+        deployment_id: Uuid::now_v7(),
+        upload_session_id: Uuid::now_v7(),
+        deployment_attempt_id: Uuid::now_v7(),
+        operation_id: Uuid::now_v7(),
         artifact_format: "SOURCE_BUNDLE_V1".into(),
-        source_artifact_id: "c".repeat(64),
-        error_code: SOURCE_UPLOAD_PUT_FAILED.into(),
-        error_log: "S3 rejected the upload".into(),
+        source_artifact_id: "c".repeat(64).as_str().try_into().unwrap(),
+        error_code: SOURCE_UPLOAD_PUT_FAILED.try_into().unwrap(),
+        error_log: "S3 rejected the upload".try_into().unwrap(),
     };
 
     let value = serde_json::to_value(&body).unwrap();
@@ -1196,52 +1570,49 @@ fn upload_failed_body_serializes_source_bundle_v1_contract() {
     assert_eq!(value["errorLog"], "S3 rejected the upload");
     assert!(value.get("sourceSha256").is_none());
     assert!(value.get("sourceSizeBytes").is_none());
-    serde_json::from_value::<nrz_contract::CliUploadFailedRequest>(value)
-        .expect("upload-failed body must match generated CLI API contract");
 }
 
 #[test]
-fn upload_complete_body_serializes_source_bundle_v1_contract() {
-    let body = UploadCompleteBody {
-        deployment_id: Uuid::now_v7().to_string(),
-        upload_session_id: Uuid::now_v7().to_string(),
-        deployment_attempt_id: Uuid::now_v7().to_string(),
-        operation_id: Uuid::now_v7().to_string(),
+fn upload_complete_request_serializes_source_bundle_v1_contract() {
+    let body = CliUploadCompleteRequest {
+        deployment_id: Uuid::now_v7(),
+        upload_session_id: Uuid::now_v7(),
+        deployment_attempt_id: Uuid::now_v7(),
+        operation_id: Uuid::now_v7(),
         artifact_format: "SOURCE_BUNDLE_V1".into(),
-        source_artifact_id: "c".repeat(64),
-        source_sha256: "d".repeat(64),
-        source_size_bytes: "4096".into(),
-        logical_manifest_sha256: "e".repeat(64),
+        source_artifact_id: "c".repeat(64).as_str().try_into().unwrap(),
+        source_sha256: "d".repeat(64).as_str().try_into().unwrap(),
+        source_size_bytes: "4096".try_into().unwrap(),
+        logical_manifest_sha256: "e".repeat(64).as_str().try_into().unwrap(),
     };
 
     let value = serde_json::to_value(&body).unwrap();
     assert_eq!(value["artifactFormat"], "SOURCE_BUNDLE_V1");
     assert_eq!(value["sourceSizeBytes"], "4096");
-    serde_json::from_value::<nrz_contract::CliUploadCompleteRequest>(value)
-        .expect("upload-complete body must match generated CLI API contract");
+    assert!(value["deploymentId"].is_string());
+    assert!(value["uploadSessionId"].is_string());
 }
 
 #[test]
-fn multipart_complete_body_serializes_source_bundle_v1_contract() {
-    let body = MultipartCompleteBody {
-        deployment_id: Uuid::now_v7().to_string(),
-        upload_session_id: Uuid::now_v7().to_string(),
-        deployment_attempt_id: Uuid::now_v7().to_string(),
-        operation_id: Uuid::now_v7().to_string(),
+fn multipart_complete_request_serializes_source_bundle_v1_contract() {
+    let body = CliMultipartCompleteRequest {
+        deployment_id: Uuid::now_v7(),
+        upload_session_id: Uuid::now_v7(),
+        deployment_attempt_id: Uuid::now_v7(),
+        operation_id: Uuid::now_v7(),
         artifact_format: "SOURCE_BUNDLE_V1".into(),
-        source_artifact_id: "c".repeat(64),
-        upload_id: "upload-id".into(),
-        parts: vec![CompletedMultipartPart {
-            part_number: 1,
-            e_tag: "\"etag\"".into(),
+        source_artifact_id: "c".repeat(64).as_str().try_into().unwrap(),
+        upload_id: "upload-id".try_into().unwrap(),
+        parts: vec![CliMultipartCompletePart {
+            part_number: std::num::NonZeroU64::new(1).unwrap(),
+            e_tag: "\"etag\"".try_into().unwrap(),
         }],
     };
 
     let value = serde_json::to_value(&body).unwrap();
     assert_eq!(value["artifactFormat"], "SOURCE_BUNDLE_V1");
     assert_eq!(value["parts"][0]["partNumber"], 1);
-    serde_json::from_value::<nrz_contract::CliMultipartCompleteRequest>(value)
-        .expect("multipart-complete body must match generated CLI API contract");
+    assert_eq!(value["parts"][0]["eTag"], "\"etag\"");
 }
 
 #[test]

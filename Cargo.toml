@@ -18,6 +18,7 @@ path = "src/main.rs"
 # Source of truth lives in ../deployment/crates; sync copies the snapshot here.
 nrz-contract = { path = "vendor/onreza-crates/nrz-contract" }
 nrz-fn-policy = { path = "vendor/onreza-crates/nrz-fn-policy" }
+nrz-source-bundle = { path = "vendor/onreza-crates/nrz-source-bundle" }
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
