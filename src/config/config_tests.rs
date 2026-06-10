@@ -131,6 +131,21 @@ fn effective_config_local_framework_wins_over_server() {
 }
 
 #[test]
+fn effective_config_applies_server_git_lfs_setting() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = ProjectConfig::default();
+    let mut effective =
+        EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+
+    effective.apply_server_settings(Some(&ProjectBuildSettings {
+        git_lfs_enabled: Some(true),
+        ..Default::default()
+    }));
+
+    assert!(effective.git_lfs_enabled());
+}
+
+#[test]
 fn merge_child_uses_child_runtime_settings_with_parent_identity_fallback() {
     let mut parent = ProjectConfig::default();
     parent.project.id = Some("proj_root".to_string());

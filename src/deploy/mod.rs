@@ -713,6 +713,11 @@ pub async fn run(
             ),
         ));
     }
+    ensure_no_unresolved_lfs_pointers(
+        &runtime_artifact.root_dir,
+        &files,
+        effective.git_lfs_enabled(),
+    )?;
     let functions = build_functions_payload(effective.config(), &project_dir, json)?;
     let has_compute_layer = manifest_has_compute_layer(&runtime_artifact.manifest);
 
@@ -4308,6 +4313,71 @@ fn prepare_deploy_files(
     Ok(deployable)
 }
 
+fn ensure_no_unresolved_lfs_pointers(
+    root_dir: &Path,
+    files: &[FileEntry],
+    git_lfs_enabled: bool,
+) -> anyhow::Result<()> {
+    for file in files {
+        if file.size == 0 || file.size > GIT_LFS_POINTER_MAX_BYTES {
+            continue;
+        }
+        let path = root_dir.join(&file.path);
+        if is_git_lfs_pointer_file(&path)? {
+            let (code, message) = if git_lfs_enabled {
+                (
+                    "GIT_LFS_UNRESOLVED",
+                    format!(
+                        "file \"{}\" is still an unresolved Git LFS pointer even though Git LFS is enabled for this project. \
+                         Run `git lfs pull` before local deploy, or check the builder Git LFS fetch step for server-side deploys.",
+                        file.path
+                    ),
+                )
+            } else {
+                (
+                    "GIT_LFS_REQUIRED",
+                    format!(
+                        "file \"{}\" is an unresolved Git LFS pointer, but Git LFS is disabled for this project. \
+                     Enable Git LFS in project settings or commit the real file bytes before deploying.",
+                        file.path
+                    ),
+                )
+            };
+            return Err(output::coded_error(code, message));
+        }
+    }
+
+    Ok(())
+}
+
+const GIT_LFS_POINTER_MAX_BYTES: u64 = 1024;
+
+fn is_git_lfs_pointer_file(path: &Path) -> anyhow::Result<bool> {
+    let mut file = std::fs::File::open(path).with_context(|| {
+        format!(
+            "failed to open {} while checking Git LFS pointer",
+            path.display()
+        )
+    })?;
+    let mut buf = Vec::new();
+    file.by_ref()
+        .take(GIT_LFS_POINTER_MAX_BYTES)
+        .read_to_end(&mut buf)
+        .with_context(|| {
+            format!(
+                "failed to read {} while checking Git LFS pointer",
+                path.display()
+            )
+        })?;
+    let content = String::from_utf8_lossy(&buf);
+
+    Ok(
+        content.starts_with("version https://git-lfs.github.com/spec/v1\n")
+            && content.contains("\noid sha256:")
+            && content.contains("\nsize "),
+    )
+}
+
 fn is_framework_build_only_path(
     manifest: &build_manifest::Manifest,
     detection: &crate::detect::types::DetectionResult,
@@ -4398,6 +4468,10 @@ fn scan_runtime_path_with_type(
     files: &mut Vec<FileEntry>,
     symlink_targets: &mut Vec<String>,
 ) -> anyhow::Result<()> {
+    if is_vcs_internal_path(base, path) {
+        return Ok(());
+    }
+
     if ft.is_symlink() {
         let rel = path
             .strip_prefix(base)
@@ -4431,6 +4505,18 @@ fn scan_runtime_path_with_type(
     }
 
     Ok(())
+}
+
+fn is_vcs_internal_path(base: &Path, path: &Path) -> bool {
+    let Ok(rel) = path.strip_prefix(base) else {
+        return false;
+    };
+    rel.components().any(|component| {
+        matches!(
+            component,
+            Component::Normal(name) if matches!(name.to_str(), Some(".git" | ".hg" | ".svn"))
+        )
+    })
 }
 
 fn read_deploy_symlink_target(

@@ -18,6 +18,12 @@ fn fe(path: &str, size: u64, content_hash: &str) -> FileEntry {
     }
 }
 
+fn git_lfs_pointer() -> &'static str {
+    "version https://git-lfs.github.com/spec/v1\n\
+     oid sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n\
+     size 104857600\n"
+}
+
 fn effective_config(
     project_dir: &Path,
     config: nrz::config::ProjectConfig,
@@ -108,6 +114,35 @@ fn scan_files_nested_directory() {
 }
 
 #[test]
+fn scan_files_skips_vcs_internal_dirs() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".git/objects/pack")).unwrap();
+    fs::create_dir_all(dir.path().join("packages/app/.git/objects/pack")).unwrap();
+    fs::create_dir_all(dir.path().join(".hg/store")).unwrap();
+    fs::create_dir_all(dir.path().join("vendor/pkg/.svn")).unwrap();
+    fs::create_dir_all(dir.path().join(".svn")).unwrap();
+    fs::write(dir.path().join(".git/objects/pack/pack.dat"), "git").unwrap();
+    fs::write(
+        dir.path().join("packages/app/.git/objects/pack/pack.dat"),
+        "nested-git",
+    )
+    .unwrap();
+    fs::write(dir.path().join(".hg/store/data"), "hg").unwrap();
+    fs::write(dir.path().join("vendor/pkg/.svn/entries"), "nested-svn").unwrap();
+    fs::write(dir.path().join(".svn/entries"), "svn").unwrap();
+    fs::write(dir.path().join(".gitignore"), "target/\n").unwrap();
+    fs::write(dir.path().join("index.html"), "hi").unwrap();
+
+    let files = scan_dir(dir.path()).unwrap();
+    let paths = files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(paths, vec![".gitignore", "index.html"]);
+}
+
+#[test]
 fn scan_files_records_correct_sizes() {
     let dir = tempdir().unwrap();
     let content = "hello world";
@@ -117,6 +152,40 @@ fn scan_files_records_correct_sizes() {
 
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].size, content.len() as u64);
+}
+
+#[test]
+fn lfs_pointer_requires_project_lfs_setting() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("public")).unwrap();
+    fs::write(dir.path().join("public/model.glb"), git_lfs_pointer()).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let err = ensure_no_unresolved_lfs_pointers(dir.path(), &files, false).unwrap_err();
+    let coded = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<crate::output::CodedError>())
+        .expect("LFS pointer error must carry a structured code");
+
+    assert_eq!(coded.code, "GIT_LFS_REQUIRED");
+    assert!(err.to_string().contains("public/model.glb"), "{err}");
+}
+
+#[test]
+fn lfs_pointer_still_fails_when_project_lfs_enabled() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("public")).unwrap();
+    fs::write(dir.path().join("public/model.glb"), git_lfs_pointer()).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let err = ensure_no_unresolved_lfs_pointers(dir.path(), &files, true).unwrap_err();
+    let coded = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<crate::output::CodedError>())
+        .expect("LFS pointer error must carry a structured code");
+
+    assert_eq!(coded.code, "GIT_LFS_UNRESOLVED");
+    assert!(err.to_string().contains("git lfs pull"), "{err}");
 }
 
 #[test]

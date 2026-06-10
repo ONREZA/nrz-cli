@@ -504,7 +504,7 @@ fn try_generate_ssr_manifest(
 
 /// Try framework-specific and configured output directory names.
 /// Returns `(path, has_manifest)` — first selects a precedence tier, then prefers dirs
-/// with `.onreza/` within that tier before plain existing dirs.
+/// with `.onreza/manifest.json` within that tier before plain existing dirs.
 ///
 /// Priority:
 /// - USER outputDirectory: exact directory only; never falls back.
@@ -567,7 +567,7 @@ fn resolve_output_directory(
         let candidate = project_dir.join(hint.path);
         if candidate.is_dir() {
             return Ok(ResolvedOutputDirectory {
-                has_manifest: candidate.join(".onreza").is_dir(),
+                has_manifest: has_manifest_file(&candidate),
                 path: candidate,
             });
         }
@@ -706,7 +706,7 @@ fn resolve_user_framework_container_artifact(
         .find_map(|candidate| {
             let path = project_dir.join(candidate);
             path.is_dir().then(|| ResolvedOutputDirectory {
-                has_manifest: path.join(".onreza").is_dir(),
+                has_manifest: has_manifest_file(&path),
                 path,
             })
         })
@@ -747,7 +747,7 @@ fn select_output_dir_from_tier(
     for candidate in &tier.candidates {
         debug_assert_eq!(candidate.role, tier.role);
         let path = project_dir.join(&candidate.path);
-        if path.is_dir() && path.join(".onreza").is_dir() {
+        if path.is_dir() && has_manifest_file(&path) {
             return Some(ResolvedOutputDirectory {
                 path,
                 has_manifest: true,
@@ -767,6 +767,10 @@ fn select_output_dir_from_tier(
     }
 
     None
+}
+
+fn has_manifest_file(path: &Path) -> bool {
+    path.join(".onreza/manifest.json").is_file()
 }
 
 fn is_framework_refinement_of_detected_hint(hint: &str, candidate: &str) -> bool {
@@ -1113,6 +1117,61 @@ fn prepare_nextjs_standalone_for_server(
     // and copy them over.
     copy_missing_prisma_packages(project_dir, bundle_root, json)?;
 
+    prune_broken_pnpm_hoist_symlinks(bundle_root, json)?;
+
+    Ok(())
+}
+
+fn prune_broken_pnpm_hoist_symlinks(bundle_root: &Path, json: bool) -> anyhow::Result<()> {
+    let pnpm_hoist_dir = bundle_root.join("node_modules/.pnpm/node_modules");
+    if !pnpm_hoist_dir.is_dir() {
+        return Ok(());
+    }
+
+    let mut removed = 0usize;
+    prune_broken_pnpm_hoist_symlinks_in_dir(&pnpm_hoist_dir, &mut removed)?;
+
+    for entry in std::fs::read_dir(&pnpm_hoist_dir)
+        .with_context(|| format!("failed to read {}", pnpm_hoist_dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let ft = entry.file_type()?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !ft.is_dir() || !name.starts_with('@') {
+            continue;
+        }
+        prune_broken_pnpm_hoist_symlinks_in_dir(&path, &mut removed)?;
+    }
+
+    if removed > 0 {
+        output::status(
+            json,
+            "~",
+            format!(
+                "Removed {removed} broken pnpm hoist symlink(s) from Next.js standalone output"
+            ),
+            output::Phase::Build,
+        );
+    }
+
+    Ok(())
+}
+
+fn prune_broken_pnpm_hoist_symlinks_in_dir(dir: &Path, removed: &mut usize) -> anyhow::Result<()> {
+    for entry in
+        std::fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if !entry.file_type()?.is_symlink() || std::fs::canonicalize(&path).is_ok() {
+            continue;
+        }
+        std::fs::remove_file(&path)
+            .with_context(|| format!("failed to remove broken pnpm symlink {}", path.display()))?;
+        *removed += 1;
+    }
     Ok(())
 }
 

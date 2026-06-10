@@ -440,6 +440,7 @@ impl BuildSettingSource {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectBuildSettings {
     pub framework_preset: Option<String>,
+    pub git_lfs_enabled: Option<bool>,
     pub install_command: Option<String>,
     pub install_command_source: Option<BuildSettingSource>,
     pub build_command: Option<String>,
@@ -565,6 +566,7 @@ pub struct EffectiveProjectConfig {
     install_command: Option<SourceAwareSetting>,
     build_command: Option<SourceAwareSetting>,
     output_directory: Option<SourceAwareSetting>,
+    git_lfs_enabled: Option<bool>,
 }
 
 impl EffectiveProjectConfig {
@@ -604,6 +606,7 @@ impl EffectiveProjectConfig {
             install_command,
             build_command,
             output_directory,
+            git_lfs_enabled: None,
         }
     }
 
@@ -674,6 +677,10 @@ impl EffectiveProjectConfig {
                 settings.output_directory_source,
             );
         }
+
+        if self.git_lfs_enabled.is_none() {
+            self.git_lfs_enabled = settings.git_lfs_enabled;
+        }
     }
 
     pub fn project_dir(&self) -> &Path {
@@ -718,6 +725,10 @@ impl EffectiveProjectConfig {
 
     pub fn project_id(&self) -> Option<&str> {
         self.project_id.as_deref()
+    }
+
+    pub fn git_lfs_enabled(&self) -> bool {
+        self.git_lfs_enabled.unwrap_or(false)
     }
 
     pub fn explain(&self) -> EffectiveConfigExplanation {

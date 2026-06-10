@@ -10,6 +10,11 @@ fn output_hint(path: &str, source: BuildSettingSource) -> OutputDirectoryHint<'_
     OutputDirectoryHint { path, source }
 }
 
+fn write_manifest(output_dir: &std::path::Path) {
+    std::fs::create_dir_all(output_dir.join(".onreza")).unwrap();
+    std::fs::write(output_dir.join(".onreza/manifest.json"), "{}").unwrap();
+}
+
 #[test]
 fn framework_dirs_checked_before_config_dirs() {
     let dir = tempfile::tempdir().unwrap();
@@ -24,14 +29,27 @@ fn framework_dirs_checked_before_config_dirs() {
 #[test]
 fn manifest_dir_wins_over_plain_dir() {
     let dir = tempfile::tempdir().unwrap();
-    // "dist" exists as plain dir, ".output" has .onreza/ inside
+    // "dist" exists as plain dir, ".output" has .onreza/manifest.json inside.
     std::fs::create_dir(dir.path().join("dist")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".output/.onreza")).unwrap();
+    write_manifest(&dir.path().join(".output"));
 
     let (found, has_manifest) =
         detect_output_dir(dir.path(), &["dist", ".output"], &[], None).unwrap();
     assert_eq!(found.file_name().unwrap(), ".output");
     assert!(has_manifest);
+}
+
+#[test]
+fn bare_onreza_dir_does_not_count_as_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("dist")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".output/.onreza")).unwrap();
+
+    let (found, has_manifest) =
+        detect_output_dir(dir.path(), &["dist", ".output"], &[], None).unwrap();
+
+    assert_eq!(found.file_name().unwrap(), "dist");
+    assert!(!has_manifest);
 }
 
 #[test]
@@ -73,9 +91,9 @@ fn empty_framework_dirs_falls_back_to_config() {
 #[test]
 fn framework_manifest_dir_wins_over_config_manifest_dir() {
     let dir = tempfile::tempdir().unwrap();
-    // Both have .onreza/, but framework dir should be checked first
-    std::fs::create_dir_all(dir.path().join("dist/.onreza")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".next/.onreza")).unwrap();
+    // Both have .onreza/manifest.json, but framework dir should be checked first.
+    write_manifest(&dir.path().join("dist"));
+    write_manifest(&dir.path().join(".next"));
 
     let (found, has_manifest) = detect_output_dir(dir.path(), &["dist"], &[".next"], None).unwrap();
     assert_eq!(found.file_name().unwrap(), ".next");
@@ -86,7 +104,7 @@ fn framework_manifest_dir_wins_over_config_manifest_dir() {
 fn framework_existing_dir_wins_over_config_manifest_dir() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join(".next")).unwrap();
-    std::fs::create_dir_all(dir.path().join("dist/.onreza")).unwrap();
+    write_manifest(&dir.path().join("dist"));
 
     let (found, has_manifest) = detect_output_dir(dir.path(), &["dist"], &[".next"], None).unwrap();
 
@@ -237,7 +255,7 @@ fn user_root_output_dir_does_not_refine_to_framework_output() {
 #[test]
 fn nextjs_user_root_output_dir_allows_standalone_refinement() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".next/standalone/.onreza")).unwrap();
+    write_manifest(&dir.path().join(".next/standalone"));
 
     let (found, has_manifest) = detect_output_dir_for_framework(
         dir.path(),
@@ -324,7 +342,7 @@ fn detected_output_dir_wins_over_framework_dir_without_being_strict() {
 fn detected_output_dir_wins_over_lower_priority_manifest_dir() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("custom-dist")).unwrap();
-    std::fs::create_dir_all(dir.path().join("dist/.onreza")).unwrap();
+    write_manifest(&dir.path().join("dist"));
 
     let (found, has_manifest) = detect_output_dir(
         dir.path(),
@@ -884,6 +902,57 @@ fn nextjs_standalone_does_not_overwrite_existing() {
     let server_content =
         std::fs::read_to_string(output.path().join(".next/static/chunks/main.js")).unwrap();
     assert_eq!(server_content, "// existing-server");
+}
+
+#[cfg(unix)]
+#[test]
+fn nextjs_standalone_prunes_broken_pnpm_hoist_symlinks() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+
+    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+    let pnpm_hoist = output.path().join("node_modules/.pnpm/node_modules");
+    std::fs::create_dir_all(&pnpm_hoist).unwrap();
+    std::fs::create_dir_all(
+        output
+            .path()
+            .join("node_modules/.pnpm/left-pad@1.3.0/node_modules/left-pad"),
+    )
+    .unwrap();
+    std::fs::create_dir_all(pnpm_hoist.join("@scope")).unwrap();
+    std::fs::create_dir_all(
+        output
+            .path()
+            .join("node_modules/.pnpm/@scope+valid@1.0.0/node_modules/@scope/valid"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        "../missing-semver@6.3.1/node_modules/semver",
+        pnpm_hoist.join("semver"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        "../left-pad@1.3.0/node_modules/left-pad",
+        pnpm_hoist.join("left-pad"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        "../../missing-scope@1.0.0/node_modules/@scope/pkg",
+        pnpm_hoist.join("@scope/pkg"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        "../../@scope+valid@1.0.0/node_modules/@scope/valid",
+        pnpm_hoist.join("@scope/valid"),
+    )
+    .unwrap();
+
+    prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
+
+    assert!(!pnpm_hoist.join("semver").exists());
+    assert!(pnpm_hoist.join("left-pad").exists());
+    assert!(!pnpm_hoist.join("@scope/pkg").exists());
+    assert!(pnpm_hoist.join("@scope/valid").exists());
 }
 
 #[tokio::test]
