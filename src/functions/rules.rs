@@ -77,20 +77,36 @@ fn read_edge_rules_value(project_dir: &Path) -> anyhow::Result<Option<(PathBuf, 
 fn validate_edge_rules_authoring_value(path: &Path, value: &Value) -> anyhow::Result<()> {
     reject_authored_positions(path, value)?;
 
-    if serde_json::from_value::<nrz_contract::EdgeRuleSetAuthoring>(value.clone()).is_ok() {
-        validate_edge_rules_refinements(path, value)?;
-        return Ok(());
-    }
+    let authoring_error =
+        match serde_json::from_value::<nrz_contract::EdgeRuleSetAuthoring>(value.clone()) {
+            Ok(_) => {
+                validate_edge_rules_refinements(path, value)?;
+                return Ok(());
+            }
+            Err(error) => error,
+        };
 
     let candidate = edge_rules_contract_validation_value(value);
-    serde_json::from_value::<nrz_contract::EdgeRuleSetAuthoring>(candidate).map_err(|error| {
-        anyhow::anyhow!(
-            "{} does not match the EdgeRuleSetAuthoring contract: {error}",
-            path.display()
-        )
-    })?;
+    serde_json::from_value::<nrz_contract::EdgeRuleSetAuthoring>(candidate).map_err(
+        |fallback_error| {
+            let error = if is_fallback_position_error(&fallback_error) {
+                authoring_error
+            } else {
+                fallback_error
+            };
+            anyhow::anyhow!(
+                "{} does not match the EdgeRuleSetAuthoring contract: {error}",
+                path.display()
+            )
+        },
+    )?;
     validate_edge_rules_refinements(path, value)?;
     Ok(())
+}
+
+fn is_fallback_position_error(error: &serde_json::Error) -> bool {
+    let message = error.to_string();
+    message.contains("unknown field `position`") || message.contains("unknown field \"position\"")
 }
 
 fn reject_authored_positions(path: &Path, value: &Value) -> anyhow::Result<()> {

@@ -186,6 +186,35 @@ action = { type = "unknown" }
 }
 
 #[test]
+fn load_edge_rules_reports_primary_contract_error_not_fallback_position() {
+    let tmp = tempfile::tempdir().unwrap();
+    write(
+        tmp.path(),
+        "onreza.rules.toml",
+        r#"
+schemaVersion = "EDGE_RULE_SET_V1"
+source = { origin = "build" }
+
+[[rules]]
+id = "regex-path"
+condition.path = { type = "regex", value = "^/capture/(?P<slug>[a-z]+)$" }
+action = { type = "set_headers", headers = { "x-edge" = "yes" } }
+"#,
+    );
+
+    let error = load_edge_rules(tmp.path()).unwrap_err();
+    let message = error.to_string();
+    assert!(
+        message.contains("unknown variant `regex`"),
+        "unexpected error: {error}"
+    );
+    assert!(
+        !message.contains("unknown field `position`"),
+        "fallback position error leaked: {error}"
+    );
+}
+
+#[test]
 fn load_edge_rules_rejects_authored_position() {
     let tmp = tempfile::tempdir().unwrap();
     write(
