@@ -6,8 +6,12 @@ pub struct EnvArgs {
     pub command: EnvCommand,
 
     /// Project ID (skip auto-detection)
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub project_id: Option<String>,
+
+    /// Target environment type (production, preview, development). Can be specified multiple times.
+    #[arg(long, global = true, env = "NRZ_ENV")]
+    pub env: Vec<String>,
 }
 
 #[derive(Subcommand)]

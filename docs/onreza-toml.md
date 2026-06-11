@@ -99,7 +99,6 @@ output_dirs = ["dist"]
 
 | Поле | Тип | По умолчанию | Описание |
 |------|-----|-------------|---------|
-| `skip_migrations` | boolean | `false` | Пропустить применение DB-миграций при деплое. Полезно если миграции применяются отдельным CI-шагом. |
 | `compute` | string | авто | Принудительно задать compute type вместо авто-определения. Значения: `"static"`, `"process"`. Используйте только если авто-определение даёт неверный результат. |
 | `entry` | string | авто | Точка входа для `PROCESS`-деплоев (Node.js/Bun сервер). Должна быть относительным путём без `..`. Пример: `"server.ts"`, `"dist/index.js"`. Если не задана, CLI определяет автоматически. |
 | `app` | string | нет | Монорепо: какой workspace/пакет деплоить. Матчится по имени пакета из `package.json`, имени директории, или относительному пути. Эквивалент CLI флага `--app` / `--filter`. |
@@ -142,7 +141,6 @@ CLI не патчит `package.json` в build output для PROCESS. Резол�
 **Пример:**
 ```toml
 [deploy]
-skip_migrations = false
 compute = "process"
 entry = "dist/server.js"
 app = "web"  # для монорепо — какой пакет деплоить
@@ -150,34 +148,20 @@ app = "web"  # для монорепо — какой пакет деплоит�
 
 ---
 
-## [migrations]
-
-Настройки DB миграций.
-
-| Поле | Тип | По умолчанию | Описание |
-|------|-----|-------------|---------|
-| `dir` | string | `"migrations"` | Папка с SQL-файлами миграций. CLI сканирует её по паттерну `NNNN_*.sql`. |
-
-**Пример:**
-```toml
-[migrations]
-dir = "db/migrations"
-```
-
----
-
 ## [db]
 
-Настройки команд работы с базой данных.
+Настройки managed PostgreSQL команд и локального `nrz dev` DB injection.
 
 | Поле | Тип | По умолчанию | Описание |
 |------|-----|-------------|---------|
-| `default_env` | string | нет | Environment по умолчанию для remote DB команд (`nrz db shell --remote`, `nrz db push`). Значения: `"production"`, `"preview"`, `"development"`. Если не задан, CLI спрашивает интерактивно. |
+| `database` | string | авто | Managed database ID или name. Если не задано, CLI выбирает auto-inject DB или первую доступную DB проекта. |
+| `branch` | string | main | Branch для `nrz dev` DB injection. CLI DB-команды также принимают `--branch`, где это поддерживается. |
 
 **Пример:**
 ```toml
 [db]
-default_env = "development"
+database = "primary"
+branch = "dev"
 ```
 
 ---
@@ -257,15 +241,12 @@ debug = "node --inspect node_modules/.bin/next dev"
 command = "npm run build"
 
 [deploy]
-skip_migrations = false
 # compute = "process"  # только если авто-определение неверно
 # entry = "dist/server.js"
 
-[migrations]
-dir = "migrations"
-
 [db]
-default_env = "development"
+database = "primary"
+branch = "dev"
 
 [env]
 strict = true
@@ -299,7 +280,7 @@ SENTRY_DSN = { visibility = "sensitive", required = false }
 CLI flag > env var (NRZ_*) > onreza.toml > hardcoded default
 ```
 
-Например, `--env production` переопределяет `[db] default_env`, `NRZ_TOKEN` переопределяет любой сохранённый токен.
+Например, `--env production` у `nrz deploy` выбирает production deploy target, `NRZ_TOKEN` переопределяет любой сохранённый токен.
 
 ## Локальные файлы (.onreza/)
 
@@ -308,5 +289,5 @@ CLI flag > env var (NRZ_*) > onreza.toml > hardcoded default
 | Файл | Назначение |
 |------|-----------|
 | `.onreza/data/dev.db` | SQLite для локальной эмуляции |
-| `.onreza/data/kv.json` | Персистенция KV store |
+| `.onreza/data/kv.<env>.json` | Персистенция local KV store по environment namespace |
 | `.onreza/environment.json` | Личный выбор environment разработчика |

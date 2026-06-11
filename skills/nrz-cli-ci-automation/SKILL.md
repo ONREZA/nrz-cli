@@ -13,7 +13,7 @@ Produce deterministic CI steps for `nrz` with machine-readable output and no int
 - Pass auth/context explicitly via flags or env:
   - `NRZ_TOKEN`
   - `NRZ_WORKSPACE`
-  - `NRZ_ENV`
+- Use command-scoped `--env`/`NRZ_ENV` for `deploy`, `env`, or `kv`.
 - Pass `--project-id` when available to skip project selection prompts.
 
 ## Recommended CI sequence
@@ -41,5 +41,5 @@ nrz logs --project-id "$NRZ_PROJECT_ID" --limit 200 --json
 
 ## Guardrails
 - Do not use `nrz login` in CI.
-- Avoid interactive operations without `--force` (for example `nrz db reset --remote`).
+- Avoid interactive destructive operations without `--force`.
 - Keep `onreza.toml` as the source of truth for `build`, `deploy`, `env` declarations.

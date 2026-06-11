@@ -4,6 +4,10 @@ use clap::{Parser, Subcommand};
 pub struct KvArgs {
     #[command(subcommand)]
     pub command: KvCommand,
+
+    /// Local environment namespace
+    #[arg(long, global = true, env = "NRZ_ENV", default_value = "development")]
+    pub env: String,
 }
 
 #[derive(Subcommand)]

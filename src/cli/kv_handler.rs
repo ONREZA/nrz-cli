@@ -4,7 +4,9 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use nrz::emulator::kv::{KvFileEntry, is_expired, kv_file_path, load_kv_file, save_kv_file};
+use nrz::emulator::kv::{
+    KvFileEntry, is_expired, kv_file_path_for_env, load_kv_file, save_kv_file,
+};
 
 use super::kv::{KvArgs, KvCommand};
 use crate::output;
@@ -27,7 +29,7 @@ struct StatusOutput {
 
 pub async fn run(args: KvArgs, json: bool) -> anyhow::Result<()> {
     let project_dir = Path::new(".").canonicalize()?;
-    let path = kv_file_path(&project_dir);
+    let path = kv_file_path_for_env(&project_dir, &args.env);
 
     match args.command {
         KvCommand::Get { key } => {

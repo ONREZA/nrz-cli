@@ -207,8 +207,29 @@ pub struct KvFileEntry {
     pub metadata: Option<String>,
 }
 
-pub fn kv_file_path(project_dir: &Path) -> std::path::PathBuf {
-    data_dir(project_dir).join("kv.json")
+pub fn kv_file_path_for_env(project_dir: &Path, env: &str) -> std::path::PathBuf {
+    let env = sanitize_env_name(env);
+    data_dir(project_dir).join(format!("kv.{env}.json"))
+}
+
+fn sanitize_env_name(env: &str) -> String {
+    let sanitized: String = env
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "development".to_string()
+    } else {
+        sanitized
+    }
 }
 
 pub fn load_kv_file(path: &Path) -> KvFile {
@@ -216,7 +237,7 @@ pub fn load_kv_file(path: &Path) -> KvFile {
         Ok(content) => match serde_json::from_str(&content) {
             Ok(kv) => kv,
             Err(e) => {
-                tracing::warn!("corrupt kv.json at {}: {e}, starting fresh", path.display());
+                tracing::warn!("corrupt KV file at {}: {e}, starting fresh", path.display());
                 KvFile::default()
             }
         },

@@ -44,7 +44,6 @@ async fn main() {
     let json = !cli.human && (cli.json || !std::io::stdout().is_terminal());
     let token = cli.token.clone();
     let workspace = cli.workspace.clone();
-    let env = cli.env;
 
     let config_dir = config_dir_for_command(&cli.command);
     let config = match nrz::config::load(&config_dir) {
@@ -61,7 +60,6 @@ async fn main() {
         json,
         token.as_deref(),
         workspace.as_deref(),
-        &env,
         &config,
     )
     .await;
@@ -112,13 +110,12 @@ async fn run_command(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
-    env: &[String],
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     match command {
         Command::Dev(args) => dev::run(args, config).await,
         Command::Build(args) => build::run(args, json, config).await.map(|_| ()),
-        Command::Deploy(args) => deploy::run(args, json, token, workspace, env, config).await,
+        Command::Deploy(args) => deploy::run(args, json, token, workspace, config).await,
         Command::Db(args) => cli::db_handler::run(args, json, token, workspace, config).await,
         Command::Kv(args) => cli::kv_handler::run(args, json).await,
         Command::Login => auth::login(json, token).await,
@@ -132,9 +129,7 @@ async fn run_command(
         }
         Command::Deployments(args) => deployments::run(args, json, token, workspace, config).await,
         Command::Logs(args) => logs::run(args, json, token, workspace, config).await,
-        Command::Env(args) => {
-            cli::env_handler::run(args, json, token, workspace, env, config).await
-        }
+        Command::Env(args) => cli::env_handler::run(args, json, token, workspace, config).await,
         Command::Domains(args) => {
             cli::domains_handler::run(args, json, token, workspace, config).await
         }

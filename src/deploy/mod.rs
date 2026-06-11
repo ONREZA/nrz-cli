@@ -419,7 +419,6 @@ pub async fn run(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
-    env: &[String],
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let root_dir = Path::new(&args.dir)
@@ -872,7 +871,7 @@ pub async fn run(
 
     // Create deployment
     output::status(json, "~", "Creating deployment...", output::Phase::Deploy);
-    let production = resolve_deploy_production_override(args.prod, env)?;
+    let production = resolve_deploy_production_override(args.prod, &args.env)?;
     let body = CreateDeploymentBody {
         manifest: manifest_raw,
         files: files.clone(),

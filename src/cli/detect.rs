@@ -17,10 +17,10 @@ pub struct DetectArgs {
     pub save: bool,
 
     /// Read JSON manifest from stdin (remote detection)
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub stdin: bool,
 
     /// Output the list of files needed for remote detection
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub needed_files: bool,
 }

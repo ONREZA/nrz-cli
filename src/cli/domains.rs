@@ -6,7 +6,7 @@ pub struct DomainsArgs {
     pub command: DomainsCommand,
 
     /// Project ID (skip auto-detection)
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub project_id: Option<String>,
 }
 

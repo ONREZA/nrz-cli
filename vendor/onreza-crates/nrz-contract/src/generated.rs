@@ -10236,6 +10236,10 @@ pub mod onreza_functions_publish {
     ///      "description": "Compiled EDGE_RULE_SET_V1 edge rule set. See onreza-rules-v1.schema.json for the full structure.",
     ///      "type": "object"
     ///    },
+    ///    "edgeRulesForce": {
+    ///      "default": false,
+    ///      "type": "boolean"
+    ///    },
     ///    "functions": {
     ///      "default": [],
     ///      "type": "array",
@@ -10295,6 +10299,8 @@ pub mod onreza_functions_publish {
             skip_serializing_if = "::serde_json::Map::is_empty"
         )]
         pub edge_rules: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
+        #[serde(rename = "edgeRulesForce", default)]
+        pub edge_rules_force: bool,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
         pub functions: ::std::vec::Vec<OnrezaFunctionsPublishPayloadV1FunctionsItem>,
         pub origin: OnrezaFunctionsPublishPayloadV1Origin,

@@ -1,4 +1,4 @@
 interface:
   display_name: "NRZ Env DB KV"
-  short_description: "Manage env vars, DB migrations, and KV"
+  short_description: "Manage env vars, managed DB, and KV"
   default_prompt: "Use $nrz-cli-env-db-kv to complete this env/DB/KV operation safely."

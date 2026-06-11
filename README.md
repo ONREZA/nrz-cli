@@ -66,8 +66,8 @@ nrz deploy --prod
 | Project | `nrz init`, `nrz link`, `nrz projects list`, `nrz projects create --name <slug>` |
 | Build/Deploy | `nrz detect`, `nrz build`, `nrz deploy`, `nrz rollback` |
 | Runtime | `nrz deployments`, `nrz logs` |
-| Database | `nrz db shell`, `nrz db execute "<sql>"`, `nrz db migrate create <name>`, `nrz db migrate apply` |
-| KV | `nrz kv get <key>`, `nrz kv set <key> <value> --ttl 60`, `nrz kv list --prefix app_` |
+| Database | `nrz db list`, `nrz db query "SELECT 1"`, `nrz db schema`, `nrz db branches` |
+| KV | `nrz kv get <key> --env preview`, `nrz kv set <key> <value> --ttl 60 --env preview`, `nrz kv list --prefix app_` |
 | Environment | `nrz env list`, `nrz env pull`, `nrz env push .env.local --declared-only`, `nrz env validate` |
 | Domains | `nrz domains list`, `nrz domains add example.com`, `nrz domains verify <domain_id>` |
 | Account | `nrz whoami`, `nrz workspace list`, `nrz workspace switch <slug>`, `nrz upgrade` |
@@ -94,8 +94,8 @@ npx ctx7 skills install /onreza/nrz-cli nrz-cli-project-bootstrap
 ## Automation and JSON Mode
 
 The CLI is designed for both human and machine usage:
-- Global flags: `--json`, `--token`, `--workspace`, `--env`.
-- Env vars: `NRZ_JSON`, `NRZ_TOKEN`, `NRZ_WORKSPACE`, `NRZ_ENV`.
+- Global flags: `--json`, `--token`, `--workspace`.
+- Env vars: `NRZ_JSON`, `NRZ_TOKEN`, `NRZ_WORKSPACE`; `NRZ_ENV` is command-scoped for `deploy`, `env`, and `kv`.
 - In JSON mode, commands return structured output in `stdout`; errors are JSON with exit code `1`.
 
 Example:

@@ -135,14 +135,13 @@ pub async fn run(
     json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
-    env: &[String],
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     let tok = auth::resolve_token(token, workspace)?;
 
     let client = ApiClient::authenticated(&tok)?;
     let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
-    let targets = resolve_targets(env);
+    let targets = resolve_targets(&args.env);
 
     match args.command {
         EnvCommand::List => list(&client, &project_id, &targets, json).await,

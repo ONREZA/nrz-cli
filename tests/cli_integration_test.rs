@@ -76,6 +76,62 @@ fn help_returns_exit_0() {
 }
 
 #[test]
+fn root_help_does_not_expose_env_as_global_flag() {
+    let output = nrz().arg("--help").output().unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("--env"));
+}
+
+#[test]
+fn command_scoped_env_flags_are_visible_only_where_used() {
+    for args in [
+        ["deploy", "--help"].as_slice(),
+        ["env", "--help"].as_slice(),
+        ["kv", "--help"].as_slice(),
+    ] {
+        let output = nrz().args(args).output().unwrap();
+
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("--env"),
+            "expected --env in help for args {args:?}"
+        );
+    }
+}
+
+#[test]
+fn internal_flags_are_hidden_from_help() {
+    let deploy_help = nrz().args(["deploy", "--help"]).output().unwrap();
+    assert!(deploy_help.status.success());
+    let deploy_stdout = String::from_utf8_lossy(&deploy_help.stdout);
+    assert!(!deploy_stdout.contains("--resume-deployment"));
+
+    let detect_help = nrz().args(["detect", "--help"]).output().unwrap();
+    assert!(detect_help.status.success());
+    let detect_stdout = String::from_utf8_lossy(&detect_help.stdout);
+    assert!(!detect_stdout.contains("--stdin"));
+    assert!(!detect_stdout.contains("--needed-files"));
+}
+
+#[test]
+fn project_id_works_after_nested_env_and_domains_subcommands() {
+    let env_help = nrz()
+        .args(["env", "validate", "--project-id", "proj_123", "--help"])
+        .output()
+        .unwrap();
+    assert!(env_help.status.success());
+
+    let domains_help = nrz()
+        .args(["domains", "list", "--project-id", "proj_123", "--help"])
+        .output()
+        .unwrap();
+    assert!(domains_help.status.success());
+}
+
+#[test]
 fn kv_set_and_get_in_tempdir() {
     let temp = tempfile::tempdir().unwrap();
 
@@ -89,6 +145,31 @@ fn kv_set_and_get_in_tempdir() {
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["kv", "get", "mykey"]);
     cmd.assert().success().stdout(contains("myvalue"));
+}
+
+#[test]
+fn kv_env_namespaces_local_state() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["kv", "--env", "preview", "set", "shared", "preview"]);
+    cmd.assert().success();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["kv", "--env", "production", "set", "shared", "production"]);
+    cmd.assert().success();
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["kv", "--env", "preview", "get", "shared"]);
+    cmd.assert().success().stdout(contains("preview"));
+
+    let mut cmd = nrz();
+    cmd.current_dir(&temp)
+        .args(["kv", "--env", "production", "get", "shared"]);
+    cmd.assert().success().stdout(contains("production"));
 }
 
 #[test]

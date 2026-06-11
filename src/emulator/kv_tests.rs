@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use super::kv::{KvFile, KvFileEntry, KvStore, load_kv_file, save_kv_file};
+use super::kv::{KvFile, KvFileEntry, KvStore, kv_file_path_for_env, load_kv_file, save_kv_file};
 
 // --- KvStore in-memory tests ---
 
@@ -231,6 +231,26 @@ fn kvfile_save_load_roundtrip() {
     assert_eq!(loaded.entries["key2"].value, "val2");
     assert_eq!(loaded.entries["key2"].expires_at, Some(9999999999));
     assert_eq!(loaded.entries["key2"].metadata, Some("meta_data".into()));
+}
+
+#[test]
+fn kvfile_path_is_namespaced_by_env() {
+    let dir = tempfile::tempdir().unwrap();
+
+    assert_eq!(
+        kv_file_path_for_env(dir.path(), "preview"),
+        dir.path()
+            .join(".onreza")
+            .join("data")
+            .join("kv.preview.json")
+    );
+    assert_eq!(
+        kv_file_path_for_env(dir.path(), "Feature/One"),
+        dir.path()
+            .join(".onreza")
+            .join("data")
+            .join("kv.feature_one.json")
+    );
 }
 
 #[test]

@@ -39,12 +39,6 @@ nrz deploy --prod --project-id <project_id> --json --token "$NRZ_TOKEN" --worksp
 nrz env validate --project-id <project_id>
 nrz env push .env.local --declared-only --project-id <project_id>
 ```
-- Migration error:
-```bash
-nrz db migrate status --remote --project-id <project_id>
-nrz db migrate apply --remote --project-id <project_id>
-```
-
 ## Post-deploy checks
 ```bash
 nrz deployments --project-id <project_id> --limit 5

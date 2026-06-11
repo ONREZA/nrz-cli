@@ -59,10 +59,6 @@ pub struct Cli {
     /// Workspace slug to use
     #[arg(long, global = true, env = "NRZ_WORKSPACE")]
     pub workspace: Option<String>,
-
-    /// Environment type or ID (production, preview, development). Can be specified multiple times.
-    #[arg(long, global = true, env = "NRZ_ENV")]
-    pub env: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -242,6 +238,10 @@ pub struct DeployArgs {
     #[arg(long)]
     pub prod: bool,
 
+    /// Environment type (production or preview). Can be specified multiple times.
+    #[arg(long, env = "NRZ_ENV")]
+    pub env: Vec<String>,
+
     /// Project ID (skip interactive selection)
     #[arg(long)]
     pub project_id: Option<String>,
@@ -263,7 +263,7 @@ pub struct DeployArgs {
     pub skip_env_check: bool,
 
     /// Resume an existing deployment (builder mode: skip project resolution and polling)
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub resume_deployment: Option<String>,
 
     /// Override compute type: static, process
