@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.33.0] - 2026-06-11
+
+### ✨ Features
+
+- **cli:** add functions invoke and rules workflow ([d1c38e7](https://github.com/ONREZA/nrz-cli/commit/d1c38e74bcfea34169337b36ec6ef3861dcae770))
+- **cli:** simplify command scope and local db execution ([3200058](https://github.com/ONREZA/nrz-cli/commit/3200058225bd3d9eb82ea253ffda303d6ecc9f0a))
+- **deploy:** conform functions publish payload to server contract at the wire ([f8c541b](https://github.com/ONREZA/nrz-cli/commit/f8c541bfcb6611e62b9b040870d1b76991866c1a))
+- **deploy:** conform build manifest to server contract at the wire ([37b4c1c](https://github.com/ONREZA/nrz-cli/commit/37b4c1c18fe0c6d38e0d26cbf524a9aef95e9317))
+- **cli:** add route pipeline contract support ([999110a](https://github.com/ONREZA/nrz-cli/commit/999110ae0a915947a86fca4b01174e5e3123d5de))
+- **cli:** add ONREZA Functions ([f09d2ff](https://github.com/ONREZA/nrz-cli/commit/f09d2ff49a791d1a78a109041c75a7e68883a7ec))
+- **release:** move release flow to dagger ([80bc0fe](https://github.com/ONREZA/nrz-cli/commit/80bc0feaa47af43c6039501e7e4a5adee7f9b574))
+
+### 🔧 Changed
+
+- update schemas ([d58ce98](https://github.com/ONREZA/nrz-cli/commit/d58ce98b3b63f93d8f5340c2a21751170e39dfb8))
+- **deploy:** re-vendor trimmed manifest contract ([cbd7ffe](https://github.com/ONREZA/nrz-cli/commit/cbd7ffe5b995b3d1fe0d985c5accf62614e7bfc1))
+- **ci:** update github actions ([f9b1b0c](https://github.com/ONREZA/nrz-cli/commit/f9b1b0ce1ace96422cd4ba70c662fc40786c8845))
+
+### 🐛 Bug Fixes
+
+- **cli:** report primary edge rules errors ([9f333ad](https://github.com/ONREZA/nrz-cli/commit/9f333ad5595a41b53ce12b395a77ef3ea800c593))
+- **deploy:** harden source bundle artifact checks ([0d6ed7e](https://github.com/ONREZA/nrz-cli/commit/0d6ed7ec3ae93bf1bb793217baa19044581c165a))
+- **build:** route SSR public assets through static layer ([14c9eb1](https://github.com/ONREZA/nrz-cli/commit/14c9eb1e608d2b1efce7070dab7a2028d4423792))
+- **release:** publish draft releases by id ([fcc82ea](https://github.com/ONREZA/nrz-cli/commit/fcc82ea415cde4e016639db3eb9ee42f8540302e))
+- **release:** restrict channels and prepare vendored deps ([ac362a5](https://github.com/ONREZA/nrz-cli/commit/ac362a5096cd336ac1443b6a56c8b725ce68be44))
+- **ci:** install configured dagger version ([4d8eae7](https://github.com/ONREZA/nrz-cli/commit/4d8eae765100e8a8a75f140a38bf034811c8352b))
+
+### ♻️ Changed
+
+- **deploy:** single-source upload contract and bundle canonicalization ([58af0f4](https://github.com/ONREZA/nrz-cli/commit/58af0f4ca5b67ba23160074ff6a72caafa93e4d1))
+
 ## [0.33.0-beta.4] - 2026-06-10
 
 ### 🐛 Bug Fixes
