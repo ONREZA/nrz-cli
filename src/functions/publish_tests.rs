@@ -26,7 +26,7 @@ export default {};
     );
     let collected = collect(tmp.path()).unwrap();
 
-    let payload = build_payload("DEPLOYMENT", &collected, None);
+    let payload = build_payload("DEPLOYMENT", &collected, None, false);
     let value = serde_json::to_value(&payload).unwrap();
 
     assert_eq!(value["origin"], "DEPLOYMENT");
@@ -343,7 +343,7 @@ action = { type = "redirect", target = "/docs" }
     let collected = collect(tmp.path()).unwrap();
     let edge_rules = load_edge_rules(tmp.path()).unwrap();
 
-    let payload = build_payload("DEPLOYMENT", &collected, edge_rules);
+    let payload = build_payload("DEPLOYMENT", &collected, edge_rules, false);
     let value = serde_json::to_value(&payload).unwrap();
 
     assert!(value["functions"].as_array().unwrap().is_empty());

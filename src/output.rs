@@ -21,6 +21,7 @@ pub enum Phase {
     Link,
     Projects,
     Rollback,
+    Rules,
     Workspace,
 }
 
@@ -40,6 +41,7 @@ impl Phase {
             Phase::Link => "link",
             Phase::Projects => "projects",
             Phase::Rollback => "rollback",
+            Phase::Rules => "rules",
             Phase::Workspace => "workspace",
         }
     }

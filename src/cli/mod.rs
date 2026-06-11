@@ -10,14 +10,23 @@ pub mod env;
 pub mod env_handler;
 #[cfg(test)]
 mod env_handler_tests;
+pub mod environment;
+#[cfg(test)]
+mod environment_tests;
 pub mod functions;
 pub mod functions_handler;
+#[cfg(test)]
+mod functions_handler_tests;
 pub mod kv;
 pub mod kv_handler;
 pub mod projects;
 pub mod projects_handler;
 #[cfg(test)]
 mod projects_handler_tests;
+pub mod rules;
+pub mod rules_handler;
+#[cfg(test)]
+mod rules_handler_tests;
 pub mod workspace;
 pub mod workspace_handler;
 
@@ -29,6 +38,7 @@ pub use env::EnvArgs;
 pub use functions::FunctionsArgs;
 pub use kv::KvArgs;
 pub use projects::ProjectsArgs;
+pub use rules::RulesArgs;
 pub use workspace::WorkspaceArgs;
 
 use clap::{Parser, Subcommand};
@@ -125,6 +135,9 @@ pub enum Command {
 
     /// Manage ONREZA Functions (policy check, ...)
     Functions(FunctionsArgs),
+
+    /// Manage Edge Rules authored in onreza.rules.toml
+    Rules(RulesArgs),
 }
 
 #[derive(Parser)]
@@ -277,6 +290,10 @@ pub struct DeployArgs {
     /// Monorepo app/workspace to deploy (name, directory basename, or path)
     #[arg(long, alias = "filter")]
     pub app: Option<String>,
+
+    /// Replace UI-authored Edge Rules when onreza.rules.toml intentionally owns them
+    #[arg(long)]
+    pub force_rules: bool,
 }
 
 #[derive(Parser)]

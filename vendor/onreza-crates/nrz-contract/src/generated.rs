@@ -5841,7 +5841,7 @@ pub mod cli_api {
             }
         }
     }
-    ///Public wire contract for nrz-cli deploy upload endpoints. Generated from the Zod source of truth used by the API server and consumed by the Rust CLI contract crate.
+    ///Public wire contract for nrz-cli endpoints. Generated from the Zod source of truth used by the API server and consumed by the Rust CLI contract crate.
     ///
     /// <details><summary>JSON schema</summary>
     ///
@@ -5849,9 +5849,13 @@ pub mod cli_api {
     ///{
     ///  "$id": "https://docs.onreza.ru/schemas/cli-api-v1.schema.json",
     ///  "title": "ONREZA CLI API v1",
-    ///  "description": "Public wire contract for nrz-cli deploy upload endpoints. Generated from the Zod source of truth used by the API server and consumed by the Rust CLI contract crate.",
+    ///  "description": "Public wire contract for nrz-cli endpoints. Generated from the Zod source of truth used by the API server and consumed by the Rust CLI contract crate.",
     ///  "type": "object",
     ///  "required": [
+    ///    "edgeRulesStatusRequest",
+    ///    "edgeRulesStatusResponse",
+    ///    "functionTestInvokeRequest",
+    ///    "functionTestInvokeResponse",
     ///    "multipartCompleteRequest",
     ///    "multipartCompleteResponse",
     ///    "prepareUploadRequest",
@@ -5862,6 +5866,351 @@ pub mod cli_api {
     ///    "uploadFailedResponse"
     ///  ],
     ///  "properties": {
+    ///    "edgeRulesStatusRequest": {
+    ///      "type": "object",
+    ///      "properties": {
+    ///        "edgeRules": {
+    ///          "description": "Authoring EDGE_RULE_SET_V1 edge rule set from onreza.rules.toml. Validated and normalized by the API server.",
+    ///          "type": "object"
+    ///        },
+    ///        "localInvalid": {
+    ///          "type": "boolean",
+    ///          "const": true
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "edgeRulesStatusResponse": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "active",
+    ///        "environmentId",
+    ///        "local",
+    ///        "status"
+    ///      ],
+    ///      "properties": {
+    ///        "active": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "present"
+    ///          ],
+    ///          "properties": {
+    ///            "checksum": {
+    ///              "type": "string",
+    ///              "pattern": "^[0-9a-f]{64}$"
+    ///            },
+    ///            "id": {
+    ///              "type": "string",
+    ///              "format": "uuid",
+    ///              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    ///            },
+    ///            "present": {
+    ///              "type": "boolean"
+    ///            },
+    ///            "publishedAt": {
+    ///              "anyOf": [
+    ///                {
+    ///                  "type": "string",
+    ///                  "format": "date-time",
+    ///                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    ///                },
+    ///                {
+    ///                  "type": "null"
+    ///                }
+    ///              ]
+    ///            },
+    ///            "ruleCount": {
+    ///              "type": "integer",
+    ///              "maximum": 9007199254740991.0,
+    ///              "minimum": 0.0
+    ///            },
+    ///            "source": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "BUILD",
+    ///                "UI"
+    ///              ]
+    ///            },
+    ///            "version": {
+    ///              "type": "integer",
+    ///              "maximum": 9007199254740991.0,
+    ///              "minimum": 0.0
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        "environmentId": {
+    ///          "type": "string",
+    ///          "format": "uuid",
+    ///          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    ///        },
+    ///        "local": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "present"
+    ///          ],
+    ///          "properties": {
+    ///            "checksum": {
+    ///              "type": "string",
+    ///              "pattern": "^[0-9a-f]{64}$"
+    ///            },
+    ///            "invalid": {
+    ///              "type": "boolean"
+    ///            },
+    ///            "present": {
+    ///              "type": "boolean"
+    ///            },
+    ///            "ruleCount": {
+    ///              "type": "integer",
+    ///              "maximum": 9007199254740991.0,
+    ///              "minimum": 0.0
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        "status": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "in_sync",
+    ///            "diverged",
+    ///            "remote_only",
+    ///            "local_only",
+    ///            "local_invalid",
+    ///            "absent"
+    ///          ]
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "functionTestInvokeRequest": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "headers",
+    ///        "host",
+    ///        "method",
+    ///        "path"
+    ///      ],
+    ///      "properties": {
+    ///        "bodyBase64": {
+    ///          "type": "string"
+    ///        },
+    ///        "debug": {
+    ///          "description": "ONREZA Functions debug options. Validated by the API server.",
+    ///          "type": "object"
+    ///        },
+    ///        "event": {
+    ///          "oneOf": [
+    ///            {
+    ///              "type": "object",
+    ///              "required": [
+    ///                "event",
+    ///                "type"
+    ///              ],
+    ///              "properties": {
+    ///                "event": {},
+    ///                "type": {
+    ///                  "type": "string",
+    ///                  "const": "manual"
+    ///                }
+    ///              },
+    ///              "additionalProperties": false
+    ///            },
+    ///            {
+    ///              "type": "object",
+    ///              "required": [
+    ///                "event",
+    ///                "type"
+    ///              ],
+    ///              "properties": {
+    ///                "event": {},
+    ///                "type": {
+    ///                  "type": "string",
+    ///                  "const": "queue"
+    ///                }
+    ///              },
+    ///              "additionalProperties": false
+    ///            },
+    ///            {
+    ///              "type": "object",
+    ///              "required": [
+    ///                "event",
+    ///                "type"
+    ///              ],
+    ///              "properties": {
+    ///                "event": {},
+    ///                "type": {
+    ///                  "type": "string",
+    ///                  "const": "scheduled"
+    ///                }
+    ///              },
+    ///              "additionalProperties": false
+    ///            }
+    ///          ]
+    ///        },
+    ///        "headers": {
+    ///          "default": [],
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "array",
+    ///            "prefixItems": [
+    ///              {
+    ///                "maxLength": 128,
+    ///                "minLength": 1,
+    ///                "type": "string"
+    ///              },
+    ///              {
+    ///                "maxLength": 8192,
+    ///                "type": "string"
+    ///              }
+    ///            ]
+    ///          },
+    ///          "maxItems": 64
+    ///        },
+    ///        "host": {
+    ///          "default": "test-invoke.onreza.internal",
+    ///          "type": "string",
+    ///          "maxLength": 255,
+    ///          "minLength": 1
+    ///        },
+    ///        "method": {
+    ///          "default": "GET",
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "GET",
+    ///            "POST",
+    ///            "PUT",
+    ///            "DELETE",
+    ///            "PATCH",
+    ///            "HEAD",
+    ///            "OPTIONS"
+    ///          ]
+    ///        },
+    ///        "path": {
+    ///          "default": "/",
+    ///          "type": "string",
+    ///          "maxLength": 2048,
+    ///          "minLength": 1
+    ///        },
+    ///        "queryString": {
+    ///          "type": "string",
+    ///          "maxLength": 4096
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "functionTestInvokeResponse": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "debugTrace",
+    ///        "invocation",
+    ///        "revision"
+    ///      ],
+    ///      "properties": {
+    ///        "debugTrace": {},
+    ///        "invocation": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "invocationId",
+    ///            "ok"
+    ///          ],
+    ///          "properties": {
+    ///            "error": {},
+    ///            "invocationId": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            },
+    ///            "logs": {
+    ///              "type": "array",
+    ///              "items": {}
+    ///            },
+    ///            "ok": {
+    ///              "type": "boolean"
+    ///            },
+    ///            "response": {
+    ///              "type": "object",
+    ///              "properties": {
+    ///                "bodyBase64": {
+    ///                  "type": "string"
+    ///                },
+    ///                "bodyPreview": {
+    ///                  "type": "string"
+    ///                },
+    ///                "headers": {
+    ///                  "type": "array",
+    ///                  "items": {
+    ///                    "type": "array",
+    ///                    "prefixItems": [
+    ///                      {
+    ///                        "maxLength": 128,
+    ///                        "minLength": 1,
+    ///                        "type": "string"
+    ///                      },
+    ///                      {
+    ///                        "maxLength": 8192,
+    ///                        "type": "string"
+    ///                      }
+    ///                    ]
+    ///                  }
+    ///                },
+    ///                "status": {
+    ///                  "type": "integer",
+    ///                  "maximum": 599.0,
+    ///                  "minimum": 100.0
+    ///                }
+    ///              },
+    ///              "additionalProperties": {}
+    ///            },
+    ///            "timings": {
+    ///              "type": "object",
+    ///              "properties": {
+    ///                "coldWorkerStartMs": {
+    ///                  "type": "number",
+    ///                  "minimum": 0.0
+    ///                },
+    ///                "totalMs": {
+    ///                  "type": "number",
+    ///                  "minimum": 0.0
+    ///                },
+    ///                "waitUntilMs": {
+    ///                  "type": "number",
+    ///                  "minimum": 0.0
+    ///                },
+    ///                "workerMs": {
+    ///                  "type": "number",
+    ///                  "minimum": 0.0
+    ///                }
+    ///              },
+    ///              "additionalProperties": {}
+    ///            }
+    ///          },
+    ///          "additionalProperties": {}
+    ///        },
+    ///        "revision": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "functionId",
+    ///            "id",
+    ///            "sourceSnapshotId"
+    ///          ],
+    ///          "properties": {
+    ///            "functionId": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            },
+    ///            "id": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            },
+    ///            "sourceSnapshotId": {
+    ///              "type": "string",
+    ///              "minLength": 1
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
     ///    "multipartCompleteRequest": {
     ///      "type": "object",
     ///      "required": [
@@ -6629,6 +6978,14 @@ pub mod cli_api {
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaCliApiV1 {
+        #[serde(rename = "edgeRulesStatusRequest")]
+        pub edge_rules_status_request: OnrezaCliApiV1EdgeRulesStatusRequest,
+        #[serde(rename = "edgeRulesStatusResponse")]
+        pub edge_rules_status_response: OnrezaCliApiV1EdgeRulesStatusResponse,
+        #[serde(rename = "functionTestInvokeRequest")]
+        pub function_test_invoke_request: OnrezaCliApiV1FunctionTestInvokeRequest,
+        #[serde(rename = "functionTestInvokeResponse")]
+        pub function_test_invoke_response: OnrezaCliApiV1FunctionTestInvokeResponse,
         #[serde(rename = "multipartCompleteRequest")]
         pub multipart_complete_request: OnrezaCliApiV1MultipartCompleteRequest,
         #[serde(rename = "multipartCompleteResponse")]
@@ -6645,6 +7002,1879 @@ pub mod cli_api {
         pub upload_failed_request: OnrezaCliApiV1UploadFailedRequest,
         #[serde(rename = "uploadFailedResponse")]
         pub upload_failed_response: OnrezaCliApiV1UploadFailedResponse,
+    }
+    ///`OnrezaCliApiV1EdgeRulesStatusRequest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "properties": {
+    ///    "edgeRules": {
+    ///      "description": "Authoring EDGE_RULE_SET_V1 edge rule set from onreza.rules.toml. Validated and normalized by the API server.",
+    ///      "type": "object"
+    ///    },
+    ///    "localInvalid": {
+    ///      "type": "boolean",
+    ///      "const": true
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaCliApiV1EdgeRulesStatusRequest {
+        ///Authoring EDGE_RULE_SET_V1 edge rule set from onreza.rules.toml. Validated and normalized by the API server.
+        #[serde(
+            rename = "edgeRules",
+            default,
+            skip_serializing_if = "::serde_json::Map::is_empty"
+        )]
+        pub edge_rules: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
+        #[serde(
+            rename = "localInvalid",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub local_invalid: ::std::option::Option<bool>,
+    }
+    impl ::std::default::Default for OnrezaCliApiV1EdgeRulesStatusRequest {
+        fn default() -> Self {
+            Self {
+                edge_rules: Default::default(),
+                local_invalid: Default::default(),
+            }
+        }
+    }
+    ///`OnrezaCliApiV1EdgeRulesStatusResponse`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "active",
+    ///    "environmentId",
+    ///    "local",
+    ///    "status"
+    ///  ],
+    ///  "properties": {
+    ///    "active": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "present"
+    ///      ],
+    ///      "properties": {
+    ///        "checksum": {
+    ///          "type": "string",
+    ///          "pattern": "^[0-9a-f]{64}$"
+    ///        },
+    ///        "id": {
+    ///          "type": "string",
+    ///          "format": "uuid",
+    ///          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    ///        },
+    ///        "present": {
+    ///          "type": "boolean"
+    ///        },
+    ///        "publishedAt": {
+    ///          "anyOf": [
+    ///            {
+    ///              "type": "string",
+    ///              "format": "date-time",
+    ///              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    ///            },
+    ///            {
+    ///              "type": "null"
+    ///            }
+    ///          ]
+    ///        },
+    ///        "ruleCount": {
+    ///          "type": "integer",
+    ///          "maximum": 9007199254740991.0,
+    ///          "minimum": 0.0
+    ///        },
+    ///        "source": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "BUILD",
+    ///            "UI"
+    ///          ]
+    ///        },
+    ///        "version": {
+    ///          "type": "integer",
+    ///          "maximum": 9007199254740991.0,
+    ///          "minimum": 0.0
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "environmentId": {
+    ///      "type": "string",
+    ///      "format": "uuid",
+    ///      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    ///    },
+    ///    "local": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "present"
+    ///      ],
+    ///      "properties": {
+    ///        "checksum": {
+    ///          "type": "string",
+    ///          "pattern": "^[0-9a-f]{64}$"
+    ///        },
+    ///        "invalid": {
+    ///          "type": "boolean"
+    ///        },
+    ///        "present": {
+    ///          "type": "boolean"
+    ///        },
+    ///        "ruleCount": {
+    ///          "type": "integer",
+    ///          "maximum": 9007199254740991.0,
+    ///          "minimum": 0.0
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "status": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "in_sync",
+    ///        "diverged",
+    ///        "remote_only",
+    ///        "local_only",
+    ///        "local_invalid",
+    ///        "absent"
+    ///      ]
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaCliApiV1EdgeRulesStatusResponse {
+        pub active: OnrezaCliApiV1EdgeRulesStatusResponseActive,
+        #[serde(rename = "environmentId")]
+        pub environment_id: ::uuid::Uuid,
+        pub local: OnrezaCliApiV1EdgeRulesStatusResponseLocal,
+        pub status: OnrezaCliApiV1EdgeRulesStatusResponseStatus,
+    }
+    ///`OnrezaCliApiV1EdgeRulesStatusResponseActive`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "present"
+    ///  ],
+    ///  "properties": {
+    ///    "checksum": {
+    ///      "type": "string",
+    ///      "pattern": "^[0-9a-f]{64}$"
+    ///    },
+    ///    "id": {
+    ///      "type": "string",
+    ///      "format": "uuid",
+    ///      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    ///    },
+    ///    "present": {
+    ///      "type": "boolean"
+    ///    },
+    ///    "publishedAt": {
+    ///      "anyOf": [
+    ///        {
+    ///          "type": "string",
+    ///          "format": "date-time",
+    ///          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    ///        },
+    ///        {
+    ///          "type": "null"
+    ///        }
+    ///      ]
+    ///    },
+    ///    "ruleCount": {
+    ///      "type": "integer",
+    ///      "maximum": 9007199254740991.0,
+    ///      "minimum": 0.0
+    ///    },
+    ///    "source": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "BUILD",
+    ///        "UI"
+    ///      ]
+    ///    },
+    ///    "version": {
+    ///      "type": "integer",
+    ///      "maximum": 9007199254740991.0,
+    ///      "minimum": 0.0
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaCliApiV1EdgeRulesStatusResponseActive {
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub checksum: ::std::option::Option<OnrezaCliApiV1EdgeRulesStatusResponseActiveChecksum>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub id: ::std::option::Option<::uuid::Uuid>,
+        pub present: bool,
+        #[serde(
+            rename = "publishedAt",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub published_at: ::std::option::Option<::chrono::DateTime<::chrono::offset::Utc>>,
+        #[serde(
+            rename = "ruleCount",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub rule_count: ::std::option::Option<i64>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub source: ::std::option::Option<OnrezaCliApiV1EdgeRulesStatusResponseActiveSource>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub version: ::std::option::Option<i64>,
+    }
+    ///`OnrezaCliApiV1EdgeRulesStatusResponseActiveChecksum`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1EdgeRulesStatusResponseActiveChecksum(::std::string::String);
+    impl ::std::ops::Deref for OnrezaCliApiV1EdgeRulesStatusResponseActiveChecksum {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaCliApiV1EdgeRulesStatusResponseActiveChecksum>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaCliApiV1EdgeRulesStatusResponseActiveChecksum) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1EdgeRulesStatusResponseActiveChecksum {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| ::regress::Regex::new("^[0-9a-f]{64}$").unwrap());
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaCliApiV1EdgeRulesStatusResponseActiveChecksum {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1EdgeRulesStatusResponseActiveChecksum
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1EdgeRulesStatusResponseActiveChecksum
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for OnrezaCliApiV1EdgeRulesStatusResponseActiveChecksum {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaCliApiV1EdgeRulesStatusResponseActiveSource`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "BUILD",
+    ///    "UI"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaCliApiV1EdgeRulesStatusResponseActiveSource {
+        #[serde(rename = "BUILD")]
+        Build,
+        #[serde(rename = "UI")]
+        Ui,
+    }
+    impl ::std::fmt::Display for OnrezaCliApiV1EdgeRulesStatusResponseActiveSource {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Build => f.write_str("BUILD"),
+                Self::Ui => f.write_str("UI"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1EdgeRulesStatusResponseActiveSource {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "BUILD" => Ok(Self::Build),
+                "UI" => Ok(Self::Ui),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaCliApiV1EdgeRulesStatusResponseActiveSource {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1EdgeRulesStatusResponseActiveSource
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1EdgeRulesStatusResponseActiveSource
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`OnrezaCliApiV1EdgeRulesStatusResponseLocal`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "present"
+    ///  ],
+    ///  "properties": {
+    ///    "checksum": {
+    ///      "type": "string",
+    ///      "pattern": "^[0-9a-f]{64}$"
+    ///    },
+    ///    "invalid": {
+    ///      "type": "boolean"
+    ///    },
+    ///    "present": {
+    ///      "type": "boolean"
+    ///    },
+    ///    "ruleCount": {
+    ///      "type": "integer",
+    ///      "maximum": 9007199254740991.0,
+    ///      "minimum": 0.0
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaCliApiV1EdgeRulesStatusResponseLocal {
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub checksum: ::std::option::Option<OnrezaCliApiV1EdgeRulesStatusResponseLocalChecksum>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub invalid: ::std::option::Option<bool>,
+        pub present: bool,
+        #[serde(
+            rename = "ruleCount",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub rule_count: ::std::option::Option<i64>,
+    }
+    ///`OnrezaCliApiV1EdgeRulesStatusResponseLocalChecksum`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1EdgeRulesStatusResponseLocalChecksum(::std::string::String);
+    impl ::std::ops::Deref for OnrezaCliApiV1EdgeRulesStatusResponseLocalChecksum {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaCliApiV1EdgeRulesStatusResponseLocalChecksum>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaCliApiV1EdgeRulesStatusResponseLocalChecksum) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1EdgeRulesStatusResponseLocalChecksum {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| ::regress::Regex::new("^[0-9a-f]{64}$").unwrap());
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaCliApiV1EdgeRulesStatusResponseLocalChecksum {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1EdgeRulesStatusResponseLocalChecksum
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1EdgeRulesStatusResponseLocalChecksum
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for OnrezaCliApiV1EdgeRulesStatusResponseLocalChecksum {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaCliApiV1EdgeRulesStatusResponseStatus`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "in_sync",
+    ///    "diverged",
+    ///    "remote_only",
+    ///    "local_only",
+    ///    "local_invalid",
+    ///    "absent"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaCliApiV1EdgeRulesStatusResponseStatus {
+        #[serde(rename = "in_sync")]
+        InSync,
+        #[serde(rename = "diverged")]
+        Diverged,
+        #[serde(rename = "remote_only")]
+        RemoteOnly,
+        #[serde(rename = "local_only")]
+        LocalOnly,
+        #[serde(rename = "local_invalid")]
+        LocalInvalid,
+        #[serde(rename = "absent")]
+        Absent,
+    }
+    impl ::std::fmt::Display for OnrezaCliApiV1EdgeRulesStatusResponseStatus {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::InSync => f.write_str("in_sync"),
+                Self::Diverged => f.write_str("diverged"),
+                Self::RemoteOnly => f.write_str("remote_only"),
+                Self::LocalOnly => f.write_str("local_only"),
+                Self::LocalInvalid => f.write_str("local_invalid"),
+                Self::Absent => f.write_str("absent"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1EdgeRulesStatusResponseStatus {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "in_sync" => Ok(Self::InSync),
+                "diverged" => Ok(Self::Diverged),
+                "remote_only" => Ok(Self::RemoteOnly),
+                "local_only" => Ok(Self::LocalOnly),
+                "local_invalid" => Ok(Self::LocalInvalid),
+                "absent" => Ok(Self::Absent),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaCliApiV1EdgeRulesStatusResponseStatus {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1EdgeRulesStatusResponseStatus
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1EdgeRulesStatusResponseStatus
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeRequest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "headers",
+    ///    "host",
+    ///    "method",
+    ///    "path"
+    ///  ],
+    ///  "properties": {
+    ///    "bodyBase64": {
+    ///      "type": "string"
+    ///    },
+    ///    "debug": {
+    ///      "description": "ONREZA Functions debug options. Validated by the API server.",
+    ///      "type": "object"
+    ///    },
+    ///    "event": {
+    ///      "oneOf": [
+    ///        {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "event",
+    ///            "type"
+    ///          ],
+    ///          "properties": {
+    ///            "event": {},
+    ///            "type": {
+    ///              "type": "string",
+    ///              "const": "manual"
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "event",
+    ///            "type"
+    ///          ],
+    ///          "properties": {
+    ///            "event": {},
+    ///            "type": {
+    ///              "type": "string",
+    ///              "const": "queue"
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "event",
+    ///            "type"
+    ///          ],
+    ///          "properties": {
+    ///            "event": {},
+    ///            "type": {
+    ///              "type": "string",
+    ///              "const": "scheduled"
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        }
+    ///      ]
+    ///    },
+    ///    "headers": {
+    ///      "default": [],
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "array",
+    ///        "prefixItems": [
+    ///          {
+    ///            "maxLength": 128,
+    ///            "minLength": 1,
+    ///            "type": "string"
+    ///          },
+    ///          {
+    ///            "maxLength": 8192,
+    ///            "type": "string"
+    ///          }
+    ///        ]
+    ///      },
+    ///      "maxItems": 64
+    ///    },
+    ///    "host": {
+    ///      "default": "test-invoke.onreza.internal",
+    ///      "type": "string",
+    ///      "maxLength": 255,
+    ///      "minLength": 1
+    ///    },
+    ///    "method": {
+    ///      "default": "GET",
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "GET",
+    ///        "POST",
+    ///        "PUT",
+    ///        "DELETE",
+    ///        "PATCH",
+    ///        "HEAD",
+    ///        "OPTIONS"
+    ///      ]
+    ///    },
+    ///    "path": {
+    ///      "default": "/",
+    ///      "type": "string",
+    ///      "maxLength": 2048,
+    ///      "minLength": 1
+    ///    },
+    ///    "queryString": {
+    ///      "type": "string",
+    ///      "maxLength": 4096
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeRequest {
+        #[serde(
+            rename = "bodyBase64",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub body_base64: ::std::option::Option<::std::string::String>,
+        ///ONREZA Functions debug options. Validated by the API server.
+        #[serde(default, skip_serializing_if = "::serde_json::Map::is_empty")]
+        pub debug: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub event: ::std::option::Option<OnrezaCliApiV1FunctionTestInvokeRequestEvent>,
+        pub headers: ::std::vec::Vec<::std::vec::Vec<::serde_json::Value>>,
+        pub host: OnrezaCliApiV1FunctionTestInvokeRequestHost,
+        pub method: OnrezaCliApiV1FunctionTestInvokeRequestMethod,
+        pub path: OnrezaCliApiV1FunctionTestInvokeRequestPath,
+        #[serde(
+            rename = "queryString",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub query_string: ::std::option::Option<OnrezaCliApiV1FunctionTestInvokeRequestQueryString>,
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeRequestEvent`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "oneOf": [
+    ///    {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "event",
+    ///        "type"
+    ///      ],
+    ///      "properties": {
+    ///        "event": {},
+    ///        "type": {
+    ///          "type": "string",
+    ///          "const": "manual"
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "event",
+    ///        "type"
+    ///      ],
+    ///      "properties": {
+    ///        "event": {},
+    ///        "type": {
+    ///          "type": "string",
+    ///          "const": "queue"
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "event",
+    ///        "type"
+    ///      ],
+    ///      "properties": {
+    ///        "event": {},
+    ///        "type": {
+    ///          "type": "string",
+    ///          "const": "scheduled"
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    }
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(tag = "type", content = "event")]
+    pub enum OnrezaCliApiV1FunctionTestInvokeRequestEvent {
+        #[serde(rename = "manual")]
+        Manual(::serde_json::Value),
+        #[serde(rename = "queue")]
+        Queue(::serde_json::Value),
+        #[serde(rename = "scheduled")]
+        Scheduled(::serde_json::Value),
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeRequestHost`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "default": "test-invoke.onreza.internal",
+    ///  "type": "string",
+    ///  "maxLength": 255,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeRequestHost(::std::string::String);
+    impl ::std::ops::Deref for OnrezaCliApiV1FunctionTestInvokeRequestHost {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaCliApiV1FunctionTestInvokeRequestHost> for ::std::string::String {
+        fn from(value: OnrezaCliApiV1FunctionTestInvokeRequestHost) -> Self {
+            value.0
+        }
+    }
+    impl ::std::default::Default for OnrezaCliApiV1FunctionTestInvokeRequestHost {
+        fn default() -> Self {
+            OnrezaCliApiV1FunctionTestInvokeRequestHost("test-invoke.onreza.internal".to_string())
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1FunctionTestInvokeRequestHost {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 255usize {
+                return Err("longer than 255 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaCliApiV1FunctionTestInvokeRequestHost {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeRequestHost
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeRequestHost
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for OnrezaCliApiV1FunctionTestInvokeRequestHost {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeRequestMethod`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "default": "GET",
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "GET",
+    ///    "POST",
+    ///    "PUT",
+    ///    "DELETE",
+    ///    "PATCH",
+    ///    "HEAD",
+    ///    "OPTIONS"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaCliApiV1FunctionTestInvokeRequestMethod {
+        #[serde(rename = "GET")]
+        Get,
+        #[serde(rename = "POST")]
+        Post,
+        #[serde(rename = "PUT")]
+        Put,
+        #[serde(rename = "DELETE")]
+        Delete,
+        #[serde(rename = "PATCH")]
+        Patch,
+        #[serde(rename = "HEAD")]
+        Head,
+        #[serde(rename = "OPTIONS")]
+        Options,
+    }
+    impl ::std::fmt::Display for OnrezaCliApiV1FunctionTestInvokeRequestMethod {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Get => f.write_str("GET"),
+                Self::Post => f.write_str("POST"),
+                Self::Put => f.write_str("PUT"),
+                Self::Delete => f.write_str("DELETE"),
+                Self::Patch => f.write_str("PATCH"),
+                Self::Head => f.write_str("HEAD"),
+                Self::Options => f.write_str("OPTIONS"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1FunctionTestInvokeRequestMethod {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "GET" => Ok(Self::Get),
+                "POST" => Ok(Self::Post),
+                "PUT" => Ok(Self::Put),
+                "DELETE" => Ok(Self::Delete),
+                "PATCH" => Ok(Self::Patch),
+                "HEAD" => Ok(Self::Head),
+                "OPTIONS" => Ok(Self::Options),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaCliApiV1FunctionTestInvokeRequestMethod {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeRequestMethod
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeRequestMethod
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::default::Default for OnrezaCliApiV1FunctionTestInvokeRequestMethod {
+        fn default() -> Self {
+            OnrezaCliApiV1FunctionTestInvokeRequestMethod::Get
+        }
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeRequestPath`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "default": "/",
+    ///  "type": "string",
+    ///  "maxLength": 2048,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeRequestPath(::std::string::String);
+    impl ::std::ops::Deref for OnrezaCliApiV1FunctionTestInvokeRequestPath {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaCliApiV1FunctionTestInvokeRequestPath> for ::std::string::String {
+        fn from(value: OnrezaCliApiV1FunctionTestInvokeRequestPath) -> Self {
+            value.0
+        }
+    }
+    impl ::std::default::Default for OnrezaCliApiV1FunctionTestInvokeRequestPath {
+        fn default() -> Self {
+            OnrezaCliApiV1FunctionTestInvokeRequestPath("/".to_string())
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1FunctionTestInvokeRequestPath {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 2048usize {
+                return Err("longer than 2048 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaCliApiV1FunctionTestInvokeRequestPath {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeRequestPath
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeRequestPath
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for OnrezaCliApiV1FunctionTestInvokeRequestPath {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeRequestQueryString`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 4096
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeRequestQueryString(::std::string::String);
+    impl ::std::ops::Deref for OnrezaCliApiV1FunctionTestInvokeRequestQueryString {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaCliApiV1FunctionTestInvokeRequestQueryString>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaCliApiV1FunctionTestInvokeRequestQueryString) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1FunctionTestInvokeRequestQueryString {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 4096usize {
+                return Err("longer than 4096 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaCliApiV1FunctionTestInvokeRequestQueryString {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeRequestQueryString
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeRequestQueryString
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for OnrezaCliApiV1FunctionTestInvokeRequestQueryString {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeResponse`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "debugTrace",
+    ///    "invocation",
+    ///    "revision"
+    ///  ],
+    ///  "properties": {
+    ///    "debugTrace": {},
+    ///    "invocation": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "invocationId",
+    ///        "ok"
+    ///      ],
+    ///      "properties": {
+    ///        "error": {},
+    ///        "invocationId": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        },
+    ///        "logs": {
+    ///          "type": "array",
+    ///          "items": {}
+    ///        },
+    ///        "ok": {
+    ///          "type": "boolean"
+    ///        },
+    ///        "response": {
+    ///          "type": "object",
+    ///          "properties": {
+    ///            "bodyBase64": {
+    ///              "type": "string"
+    ///            },
+    ///            "bodyPreview": {
+    ///              "type": "string"
+    ///            },
+    ///            "headers": {
+    ///              "type": "array",
+    ///              "items": {
+    ///                "type": "array",
+    ///                "prefixItems": [
+    ///                  {
+    ///                    "maxLength": 128,
+    ///                    "minLength": 1,
+    ///                    "type": "string"
+    ///                  },
+    ///                  {
+    ///                    "maxLength": 8192,
+    ///                    "type": "string"
+    ///                  }
+    ///                ]
+    ///              }
+    ///            },
+    ///            "status": {
+    ///              "type": "integer",
+    ///              "maximum": 599.0,
+    ///              "minimum": 100.0
+    ///            }
+    ///          },
+    ///          "additionalProperties": {}
+    ///        },
+    ///        "timings": {
+    ///          "type": "object",
+    ///          "properties": {
+    ///            "coldWorkerStartMs": {
+    ///              "type": "number",
+    ///              "minimum": 0.0
+    ///            },
+    ///            "totalMs": {
+    ///              "type": "number",
+    ///              "minimum": 0.0
+    ///            },
+    ///            "waitUntilMs": {
+    ///              "type": "number",
+    ///              "minimum": 0.0
+    ///            },
+    ///            "workerMs": {
+    ///              "type": "number",
+    ///              "minimum": 0.0
+    ///            }
+    ///          },
+    ///          "additionalProperties": {}
+    ///        }
+    ///      },
+    ///      "additionalProperties": {}
+    ///    },
+    ///    "revision": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "functionId",
+    ///        "id",
+    ///        "sourceSnapshotId"
+    ///      ],
+    ///      "properties": {
+    ///        "functionId": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        },
+    ///        "id": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        },
+    ///        "sourceSnapshotId": {
+    ///          "type": "string",
+    ///          "minLength": 1
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeResponse {
+        #[serde(rename = "debugTrace")]
+        pub debug_trace: ::serde_json::Value,
+        pub invocation: OnrezaCliApiV1FunctionTestInvokeResponseInvocation,
+        pub revision: OnrezaCliApiV1FunctionTestInvokeResponseRevision,
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeResponseInvocation`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "invocationId",
+    ///    "ok"
+    ///  ],
+    ///  "properties": {
+    ///    "error": {},
+    ///    "invocationId": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    },
+    ///    "logs": {
+    ///      "type": "array",
+    ///      "items": {}
+    ///    },
+    ///    "ok": {
+    ///      "type": "boolean"
+    ///    },
+    ///    "response": {
+    ///      "type": "object",
+    ///      "properties": {
+    ///        "bodyBase64": {
+    ///          "type": "string"
+    ///        },
+    ///        "bodyPreview": {
+    ///          "type": "string"
+    ///        },
+    ///        "headers": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "array",
+    ///            "prefixItems": [
+    ///              {
+    ///                "maxLength": 128,
+    ///                "minLength": 1,
+    ///                "type": "string"
+    ///              },
+    ///              {
+    ///                "maxLength": 8192,
+    ///                "type": "string"
+    ///              }
+    ///            ]
+    ///          }
+    ///        },
+    ///        "status": {
+    ///          "type": "integer",
+    ///          "maximum": 599.0,
+    ///          "minimum": 100.0
+    ///        }
+    ///      },
+    ///      "additionalProperties": {}
+    ///    },
+    ///    "timings": {
+    ///      "type": "object",
+    ///      "properties": {
+    ///        "coldWorkerStartMs": {
+    ///          "type": "number",
+    ///          "minimum": 0.0
+    ///        },
+    ///        "totalMs": {
+    ///          "type": "number",
+    ///          "minimum": 0.0
+    ///        },
+    ///        "waitUntilMs": {
+    ///          "type": "number",
+    ///          "minimum": 0.0
+    ///        },
+    ///        "workerMs": {
+    ///          "type": "number",
+    ///          "minimum": 0.0
+    ///        }
+    ///      },
+    ///      "additionalProperties": {}
+    ///    }
+    ///  },
+    ///  "additionalProperties": {}
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeResponseInvocation {
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub error: ::std::option::Option<::serde_json::Value>,
+        #[serde(rename = "invocationId")]
+        pub invocation_id: OnrezaCliApiV1FunctionTestInvokeResponseInvocationInvocationId,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub logs: ::std::vec::Vec<::serde_json::Value>,
+        pub ok: bool,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub response:
+            ::std::option::Option<OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponse>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub timings:
+            ::std::option::Option<OnrezaCliApiV1FunctionTestInvokeResponseInvocationTimings>,
+        #[serde(flatten)]
+        pub extra: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeResponseInvocationInvocationId`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeResponseInvocationInvocationId(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref for OnrezaCliApiV1FunctionTestInvokeResponseInvocationInvocationId {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaCliApiV1FunctionTestInvokeResponseInvocationInvocationId>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaCliApiV1FunctionTestInvokeResponseInvocationInvocationId) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1FunctionTestInvokeResponseInvocationInvocationId {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationInvocationId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationInvocationId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationInvocationId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationInvocationId
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponse`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "properties": {
+    ///    "bodyBase64": {
+    ///      "type": "string"
+    ///    },
+    ///    "bodyPreview": {
+    ///      "type": "string"
+    ///    },
+    ///    "headers": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "array",
+    ///        "prefixItems": [
+    ///          {
+    ///            "maxLength": 128,
+    ///            "minLength": 1,
+    ///            "type": "string"
+    ///          },
+    ///          {
+    ///            "maxLength": 8192,
+    ///            "type": "string"
+    ///          }
+    ///        ]
+    ///      }
+    ///    },
+    ///    "status": {
+    ///      "type": "integer",
+    ///      "maximum": 599.0,
+    ///      "minimum": 100.0
+    ///    }
+    ///  },
+    ///  "additionalProperties": {}
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponse {
+        #[serde(
+            rename = "bodyBase64",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub body_base64: ::std::option::Option<::std::string::String>,
+        #[serde(
+            rename = "bodyPreview",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub body_preview: ::std::option::Option<::std::string::String>,
+        #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+        pub headers: ::std::vec::Vec<::std::vec::Vec<::serde_json::Value>>,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub status: ::std::option::Option<i64>,
+        #[serde(flatten)]
+        pub extra: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeResponseInvocationTimings`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "properties": {
+    ///    "coldWorkerStartMs": {
+    ///      "type": "number",
+    ///      "minimum": 0.0
+    ///    },
+    ///    "totalMs": {
+    ///      "type": "number",
+    ///      "minimum": 0.0
+    ///    },
+    ///    "waitUntilMs": {
+    ///      "type": "number",
+    ///      "minimum": 0.0
+    ///    },
+    ///    "workerMs": {
+    ///      "type": "number",
+    ///      "minimum": 0.0
+    ///    }
+    ///  },
+    ///  "additionalProperties": {}
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeResponseInvocationTimings {
+        #[serde(
+            rename = "coldWorkerStartMs",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub cold_worker_start_ms: ::std::option::Option<f64>,
+        #[serde(
+            rename = "totalMs",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub total_ms: ::std::option::Option<f64>,
+        #[serde(
+            rename = "waitUntilMs",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub wait_until_ms: ::std::option::Option<f64>,
+        #[serde(
+            rename = "workerMs",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub worker_ms: ::std::option::Option<f64>,
+        #[serde(flatten)]
+        pub extra: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeResponseRevision`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "functionId",
+    ///    "id",
+    ///    "sourceSnapshotId"
+    ///  ],
+    ///  "properties": {
+    ///    "functionId": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    },
+    ///    "id": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    },
+    ///    "sourceSnapshotId": {
+    ///      "type": "string",
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeResponseRevision {
+        #[serde(rename = "functionId")]
+        pub function_id: OnrezaCliApiV1FunctionTestInvokeResponseRevisionFunctionId,
+        pub id: OnrezaCliApiV1FunctionTestInvokeResponseRevisionId,
+        #[serde(rename = "sourceSnapshotId")]
+        pub source_snapshot_id: OnrezaCliApiV1FunctionTestInvokeResponseRevisionSourceSnapshotId,
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeResponseRevisionFunctionId`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeResponseRevisionFunctionId(::std::string::String);
+    impl ::std::ops::Deref for OnrezaCliApiV1FunctionTestInvokeResponseRevisionFunctionId {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaCliApiV1FunctionTestInvokeResponseRevisionFunctionId>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaCliApiV1FunctionTestInvokeResponseRevisionFunctionId) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1FunctionTestInvokeResponseRevisionFunctionId {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaCliApiV1FunctionTestInvokeResponseRevisionFunctionId {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeResponseRevisionFunctionId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeResponseRevisionFunctionId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for OnrezaCliApiV1FunctionTestInvokeResponseRevisionFunctionId {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeResponseRevisionId`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeResponseRevisionId(::std::string::String);
+    impl ::std::ops::Deref for OnrezaCliApiV1FunctionTestInvokeResponseRevisionId {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaCliApiV1FunctionTestInvokeResponseRevisionId>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaCliApiV1FunctionTestInvokeResponseRevisionId) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1FunctionTestInvokeResponseRevisionId {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaCliApiV1FunctionTestInvokeResponseRevisionId {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeResponseRevisionId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeResponseRevisionId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for OnrezaCliApiV1FunctionTestInvokeResponseRevisionId {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeResponseRevisionSourceSnapshotId`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeResponseRevisionSourceSnapshotId(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref for OnrezaCliApiV1FunctionTestInvokeResponseRevisionSourceSnapshotId {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaCliApiV1FunctionTestInvokeResponseRevisionSourceSnapshotId>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaCliApiV1FunctionTestInvokeResponseRevisionSourceSnapshotId) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1FunctionTestInvokeResponseRevisionSourceSnapshotId {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaCliApiV1FunctionTestInvokeResponseRevisionSourceSnapshotId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeResponseRevisionSourceSnapshotId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeResponseRevisionSourceSnapshotId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaCliApiV1FunctionTestInvokeResponseRevisionSourceSnapshotId
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
     }
     ///`OnrezaCliApiV1MultipartCompleteRequest`
     ///

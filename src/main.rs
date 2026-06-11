@@ -82,6 +82,13 @@ fn config_dir_for_command(command: &Command) -> PathBuf {
         Command::Detect(args) => Path::new(&args.dir).to_path_buf(),
         Command::Functions(args) => match &args.command {
             cli::functions::FunctionsCommand::Check(args) => Path::new(&args.dir).to_path_buf(),
+            cli::functions::FunctionsCommand::Invoke(args) => Path::new(&args.dir).to_path_buf(),
+        },
+        Command::Rules(args) => match &args.command {
+            cli::rules::RulesCommand::Check(args) => Path::new(&args.dir).to_path_buf(),
+            cli::rules::RulesCommand::Pull(args) => Path::new(&args.dir).to_path_buf(),
+            cli::rules::RulesCommand::Publish(args) => Path::new(&args.dir).to_path_buf(),
+            cli::rules::RulesCommand::Status(args) => Path::new(&args.dir).to_path_buf(),
         },
         _ => std::env::current_dir().unwrap_or_default(),
     }
@@ -137,6 +144,9 @@ async fn run_command(
         Command::Workspace(args) => cli::workspace_handler::run(args, json).await,
         Command::Init(args) => init::run(args, json, token, workspace, config).await,
         Command::Detect(args) => Ok(cli::detect_handler::run(args, json)?),
-        Command::Functions(args) => cli::functions_handler::run(args, json).await,
+        Command::Functions(args) => {
+            cli::functions_handler::run(args, json, token, workspace, config).await
+        }
+        Command::Rules(args) => cli::rules_handler::run(args, json, token, workspace, config).await,
     }
 }

@@ -12,6 +12,8 @@ pub struct FunctionPublishPayload {
     pub functions: Vec<FunctionPublishSpec>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edge_rules: Option<Value>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub edge_rules_force: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -33,6 +35,7 @@ pub fn build_payload(
     origin: &'static str,
     collected: &CollectedFunctions,
     edge_rules: Option<Value>,
+    edge_rules_force: bool,
 ) -> FunctionPublishPayload {
     let functions = collected
         .functions
@@ -56,5 +59,10 @@ pub fn build_payload(
         origin,
         functions,
         edge_rules,
+        edge_rules_force,
     }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }

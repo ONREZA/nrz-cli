@@ -363,6 +363,7 @@ fn build_functions_payload(
     _config: &ProjectConfig,
     project_dir: &Path,
     json: bool,
+    edge_rules_force: bool,
 ) -> anyhow::Result<Option<crate::functions::FunctionPublishPayload>> {
     let collected = crate::functions::collect(project_dir)?;
     let edge_rules = crate::functions::load_edge_rules(project_dir)?;
@@ -411,6 +412,7 @@ fn build_functions_payload(
         "DEPLOYMENT",
         &collected,
         edge_rules,
+        edge_rules_force,
     )))
 }
 
@@ -717,7 +719,8 @@ pub async fn run(
         &files,
         effective.git_lfs_enabled(),
     )?;
-    let functions = build_functions_payload(effective.config(), &project_dir, json)?;
+    let functions =
+        build_functions_payload(effective.config(), &project_dir, json, args.force_rules)?;
     let has_compute_layer = manifest_has_compute_layer(&runtime_artifact.manifest);
 
     // Resolve health check path (PROCESS only)
@@ -2376,6 +2379,13 @@ fn map_function_stage_error(error: anyhow::Error, json: bool) -> anyhow::Error {
     let Some(api_error) = error.downcast_ref::<crate::api::StructuredApiError>() else {
         return error.context("failed to stage ONREZA Functions for deployment");
     };
+    if let Some(mapped) = map_edge_rules_diverged_error(
+        api_error,
+        json,
+        "failed to stage ONREZA Functions for deployment",
+    ) {
+        return mapped;
+    }
     if api_error.code != "FUNCTION_PUBLISH_FAILED" {
         return error.context("failed to stage ONREZA Functions for deployment");
     }
@@ -2397,6 +2407,11 @@ fn map_create_deployment_error(error: anyhow::Error, json: bool) -> anyhow::Erro
     let Some(api_error) = error.downcast_ref::<crate::api::StructuredApiError>() else {
         return error.context("failed to create deployment");
     };
+    if let Some(mapped) =
+        map_edge_rules_diverged_error(api_error, json, "failed to create deployment")
+    {
+        return mapped;
+    }
     if api_error.code != "FUNCTION_PUBLISH_FAILED" {
         return error.context("failed to create deployment");
     }
@@ -2412,6 +2427,55 @@ fn map_create_deployment_error(error: anyhow::Error, json: bool) -> anyhow::Erro
         return output::already_reported_error();
     }
     anyhow::anyhow!(message).context("failed to create deployment")
+}
+
+fn map_edge_rules_diverged_error(
+    error: &crate::api::StructuredApiError,
+    json: bool,
+    context: &str,
+) -> Option<anyhow::Error> {
+    if !is_edge_rules_diverged_error(error) {
+        return None;
+    }
+    let message = format_edge_rules_diverged_failure(error);
+    if json {
+        output::log_error_structured(
+            "deploy",
+            &message,
+            "EDGE_RULES_DIVERGED",
+            error.details.as_ref(),
+        );
+        return Some(output::already_reported_error());
+    }
+    Some(output::coded_error("EDGE_RULES_DIVERGED", message).context(context.to_string()))
+}
+
+fn is_edge_rules_diverged_error(error: &crate::api::StructuredApiError) -> bool {
+    if error.code == "EDGE_RULES_DIVERGED" {
+        return true;
+    }
+    error.code == "FUNCTION_PUBLISH_FAILED"
+        && error
+            .details
+            .as_ref()
+            .and_then(|details| details.get("errorCode"))
+            .and_then(serde_json::Value::as_str)
+            == Some("EDGE_RULES_DIVERGED")
+}
+
+fn format_edge_rules_diverged_failure(error: &crate::api::StructuredApiError) -> String {
+    let message = error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("message"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(error.message.as_str());
+    if message.contains("nrz rules pull") && message.contains("--force-rules") {
+        return format!("Edge Rules diverged: {message}");
+    }
+    format!(
+        "Edge Rules diverged: {message}. Run `nrz rules pull` to import dashboard-authored rules, or redeploy with `--force-rules` to replace them."
+    )
 }
 
 fn format_function_publish_failure(error: &crate::api::StructuredApiError) -> String {

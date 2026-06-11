@@ -1491,6 +1491,7 @@ fn create_deployment_body_serializes_functions_payload() {
                 origin: "DEPLOYMENT",
                 functions: vec![],
                 edge_rules: None,
+                edge_rules_force: false,
             },
         ))
         .unwrap(),
@@ -1504,6 +1505,30 @@ fn create_deployment_body_serializes_functions_payload() {
             .and_then(|origin| origin.as_str()),
         Some("DEPLOYMENT")
     );
+}
+
+#[test]
+fn functions_payload_serializes_edge_rules_force() {
+    let value =
+        conform_functions_to_wire_contract(Some(crate::functions::FunctionPublishPayload {
+            origin: "DEPLOYMENT",
+            functions: vec![],
+            edge_rules: Some(serde_json::json!({
+                "schemaVersion": "EDGE_RULE_SET_V1",
+                "source": { "origin": "build" },
+                "rules": [
+                    {
+                        "id": "allow-all",
+                        "action": { "type": "allow" }
+                    }
+                ]
+            })),
+            edge_rules_force: true,
+        }))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(value["edgeRulesForce"], true);
 }
 
 #[test]
@@ -3167,6 +3192,31 @@ fn function_stage_error_preserves_publish_failure_details() {
 }
 
 #[test]
+fn create_deployment_error_maps_edge_rules_divergence() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: StatusCode::BAD_REQUEST,
+        code: "EDGE_RULES_DIVERGED".to_string(),
+        message:
+            "environment has UI-authored edge rules; run `nrz rules pull` to import them, or redeploy with --force-rules"
+                .to_string(),
+        retry_after_seconds: None,
+        details: None,
+    }
+    .into();
+
+    let mapped = map_create_deployment_error(error, false);
+    let rendered = format!("{mapped:#}");
+    let coded = mapped
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<crate::output::CodedError>())
+        .expect("mapped error must keep EDGE_RULES_DIVERGED code");
+
+    assert_eq!(coded.code, "EDGE_RULES_DIVERGED");
+    assert!(rendered.contains("nrz rules pull"));
+    assert!(rendered.contains("--force-rules"));
+}
+
+#[test]
 fn boundary_wrap_nuxt_missing_server_is_missing_process_entry() {
     // validate_process_output is an internal helper; the boundary wrap that
     // tags its failures with MISSING_PROCESS_ENTRY lives at the call site in
@@ -3376,6 +3426,7 @@ fn wire_functions_contract_validates_origin_against_server_enum() {
         origin: "DEPLOYMENT",
         functions: vec![],
         edge_rules: None,
+        edge_rules_force: false,
     };
     assert!(
         conform_functions_to_wire_contract(Some(ok))
@@ -3389,6 +3440,7 @@ fn wire_functions_contract_validates_origin_against_server_enum() {
         origin: "BOGUS",
         functions: vec![],
         edge_rules: None,
+        edge_rules_force: false,
     };
     assert!(
         conform_functions_to_wire_contract(Some(bad)).is_err(),

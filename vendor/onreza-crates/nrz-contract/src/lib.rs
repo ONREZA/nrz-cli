@@ -9,6 +9,10 @@ pub use generated::*;
 pub use policy_config::ONREZA_FUNCTIONS_POLICY_CONFIG_JSON;
 
 pub use cli_api::{
+    OnrezaCliApiV1EdgeRulesStatusRequest as CliEdgeRulesStatusRequest,
+    OnrezaCliApiV1EdgeRulesStatusResponse as CliEdgeRulesStatusResponse,
+    OnrezaCliApiV1FunctionTestInvokeRequest as CliFunctionTestInvokeRequest,
+    OnrezaCliApiV1FunctionTestInvokeResponse as CliFunctionTestInvokeResponse,
     OnrezaCliApiV1MultipartCompleteRequest as CliMultipartCompleteRequest,
     OnrezaCliApiV1MultipartCompleteResponse as CliMultipartCompleteResponse,
     OnrezaCliApiV1PrepareUploadRequest as CliPrepareUploadRequest,
