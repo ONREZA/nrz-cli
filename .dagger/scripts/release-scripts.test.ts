@@ -13,8 +13,8 @@ import {
 } from "./publish-github-release";
 import {
   filterReleaseCommits,
+  releaseCargoLock,
   releaseCargoToml,
-  releaseVendorCargoToml,
   resolveVersion,
   type ReleaseCommit,
 } from "./release-plan";
@@ -132,6 +132,7 @@ test("release cargo manifest points nrz crates at sanitized vendor snapshot", ()
     '[dependencies]',
     'nrz-contract = { version = "0.1", path = "../deployment/crates/nrz-contract" }',
     'nrz-fn-policy = { version = "0.1", path = "../deployment/crates/nrz-fn-policy" }',
+    'nrz-source-bundle = { version = "0.1", path = "../deployment/crates/nrz-source-bundle" }',
     '',
   ].join("\n");
 
@@ -140,6 +141,7 @@ test("release cargo manifest points nrz crates at sanitized vendor snapshot", ()
   assert.match(updated, /^version = "0\.33\.0-beta\.0"$/m);
   assert.match(updated, /^nrz-contract = \{ path = "vendor\/onreza-crates\/nrz-contract" \}$/m);
   assert.match(updated, /^nrz-fn-policy = \{ path = "vendor\/onreza-crates\/nrz-fn-policy" \}$/m);
+  assert.match(updated, /^nrz-source-bundle = \{ path = "vendor\/onreza-crates\/nrz-source-bundle" \}$/m);
   assert.doesNotMatch(updated, /\.\.\/deployment/);
 });
 
@@ -152,6 +154,7 @@ test("release cargo manifest accepts already sanitized nrz crate dependencies", 
     '[dependencies]',
     'nrz-contract = { path = "vendor/onreza-crates/nrz-contract" }',
     'nrz-fn-policy = { path = "vendor/onreza-crates/nrz-fn-policy" }',
+    'nrz-source-bundle = { path = "vendor/onreza-crates/nrz-source-bundle" }',
     '',
   ].join("\n");
 
@@ -160,20 +163,35 @@ test("release cargo manifest accepts already sanitized nrz crate dependencies", 
   assert.match(updated, /^version = "0\.33\.0-beta\.0"$/m);
   assert.match(updated, /^nrz-contract = \{ path = "vendor\/onreza-crates\/nrz-contract" \}$/m);
   assert.match(updated, /^nrz-fn-policy = \{ path = "vendor\/onreza-crates\/nrz-fn-policy" \}$/m);
+  assert.match(updated, /^nrz-source-bundle = \{ path = "vendor\/onreza-crates\/nrz-source-bundle" \}$/m);
 });
 
-test("release vendored crate manifests follow the CLI version", () => {
-  const cargo = [
-    '[package]',
+test("release cargo lock leaves vendored crate versions stable", () => {
+  const lock = [
+    "[[package]]",
+    'name = "nrz"',
+    'version = "0.32.4"',
+    "",
+    "[[package]]",
     'name = "nrz-contract"',
-    'version = "0.0.0"',
-    'edition = "2024"',
-    '',
+    'version = "0.1.0"',
+    "",
+    "[[package]]",
+    'name = "nrz-fn-policy"',
+    'version = "0.1.0"',
+    "",
+    "[[package]]",
+    'name = "nrz-source-bundle"',
+    'version = "0.1.0"',
+    "",
   ].join("\n");
 
-  const updated = releaseVendorCargoToml(cargo, "0.33.0-beta.0");
+  const updated = releaseCargoLock(lock, "0.33.0-beta.0");
 
-  assert.match(updated, /^version = "0\.33\.0-beta\.0"$/m);
+  assert.match(updated, /\[\[package\]\]\nname = "nrz"\nversion = "0\.33\.0-beta\.0"/);
+  assert.match(updated, /\[\[package\]\]\nname = "nrz-contract"\nversion = "0\.1\.0"/);
+  assert.match(updated, /\[\[package\]\]\nname = "nrz-fn-policy"\nversion = "0\.1\.0"/);
+  assert.match(updated, /\[\[package\]\]\nname = "nrz-source-bundle"\nversion = "0\.1\.0"/);
 });
 
 test("stable auto release promotes an active prerelease train without another bump", () => {

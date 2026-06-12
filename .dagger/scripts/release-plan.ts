@@ -8,9 +8,10 @@ const repoUrl = "https://github.com/ONREZA/nrz-cli";
 const metadataPath = ".nrz-release/metadata.json";
 const defaultChannel = "stable";
 const releaseCommitPrefix = "chore(release):";
-const cliCrateDependencies = [
+const vendoredCrateDependencies = [
   { name: "nrz-contract", path: "vendor/onreza-crates/nrz-contract" },
   { name: "nrz-fn-policy", path: "vendor/onreza-crates/nrz-fn-policy" },
+  { name: "nrz-source-bundle", path: "vendor/onreza-crates/nrz-source-bundle" },
 ] as const;
 
 type Bump = "major" | "minor" | "patch";
@@ -311,21 +312,13 @@ function changelogEntry(version: string, commits: ReleaseCommit[]): string {
 
 export function releaseCargoToml(cargo: string, version: string): string {
   let updated = cargo.replace(/^version\s*=\s*"[^"]+"/m, `version = "${version}"`);
-  for (const crate of cliCrateDependencies) {
+  for (const crate of vendoredCrateDependencies) {
     const re = new RegExp(`^${escapeRegExp(crate.name)}\\s*=.*$`, "m");
     if (!re.test(updated)) {
       throw new Error(`Could not update ${crate.name} dependency in Cargo.toml`);
     }
     const next = updated.replace(re, `${crate.name} = { path = "${crate.path}" }`);
     updated = next;
-  }
-  return updated;
-}
-
-export function releaseVendorCargoToml(cargo: string, version: string): string {
-  const updated = cargo.replace(/^version\s*=\s*"[^"]+"/m, `version = "${version}"`);
-  if (updated === cargo) {
-    throw new Error("Could not update vendored crate version in Cargo.toml");
   }
   return updated;
 }
@@ -340,21 +333,15 @@ function updateLockPackageVersion(lock: string, packageName: string, version: st
 }
 
 export function releaseCargoLock(lock: string, version: string): string {
-  let updated = updateLockPackageVersion(lock, "nrz", version);
-  for (const crate of cliCrateDependencies) {
-    updated = updateLockPackageVersion(updated, crate.name, version);
-  }
-  return updated;
+  return updateLockPackageVersion(lock, "nrz", version);
 }
 
 function updateCargoVersion(version: string): void {
   writeFileSync("Cargo.toml", releaseCargoToml(readFileSync("Cargo.toml", "utf8"), version));
-  for (const crate of cliCrateDependencies) {
-    const manifestPath = join(crate.path, "Cargo.toml");
-    if (!existsSync(manifestPath)) {
-      throw new Error(`Missing sanitized nrz-cli crate snapshot: ${manifestPath}`);
+  for (const crate of vendoredCrateDependencies) {
+    if (!existsSync(join(crate.path, "Cargo.toml"))) {
+      throw new Error(`Missing sanitized nrz-cli crate snapshot: ${join(crate.path, "Cargo.toml")}`);
     }
-    writeFileSync(manifestPath, releaseVendorCargoToml(readFileSync(manifestPath, "utf8"), version));
   }
   writeFileSync("Cargo.lock", releaseCargoLock(readFileSync("Cargo.lock", "utf8"), version));
 }

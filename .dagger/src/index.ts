@@ -184,7 +184,7 @@ export class NrzCli {
         "sh",
         "-ceu",
         [
-          `if ! test -f ${CLI_CRATES_VENDOR_DIR}/nrz-contract/Cargo.toml || ! test -f ${CLI_CRATES_VENDOR_DIR}/nrz-fn-policy/Cargo.toml; then`,
+          `if ! test -f ${CLI_CRATES_VENDOR_DIR}/nrz-contract/Cargo.toml || ! test -f ${CLI_CRATES_VENDOR_DIR}/nrz-fn-policy/Cargo.toml || ! test -f ${CLI_CRATES_VENDOR_DIR}/nrz-source-bundle/Cargo.toml; then`,
           "  echo 'prepare-release requires vendor/onreza-crates from deployment scripts/sync-nrz-cli-crates.ts' >&2",
           "  exit 1",
           "fi",
