@@ -164,6 +164,7 @@ fn validate_edge_rules_refinements(path: &Path, value: &Value) -> anyhow::Result
         if action_type == Some("pipeline") {
             validate_pipeline_action(path, rule_id, action)?;
         }
+        validate_path_captures(path, rule_id, rule)?;
         if action_type != Some("cache") {
             continue;
         }
@@ -304,6 +305,179 @@ fn validate_pipeline_action(
     }
 
     Ok(())
+}
+
+/// Path captures are a refinement on top of the generated contract (plain
+/// strings to typify), so they must be checked here to match the platform's
+/// authoring schema and fail fast in `nrz functions check`: `{name}`/`{name...}`
+/// captures live only in the root glob `condition.path`; redirect/rewrite
+/// `target` and `set_headers` values reference them as `{name}` (splats too —
+/// without `...`); `{{name}}` escapes interpolation and emits the literal token.
+fn validate_path_captures(
+    path: &Path,
+    rule_id: &str,
+    rule: &Map<String, Value>,
+) -> anyhow::Result<()> {
+    let condition = rule.get("condition").and_then(Value::as_object);
+    let defined = validate_glob_capture_syntax(
+        path,
+        rule_id,
+        condition.and_then(|condition| condition.get("path")),
+        true,
+    )?;
+    if let Some(branches) = condition
+        .and_then(|condition| condition.get("any"))
+        .and_then(Value::as_array)
+    {
+        for branch in branches {
+            let branch_path = branch.as_object().and_then(|leaf| leaf.get("path"));
+            validate_glob_capture_syntax(path, rule_id, branch_path, false)?;
+        }
+    }
+    let not_path = condition
+        .and_then(|condition| condition.get("not"))
+        .and_then(Value::as_object)
+        .and_then(|leaf| leaf.get("path"));
+    validate_glob_capture_syntax(path, rule_id, not_path, false)?;
+
+    let Some(action) = rule.get("action").and_then(Value::as_object) else {
+        return Ok(());
+    };
+    let mut references = Vec::new();
+    match action.get("type").and_then(Value::as_str) {
+        Some("redirect" | "rewrite") => {
+            if let Some(target) = action.get("target").and_then(Value::as_str) {
+                collect_capture_references(target, &mut references);
+            }
+        }
+        Some("set_headers") => {
+            if let Some(headers) = action.get("headers").and_then(Value::as_object) {
+                for value in headers.values().filter_map(Value::as_str) {
+                    collect_capture_references(value, &mut references);
+                }
+            }
+        }
+        _ => {}
+    }
+    for (name, splat) in references {
+        if splat {
+            return Err(anyhow::anyhow!(
+                "{} rule '{rule_id}' must reference splat capture '{{{name}...}}' by plain '{{{name}}}'",
+                path.display()
+            ));
+        }
+        if !defined.contains(&name) {
+            return Err(anyhow::anyhow!(
+                "{} rule '{rule_id}' references undefined path capture '{{{name}}}'; declare it in a glob path matcher",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_glob_capture_syntax(
+    path: &Path,
+    rule_id: &str,
+    path_condition: Option<&Value>,
+    allow_captures: bool,
+) -> anyhow::Result<HashSet<String>> {
+    let mut names = HashSet::new();
+    let Some(path_condition) = path_condition.and_then(Value::as_object) else {
+        return Ok(names);
+    };
+    if path_condition.get("type").and_then(Value::as_str) != Some("glob") {
+        return Ok(names);
+    }
+    let Some(value) = path_condition.get("value").and_then(Value::as_str) else {
+        return Ok(names);
+    };
+
+    let mut splats = 0;
+    let mut rest = value;
+    while let Some(offset) = rest.find(['{', '}']) {
+        let tail = &rest[offset..];
+        let Some((name, splat, consumed)) = parse_capture_token(tail) else {
+            return Err(anyhow::anyhow!(
+                "{} rule '{rule_id}' glob path has a malformed capture token; use '{{name}}' for a segment or '{{name...}}' for the remainder",
+                path.display()
+            ));
+        };
+        if !allow_captures {
+            return Err(anyhow::anyhow!(
+                "{} rule '{rule_id}' declares path capture '{{{name}}}' in an any/not branch; captures are only supported in the rule's root condition.path",
+                path.display()
+            ));
+        }
+        if !names.insert(name.to_string()) {
+            return Err(anyhow::anyhow!(
+                "{} rule '{rule_id}' declares duplicate path capture '{{{name}}}'",
+                path.display()
+            ));
+        }
+        if splat {
+            splats += 1;
+            if splats > 1 {
+                return Err(anyhow::anyhow!(
+                    "{} rule '{rule_id}' path may declare at most one splat capture '{{name...}}'",
+                    path.display()
+                ));
+            }
+        }
+        rest = &tail[consumed..];
+    }
+    Ok(names)
+}
+
+// Parses `{name}` / `{name...}` at the start of `tail`. Returns
+// `(name, is_splat, bytes_consumed)` or `None` when `tail` does not begin with a
+// well-formed capture token.
+fn parse_capture_token(tail: &str) -> Option<(&str, bool, usize)> {
+    let body = tail.strip_prefix('{')?;
+    let bytes = body.as_bytes();
+    let mut name_len = 0;
+    while name_len < bytes.len()
+        && (bytes[name_len].is_ascii_alphanumeric() || bytes[name_len] == b'_')
+    {
+        name_len += 1;
+    }
+    if name_len == 0 || !bytes[0].is_ascii_alphabetic() {
+        return None;
+    }
+    let name = &body[..name_len];
+    let after_name = &body[name_len..];
+    if let Some(after_splat) = after_name.strip_prefix("...") {
+        after_splat.strip_prefix('}')?;
+        Some((name, true, 1 + name_len + 4))
+    } else {
+        after_name.strip_prefix('}')?;
+        Some((name, false, 1 + name_len + 1))
+    }
+}
+
+fn collect_capture_references(value: &str, references: &mut Vec<(String, bool)>) {
+    let mut rest = value;
+    while let Some(offset) = rest.find('{') {
+        let tail = &rest[offset..];
+        if let Some(remainder) = strip_escaped_capture_token(tail) {
+            rest = remainder;
+            continue;
+        }
+        if let Some((name, splat, consumed)) = parse_capture_token(tail) {
+            references.push((name.to_string(), splat));
+            rest = &tail[consumed..];
+        } else {
+            rest = &tail[1..];
+        }
+    }
+}
+
+// `{{name}}` / `{{name...}}` escapes interpolation; returns the text after the
+// escape or `None` when `tail` is not an escaped token.
+fn strip_escaped_capture_token(tail: &str) -> Option<&str> {
+    let body = tail.strip_prefix('{')?;
+    let (_, _, consumed) = parse_capture_token(body)?;
+    body[consumed..].strip_prefix('}')
 }
 
 fn validate_pipeline_security_gate_shadowing(path: &Path, rules: &[Value]) -> anyhow::Result<()> {

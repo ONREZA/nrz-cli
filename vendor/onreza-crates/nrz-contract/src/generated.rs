@@ -5441,6 +5441,19 @@ pub mod edge_rules {
     ///        },
     ///        {
     ///          "action": {
+    ///            "target": "/posts/{slug}.html",
+    ///            "type": "rewrite"
+    ///          },
+    ///          "condition": {
+    ///            "path": {
+    ///              "type": "glob",
+    ///              "value": "/blog/{slug}"
+    ///            }
+    ///          },
+    ///          "id": "clean-urls"
+    ///        },
+    ///        {
+    ///          "action": {
     ///            "ttlSeconds": 3600,
     ///            "type": "cache"
     ///          },
@@ -5524,7 +5537,11 @@ pub mod edge_rules {
     ///    "cache rule must Vary by request-dependent condition dimensions",
     ///    "pipeline actions must declare exactly one terminal handle step",
     ///    "pipeline response/observe steps must appear after the terminal handle",
-    ///    "a narrower pipeline rule must re-declare a broader failure=closed request gate or set inherit_gate=false"
+    ///    "a narrower pipeline rule must re-declare a broader failure=closed request gate or set inherit_gate=false",
+    ///    "glob path captures: '{name}' matches one segment, '{name...}' matches the remainder (at most one splat, unique names)",
+    ///    "path captures are declared only in the root condition.path glob; any/not branch globs must not declare captures",
+    ///    "redirect/rewrite target and set_headers values may interpolate '{name}'; every reference must be defined as a capture in the rule's root glob path matcher, splats are referenced by plain '{name}'",
+    ///    "'{{name}}' escapes interpolation in target/header values and emits the literal text '{name}'"
     ///  ]
     ///}
     /// ```

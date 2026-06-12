@@ -325,6 +325,130 @@ action = { type = "redirect", target = "/new", statusCode = 308 }
 }
 
 #[test]
+fn load_edge_rules_accepts_path_captures_and_escapes() {
+    let tmp = tempfile::tempdir().unwrap();
+    write(
+        tmp.path(),
+        "onreza.rules.toml",
+        r#"
+schemaVersion = "EDGE_RULE_SET_V1"
+source = { origin = "build" }
+
+[[rules]]
+id = "clean-urls"
+condition.path = { type = "glob", value = "/blog/{slug}" }
+action = { type = "rewrite", target = "/posts/{slug}.html" }
+
+[[rules]]
+id = "move-docs"
+condition.path = { type = "glob", value = "/docs/{rest...}" }
+action = { type = "redirect", target = "/guides/{rest}", statusCode = 308 }
+
+[[rules]]
+id = "uri-template"
+condition.path = { type = "prefix", value = "/api" }
+action = { type = "set_headers", headers = { link = "</api/{{id}}>; rel=template" } }
+"#,
+    );
+
+    assert!(load_edge_rules(tmp.path()).unwrap().is_some());
+}
+
+#[test]
+fn load_edge_rules_rejects_undefined_capture_reference() {
+    let tmp = tempfile::tempdir().unwrap();
+    write(
+        tmp.path(),
+        "onreza.rules.toml",
+        r#"
+schemaVersion = "EDGE_RULE_SET_V1"
+source = { origin = "build" }
+
+[[rules]]
+id = "bad"
+condition.path = { type = "glob", value = "/blog/{slug}" }
+action = { type = "redirect", target = "/posts/{missing}.html" }
+"#,
+    );
+
+    let error = load_edge_rules(tmp.path()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("references undefined path capture '{missing}'"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn load_edge_rules_rejects_capture_declared_in_any_branch() {
+    let tmp = tempfile::tempdir().unwrap();
+    write(
+        tmp.path(),
+        "onreza.rules.toml",
+        r#"
+schemaVersion = "EDGE_RULE_SET_V1"
+source = { origin = "build" }
+
+[[rules]]
+id = "branch-capture"
+condition.any = [{ path = { type = "glob", value = "/x/{a}" } }]
+action = { type = "allow" }
+"#,
+    );
+
+    let error = load_edge_rules(tmp.path()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("captures are only supported in the rule's root condition.path"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn load_edge_rules_rejects_duplicate_and_splat_form_captures() {
+    let tmp = tempfile::tempdir().unwrap();
+    write(
+        tmp.path(),
+        "onreza.rules.toml",
+        r#"
+schemaVersion = "EDGE_RULE_SET_V1"
+source = { origin = "build" }
+
+[[rules]]
+id = "dup"
+condition.path = { type = "glob", value = "/{a}/{a}" }
+action = { type = "allow" }
+"#,
+    );
+    let error = load_edge_rules(tmp.path()).unwrap_err();
+    assert!(
+        error.to_string().contains("duplicate path capture '{a}'"),
+        "unexpected error: {error}"
+    );
+
+    write(
+        tmp.path(),
+        "onreza.rules.toml",
+        r#"
+schemaVersion = "EDGE_RULE_SET_V1"
+source = { origin = "build" }
+
+[[rules]]
+id = "splat-ref"
+condition.path = { type = "glob", value = "/docs/{rest...}" }
+action = { type = "redirect", target = "/guides/{rest...}" }
+"#,
+    );
+    let error = load_edge_rules(tmp.path()).unwrap_err();
+    assert!(
+        error.to_string().contains("by plain '{rest}'"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn build_payload_can_publish_edge_rules_without_functions() {
     let tmp = tempfile::tempdir().unwrap();
     write(
