@@ -282,6 +282,7 @@ fn deploy_app_in_non_monorepo_fails() {
 
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["deploy", "--app", "web"]);
+    // Terminal outcome envelope goes to stdout (the CLI/automation contract).
     cmd.assert()
         .failure()
         .stdout(contains("no monorepo detected"));
@@ -913,9 +914,17 @@ fn broken_onreza_toml_emits_invalid_config_code() {
     cmd.current_dir(&temp).args(["detect", "--json"]);
     cmd.assert().failure();
     let output = cmd.output().unwrap();
+    // Dual-channel contract: the terminal envelope on stdout carries the code for
+    // CLI/automation, and a structured error frame on stderr carries it for the
+    // Builder (which reads the merged log stream).
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stdout.contains("\"code\":\"INVALID_CONFIG\""),
-        "config load fault must surface as structured error with code=INVALID_CONFIG, got: {stdout}"
+        "terminal error envelope with code=INVALID_CONFIG must be on stdout, got: {stdout}"
+    );
+    assert!(
+        stderr.contains("\"code\":\"INVALID_CONFIG\""),
+        "structured error frame with code=INVALID_CONFIG must be on stderr for the Builder, got: {stderr}"
     );
 }

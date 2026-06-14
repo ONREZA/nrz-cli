@@ -233,13 +233,12 @@ pub(crate) fn map_publish_error(error: anyhow::Error, json: bool) -> anyhow::Err
 
     let message = format_edge_rules_diverged_failure(api_error);
     if json {
-        output::log_error_structured(
+        return output::report_terminal_error(
             "rules",
             &message,
             "EDGE_RULES_DIVERGED",
             api_error.details.as_ref(),
         );
-        return output::already_reported_error();
     }
     output::coded_error("EDGE_RULES_DIVERGED", message).context("failed to publish Edge Rules")
 }

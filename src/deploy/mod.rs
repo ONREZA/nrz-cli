@@ -1331,6 +1331,28 @@ struct SourceMultipartCompletion {
     parts: Vec<CompletedMultipartPart>,
 }
 
+/// Map a *non-retryable* prepare-upload error to the value returned to the
+/// caller. User-fault plan-limit failures in JSON mode are reported on both
+/// channels (stderr frame for the Builder + stdout envelope with `code` for
+/// CLI/automation) via [`output::report_terminal_error`], which returns an
+/// `AlreadyReportedError` so `main` does not re-emit a code-less envelope.
+/// Everything else stays a contextual `anyhow` that `main` renders as the
+/// terminal outcome.
+fn prepare_upload_terminal_error(error: anyhow::Error, json: bool) -> anyhow::Error {
+    if json
+        && let Some(api_err) = error.downcast_ref::<crate::api::StructuredApiError>()
+        && (api_err.code == "LIMIT_EXCEEDED" || api_err.code == "SUBSCRIPTION_REQUIRED")
+    {
+        return output::report_terminal_error(
+            "deploy",
+            &api_err.message,
+            &api_err.code,
+            api_err.details.as_ref(),
+        );
+    }
+    error.context("failed to prepare upload")
+}
+
 async fn prepare_upload_with_retry(
     client: &ApiClient,
     deployment_id: Uuid,
@@ -1353,20 +1375,7 @@ async fn prepare_upload_with_retry(
             Ok(resp) => return Ok(resp),
             Err(error) => {
                 let Some(retry) = classify_prepare_upload_retry_error(&error) else {
-                    if json
-                        && let Some(api_err) =
-                            error.downcast_ref::<crate::api::StructuredApiError>()
-                        && (api_err.code == "LIMIT_EXCEEDED"
-                            || api_err.code == "SUBSCRIPTION_REQUIRED")
-                    {
-                        output::log_error_structured(
-                            "deploy",
-                            &api_err.message,
-                            &api_err.code,
-                            api_err.details.as_ref(),
-                        );
-                    }
-                    return Err(error.context("failed to prepare upload"));
+                    return Err(prepare_upload_terminal_error(error, json));
                 };
 
                 let elapsed = started.elapsed();
@@ -2392,13 +2401,12 @@ fn map_function_stage_error(error: anyhow::Error, json: bool) -> anyhow::Error {
 
     let message = format_function_publish_failure(api_error);
     if json {
-        output::log_error_structured(
+        return output::report_terminal_error(
             "deploy",
             &message,
             &api_error.code,
             api_error.details.as_ref(),
         );
-        return output::already_reported_error();
     }
     anyhow::anyhow!(message).context("failed to stage ONREZA Functions for deployment")
 }
@@ -2418,13 +2426,12 @@ fn map_create_deployment_error(error: anyhow::Error, json: bool) -> anyhow::Erro
 
     let message = format_function_publish_failure(api_error);
     if json {
-        output::log_error_structured(
+        return output::report_terminal_error(
             "deploy",
             &message,
             &api_error.code,
             api_error.details.as_ref(),
         );
-        return output::already_reported_error();
     }
     anyhow::anyhow!(message).context("failed to create deployment")
 }
@@ -2439,13 +2446,12 @@ fn map_edge_rules_diverged_error(
     }
     let message = format_edge_rules_diverged_failure(error);
     if json {
-        output::log_error_structured(
+        return Some(output::report_terminal_error(
             "deploy",
             &message,
             "EDGE_RULES_DIVERGED",
             error.details.as_ref(),
-        );
-        return Some(output::already_reported_error());
+        ));
     }
     Some(output::coded_error("EDGE_RULES_DIVERGED", message).context(context.to_string()))
 }
@@ -3754,7 +3760,8 @@ fn run_command_streaming(
     }
 
     // JSON mode: capture stdout/stderr and emit structured progress log lines
-    let mut child = std::process::Command::new(shell)
+    let mut command = std::process::Command::new(shell);
+    command
         .args(shell_args)
         .current_dir(project_dir)
         .envs(
@@ -3763,9 +3770,27 @@ fn run_command_streaming(
                 .map(|(key, value)| (key.as_str(), value.as_str())),
         )
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    // Run the build in its own process group. Build tools spawn long-lived
+    // grandchildren (jest/SWC workers, an OG-image headless Chromium, dev
+    // daemons) that inherit the stdout/stderr pipe write-ends. If one survives
+    // the top-level command, the reader threads never observe EOF and the joins
+    // after `wait()` block forever — which is how a *successful* build ends up
+    // recorded as a 15-minute "build timeout". A dedicated group lets us reap
+    // the orphans deterministically once the command itself has exited.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        command.process_group(0);
+    }
+
+    let mut child = command
         .spawn()
         .with_context(|| format!("failed to start command: {cmd}"))?;
+
+    #[cfg(unix)]
+    let child_pid = child.id() as libc::pid_t;
 
     let stdout = child
         .stdout
@@ -3826,6 +3851,19 @@ fn run_command_streaming(
     let status = child
         .wait()
         .with_context(|| format!("failed to wait for command: {cmd}"))?;
+
+    // The command has exited; reap any orphaned grandchildren still holding the
+    // pipe write-ends open in its process group. Without this the joins below
+    // can hang until an external timeout. SIGKILL is safe here — survivors are
+    // orphans of an already-terminated build. The group id stays allocated while
+    // any member is alive, so signalling it after `wait()` reaped the leader
+    // cannot hit a recycled pid.
+    #[cfg(unix)]
+    {
+        // Negative pid targets the whole process group.
+        unsafe { libc::kill(-child_pid, libc::SIGKILL) };
+    }
+
     if let Err(e) = stdout_handle.join() {
         tracing::warn!("stdout reader thread panicked: {e:?}");
     }

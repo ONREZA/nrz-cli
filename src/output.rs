@@ -64,19 +64,112 @@ pub fn json_output<T: Serialize>(data: &T) {
     }
 }
 
+/// Emit the terminal outcome envelope for a *failed* command to **stdout** (JSON
+/// mode). This is the machine-readable result automation/LLMs read from stdout —
+/// the counterpart of [`json_output`] for the success case. It is deliberately
+/// separate from the stderr structured-log frame channel ([`log_error_structured`])
+/// that the Builder consumes: stdout = terminal result, stderr = log stream.
+pub fn terminal_error(message: &str, code: Option<&str>) {
+    let mut obj = serde_json::json!({ "error": cap_message(message) });
+    if let Some(code) = code {
+        obj["code"] = serde_json::Value::String(code.to_owned());
+    }
+    json_output(&obj);
+}
+
+/// Sentinel byte prefixing every structured protocol frame.
+///
+/// ASCII Record Separator (`0x1E`) never appears in normal build-tool output or
+/// JSON text, so a consumer can decide "is this a protocol frame?" with one byte
+/// check — instead of trying to JSON-parse every `{`-prefixed line and treating
+/// failures as errors. Lines that arrive byte-level-torn (spliced by the log
+/// pipeline) lose sentinel alignment and are unambiguously *not* frames.
+pub const FRAME_SENTINEL: char = '\u{1e}';
+
+/// Upper bound on a message's **JSON-serialized** length before framing.
+///
+/// Build tools emit very long single lines (minified bundles, base64 blobs,
+/// dependency dumps). Container log pipelines (containerd/CRI, Docker) split a
+/// log line at ~16 KiB into partial fragments — a frame larger than that would
+/// be torn by the runtime, leaving the consumer a sentinel-prefixed half-frame.
+/// We bound the *escaped* size (not raw bytes) because control chars / ANSI
+/// sequences common in build output expand up to 6× when JSON-escaped; the
+/// remaining headroom under 16 KiB covers the small envelope keys/code/details.
+const MAX_SERIALIZED_MESSAGE_BYTES: usize = 12 * 1024;
+
+const TRUNCATION_MARKER: &str = "…[truncated]";
+
+/// Byte length of `s` once JSON-escaped by `serde_json` (excluding the quotes).
+/// Mirrors serde_json's escaping exactly so [`cap_message`] can bound the real
+/// serialized size without allocating: `"`, `\`, `\n`, `\r`, `\t` → 2 bytes;
+/// other control bytes → `\u00XX` (6); everything else (incl. UTF-8) → as-is.
+fn json_escaped_len(s: &str) -> usize {
+    s.bytes()
+        .map(|b| match b {
+            b'"' | b'\\' | b'\n' | b'\r' | b'\t' => 2,
+            0x00..=0x1f => 6,
+            _ => 1,
+        })
+        .sum()
+}
+
+/// Truncate `msg` on a char boundary so its JSON-escaped form (plus a marker)
+/// stays within [`MAX_SERIALIZED_MESSAGE_BYTES`]. Borrows when no cut is needed.
+pub(crate) fn cap_message(msg: &str) -> std::borrow::Cow<'_, str> {
+    if json_escaped_len(msg) <= MAX_SERIALIZED_MESSAGE_BYTES {
+        return std::borrow::Cow::Borrowed(msg);
+    }
+    let budget = MAX_SERIALIZED_MESSAGE_BYTES - json_escaped_len(TRUNCATION_MARKER);
+    let mut end = msg.len();
+    loop {
+        // Shrink ~25% per step (rare path — only oversized lines reach here).
+        end = end.saturating_sub(end / 4 + 1);
+        while end > 0 && !msg.is_char_boundary(end) {
+            end -= 1;
+        }
+        if end == 0 || json_escaped_len(&msg[..end]) <= budget {
+            return std::borrow::Cow::Owned(format!("{}{}", &msg[..end], TRUNCATION_MARKER));
+        }
+    }
+}
+
+/// Render a frame to its exact wire bytes: `<sentinel><json>\n`. Pure — the IO
+/// side ([`emit_frame`]) writes the result in a single `write_all`.
+pub(crate) fn render_frame(obj: &serde_json::Value) -> String {
+    let mut line = String::with_capacity(128);
+    line.push(FRAME_SENTINEL);
+    line.push_str(&obj.to_string());
+    line.push('\n');
+    line
+}
+
+/// Serialize a structured frame and write it to stderr as a single atomic
+/// `write_all`: `<sentinel><json>\n`.
+///
+/// Two invariants this guarantees and the old `eprintln!("{}", value)` did not:
+/// 1. **Whole-frame writes.** `Display` for a `serde_json::Value` writes
+///    token-by-token; the container log pipeline can read a partial line and
+///    splice it with another stream's bytes, producing torn JSON. One write of
+///    a size-capped frame ([`cap_message`]) keeps each frame intact in transit.
+/// 2. **One channel.** Every frame goes to stderr — never stdout — so frames
+///    from different call sites can't interleave across two merged fds.
+fn emit_frame(obj: &serde_json::Value) {
+    // A broken stderr pipe must not abort an otherwise-successful build.
+    let _ = std::io::stderr()
+        .lock()
+        .write_all(render_frame(obj).as_bytes());
+}
+
 /// Emit one structured JSON progress log line to stderr (JSON mode only).
 ///
-/// Format: `{"s":"user|debug","p":"phase","l":"info|warn","m":"message"}`
+/// Wire format: `<FRAME_SENTINEL>{"s":..,"p":..,"l":..,"m":..}\n`
 ///
 /// - `s`: stream — "user" (user-visible) or "debug" (internal noise)
 /// - `p`: phase — value from `Phase::as_str()`
 /// - `l`: level — "info" or "warn"
-/// - `m`: message text
+/// - `m`: message text (size-capped via [`cap_message`])
 pub fn log_line(stream: &str, level: &str, phase: &str, msg: &str) {
-    eprintln!(
-        "{}",
-        serde_json::json!({"s": stream, "p": phase, "l": level, "m": msg}),
-    );
+    emit_frame(&serde_json::json!({"s": stream, "p": phase, "l": level, "m": cap_message(msg)}));
 }
 
 /// Print status message to stderr, or structured JSON log in JSON mode.
@@ -108,10 +201,12 @@ pub fn warn(json: bool, msg: impl std::fmt::Display, phase: Phase) {
 
 /// Emit a structured error line with error code and optional limit details.
 ///
-/// Format: `{"s":"error","p":"phase","l":"error","m":"message","code":"...","details":{...}}`
+/// Wire format: `<FRAME_SENTINEL>{"s":"error","p":..,"l":"error","m":..,"code":..,"details":{..}}\n`
 ///
 /// Used by Builder to extract structured error info (e.g., LIMIT_EXCEEDED with limitType)
-/// and persist it to the deployment record for frontend upsell dialogs.
+/// and persist it to the deployment record for frontend upsell dialogs. Shares the
+/// single stderr frame channel with [`log_line`] — emitting it on stdout (as it once
+/// did) let error frames interleave with progress frames across two merged fds.
 pub fn log_error_structured(
     phase: &str,
     message: &str,
@@ -122,13 +217,13 @@ pub fn log_error_structured(
         "s": "error",
         "p": phase,
         "l": "error",
-        "m": message,
+        "m": cap_message(message),
         "code": code,
     });
     if let Some(d) = details {
         obj["details"] = d.clone();
     }
-    println!("{obj}");
+    emit_frame(&obj);
 }
 
 /// Typed error carrying a machine-readable code for Builder classification.
@@ -211,6 +306,22 @@ impl std::error::Error for AlreadyReportedError {}
 
 pub fn already_reported_error() -> anyhow::Error {
     anyhow::Error::new(AlreadyReportedError)
+}
+
+/// Fully emit a terminal coded error on BOTH channels and return an
+/// [`AlreadyReportedError`] so `main`'s terminal handler does not re-emit it:
+/// the structured frame on stderr (Builder — carries `details`) and the terminal
+/// envelope on stdout (CLI/automation). Use at JSON-mode call sites that detect a
+/// terminal failure with richer details than a bare [`CodedError`] would carry.
+pub fn report_terminal_error(
+    phase: &str,
+    message: &str,
+    code: &str,
+    details: Option<&serde_json::Value>,
+) -> anyhow::Error {
+    log_error_structured(phase, message, code, details);
+    terminal_error(message, Some(code));
+    already_reported_error()
 }
 
 /// Attach a default `CodedError(code)` to an error only if the chain doesn't

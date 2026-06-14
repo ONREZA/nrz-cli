@@ -1904,6 +1904,64 @@ fn prepare_upload_operation_in_progress_error_is_retryable() {
     );
 }
 
+fn limit_exceeded_api_error() -> anyhow::Error {
+    crate::api::StructuredApiError {
+        status: reqwest::StatusCode::FORBIDDEN,
+        code: "LIMIT_EXCEEDED".into(),
+        message: "Deployment exceeds maximum file count (15503 / 5000).".into(),
+        retry_after_seconds: None,
+        details: Some(serde_json::json!({"limitType": "maxDeploymentFiles", "limit": 5000})),
+    }
+    .into()
+}
+
+#[test]
+fn prepare_upload_limit_error_in_json_mode_is_reported_on_both_channels() {
+    // JSON mode: report_terminal_error emits the stderr frame (Builder) + stdout
+    // envelope with code (CLI/automation) and returns AlreadyReportedError so
+    // main does not re-emit a code-less envelope.
+    let mapped = prepare_upload_terminal_error(limit_exceeded_api_error(), true);
+    assert!(
+        mapped
+            .downcast_ref::<crate::output::AlreadyReportedError>()
+            .is_some(),
+        "limit error in JSON mode must be fully reported (AlreadyReportedError), got: {mapped:#}"
+    );
+}
+
+#[test]
+fn prepare_upload_limit_error_in_human_mode_stays_contextual() {
+    // Human mode: no machine envelope — a contextual error main prints as "Error:".
+    let mapped = prepare_upload_terminal_error(limit_exceeded_api_error(), false);
+    assert!(
+        mapped
+            .downcast_ref::<crate::output::AlreadyReportedError>()
+            .is_none()
+    );
+    assert!(mapped.to_string().contains("failed to prepare upload"));
+}
+
+#[test]
+fn prepare_upload_platform_error_in_json_mode_is_not_swallowed() {
+    // A non-limit (platform-fault) structured error must NOT be marked
+    // already-reported — main keeps ownership so it surfaces / routes to Sentry.
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+        code: "INTERNAL".into(),
+        message: "boom".into(),
+        retry_after_seconds: None,
+        details: None,
+    }
+    .into();
+    let mapped = prepare_upload_terminal_error(error, true);
+    assert!(
+        mapped
+            .downcast_ref::<crate::output::AlreadyReportedError>()
+            .is_none()
+    );
+    assert!(mapped.to_string().contains("failed to prepare upload"));
+}
+
 #[tokio::test]
 async fn prepare_upload_transport_error_is_retryable() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -3153,6 +3211,40 @@ fn run_command_streaming_emits_phase_specific_code_for_install() {
         .find_map(|c| c.downcast_ref::<crate::output::CodedError>())
         .expect("CodedError expected in JSON-mode path as well");
     assert_eq!(coded.code, "INSTALL_EXIT_CODE");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_command_streaming_does_not_hang_on_orphaned_grandchild() {
+    // The build command exits immediately but leaves a backgrounded grandchild
+    // holding the stdout pipe write-end open. Before the process-group reap, the
+    // stdout reader join blocked until the grandchild died — turning a
+    // successful build into a 15-minute "build timeout". The call must now
+    // return promptly because we SIGKILL the whole group after `wait()`.
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let (tx, rx) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let dir = tempdir().unwrap();
+        let result = run_command_streaming(
+            "sleep 30 & echo started",
+            dir.path(),
+            true, // JSON mode: exercises the piped stdout/stderr reader-join path
+            crate::output::Phase::Build,
+            "debug",
+            &[],
+        );
+        let _ = tx.send(result.is_ok());
+    });
+
+    match rx.recv_timeout(Duration::from_secs(10)) {
+        Ok(ok) => assert!(ok, "command itself should succeed"),
+        Err(_) => panic!(
+            "run_command_streaming hung waiting for EOF on a pipe held open by an orphaned grandchild"
+        ),
+    }
+    worker.join().unwrap();
 }
 
 // ── Error-code contract (user-fault failures carry CodedError) ───────
