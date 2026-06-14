@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.34.0] - 2026-06-14
+
+### 🐛 Bug Fixes
+
+- **deploy:** reap build process group and harden structured log framing ([91d5b93](https://github.com/ONREZA/nrz-cli/commit/91d5b93beb14f226f1ece6029db8ff53eea80444))
+- **release:** keep vendored crate versions stable ([fc99d52](https://github.com/ONREZA/nrz-cli/commit/fc99d52fdc05d89acf6272157aae1feaf704fd97))
+
+### ✨ Features
+
+- **cli:** validate edge rule path captures in rules check ([46537f5](https://github.com/ONREZA/nrz-cli/commit/46537f5b2cad585458187626740fe69b87ab8399))
+
 ## [0.33.0] - 2026-06-11
 
 ### ✨ Features
