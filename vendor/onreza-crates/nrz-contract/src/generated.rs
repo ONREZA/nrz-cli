@@ -5441,6 +5441,22 @@ pub mod edge_rules {
     ///        },
     ///        {
     ///          "action": {
+    ///            "ifNoFile": false,
+    ///            "statusCode": 301,
+    ///            "target": "https://example.com/{rest}",
+    ///            "type": "redirect"
+    ///          },
+    ///          "condition": {
+    ///            "host": "пример.рф",
+    ///            "path": {
+    ///              "type": "glob",
+    ///              "value": "/{rest...}"
+    ///            }
+    ///          },
+    ///          "id": "redirect-cyrillic-domain"
+    ///        },
+    ///        {
+    ///          "action": {
     ///            "target": "/posts/{slug}.html",
     ///            "type": "rewrite"
     ///          },
@@ -5541,6 +5557,9 @@ pub mod edge_rules {
     ///    "glob path captures: '{name}' matches one segment, '{name...}' matches the remainder (at most one splat, unique names)",
     ///    "path captures are declared only in the root condition.path glob; any/not branch globs must not declare captures",
     ///    "redirect/rewrite target and set_headers values may interpolate '{name}'; every reference must be defined as a capture in the rule's root glob path matcher, splats are referenced by plain '{name}'",
+    ///    "redirect target must be a relative path or an absolute http(s) URL; IDN hosts in absolute redirect targets are normalized to punycode",
+    ///    "internal rewrite target must be a relative path; external rewrite target must be an absolute https URL",
+    ///    "host conditions accept ASCII/punycode or IDN Unicode hostnames without scheme, port, path, or userinfo and are normalized to punycode",
     ///    "'{{name}}' escapes interpolation in target/header values and emits the literal text '{name}'"
     ///  ]
     ///}
