@@ -3,8 +3,13 @@
 
 commit-msg:
   commands:
-    commitlint:
-      run: npx --yes commitlint --edit {1}
+    cocogitto:
+      run: cog verify --file {1}
+      fail_text: |
+        Commit message does not follow Conventional Commits format.
+
+        Format: <type>(<scope>): <subject>
+        Allowed types and scopes are defined in cog.toml.
 
 pre-commit:
   parallel: false

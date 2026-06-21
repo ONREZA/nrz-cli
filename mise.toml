@@ -1,0 +1,57 @@
+[tools]
+bun = "1.3.14"
+rust = "1.96"
+cocogitto = "7.0.0"
+lefthook = "2.1.9"
+actionlint = "1.7.12"
+
+[tasks.hooks]
+description = "Install Git hooks"
+run = "lefthook install"
+
+[tasks.fmt]
+description = "Format Rust code"
+run = "cargo fmt"
+
+[tasks."fmt:check"]
+description = "Check Rust formatting"
+run = "cargo fmt -- --check"
+
+[tasks.clippy]
+description = "Run strict Rust lints"
+run = "cargo clippy -- -D warnings"
+
+[tasks.test]
+description = "Run Rust tests"
+run = "cargo test"
+
+[tasks."dagger:scripts"]
+description = "Check Dagger release helper scripts"
+run = "cd .dagger && bun install --frozen-lockfile && bun run typecheck && bun test scripts/release-scripts.test.ts"
+
+[tasks."dagger:ci"]
+description = "Run the Dagger CI pipeline"
+run = "dagger call ci --source=."
+
+[tasks."release:metadata"]
+description = "Dry-run release metadata"
+run = "dagger call release-metadata --source=. --channel=stable --bump=auto"
+
+[tasks."commits:check"]
+description = "Check Conventional Commits since the latest tag"
+run = "cog check --from-latest-tag --ignore-merge-commits"
+
+[tasks.actionlint]
+description = "Lint GitHub Actions workflows"
+run = "actionlint"
+
+[tasks.check]
+description = "Run the standard local quality gate"
+run = [
+  "cargo fmt -- --check",
+  "cargo clippy -- -D warnings",
+  "cargo test",
+  "cd .dagger && bun install --frozen-lockfile && bun run typecheck && bun test scripts/release-scripts.test.ts",
+  "actionlint",
+  "cog check --from-latest-tag --ignore-merge-commits",
+]

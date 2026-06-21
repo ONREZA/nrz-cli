@@ -1,0 +1,19 @@
+ignore_merge_commits = true
+ignore_fixup_commits = true
+tag_prefix = "v"
+
+scopes = [
+  "build",
+  "ci",
+  "cli",
+  "config",
+  "db",
+  "deploy",
+  "deps",
+  "dev",
+  "docs",
+  "emulator",
+  "kv",
+  "release",
+  "tests",
+]

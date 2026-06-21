@@ -10,11 +10,6 @@
     "LICENSE"
   ],
   "scripts": {
-    "prepare": "lefthook install || echo 'Install lefthook: https://github.com/evilmartians/lefthook'",
-    "commitlint": "commitlint"
-  },
-  "devDependencies": {
-    "@commitlint/cli": "^21.0.2",
-    "lefthook": "^2.1.9"
+    "prepare": "lefthook install || echo 'Install lefthook with mise: mise install && mise run hooks'"
   }
 }

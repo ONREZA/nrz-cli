@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 `nrz` is a Rust CLI. Entrypoints are `src/main.rs` (binary) and `src/lib.rs` (shared exports). Core domains are split under `src/`: `cli/`, `deploy/`, `build/`, `detect/`, `dev/`, `emulator/`, `auth/`, `config/`, `init/`, and `upgrade/`.
 
-Integration tests are in `tests/` (for example `tests/cli_integration_test.rs`). Unit tests are colocated as dedicated `*_tests.rs` files (for example `src/build/manifest_tests.rs`). Operational docs live in `docs/`; root config includes `lefthook.yml` and `commitlint.config.js`. The `onreza.toml` JSON Schema is generated in the platform repo and served at `https://docs.onreza.ru/schemas/onreza-project-v1.schema.json` (`nrz init` wires it via `#:schema`).
+Integration tests are in `tests/` (for example `tests/cli_integration_test.rs`). Unit tests are colocated as dedicated `*_tests.rs` files (for example `src/build/manifest_tests.rs`). Operational docs live in `docs/`; root config includes `mise.toml`, `lefthook.yml`, and `cog.toml`. The `onreza.toml` JSON Schema is generated in the platform repo and served at `https://docs.onreza.ru/schemas/onreza-project-v1.schema.json` (`nrz init` wires it via `#:schema`).
 
 ## LLM-First CLI Contract
 Every command must support machine and human modes:
@@ -20,7 +20,9 @@ Every command must support machine and human modes:
 - `cargo test --test cli_integration_test`: run one integration suite.
 - `cargo fmt`: format code.
 - `cargo clippy -- -D warnings`: fail on lints/warnings.
-- `npm run prepare`: install Lefthook hooks.
+- `mise install`: install pinned local tools.
+- `mise run hooks`: install Lefthook hooks.
+- `mise run check`: run the standard local quality gate.
 - `dagger call release-metadata --source=. --channel=stable --bump=auto`: local release plan dry run.
 
 ## Coding Style & Testing Guidelines
@@ -34,6 +36,8 @@ Testing rules:
 ## Configuration, Commits, and PRs
 `onreza.toml` is committed and is the single project config source. `.onreza/` is local state only (KV/environment refs) and must remain gitignored.
 
-Conventional Commits are enforced by Lefthook + commitlint. Format: `type(scope): subject` (example: `fix(deploy): resolve process entry fallback`). Typical scopes: `cli`, `deploy`, `build`, `config`, `emulator`, `db`, `kv`, `tests`, `release`.
+Conventional Commits are enforced by Lefthook + Cocogitto. Format: `type(scope): subject` (example: `fix(deploy): resolve process entry fallback`). Allowed scopes are defined in `cog.toml`; typical scopes are `cli`, `deploy`, `build`, `config`, `emulator`, `db`, `kv`, `tests`, `release`.
 
-Before opening a PR, run `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test`. Include a concise problem/solution summary, linked issue (if any), and CLI output snippets for user-visible changes.
+Release version/package metadata and GitHub publishing are Dagger-owned. Do not use `cog bump` as the nrz release path unless that ownership boundary is explicitly changed.
+
+Before opening a PR, run `mise run check`. Include a concise problem/solution summary, linked issue (if any), and CLI output snippets for user-visible changes.

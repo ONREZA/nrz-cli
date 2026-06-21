@@ -114,15 +114,18 @@ Reference:
 ## Development
 
 ```bash
-npm run prepare                # install git hooks (lefthook)
-cargo fmt                      # format Rust code
-cargo clippy -- -D warnings    # strict lint
-cargo test                     # all tests
+mise install                   # install pinned local tools
+mise run hooks                 # install git hooks (lefthook)
+mise run fmt                   # format Rust code
+mise run clippy                # strict lint
+mise run test                  # all tests
+mise run check                 # standard local quality gate
 cargo build --release          # release build
 dagger call release-metadata --source=. --channel=beta --bump=minor
 ```
 
-Commit messages are validated with Conventional Commits via `commitlint` + `lefthook`, format: `type(scope): subject`.
+Commit messages are validated with Conventional Commits via Cocogitto + Lefthook, format: `type(scope): subject`.
+Release version/package metadata and GitHub publishing remain Dagger-owned; do not use `cog bump` as the nrz release path.
 
 ## Supported Binary Targets
 
