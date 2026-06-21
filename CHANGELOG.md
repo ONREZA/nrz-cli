@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.34.1] - 2026-06-21
+
+### 🔧 Changed
+
+- **ci:** sync dx tooling ([1dd332b](https://github.com/ONREZA/nrz-cli/commit/1dd332b684b2b9329be0690498532aa031d58d30))
+- sync onreza contract vendor ([b9f391b](https://github.com/ONREZA/nrz-cli/commit/b9f391b503ac7a560bb0494550a3cee60697e20d))
+
+### 🐛 Bug Fixes
+
+- **cli:** sync server endpoint contracts ([d3f8c1a](https://github.com/ONREZA/nrz-cli/commit/d3f8c1ae079c2a1b355cd8d1b3c35def9e30410e))
+
 ## [0.34.0] - 2026-06-14
 
 ### 🐛 Bug Fixes
