@@ -15,7 +15,7 @@ pub enum DomainsCommand {
     /// List custom domains
     List,
 
-    /// Add a custom domain
+    /// Attach a custom domain hostname
     Add {
         /// Domain name (e.g. example.com)
         domain: String,
@@ -25,15 +25,15 @@ pub enum DomainsCommand {
         environment_id: Option<String>,
     },
 
-    /// Remove a custom domain
+    /// Remove a custom domain hostname
     Remove {
-        /// Domain ID to remove
+        /// Hostname/domain binding ID to remove
         domain_id: String,
     },
 
-    /// Verify a custom domain
+    /// Verify the workspace domain zone for a hostname
     Verify {
-        /// Domain ID to verify
+        /// Hostname/domain binding ID to verify
         domain_id: String,
     },
 }

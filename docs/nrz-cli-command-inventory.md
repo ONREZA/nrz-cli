@@ -1,12 +1,13 @@
 # Инвентаризация команд nrz-cli
 
-Срез: 2026-06-11.
+Срез: 2026-06-21.
 
 Проверено по текущему коду и help текущего debug-бинаря:
 
 - `src/cli/mod.rs` - верхнеуровневый `Command` enum и глобальные флаги.
 - `src/main.rs` - dispatch всех команд в handlers.
 - `src/cli/*` и профильные modules (`deploy`, `build`, `dev`, `init`, `auth`).
+- Endpoint-контракт DB/domains сверялся с текущим checkout `../deployment/packages/server`.
 - `cargo build --quiet`.
 - `target/debug/nrz --help` и help для основных вложенных команд.
 
@@ -119,9 +120,9 @@ mindmap
 | `nrz rollback` | Создает rollback deployment. | `--deployment-id`; если не задан, ищет текущий live deployment через `--project-id`/config. |
 | `nrz functions check [DIR]` | Локальная проверка ONREZA Functions policy и `onreza.rules.toml`. | Ошибка `ONREZA_FUNCTIONS_NOT_FOUND`, если нет function entries и rules-файла; policy failure кодируется как `ONREZA_FUNCTIONS_POLICY`. |
 | `nrz kv ...` | Локальный KV store для dev/emulator state. | Не ходит в API. Хранилище: `.onreza/data/kv.<env>.json` от текущей директории; default env namespace `development`. |
-| `nrz db ...` | Managed PostgreSQL (kaiki) операции. | Management идет через API; `query` и `schema` получают connection URI через API и выполняют SQL локально из `nrz`. Database auto-resolve: explicit arg -> config `[db].database` -> auto-inject DB -> первый DB. |
+| `nrz db ...` | Managed PostgreSQL (kaiki) операции. | Management идет через `/v1/kaiki/databases`; project-scoped команды фильтруют/обновляют `projectAttachments`. `query` и `schema` получают connection URI через API и выполняют SQL локально из `nrz`. Database auto-resolve: explicit arg -> config `[db].database` -> auto-inject attachment -> первый attached DB. |
 | `nrz env ...` | Управление platform env vars и локальными dotenv imports/exports. | `--project-id` global внутри `env`; target env берется из command-scoped `--env` для `list/set/push`. |
-| `nrz domains ...` | Custom domains проекта. | `--project-id` global внутри `domains`; `add` по умолчанию ищет production environment. |
+| `nrz domains ...` | Custom domain hostnames проекта через workspace-domain API. | `--project-id` global внутри `domains`; `add` по умолчанию ищет production environment и создает/переиспользует workspace domain zone. |
 | `nrz projects ...` | CRUD projects через API. | `create --link` также пишет `onreza.toml` в cwd. |
 | `nrz login` | Device flow login или сохранение explicit token. | Если передан `--token`, валидирует `/v1/user` и сохраняет workspace `personal`. |
 | `nrz whoami` | Показывает текущего user и workspace context. | Требует token/workspace context. |
@@ -179,10 +180,10 @@ mindmap
 
 | Команда | Назначение | Опции |
 | --- | --- | --- |
-| `nrz domains list` | Список custom domains. | `--project-id`. |
-| `nrz domains add <DOMAIN>` | Добавляет domain в environment. | `--environment-id`; если не задан, ищет production environment. |
-| `nrz domains remove <DOMAIN_ID>` | Удаляет domain. | `--project-id`. |
-| `nrz domains verify <DOMAIN_ID>` | Запускает verify/check domain. | `--project-id`. |
+| `nrz domains list` | Список custom domain hostnames проекта из workspace-domain projection. | `--project-id`. |
+| `nrz domains add <DOMAIN>` | Привязывает hostname к environment через workspace-domain API. | `--environment-id`; если не задан, ищет production environment; parent zone создается/переиспользуется сервером. |
+| `nrz domains remove <DOMAIN_ID>` | Удаляет hostname binding. | `--project-id`. |
+| `nrz domains verify <DOMAIN_ID>` | Запускает verify/check parent workspace domain zone для hostname binding. | `--project-id`. |
 | `nrz kv get <KEY>` | Читает local KV value. | `--env`; expired values считаются отсутствующими. |
 | `nrz kv set <KEY> <VALUE>` | Пишет local KV value. | `--env`, `--ttl`, default `0` без expiry. |
 | `nrz kv delete <KEY>` | Удаляет local KV key. | `--env`. |

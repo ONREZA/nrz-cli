@@ -28,9 +28,18 @@ struct Domain {
     dns_error: Option<String>,
     tls_error: Option<String>,
     target_cname: Option<String>,
+    dns_mode: String,
+    managed_dns_zone: Option<DomainManagedDnsZone>,
     redirect_from_www: bool,
     created_at: String,
     environment: DomainEnvironment,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DomainManagedDnsZone {
+    id: String,
+    zone_name: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -54,32 +63,40 @@ struct Environment {
 }
 
 #[derive(Debug, Serialize)]
-struct AddDomainBody {
+#[serde(rename_all = "camelCase")]
+struct AttachHostnameBody {
     domain: String,
+    project_id: String,
+    environment_id: String,
+    redirect_from_www: bool,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AddDomainResponse {
-    domain: AddedDomain,
-    message: String,
+struct AttachHostnameResponse {
+    hostname: AddedHostname,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AddedDomain {
+struct AddedHostname {
     id: String,
     domain: String,
+    dns_mode: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct VerifyDomainResponse {
-    domain: String,
-    verified: bool,
-    dns_status: String,
-    #[serde(default)]
-    is_apex: Option<bool>,
+struct VerifyWorkspaceZoneResponse {
+    delegation: Option<DelegationStatus>,
+    requeued: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DelegationStatus {
+    delegated: bool,
+    expected: Vec<String>,
+    actual: Vec<String>,
 }
 
 pub async fn run(
@@ -119,8 +136,7 @@ pub async fn run(
 }
 
 async fn list(client: &ApiClient, project_id: &str, json: bool) -> anyhow::Result<()> {
-    let resp: DomainsListResponse = client
-        .get(&format!("/v1/domains/{}", project_id))
+    let resp = fetch_project_domains(client, project_id)
         .await
         .context("failed to fetch domains")?;
 
@@ -152,6 +168,15 @@ async fn list(client: &ApiClient, project_id: &str, json: bool) -> anyhow::Resul
     Ok(())
 }
 
+async fn fetch_project_domains(
+    client: &ApiClient,
+    project_id: &str,
+) -> anyhow::Result<DomainsListResponse> {
+    client
+        .get(&format!("/v1/workspace-domains?projectIds={}", project_id))
+        .await
+}
+
 fn format_status(status: &str) -> String {
     match status.to_uppercase().as_str() {
         "VALIDATED" | "ISSUED" => console::style(status.to_lowercase()).green().to_string(),
@@ -174,30 +199,30 @@ async fn add(
         find_production_environment(client, project_id).await?
     };
 
-    let body = AddDomainBody {
+    let body = AttachHostnameBody {
         domain: domain.to_string(),
+        project_id: project_id.to_string(),
+        environment_id: env_id,
+        redirect_from_www: false,
     };
 
-    let resp: AddDomainResponse = client
-        .post(
-            &format!("/v1/domains/{}/environments/{}", project_id, env_id),
-            &body,
-        )
+    let resp: AttachHostnameResponse = client
+        .post("/v1/workspace-domains/hostnames", &body)
         .await
         .context("failed to add domain")?;
 
     if json {
         output::json_output(&serde_json::json!({
-            "id": resp.domain.id,
-            "domain": resp.domain.domain,
-            "message": resp.message,
+            "id": resp.hostname.id,
+            "domain": resp.hostname.domain,
+            "dnsMode": resp.hostname.dns_mode,
         }));
     } else {
         output::success(
             false,
             format!(
                 "Added domain {}",
-                console::style(&resp.domain.domain).bold(),
+                console::style(&resp.hostname.domain).bold(),
             ),
             output::Phase::Domains,
         );
@@ -212,8 +237,14 @@ async fn remove(
     domain_id: &str,
     json: bool,
 ) -> anyhow::Result<()> {
+    let domain = find_project_domain(client, project_id, domain_id).await?;
+    let delete_path = match (domain.managed_dns_zone.as_ref(), domain.dns_mode.as_str()) {
+        (Some(zone), _) => workspace_hostname_delete_url(&zone.id, domain_id),
+        (None, _) => project_domain_delete_url(project_id, domain_id),
+    };
+
     client
-        .delete_empty(&format!("/v1/domains/{}/{}", project_id, domain_id))
+        .delete_empty(&delete_path)
         .await
         .context("failed to remove domain")?;
 
@@ -235,24 +266,67 @@ async fn verify(
     domain_id: &str,
     json: bool,
 ) -> anyhow::Result<()> {
-    let resp: VerifyDomainResponse = client
-        .post_empty(&format!("/v1/domains/{}/{}/verify", project_id, domain_id))
+    let domain = find_project_domain(client, project_id, domain_id).await?;
+    let zone_id = domain
+        .managed_dns_zone
+        .as_ref()
+        .map(|zone| zone.id.clone())
+        .ok_or_else(|| anyhow::anyhow!("domain is not attached to a workspace domain"))?;
+
+    let resp: VerifyWorkspaceZoneResponse = client
+        .post_empty(&workspace_zone_verify_url(&zone_id))
         .await
         .context("failed to verify domain")?;
 
     if json {
-        output::json_output(&resp);
-    } else if resp.verified {
-        output::success(false, "Domain verified.", output::Phase::Domains);
+        output::json_output(&serde_json::json!({
+            "id": domain.id,
+            "domain": domain.domain,
+            "zoneId": zone_id,
+            "requeued": resp.requeued,
+            "delegation": resp.delegation,
+        }));
+    } else if resp
+        .delegation
+        .as_ref()
+        .is_some_and(|status| status.delegated)
+    {
+        output::success(false, "Domain delegation verified.", output::Phase::Domains);
     } else {
         output::warn(
             false,
-            "Domain verification pending. Check your DNS records.",
+            "Domain verification queued. Check your DNS records.",
             output::Phase::Domains,
         );
     }
 
     Ok(())
+}
+
+async fn find_project_domain(
+    client: &ApiClient,
+    project_id: &str,
+    domain_id: &str,
+) -> anyhow::Result<Domain> {
+    fetch_project_domains(client, project_id)
+        .await
+        .context("failed to fetch domains")?
+        .domains
+        .into_iter()
+        .find(|domain| domain.id == domain_id)
+        .ok_or_else(|| anyhow::anyhow!("domain not found in project: {domain_id}"))
+}
+
+pub(crate) fn workspace_hostname_delete_url(zone_id: &str, binding_id: &str) -> String {
+    format!("/v1/workspace-domains/domains/{zone_id}/hostnames/{binding_id}")
+}
+
+pub(crate) fn project_domain_delete_url(project_id: &str, domain_id: &str) -> String {
+    format!("/v1/domains/{project_id}/platform-subdomains/{domain_id}")
+}
+
+pub(crate) fn workspace_zone_verify_url(zone_id: &str) -> String {
+    format!("/v1/workspace-domains/domains/{zone_id}/verify")
 }
 
 async fn find_production_environment(

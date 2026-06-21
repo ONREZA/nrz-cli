@@ -6,6 +6,8 @@ pub mod detect;
 pub mod detect_handler;
 pub mod domains;
 pub mod domains_handler;
+#[cfg(test)]
+mod domains_handler_tests;
 pub mod env;
 pub mod env_handler;
 #[cfg(test)]

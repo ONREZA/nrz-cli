@@ -21,6 +21,68 @@ fn create_body_serializes_server_contract() {
 }
 
 #[test]
+fn db_urls_use_current_kaiki_server_routes() {
+    assert_eq!(KAIKI_DATABASES_BASE, "/v1/kaiki/databases");
+    assert_eq!(
+        project_attachment_url(KAIKI_DATABASES_BASE, "db-1", "project-1"),
+        "/v1/kaiki/databases/db-1/attachments/project-1"
+    );
+    assert_eq!(
+        dev_env_url("project-1", Some("primary db"), Some("feature/a")),
+        "/v1/kaiki/databases/dev-env?projectId=project%2D1&database=primary%20db&branch=feature%2Fa"
+    );
+}
+
+#[test]
+fn project_attachment_body_serializes_server_contract() {
+    let body = ProjectAttachmentBody {
+        env_var_name: Some("DATABASE_URL".to_string()),
+        auto_inject_db_url: Some(true),
+        auto_create_preview_branch: Some(false),
+    };
+
+    let value = serde_json::to_value(body).expect("attachment body serializes");
+
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "envVarName": "DATABASE_URL",
+            "autoInjectDbUrl": true,
+            "autoCreatePreviewBranch": false,
+        })
+    );
+}
+
+#[test]
+fn managed_database_uses_project_attachment_settings() {
+    let db: ManagedDatabase = serde_json::from_value(serde_json::json!({
+        "id": "db-1",
+        "dbName": "primary",
+        "autoInjectDbUrl": false,
+        "projectAttachments": [
+            {
+                "projectId": "project-1",
+                "autoInjectDbUrl": true,
+                "envVarName": "APP_DATABASE_URL",
+                "autoCreatePreviewBranch": true
+            }
+        ]
+    }))
+    .expect("managed database deserializes");
+
+    assert!(db.is_attached_to_project("project-1"));
+    assert_eq!(db.auto_inject_db_url_for_project("project-1"), Some(true));
+    assert_eq!(
+        db.env_var_name_for_project("project-1"),
+        Some("APP_DATABASE_URL")
+    );
+    assert_eq!(
+        db.auto_create_preview_branch_for_project("project-1"),
+        Some(true)
+    );
+}
+
+#[test]
 fn branch_list_deserializes_current_server_array() {
     let list: BranchListResponse = serde_json::from_value(serde_json::json!([
         {"id": "branch-1", "name": "main", "status": "ACTIVE"}

@@ -86,7 +86,7 @@ pub fn analyze_function_entry(
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(path).unwrap_or_else(|_| SourceType::ts());
     let parsed = Parser::new(&allocator, source, source_type).parse();
-    if parsed.panicked || !parsed.errors.is_empty() {
+    if parsed.panicked || !parsed.diagnostics.is_empty() {
         return Err(FunctionConfigError::new(
             "function entry could not be parsed as ESM TypeScript/JavaScript",
         ));

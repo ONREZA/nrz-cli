@@ -23,6 +23,7 @@ use nrz::config::ProjectConfig;
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 const QUERY_MAX_ROWS: usize = 1000;
+const KAIKI_DATABASES_BASE: &str = "/v1/kaiki/databases";
 
 // ── API response types ──────────────────────────────────────
 
@@ -46,6 +47,50 @@ struct ManagedDatabase {
     auto_create_preview_branch: Option<bool>,
     #[serde(default)]
     kaiki_status: Option<String>,
+    #[serde(default)]
+    project_attachments: Vec<ProjectAttachment>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectAttachment {
+    project_id: String,
+    #[serde(default)]
+    auto_inject_db_url: Option<bool>,
+    #[serde(default)]
+    env_var_name: Option<String>,
+    #[serde(default)]
+    auto_create_preview_branch: Option<bool>,
+}
+
+impl ManagedDatabase {
+    fn attachment_for_project(&self, project_id: &str) -> Option<&ProjectAttachment> {
+        self.project_attachments
+            .iter()
+            .find(|attachment| attachment.project_id == project_id)
+    }
+
+    fn is_attached_to_project(&self, project_id: &str) -> bool {
+        self.attachment_for_project(project_id).is_some()
+    }
+
+    fn auto_inject_db_url_for_project(&self, project_id: &str) -> Option<bool> {
+        self.attachment_for_project(project_id)
+            .and_then(|attachment| attachment.auto_inject_db_url)
+            .or(self.auto_inject_db_url)
+    }
+
+    fn env_var_name_for_project(&self, project_id: &str) -> Option<&str> {
+        self.attachment_for_project(project_id)
+            .and_then(|attachment| attachment.env_var_name.as_deref())
+            .or(self.env_var_name.as_deref())
+    }
+
+    fn auto_create_preview_branch_for_project(&self, project_id: &str) -> Option<bool> {
+        self.attachment_for_project(project_id)
+            .and_then(|attachment| attachment.auto_create_preview_branch)
+            .or(self.auto_create_preview_branch)
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -171,12 +216,13 @@ struct CreateBranchBody {
     name: String,
 }
 
-#[derive(Serialize)]
+#[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AutoInjectBody {
-    enabled: bool,
+struct ProjectAttachmentBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     env_var_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_inject_db_url: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     auto_create_preview_branch: Option<bool>,
 }
@@ -216,34 +262,34 @@ pub async fn run(
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
     let project_id = nrz::config::resolve_project_id(args.project_id.as_deref(), config)?;
-    let base = format!("/v1/managed-databases/{project_id}");
+    let base = KAIKI_DATABASES_BASE;
 
     match args.command {
-        DbCommand::List => cmd_list(&client, &base, json).await,
+        DbCommand::List => cmd_list(&client, base, &project_id, json).await,
         DbCommand::Create {
             name,
             cu_size,
             wait,
-        } => cmd_create(&client, &base, json, name, cu_size, wait).await,
+        } => cmd_create(&client, base, &project_id, json, name, cu_size, wait).await,
         DbCommand::Info { database } => {
-            let db_id = resolve_db(&client, &base, database.as_deref(), config).await?;
-            cmd_info(&client, &base, &db_id, json).await
+            let db_id = resolve_db(&client, base, &project_id, database.as_deref(), config).await?;
+            cmd_info(&client, base, &project_id, &db_id, json).await
         }
         DbCommand::Delete { database, force } => {
-            let db_id = resolve_db(&client, &base, Some(&database), config).await?;
-            cmd_delete(&client, &base, &db_id, json, force).await
+            let db_id = resolve_db(&client, base, &project_id, Some(&database), config).await?;
+            cmd_delete(&client, base, &db_id, json, force).await
         }
         DbCommand::Start { database } => {
-            let db_id = resolve_db(&client, &base, database.as_deref(), config).await?;
-            cmd_start_stop(&client, &base, &db_id, json, "start").await
+            let db_id = resolve_db(&client, base, &project_id, database.as_deref(), config).await?;
+            cmd_start_stop(&client, base, &db_id, json, "start").await
         }
         DbCommand::Stop { database } => {
-            let db_id = resolve_db(&client, &base, database.as_deref(), config).await?;
-            cmd_start_stop(&client, &base, &db_id, json, "stop").await
+            let db_id = resolve_db(&client, base, &project_id, database.as_deref(), config).await?;
+            cmd_start_stop(&client, base, &db_id, json, "stop").await
         }
         DbCommand::Connection { database, branch } => {
-            let db_id = resolve_db(&client, &base, database.as_deref(), config).await?;
-            cmd_connection(&client, &base, &db_id, json, branch.as_deref()).await
+            let db_id = resolve_db(&client, base, &project_id, database.as_deref(), config).await?;
+            cmd_connection(&client, base, &db_id, json, branch.as_deref()).await
         }
         DbCommand::Query {
             database,
@@ -251,34 +297,48 @@ pub async fn run(
             file,
             branch,
         } => {
-            let db_id = resolve_db(&client, &base, database.as_deref(), config).await?;
+            let db_id = resolve_db(&client, base, &project_id, database.as_deref(), config).await?;
             let sql = resolve_sql(sql.as_deref(), file.as_deref())?;
-            cmd_query(&client, &base, &db_id, json, &sql, branch.as_deref()).await
+            cmd_query(&client, base, &db_id, json, &sql, branch.as_deref()).await
         }
         DbCommand::Branches(bargs) => {
-            let db_id = resolve_db(&client, &base, bargs.database.as_deref(), config).await?;
+            let db_id = resolve_db(
+                &client,
+                base,
+                &project_id,
+                bargs.database.as_deref(),
+                config,
+            )
+            .await?;
             match bargs.command {
                 None | Some(BranchesCommand::List) => {
-                    cmd_branches_list(&client, &base, &db_id, json).await
+                    cmd_branches_list(&client, base, &db_id, json).await
                 }
                 Some(BranchesCommand::Create { name }) => {
-                    cmd_branches_create(&client, &base, &db_id, json, &name).await
+                    cmd_branches_create(&client, base, &db_id, json, &name).await
                 }
                 Some(BranchesCommand::Delete { branch }) => {
-                    cmd_branches_delete(&client, &base, &db_id, json, &branch).await
+                    cmd_branches_delete(&client, base, &db_id, json, &branch).await
                 }
                 Some(BranchesCommand::Connection { branch }) => {
-                    cmd_branch_connection(&client, &base, &db_id, json, &branch).await
+                    cmd_branch_connection(&client, base, &db_id, json, &branch).await
                 }
             }
         }
         DbCommand::Config(cargs) => {
-            let db_id = resolve_db(&client, &base, cargs.database.as_deref(), config).await?;
-            cmd_config(&client, &base, &db_id, json, cargs).await
+            let db_id = resolve_db(
+                &client,
+                base,
+                &project_id,
+                cargs.database.as_deref(),
+                config,
+            )
+            .await?;
+            cmd_config(&client, base, &project_id, &db_id, json, cargs).await
         }
         DbCommand::Schema { database, branch } => {
-            let db_id = resolve_db(&client, &base, database.as_deref(), config).await?;
-            cmd_schema(&client, &base, &db_id, json, branch.as_deref()).await
+            let db_id = resolve_db(&client, base, &project_id, database.as_deref(), config).await?;
+            cmd_schema(&client, base, &db_id, json, branch.as_deref()).await
         }
     }
 }
@@ -289,6 +349,7 @@ pub async fn run(
 async fn resolve_db(
     client: &ApiClient,
     base: &str,
+    project_id: &str,
     explicit: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<String> {
@@ -296,22 +357,27 @@ async fn resolve_db(
     if let Some(val) = explicit
         && !val.is_empty()
     {
-        return resolve_db_by_id_or_name(client, base, val).await;
+        return resolve_db_by_id_or_name(client, base, project_id, val).await;
     }
 
     // 2. Config: [db] database
     if let Some(val) = config.db_database() {
-        return resolve_db_by_id_or_name(client, base, val).await;
+        return resolve_db_by_id_or_name(client, base, project_id, val).await;
     }
 
-    // 3. Auto-resolve: first auto-inject, or first available
+    // 3. Auto-resolve: first project auto-inject attachment, or first project attachment.
     let list: ListResponse = client.get(base).await.context("failed to list databases")?;
 
     let db = list
         .data
         .iter()
-        .find(|d| d.auto_inject_db_url == Some(true))
-        .or(list.data.first())
+        .filter(|db| db.is_attached_to_project(project_id))
+        .find(|db| db.auto_inject_db_url_for_project(project_id) == Some(true))
+        .or_else(|| {
+            list.data
+                .iter()
+                .find(|db| db.is_attached_to_project(project_id))
+        })
         .ok_or_else(|| anyhow::anyhow!("no databases found in project"))?;
 
     Ok(db.id.clone())
@@ -320,6 +386,7 @@ async fn resolve_db(
 async fn resolve_db_by_id_or_name(
     client: &ApiClient,
     base: &str,
+    project_id: &str,
     val: &str,
 ) -> anyhow::Result<String> {
     // If it looks like an ID (UUIDv7 hex or with hyphens), use directly
@@ -332,7 +399,13 @@ async fn resolve_db_by_id_or_name(
 
     list.data
         .iter()
+        .filter(|db| db.is_attached_to_project(project_id))
         .find(|d| d.id == val || d.db_name.as_deref() == Some(val))
+        .or_else(|| {
+            list.data
+                .iter()
+                .find(|d| d.id == val || d.db_name.as_deref() == Some(val))
+        })
         .map(|d| d.id.clone())
         .ok_or_else(|| anyhow::anyhow!("database \"{val}\" not found"))
 }
@@ -360,8 +433,14 @@ fn resolve_sql(sql: Option<&str>, file: Option<&str>) -> anyhow::Result<String> 
 
 // ── Command implementations ─────────────────────────────────
 
-async fn cmd_list(client: &ApiClient, base: &str, json: bool) -> anyhow::Result<()> {
-    let list: ListResponse = client.get(base).await.context("failed to list databases")?;
+async fn cmd_list(
+    client: &ApiClient,
+    base: &str,
+    project_id: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    let mut list: ListResponse = client.get(base).await.context("failed to list databases")?;
+    list.data.retain(|db| db.is_attached_to_project(project_id));
 
     if json {
         output::json_output(&list);
@@ -386,7 +465,7 @@ async fn cmd_list(client: &ApiClient, base: &str, json: bool) -> anyhow::Result<
         let name = db.db_name.as_deref().unwrap_or("(unnamed)");
         let status = db.status.as_deref().unwrap_or("unknown");
         let cu = db.cu_size.map(|v| format!("{v}")).unwrap_or_default();
-        let inject = if db.auto_inject_db_url == Some(true) {
+        let inject = if db.auto_inject_db_url_for_project(project_id) == Some(true) {
             " [auto-inject]"
         } else {
             ""
@@ -405,6 +484,7 @@ async fn cmd_list(client: &ApiClient, base: &str, json: bool) -> anyhow::Result<
 async fn cmd_create(
     client: &ApiClient,
     base: &str,
+    project_id: &str,
     json: bool,
     name: Option<String>,
     cu_size: Option<f64>,
@@ -420,6 +500,19 @@ async fn cmd_create(
         .post(base, &body)
         .await
         .context("failed to create database")?;
+
+    let _: serde_json::Value = client
+        .patch(
+            &project_attachment_url(base, &created.id, project_id),
+            &ProjectAttachmentBody::default(),
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "database {} was created, but failed to attach it to project {}",
+                created.id, project_id
+            )
+        })?;
 
     if wait {
         output::status(
@@ -478,7 +571,13 @@ async fn cmd_create(
     Ok(())
 }
 
-async fn cmd_info(client: &ApiClient, base: &str, db_id: &str, json: bool) -> anyhow::Result<()> {
+async fn cmd_info(
+    client: &ApiClient,
+    base: &str,
+    project_id: &str,
+    db_id: &str,
+    json: bool,
+) -> anyhow::Result<()> {
     let url = format!("{}/{}", base, db_id);
     let info: DbInfoResponse = client
         .get(&url)
@@ -505,10 +604,12 @@ async fn cmd_info(client: &ApiClient, base: &str, db_id: &str, json: bool) -> an
     if let Some(pg) = db.pg_version {
         eprintln!("  PostgreSQL: {pg}");
     }
-    if let Some(true) = db.auto_inject_db_url {
-        let var = db.env_var_name.as_deref().unwrap_or("DATABASE_URL");
+    if let Some(true) = db.auto_inject_db_url_for_project(project_id) {
+        let var = db
+            .env_var_name_for_project(project_id)
+            .unwrap_or("DATABASE_URL");
         eprintln!("  Auto-inject: {var}");
-        if db.auto_create_preview_branch == Some(true) {
+        if db.auto_create_preview_branch_for_project(project_id) == Some(true) {
             eprintln!("  Preview branches: enabled");
         }
     }
@@ -756,6 +857,7 @@ async fn cmd_branch_connection(
 async fn cmd_config(
     client: &ApiClient,
     base: &str,
+    project_id: &str,
     db_id: &str,
     json: bool,
     args: ConfigArgs,
@@ -764,31 +866,24 @@ async fn cmd_config(
         args.auto_inject.is_some() || args.env_var.is_some() || args.preview_branches.is_some();
 
     if has_updates {
-        let url = format!("{}/{}/auto-inject", base, db_id);
-        let enabled = match args.auto_inject {
-            Some(enabled) => enabled,
-            None => {
-                let info: DbInfoResponse = client
-                    .get(&format!("{}/{}", base, db_id))
-                    .await
-                    .context("failed to get current auto-inject settings")?;
-                info.db.auto_inject_db_url.unwrap_or(false)
-            }
-        };
-        let body = AutoInjectBody {
-            enabled,
+        let body = ProjectAttachmentBody {
             env_var_name: args.env_var,
+            auto_inject_db_url: args.auto_inject,
             auto_create_preview_branch: args.preview_branches,
         };
         let resp: serde_json::Value = client
-            .patch(&url, &body)
+            .patch(&project_attachment_url(base, db_id, project_id), &body)
             .await
-            .context("failed to update auto-inject settings")?;
+            .context("failed to update project database attachment")?;
 
         if json {
             output::json_output(&resp);
         } else {
-            output::success(false, "Auto-inject settings updated", output::Phase::Db);
+            output::success(
+                false,
+                "Database project settings updated",
+                output::Phase::Db,
+            );
         }
     } else {
         // Show current settings
@@ -800,14 +895,17 @@ async fn cmd_config(
 
         if json {
             output::json_output(&serde_json::json!({
-                "autoInject": info.db.auto_inject_db_url,
-                "envVar": info.db.env_var_name,
-                "previewBranches": info.db.auto_create_preview_branch,
+                "autoInject": info.db.auto_inject_db_url_for_project(project_id),
+                "envVar": info.db.env_var_name_for_project(project_id),
+                "previewBranches": info.db.auto_create_preview_branch_for_project(project_id),
             }));
         } else {
-            let enabled = info.db.auto_inject_db_url == Some(true);
-            let var = info.db.env_var_name.as_deref().unwrap_or("DATABASE_URL");
-            let preview = info.db.auto_create_preview_branch == Some(true);
+            let enabled = info.db.auto_inject_db_url_for_project(project_id) == Some(true);
+            let var = info
+                .db
+                .env_var_name_for_project(project_id)
+                .unwrap_or("DATABASE_URL");
+            let preview = info.db.auto_create_preview_branch_for_project(project_id) == Some(true);
             eprintln!("  Auto-inject:      {}", if enabled { "on" } else { "off" });
             eprintln!("  Env variable:     {var}");
             eprintln!("  Preview branches: {}", if preview { "on" } else { "off" });
@@ -909,6 +1007,25 @@ async fn cmd_schema(
 
 // ── Helpers ─────────────────────────────────────────────────
 
+fn project_attachment_url(base: &str, db_id: &str, project_id: &str) -> String {
+    format!("{base}/{db_id}/attachments/{project_id}")
+}
+
+fn query_value(value: &str) -> String {
+    percent_encoding::utf8_percent_encode(value, percent_encoding::NON_ALPHANUMERIC).to_string()
+}
+
+fn dev_env_url(project_id: &str, database: Option<&str>, branch: Option<&str>) -> String {
+    let mut params = vec![format!("projectId={}", query_value(project_id))];
+    if let Some(database) = database {
+        params.push(format!("database={}", query_value(database)));
+    }
+    if let Some(branch) = branch {
+        params.push(format!("branch={}", query_value(branch)));
+    }
+    format!("{KAIKI_DATABASES_BASE}/dev-env?{}", params.join("&"))
+}
+
 /// Fetch dev-env connection for `nrz dev` integration.
 pub async fn fetch_dev_env(
     client: &ApiClient,
@@ -916,24 +1033,7 @@ pub async fn fetch_dev_env(
     database: Option<&str>,
     branch: Option<&str>,
 ) -> anyhow::Result<DevEnvResponse> {
-    let mut url = format!("/v1/managed-databases/{project_id}/dev-env");
-    let mut params = Vec::new();
-    if let Some(db) = database {
-        params.push(format!(
-            "database={}",
-            percent_encoding::utf8_percent_encode(db, percent_encoding::NON_ALPHANUMERIC)
-        ));
-    }
-    if let Some(br) = branch {
-        params.push(format!(
-            "branch={}",
-            percent_encoding::utf8_percent_encode(br, percent_encoding::NON_ALPHANUMERIC)
-        ));
-    }
-    if !params.is_empty() {
-        url.push('?');
-        url.push_str(&params.join("&"));
-    }
+    let url = dev_env_url(project_id, database, branch);
 
     client.get(&url).await.context(
         "failed to fetch dev environment — is a managed database configured for this project?",
