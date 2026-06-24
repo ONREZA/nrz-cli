@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.0-beta.0] - 2026-06-24
+
+### ✨ Features
+
+- **deploy:** add nextjs adapter support ([60a6f5e](https://github.com/ONREZA/nrz-cli/commit/60a6f5ef86a3f355e46d63f6a0edbc0bb05c5d6a))
+
 ## [0.34.1] - 2026-06-21
 
 ### 🔧 Changed
