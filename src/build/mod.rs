@@ -34,6 +34,8 @@ struct BuildOutput {
     framework: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     framework_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compatibility: Option<serde_json::Value>,
 }
 
 /// Result of the build step — carries the output directory and parsed manifest so deploy avoids re-reading them.
@@ -213,6 +215,7 @@ pub(crate) async fn run_with_effective_config(
                 output_dir: output_dir.to_string_lossy().into_owned(),
                 framework,
                 framework_version,
+                compatibility: nextjs_adapter_compatibility(&manifest),
             };
             if emit_json_result {
                 output::json_output(&data);
@@ -238,7 +241,17 @@ pub(crate) async fn run_with_effective_config(
                 manifest.routes.len(),
             );
         }
+        emit_nextjs_adapter_compatibility_status(json, &manifest, output::Phase::Build);
         Some(manifest)
+    } else if let Some(auto) =
+        try_generate_nextjs_adapter_manifest(project_dir, &output_dir, detection, json)?
+    {
+        if !args.skip_validation {
+            manifest::verify_files(&output_dir, &auto)
+                .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
+        }
+        emit_build_output(json, emit_json_result, &auto, &output_dir, Some(detection));
+        Some(auto)
     } else if is_nextjs_standalone_framework(&detection.framework)
         && (detection
             .metadata
@@ -263,6 +276,7 @@ pub(crate) async fn run_with_effective_config(
             project_dir,
             &output_dir,
             &standalone.server_dir,
+            true,
             json,
         )?;
         let has_public = standalone.server_dir.join("public").is_dir();
@@ -334,8 +348,20 @@ fn emit_build_output(
     output_dir: &Path,
     detection: Option<&crate::detect::types::DetectionResult>,
 ) {
-    let framework = detection.map(|d| d.framework.clone());
-    let framework_version = detection.and_then(|d| d.version.clone());
+    let framework = manifest
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.pointer("/framework/name"))
+        .and_then(serde_json::Value::as_str)
+        .map(String::from)
+        .or_else(|| detection.map(|d| d.framework.clone()));
+    let framework_version = manifest
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.pointer("/framework/version"))
+        .and_then(serde_json::Value::as_str)
+        .map(String::from)
+        .or_else(|| detection.and_then(|d| d.version.clone()));
 
     if json {
         let data = BuildOutput {
@@ -353,6 +379,7 @@ fn emit_build_output(
             output_dir: output_dir.to_string_lossy().into_owned(),
             framework,
             framework_version,
+            compatibility: nextjs_adapter_compatibility(manifest),
         };
         if emit_json_result {
             output::json_output(&data);
@@ -378,6 +405,262 @@ fn emit_build_output(
             manifest.routes.len(),
         );
     }
+}
+
+fn emit_nextjs_adapter_compatibility_status(
+    json: bool,
+    manifest: &manifest::Manifest,
+    phase: output::Phase,
+) {
+    let Some(compatibility) = nextjs_adapter_compatibility(manifest) else {
+        return;
+    };
+    output::status(
+        json,
+        "~",
+        crate::nextjs_adapter::format_nextjs_adapter_report(&compatibility),
+        phase,
+    );
+}
+
+fn try_generate_nextjs_adapter_manifest(
+    project_dir: &Path,
+    output_dir: &Path,
+    detection: &crate::detect::types::DetectionResult,
+    json: bool,
+) -> anyhow::Result<Option<manifest::Manifest>> {
+    if !is_nextjs_standalone_framework(&detection.framework) {
+        return Ok(None);
+    }
+
+    let Some(descriptor) = crate::nextjs_adapter::load_descriptor(project_dir)? else {
+        return Ok(None);
+    };
+    if descriptor.version != 1 {
+        return Err(output::coded_error(
+            "INVALID_NEXT_ADAPTER_OUTPUT",
+            format!(
+                "unsupported Next.js adapter descriptor version: {}. Expected 1.",
+                descriptor.version
+            ),
+        ));
+    }
+
+    let Some(standalone) = resolve_nextjs_standalone_server(project_dir, output_dir) else {
+        tracing::warn!(
+            output_dir = %output_dir.display(),
+            "Next.js adapter descriptor found, but standalone server output is unavailable"
+        );
+        return Ok(None);
+    };
+
+    prepare_nextjs_standalone_for_server(
+        project_dir,
+        output_dir,
+        &standalone.server_dir,
+        false,
+        json,
+    )?;
+    let has_middleware = descriptor.has_middleware();
+    if has_middleware {
+        output::status(
+            json,
+            "~",
+            "Next.js middleware detected, splitting only matcher-safe assets into STATIC",
+            output::Phase::Build,
+        );
+    }
+    let static_file_count = copy_nextjs_adapter_static_files(project_dir, output_dir, &descriptor)?;
+    let prerender_pages = copy_nextjs_adapter_prerenders(project_dir, output_dir, &descriptor)?;
+    let public_root = standalone.server_dir.join("public");
+    let has_public =
+        public_root.is_dir() && public_layer_safe_for_nextjs_adapter(&public_root, &descriptor)?;
+    let public_dir = join_manifest_path(
+        standalone.server_dir_relative.as_deref().unwrap_or(""),
+        "public",
+    );
+    let compatibility = descriptor.compatibility_summary();
+    let manifest_compatibility = descriptor.manifest_compatibility_summary();
+    let mut auto = manifest::generate_nextjs_adapter_manifest_for_server(
+        static_file_count > 0,
+        has_public,
+        &public_dir,
+        &standalone.entry,
+        prerender_pages.clone(),
+    );
+    auto.meta = Some(serde_json::json!({
+        "adapter": {
+            "name": &descriptor.adapter.name,
+            "version": &descriptor.adapter.version,
+        },
+        "framework": {
+            "name": &detection.framework,
+            "version": descriptor.next_version.as_ref().or(detection.version.as_ref()),
+        },
+        "next": {
+            "buildId": &descriptor.build_id,
+            "adapterCompatibility": &manifest_compatibility,
+        },
+    }));
+    let manifest_mode =
+        if has_middleware && static_file_count == 0 && !has_public && prerender_pages.is_empty() {
+            "COMPUTE fallback"
+        } else if has_middleware {
+            "guarded STATIC + COMPUTE"
+        } else {
+            "STATIC + COMPUTE"
+        };
+    output::status(
+        json,
+        "~",
+        format!("Auto-generated Next.js adapter manifest ({manifest_mode})"),
+        output::Phase::Build,
+    );
+    output::status(
+        json,
+        "~",
+        crate::nextjs_adapter::format_nextjs_adapter_report(&compatibility),
+        output::Phase::Build,
+    );
+    manifest::validate(&auto).map_err(|e| output::with_default_code(e, "INVALID_MANIFEST"))?;
+    Ok(Some(auto))
+}
+
+fn copy_nextjs_adapter_static_files(
+    project_dir: &Path,
+    output_dir: &Path,
+    descriptor: &crate::nextjs_adapter::AdapterDescriptor,
+) -> anyhow::Result<usize> {
+    let mappings = descriptor.static_file_mappings_for_static_layer(project_dir)?;
+    if mappings.is_empty() {
+        return Ok(0);
+    }
+
+    let static_root = output_dir.join("_static");
+    for mapping in &mappings {
+        let target = static_root.join(&mapping.target);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        std::fs::copy(&mapping.source, &target).with_context(|| {
+            format!(
+                "failed to copy Next.js static file {} -> {}",
+                mapping.source.display(),
+                target.display()
+            )
+        })?;
+    }
+
+    Ok(mappings.len())
+}
+
+fn copy_nextjs_adapter_prerenders(
+    project_dir: &Path,
+    output_dir: &Path,
+    descriptor: &crate::nextjs_adapter::AdapterDescriptor,
+) -> anyhow::Result<Vec<manifest::NextjsAdapterPrerenderPage>> {
+    let mappings = descriptor.static_prerender_mappings_for_static_layer(project_dir)?;
+    if mappings.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let prerender_root = output_dir.join("_prerender");
+    let mut pages = Vec::with_capacity(mappings.len());
+    for mapping in &mappings {
+        let target = prerender_root.join(&mapping.target);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        std::fs::copy(&mapping.source, &target).with_context(|| {
+            format!(
+                "failed to copy Next.js prerender file {} -> {}",
+                mapping.source.display(),
+                target.display()
+            )
+        })?;
+        pages.push(manifest::NextjsAdapterPrerenderPage {
+            pathname: mapping.pathname.clone(),
+            html: mapping.target.clone(),
+        });
+    }
+
+    Ok(pages)
+}
+
+fn nextjs_adapter_compatibility(manifest: &manifest::Manifest) -> Option<serde_json::Value> {
+    manifest
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.pointer("/next/adapterCompatibility"))
+        .cloned()
+}
+
+fn public_layer_safe_for_nextjs_adapter(
+    public_root: &Path,
+    descriptor: &crate::nextjs_adapter::AdapterDescriptor,
+) -> anyhow::Result<bool> {
+    if !descriptor.has_middleware() {
+        return Ok(true);
+    }
+
+    let pathnames = public_asset_pathnames(public_root)?;
+    if pathnames.is_empty() {
+        return Ok(false);
+    }
+    Ok(pathnames
+        .iter()
+        .all(|pathname| descriptor.pathname_safe_for_public_layer(pathname)))
+}
+
+fn public_asset_pathnames(public_root: &Path) -> anyhow::Result<Vec<String>> {
+    let mut pathnames = Vec::new();
+    collect_public_asset_pathnames(public_root, public_root, &mut pathnames)?;
+    pathnames.sort();
+    Ok(pathnames)
+}
+
+fn collect_public_asset_pathnames(
+    base: &Path,
+    dir: &Path,
+    pathnames: &mut Vec<String>,
+) -> anyhow::Result<()> {
+    for entry in
+        std::fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            collect_public_asset_pathnames(base, &path, pathnames)?;
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+
+        let relative = path
+            .strip_prefix(base)
+            .with_context(|| format!("failed to relativize {}", path.display()))?;
+        let mut url_path = String::from("/");
+        let mut first = true;
+        for component in relative.components() {
+            let std::path::Component::Normal(segment) = component else {
+                anyhow::bail!("unsafe public asset path: {}", relative.display());
+            };
+            let Some(segment) = segment.to_str() else {
+                anyhow::bail!("public asset path is not UTF-8: {}", relative.display());
+            };
+            if !first {
+                url_path.push('/');
+            }
+            first = false;
+            url_path.push_str(segment);
+        }
+        pathnames.push(url_path);
+    }
+    Ok(())
 }
 
 /// Use SSR analysis from detection to refine the output directory list.
@@ -1024,13 +1307,14 @@ fn prepare_nextjs_standalone(
     output_dir: &Path,
     json: bool,
 ) -> anyhow::Result<()> {
-    prepare_nextjs_standalone_for_server(project_dir, output_dir, output_dir, json)
+    prepare_nextjs_standalone_for_server(project_dir, output_dir, output_dir, true, json)
 }
 
 fn prepare_nextjs_standalone_for_server(
     project_dir: &Path,
     bundle_root: &Path,
     server_dir: &Path,
+    copy_cdn_static: bool,
     json: bool,
 ) -> anyhow::Result<()> {
     let next_static_src = project_dir.join(".next/static");
@@ -1062,23 +1346,25 @@ fn prepare_nextjs_standalone_for_server(
             );
         }
 
-        // 2. Copy .next/static/ → {server}/_static/_next/static/ (for CDN STATIC layer)
-        let cdn_static_dst = server_dir.join("_static/_next/static");
-        if !cdn_static_dst.is_dir() {
-            output::status(
-                json,
-                "+",
-                "Copying static assets to _static/ for CDN",
-                output::Phase::Build,
-            );
-            copy_dir_recursive(&next_static_src, &cdn_static_dst)?;
-        } else {
-            output::status(
-                json,
-                "~",
-                "_static/ already present, skipping copy",
-                output::Phase::Build,
-            );
+        if copy_cdn_static {
+            // 2. Copy .next/static/ → {server}/_static/_next/static/ (for CDN STATIC layer)
+            let cdn_static_dst = server_dir.join("_static/_next/static");
+            if !cdn_static_dst.is_dir() {
+                output::status(
+                    json,
+                    "+",
+                    "Copying static assets to _static/ for CDN",
+                    output::Phase::Build,
+                );
+                copy_dir_recursive(&next_static_src, &cdn_static_dst)?;
+            } else {
+                output::status(
+                    json,
+                    "~",
+                    "_static/ already present, skipping copy",
+                    output::Phase::Build,
+                );
+            }
         }
     }
 

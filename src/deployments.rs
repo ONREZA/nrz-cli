@@ -159,9 +159,20 @@ pub async fn run(
             console::style("Total:").dim(),
             resp.total,
         );
+        if let Some(url) = first_preview_url(&resp.deployments) {
+            eprintln!();
+            crate::preview::print_preview_access_hint(&project_id, Some(url));
+        }
     }
 
     Ok(())
+}
+
+pub(crate) fn first_preview_url(deployments: &[Deployment]) -> Option<&str> {
+    deployments
+        .iter()
+        .find(|d| d.is_preview == Some(true) && d.url.is_some())
+        .and_then(|d| d.url.as_deref())
 }
 
 pub fn truncate_id(s: &str, max: usize) -> &str {

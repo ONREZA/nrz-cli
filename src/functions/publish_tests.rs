@@ -26,7 +26,7 @@ export default {};
     );
     let collected = collect(tmp.path()).unwrap();
 
-    let payload = build_payload("DEPLOYMENT", &collected, None, false);
+    let payload = build_payload("DEPLOYMENT", &collected, None, false, Vec::new());
     let value = serde_json::to_value(&payload).unwrap();
 
     assert_eq!(value["origin"], "DEPLOYMENT");
@@ -56,7 +56,6 @@ fn load_edge_rules_parses_toml_array_of_tables() {
         "onreza.rules.toml",
         r#"
 schemaVersion = "EDGE_RULE_SET_V1"
-source = { origin = "build" }
 
 [[rules]]
 id = "old-docs"
@@ -72,7 +71,7 @@ action = { type = "cache", ttlSeconds = 60 }
 
     let value = load_edge_rules(tmp.path()).unwrap().unwrap();
     assert_eq!(value["schemaVersion"], "EDGE_RULE_SET_V1");
-    assert_eq!(value["source"]["origin"], "build");
+    assert!(value.get("source").is_none());
     // `[[rules]]` array-of-tables preserves order → platform assigns `position`.
     assert_eq!(value["rules"][0]["id"], "old-docs");
     assert!(value["rules"][0].get("position").is_none());
@@ -467,7 +466,7 @@ action = { type = "redirect", target = "/docs" }
     let collected = collect(tmp.path()).unwrap();
     let edge_rules = load_edge_rules(tmp.path()).unwrap();
 
-    let payload = build_payload("DEPLOYMENT", &collected, edge_rules, false);
+    let payload = build_payload("DEPLOYMENT", &collected, edge_rules, false, Vec::new());
     let value = serde_json::to_value(&payload).unwrap();
 
     assert!(value["functions"].as_array().unwrap().is_empty());

@@ -3,7 +3,8 @@
 use std::path::Path;
 
 use super::manifest::{
-    LayerTarget, generate_astro_ssr_manifest, generate_compute_manifest,
+    LayerTarget, NextjsAdapterPrerenderPage, generate_astro_ssr_manifest,
+    generate_compute_manifest, generate_nextjs_adapter_manifest_for_server,
     generate_nextjs_standalone_manifest_for_server, generate_nuxt_manifest,
     generate_remix_manifest, generate_static_manifest, generate_sveltekit_manifest,
     load_and_validate, primary_compute_target, validate, verify_files,
@@ -469,6 +470,29 @@ fn manifest_with_legacy_middleware_is_rejected() {
     assert!(
         err.to_string().contains(
             "manifest middleware is no longer supported; declare HTTP function wiring in onreza.rules.toml with a pipeline action"
+        ),
+        "{err}"
+    );
+}
+
+#[test]
+fn manifest_with_edge_rules_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let json = r#"{
+        "version": 1,
+        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
+        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
+        "edgeRules": {
+            "schemaVersion": "EDGE_RULE_SET_V1",
+            "source": { "origin": "build" },
+            "rules": []
+        }
+    }"#;
+    let path = write_manifest(dir.path(), json);
+    let err = load_and_validate(&path).unwrap_err();
+    assert!(
+        err.to_string().contains(
+            "manifest edgeRules is no longer supported; declare user-authored Edge Rules in onreza.rules.toml"
         ),
         "{err}"
     );
@@ -1663,4 +1687,59 @@ fn nextjs_standalone_manifest_route_priorities() {
     assert_eq!(m.routes[1].pattern, "^/.*$");
     assert_eq!(m.routes[2].priority, Some(0));
     assert_eq!(m.routes[2].pattern, "^/.*$");
+}
+
+#[test]
+fn nextjs_adapter_manifest_with_static_files_is_valid() {
+    let m = generate_nextjs_adapter_manifest_for_server(
+        true,
+        true,
+        "public",
+        "server.js",
+        vec![NextjsAdapterPrerenderPage {
+            pathname: "/about".to_string(),
+            html: "about/index.html".to_string(),
+        }],
+    );
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 4);
+    assert_eq!(m.layers[0].name, "static-assets");
+    assert_eq!(m.layers[0].directory, "_static");
+    assert_eq!(m.layers[1].name, "prerendered");
+    assert_eq!(m.layers[1].directory, "_prerender");
+    assert_eq!(m.layers[2].name, "public-assets");
+    assert_eq!(m.layers[2].directory, "public");
+    assert_eq!(m.layers[3].name, "server");
+    assert_eq!(m.routes[0].pattern, "^/.*$");
+    assert_eq!(m.routes[0].priority, Some(100));
+    assert_eq!(m.routes[0].fallthrough, Some(true));
+    assert_eq!(m.routes[1].pattern, "^/.*$");
+    assert_eq!(m.routes[1].priority, Some(75));
+    assert_eq!(m.routes[1].fallthrough, Some(true));
+    assert_eq!(m.routes[2].pattern, "^/.*$");
+    assert_eq!(m.routes[2].priority, Some(50));
+    assert_eq!(m.routes[2].fallthrough, Some(true));
+    assert_eq!(m.routes[3].priority, Some(0));
+    let prerender = m.prerender.as_ref().expect("prerender config");
+    assert_eq!(prerender.layer, "prerendered");
+    assert_eq!(
+        prerender.pages["/about"].html,
+        "about/index.html".to_string()
+    );
+}
+
+#[test]
+fn nextjs_adapter_manifest_without_static_files_is_valid() {
+    let m = generate_nextjs_adapter_manifest_for_server(
+        false,
+        false,
+        "public",
+        "server.js",
+        Vec::new(),
+    );
+    validate(&m).unwrap();
+    assert_eq!(m.layers.len(), 1);
+    assert_eq!(m.layers[0].name, "server");
+    assert_eq!(m.routes.len(), 1);
+    assert_eq!(m.routes[0].layer, "server");
 }

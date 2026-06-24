@@ -4,7 +4,12 @@
 //! and JSON mode activates automatically. All assertions check JSON in stdout.
 
 use assert_cmd::Command;
-use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::get};
+use axum::{
+    Json, Router,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{delete, get, post},
+};
 use predicates::str::contains;
 use serde_json::json;
 use std::fs;
@@ -59,6 +64,58 @@ fn spawn_project_settings_failure_mock(status: StatusCode) -> String {
                         .into_response()
                 }),
             );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tx.send(format!("http://{addr}")).unwrap();
+            axum::serve(listener, app).await.unwrap();
+        });
+    });
+    rx.recv().unwrap()
+}
+
+fn spawn_preview_access_mock() -> String {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
+            let app = Router::new()
+                .route(
+                    "/v1/preview-access/{project_id}",
+                    post(
+                        |axum::extract::Path(project_id): axum::extract::Path<String>,
+                         Json(body): Json<serde_json::Value>| async move {
+                            assert!(
+                                body.get("url").is_none(),
+                                "preview access request body must stay compatible with strict server schema"
+                            );
+                            Json(json!({
+                                "access": {
+                                    "projectId": project_id,
+                                    "secretId": "secret-1",
+                                    "note": body["note"].as_str().unwrap_or(""),
+                                    "expiresAt": "2026-06-24T17:00:00.000Z",
+                                    "ttlSeconds": body["ttlSeconds"].as_u64().unwrap_or(0),
+                                    "header": {
+                                        "name": "X-ONREZA-Protection-Bypass",
+                                        "value": "token-value"
+                                    },
+                                    "query": {
+                                        "name": "_bypass",
+                                        "value": "token-value"
+                                    }
+                                }
+                            }))
+                        },
+                    ),
+                )
+                .route(
+                    "/v1/preview-access/{project_id}/{secret_id}",
+                    delete(
+                        |axum::extract::Path(_params): axum::extract::Path<
+                            std::collections::HashMap<String, String>,
+                        >| async move { Json(json!({ "success": true })) },
+                    ),
+                );
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addr = listener.local_addr().unwrap();
             tx.send(format!("http://{addr}")).unwrap();
@@ -129,6 +186,91 @@ fn project_id_works_after_nested_env_and_domains_subcommands() {
         .output()
         .unwrap();
     assert!(domains_help.status.success());
+}
+
+#[test]
+fn preview_access_creates_bypass_secret_json() {
+    let api_url = spawn_preview_access_mock();
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("onreza.toml"),
+        "[project]\nid = \"project-1\"\n",
+    )
+    .unwrap();
+
+    let output = nrz()
+        .current_dir(&temp)
+        .env("NRZ_API_URL", api_url)
+        .args([
+            "--token",
+            "test-token",
+            "preview",
+            "access",
+            "--url",
+            "https://preview.onreza.app/docs",
+            "--note",
+            "agent smoke",
+            "--ttl",
+            "30m",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["projectId"], "project-1");
+    assert_eq!(value["secretId"], "secret-1");
+    assert_eq!(value["headerName"], "X-ONREZA-Protection-Bypass");
+    assert_eq!(value["headerValue"], "token-value");
+    assert_eq!(value["queryName"], "_bypass");
+    assert_eq!(value["queryValue"], "token-value");
+    assert_eq!(value["expiresAt"], "2026-06-24T17:00:00.000Z");
+    assert_eq!(value["ttlSeconds"], 1800);
+    assert_eq!(value["ttlEnforced"], true);
+    assert_eq!(
+        value["browserUrl"],
+        "https://preview.onreza.app/docs?_bypass=token-value"
+    );
+    assert_eq!(
+        value["revokeCommand"],
+        "nrz preview revoke --project-id project-1 --secret-id secret-1"
+    );
+}
+
+#[test]
+fn preview_revoke_deletes_bypass_secret_json() {
+    let api_url = spawn_preview_access_mock();
+    let temp = tempfile::tempdir().unwrap();
+
+    let output = nrz()
+        .current_dir(&temp)
+        .env("NRZ_API_URL", api_url)
+        .args([
+            "--token",
+            "test-token",
+            "preview",
+            "revoke",
+            "--project-id",
+            "project-1",
+            "--secret-id",
+            "secret-1",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["success"], true);
 }
 
 #[test]

@@ -68,6 +68,7 @@ const UPLOAD_FAILED_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_UPLOAD_FAILURE_LOG_LENGTH: usize = 4096;
 const REDACTED_URL_COMPONENT: &str = "REDACTED";
 const SOURCE_UPLOAD_PUT_FAILED: &str = "SOURCE_UPLOAD_PUT_FAILED";
+const NEXTJS_ADAPTER_EDGE_RULE_PRODUCER: &str = "nextjs-adapter";
 const PNPM_BUILD_SCRIPT_COMPAT_ENV: [(&str, &str); 2] = [
     ("npm_config_dangerously_allow_all_builds", "true"),
     ("pnpm_config_dangerously_allow_all_builds", "true"),
@@ -366,12 +367,17 @@ fn build_functions_payload(
     edge_rules_force: bool,
 ) -> anyhow::Result<Option<crate::functions::FunctionPublishPayload>> {
     let collected = crate::functions::collect(project_dir)?;
-    let edge_rules = crate::functions::load_edge_rules(project_dir)?;
-    let edge_rule_count = edge_rules
+    let user_edge_rules = crate::functions::load_edge_rules(project_dir)?;
+    let generated_edge_rule_sets = generated_nextjs_edge_rule_sets(project_dir, json)?;
+    let edge_rule_count = user_edge_rules
         .as_ref()
-        .map_or(0, crate::functions::edge_rule_count);
+        .map_or(0, crate::functions::edge_rule_count)
+        + generated_edge_rule_sets
+            .iter()
+            .map(|rule_set| crate::functions::edge_rule_count(&rule_set.edge_rules))
+            .sum::<usize>();
 
-    if collected.is_empty() && edge_rules.is_none() {
+    if collected.is_empty() && user_edge_rules.is_none() && generated_edge_rule_sets.is_empty() {
         return Ok(None);
     }
 
@@ -411,9 +417,46 @@ fn build_functions_payload(
     Ok(Some(crate::functions::build_payload(
         "DEPLOYMENT",
         &collected,
-        edge_rules,
+        user_edge_rules,
         edge_rules_force,
+        generated_edge_rule_sets,
     )))
+}
+
+fn generated_nextjs_edge_rule_sets(
+    project_dir: &Path,
+    json: bool,
+) -> anyhow::Result<Vec<crate::functions::GeneratedEdgeRuleSet>> {
+    let Some(descriptor) = crate::nextjs_adapter::load_descriptor(project_dir)? else {
+        return Ok(Vec::new());
+    };
+    if descriptor.version != 1 {
+        return Ok(Vec::new());
+    }
+    output::status(
+        json,
+        "~",
+        descriptor.compatibility_report_line(),
+        output::Phase::Deploy,
+    );
+    let edge_rules = descriptor.generated_edge_rules().unwrap_or_else(|| {
+        serde_json::json!({
+            "schemaVersion": "EDGE_RULE_SET_V1",
+            "rules": [],
+        })
+    });
+    let rule_count = crate::functions::edge_rule_count(&edge_rules);
+    output::status(
+        json,
+        "~",
+        format!("Generated {rule_count} Next.js Edge Rule(s) from adapter routing"),
+        output::Phase::Deploy,
+    );
+    Ok(vec![crate::functions::GeneratedEdgeRuleSet {
+        producer: NEXTJS_ADAPTER_EDGE_RULE_PRODUCER.to_string(),
+        version: descriptor.next_version.or(descriptor.adapter.version),
+        edge_rules,
+    }])
 }
 
 pub async fn run(
@@ -519,16 +562,46 @@ pub async fn run(
     let build_env: Vec<(String, String)> = {
         let mut env = Vec::new();
 
-        // Next.js: inject NEXT_PRIVATE_STANDALONE=1 so users don't have to manually set
-        // `output: 'standalone'` in next.config. No-op when user has `output: 'export'`.
+        // Next.js: prefer the official Adapter API on supported versions. Older
+        // versions keep the legacy standalone env fallback.
         if is_nextjs_project(&project_dir) {
-            output::status(
-                json,
-                "~",
-                "Next.js detected, enabling standalone output (NEXT_PRIVATE_STANDALONE=1)",
-                output::Phase::Deploy,
-            );
-            env.push(("NEXT_PRIVATE_STANDALONE".to_string(), "1".to_string()));
+            match crate::nextjs_adapter::prepare_build_adapter(&project_dir) {
+                Ok(Some(adapter)) => {
+                    output::status(
+                        json,
+                        "~",
+                        "Next.js detected, enabling ONREZA adapter (NEXT_ADAPTER_PATH)",
+                        output::Phase::Deploy,
+                    );
+                    env.push((
+                        "NEXT_ADAPTER_PATH".to_string(),
+                        adapter.path.to_string_lossy().into_owned(),
+                    ));
+                    env.push((
+                        "ONREZA_NEXT_ADAPTER_VERSION".to_string(),
+                        env!("CARGO_PKG_VERSION").to_string(),
+                    ));
+                }
+                Ok(None) => {
+                    output::status(
+                        json,
+                        "~",
+                        "Next.js detected, enabling standalone output (NEXT_PRIVATE_STANDALONE=1)",
+                        output::Phase::Deploy,
+                    );
+                    env.push(("NEXT_PRIVATE_STANDALONE".to_string(), "1".to_string()));
+                }
+                Err(err) => {
+                    output::warn(
+                        json,
+                        format!(
+                            "Could not prepare Next.js adapter: {err:#}. Falling back to standalone output."
+                        ),
+                        output::Phase::Deploy,
+                    );
+                    env.push(("NEXT_PRIVATE_STANDALONE".to_string(), "1".to_string()));
+                }
+            }
         }
 
         // SvelteKit: adapter-auto checks platform env vars to pick an adapter.
@@ -552,6 +625,7 @@ pub async fn run(
         && let Some(cmd) =
             resolve_build_command(args.build_command.as_deref(), &project_dir, &effective)
     {
+        clear_nextjs_descriptor_before_build(&project_dir)?;
         run_build_step(&cmd, &project_dir, json, &build_env)?;
     }
 
@@ -942,6 +1016,9 @@ pub async fn run(
                         console::style(url).underlined().bold(),
                     );
                     eprintln!();
+                    if production != Some(true) {
+                        crate::preview::print_preview_access_hint(&project_id, Some(url));
+                    }
                 }
                 return Ok(());
             }
@@ -2357,10 +2434,7 @@ async fn stage_deployment_functions(
     functions: &crate::functions::FunctionPublishPayload,
     json: bool,
 ) -> anyhow::Result<()> {
-    let edge_rule_count = functions
-        .edge_rules
-        .as_ref()
-        .map_or(0, crate::functions::edge_rule_count);
+    let edge_rule_count = functions_payload_edge_rule_count(functions);
     output::status(
         json,
         "~",
@@ -2384,6 +2458,20 @@ async fn stage_deployment_functions(
     Ok(())
 }
 
+fn functions_payload_edge_rule_count(
+    functions: &crate::functions::FunctionPublishPayload,
+) -> usize {
+    functions
+        .edge_rules
+        .as_ref()
+        .map_or(0, crate::functions::edge_rule_count)
+        + functions
+            .generated_edge_rule_sets
+            .iter()
+            .map(|rule_set| crate::functions::edge_rule_count(&rule_set.edge_rules))
+            .sum::<usize>()
+}
+
 fn map_function_stage_error(error: anyhow::Error, json: bool) -> anyhow::Error {
     let Some(api_error) = error.downcast_ref::<crate::api::StructuredApiError>() else {
         return error.context("failed to stage ONREZA Functions for deployment");
@@ -2396,6 +2484,15 @@ fn map_function_stage_error(error: anyhow::Error, json: bool) -> anyhow::Error {
         return mapped;
     }
     if api_error.code != "FUNCTION_PUBLISH_FAILED" {
+        if json {
+            let message = format!("failed to stage ONREZA Functions for deployment: {api_error}");
+            return output::report_terminal_error(
+                "deploy",
+                &message,
+                &api_error.code,
+                api_error.details.as_ref(),
+            );
+        }
         return error.context("failed to stage ONREZA Functions for deployment");
     }
 
@@ -2421,6 +2518,15 @@ fn map_create_deployment_error(error: anyhow::Error, json: bool) -> anyhow::Erro
         return mapped;
     }
     if api_error.code != "FUNCTION_PUBLISH_FAILED" {
+        if json {
+            let message = format!("failed to create deployment: {api_error}");
+            return output::report_terminal_error(
+                "deploy",
+                &message,
+                &api_error.code,
+                api_error.details.as_ref(),
+            );
+        }
         return error.context("failed to create deployment");
     }
 
@@ -3678,6 +3784,13 @@ fn is_nextjs_project(project_dir: &Path) -> bool {
         return false;
     };
     pkg.has_dependency("next")
+}
+
+fn clear_nextjs_descriptor_before_build(project_dir: &Path) -> anyhow::Result<()> {
+    if is_nextjs_project(project_dir) {
+        crate::nextjs_adapter::clear_descriptor(project_dir)?;
+    }
+    Ok(())
 }
 
 /// Check if the project uses SvelteKit with adapter-auto (needs GCP_BUILDPACKS env injection).

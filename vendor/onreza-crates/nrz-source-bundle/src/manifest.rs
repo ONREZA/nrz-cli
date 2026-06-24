@@ -22,8 +22,6 @@ pub struct SourceLogicalManifest {
     #[serde(default)]
     pub routes: Vec<SourceLogicalManifestRoute>,
     #[serde(default)]
-    pub edge_rules: Option<Value>,
-    #[serde(default)]
     pub entrypoints: Vec<String>,
 }
 

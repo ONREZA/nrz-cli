@@ -51,6 +51,8 @@ pub struct Manifest {
     pub prerender: Option<PrerenderConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub middleware: Option<Vec<Middleware>>,
+    #[serde(rename = "edgeRules", skip_serializing_if = "Option::is_none")]
+    pub edge_rules: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<serde_json::Value>,
 }
@@ -135,6 +137,12 @@ pub struct PrerenderPage {
     pub html: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NextjsAdapterPrerenderPage {
+    pub pathname: String,
+    pub html: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -421,6 +429,11 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
             "manifest middleware is no longer supported; declare HTTP function wiring in onreza.rules.toml with a pipeline action"
         );
     }
+    if manifest.edge_rules.is_some() {
+        anyhow::bail!(
+            "manifest edgeRules is no longer supported; declare user-authored Edge Rules in onreza.rules.toml"
+        );
+    }
 
     // ── Meta ──────────────────────────────────────────────────
 
@@ -495,6 +508,7 @@ pub fn generate_static_manifest() -> Manifest {
         }],
         prerender: None,
         middleware: None,
+        edge_rules: None,
         meta: None,
     }
 }
@@ -523,6 +537,7 @@ pub fn generate_compute_manifest(entry: &str) -> Manifest {
         }],
         prerender: None,
         middleware: None,
+        edge_rules: None,
         meta: None,
     }
 }
@@ -612,6 +627,123 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         routes,
         prerender: None,
         middleware: None,
+        edge_rules: None,
+        meta: None,
+    }
+}
+
+/// Auto-generate a Next.js adapter manifest from the official Adapter API
+/// outputs. Static files are staged into a single STATIC layer that falls
+/// through to the Next.js COMPUTE server for misses.
+pub fn generate_nextjs_adapter_manifest_for_server(
+    has_static_files: bool,
+    has_public: bool,
+    public_dir: &str,
+    server_entry: &str,
+    prerender_pages: Vec<NextjsAdapterPrerenderPage>,
+) -> Manifest {
+    let mut layers = Vec::new();
+    let mut routes = Vec::new();
+
+    if has_static_files {
+        layers.push(Layer {
+            name: "static-assets".to_string(),
+            target: LayerTarget::Static,
+            directory: "_static".to_string(),
+            entry: None,
+            export_format: None,
+            runtime: None,
+        });
+        routes.push(Route {
+            pattern: "^/.*$".to_string(),
+            layer: "static-assets".to_string(),
+            priority: Some(100),
+            revalidate: None,
+            methods: None,
+            headers: None,
+            fallthrough: Some(true),
+        });
+    }
+
+    if !prerender_pages.is_empty() {
+        layers.push(Layer {
+            name: "prerendered".to_string(),
+            target: LayerTarget::Static,
+            directory: "_prerender".to_string(),
+            entry: None,
+            export_format: None,
+            runtime: None,
+        });
+        routes.push(Route {
+            pattern: "^/.*$".to_string(),
+            layer: "prerendered".to_string(),
+            priority: Some(75),
+            revalidate: None,
+            methods: None,
+            headers: None,
+            fallthrough: Some(true),
+        });
+    }
+
+    if has_public {
+        layers.push(Layer {
+            name: "public-assets".to_string(),
+            target: LayerTarget::Static,
+            directory: public_dir.to_string(),
+            entry: None,
+            export_format: None,
+            runtime: None,
+        });
+        routes.push(Route {
+            pattern: "^/.*$".to_string(),
+            layer: "public-assets".to_string(),
+            priority: Some(50),
+            revalidate: None,
+            methods: None,
+            headers: None,
+            fallthrough: Some(true),
+        });
+    }
+
+    layers.push(Layer {
+        name: "server".to_string(),
+        target: LayerTarget::Compute,
+        directory: ".".to_string(),
+        entry: Some(server_entry.to_string()),
+        export_format: None,
+        runtime: None,
+    });
+    routes.push(Route {
+        pattern: "^/.*$".to_string(),
+        layer: "server".to_string(),
+        priority: Some(0),
+        revalidate: None,
+        methods: None,
+        headers: None,
+        fallthrough: None,
+    });
+
+    Manifest {
+        version: 1,
+        layers,
+        routes,
+        prerender: (!prerender_pages.is_empty()).then(|| PrerenderConfig {
+            layer: "prerendered".to_string(),
+            pages: prerender_pages
+                .into_iter()
+                .map(|page| {
+                    (
+                        page.pathname,
+                        PrerenderPage {
+                            html: page.html,
+                            data: None,
+                        },
+                    )
+                })
+                .collect(),
+        }),
+        middleware: None,
+        edge_rules: None,
         meta: None,
     }
 }
@@ -708,6 +840,7 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
         routes,
         prerender: None,
         middleware: None,
+        edge_rules: None,
         meta: None,
     }
 }

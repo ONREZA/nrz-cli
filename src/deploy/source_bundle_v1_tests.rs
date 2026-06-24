@@ -105,6 +105,44 @@ fn source_bundle_treats_header_and_redirect_files_as_static_content() {
 }
 
 #[test]
+fn source_bundle_marks_prerender_files_under_layer_root() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("_prerender")).unwrap();
+    fs::write(dir.path().join("_prerender/index.html"), b"<main/>").unwrap();
+    fs::create_dir_all(dir.path().join("server")).unwrap();
+    fs::write(dir.path().join("server/server.js"), b"// server").unwrap();
+
+    let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "layers": [
+            { "name": "prerendered", "target": "STATIC", "directory": "_prerender" },
+            { "name": "server", "target": "COMPUTE", "directory": "server", "entry": "server.js" }
+        ],
+        "routes": [
+            { "pattern": "^/.*$", "layer": "prerendered", "priority": 75, "fallthrough": true },
+            { "pattern": "^/.*$", "layer": "server", "priority": 0 }
+        ],
+        "prerender": {
+            "layer": "prerendered",
+            "pages": { "/": { "html": "index.html" } }
+        }
+    }))
+    .unwrap();
+
+    let files = scan_dir(dir.path()).unwrap();
+    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+
+    let prerender = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "_prerender/index.html")
+        .unwrap();
+    assert_eq!(prerender.role, SourceLogicalManifestFileRole::Prerender);
+    assert_eq!(prerender.layer_name.as_deref(), Some("prerendered"));
+}
+
+#[test]
 fn nuxt_public_asset_maps_to_static_layer_root() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("public")).unwrap();

@@ -400,7 +400,7 @@ fn build_logical_manifest(
         );
     }
     let mut logical_files = Vec::with_capacity(entries.len());
-    let prerender_paths = prerender_paths(manifest);
+    let prerender_paths = prerender_paths(manifest)?;
 
     for entry in entries {
         validate_source_path(&entry.path)?;
@@ -492,17 +492,25 @@ fn ensure_manifest_covers_entries(
     Ok(())
 }
 
-fn prerender_paths(manifest: &Manifest) -> Vec<String> {
+fn prerender_paths(manifest: &Manifest) -> anyhow::Result<Vec<String>> {
     let mut paths = Vec::new();
     if let Some(prerender) = &manifest.prerender {
+        let prerender_layer = manifest
+            .layers
+            .iter()
+            .find(|layer| layer.name == prerender.layer)
+            .with_context(|| {
+                format!("prerender references unknown layer: '{}'", prerender.layer)
+            })?;
+        let root_path = normalize_layer_root(&prerender_layer.directory)?;
         for page in prerender.pages.values() {
-            paths.push(page.html.clone());
+            paths.push(join_entrypoint(&root_path, &page.html)?);
             if let Some(data) = &page.data {
-                paths.push(data.clone());
+                paths.push(join_entrypoint(&root_path, data)?);
             }
         }
     }
-    paths
+    Ok(paths)
 }
 
 fn best_layer_match<'a>(

@@ -14,6 +14,8 @@ pub struct FunctionPublishPayload {
     pub edge_rules: Option<Value>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub edge_rules_force: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generated_edge_rule_sets: Vec<GeneratedEdgeRuleSet>,
 }
 
 #[derive(Debug, Serialize)]
@@ -29,6 +31,15 @@ pub struct FunctionSourceFile {
     pub content_text: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedEdgeRuleSet {
+    pub producer: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    pub edge_rules: Value,
+}
+
 /// Assemble the publish payload from the discovered functions and optional edge
 /// rules. The platform re-extracts triggers from each entry source.
 pub fn build_payload(
@@ -36,6 +47,7 @@ pub fn build_payload(
     collected: &CollectedFunctions,
     edge_rules: Option<Value>,
     edge_rules_force: bool,
+    generated_edge_rule_sets: Vec<GeneratedEdgeRuleSet>,
 ) -> FunctionPublishPayload {
     let functions = collected
         .functions
@@ -60,6 +72,7 @@ pub fn build_payload(
         functions,
         edge_rules,
         edge_rules_force,
+        generated_edge_rule_sets,
     }
 }
 

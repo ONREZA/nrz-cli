@@ -1,6 +1,6 @@
 //! Best-effort sync of detection results to the platform API.
 
-use crate::detect::types::{ComputeType, DetectionResult};
+use crate::detect::types::{ComputeType, DetectionResult, PackageManagerType};
 use serde::Serialize;
 
 use crate::api::ApiClient;
@@ -27,7 +27,7 @@ pub async fn sync_detection_to_api(client: &ApiClient, project_id: &str, result:
         .metadata
         .package_manager
         .as_ref()
-        .map(|p| p.pm_type.as_str());
+        .map(|p| detection_package_manager_to_platform(p.pm_type));
 
     let body = DetectionSyncBody {
         framework: &result.framework,
@@ -43,5 +43,14 @@ pub async fn sync_detection_to_api(client: &ApiClient, project_id: &str, result:
     let resp: Result<serde_json::Value, _> = client.post(&path, &body).await;
     if let Err(e) = resp {
         tracing::warn!("failed to sync detection to API: {e}");
+    }
+}
+
+pub(crate) fn detection_package_manager_to_platform(pm: PackageManagerType) -> &'static str {
+    match pm {
+        PackageManagerType::Npm => "NPM",
+        PackageManagerType::Yarn => "YARN",
+        PackageManagerType::Pnpm => "PNPM",
+        PackageManagerType::Bun => "BUN",
     }
 }

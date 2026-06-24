@@ -8,6 +8,8 @@ mod deployments;
 mod deployments_tests;
 mod detect;
 mod detect_sync;
+#[cfg(test)]
+mod detect_sync_tests;
 mod dev;
 mod functions;
 mod init;
@@ -15,9 +17,11 @@ mod link;
 mod logs;
 #[cfg(test)]
 mod logs_tests;
+mod nextjs_adapter;
 mod output;
 #[cfg(test)]
 mod output_tests;
+mod preview;
 mod project_context;
 mod project_settings;
 mod rollback;
@@ -78,6 +82,7 @@ fn config_dir_for_command(command: &Command) -> PathBuf {
         Command::Config(args) => match &args.command {
             cli::config::ConfigCommand::Explain(args) => Path::new(&args.dir).to_path_buf(),
         },
+        Command::Preview(_) => std::env::current_dir().unwrap_or_default(),
         Command::Link(args) => Path::new(&args.dir).to_path_buf(),
         Command::Detect(args) => Path::new(&args.dir).to_path_buf(),
         Command::Functions(args) => match &args.command {
@@ -138,6 +143,7 @@ async fn run_command(
         Command::Link(args) => link::run(args, json, token, workspace, config).await,
         Command::Upgrade(args) => upgrade::run(args).await,
         Command::Projects(args) => cli::projects_handler::run(args, json, token, workspace).await,
+        Command::Preview(args) => preview::run(args, json, token, workspace, config).await,
         Command::Config(args) => {
             cli::config_handler::run(args, json, token, workspace, config).await
         }

@@ -5503,17 +5503,13 @@ pub mod edge_rules {
     ///          "id": "dashboard-auth"
     ///        }
     ///      ],
-    ///      "schemaVersion": "EDGE_RULE_SET_V1",
-    ///      "source": {
-    ///        "origin": "build"
-    ///      }
+    ///      "schemaVersion": "EDGE_RULE_SET_V1"
     ///    }
     ///  ],
     ///  "type": "object",
     ///  "required": [
     ///    "rules",
-    ///    "schemaVersion",
-    ///    "source"
+    ///    "schemaVersion"
     ///  ],
     ///  "properties": {
     ///    "rules": {
@@ -5571,7 +5567,8 @@ pub mod edge_rules {
         pub rules: ::std::vec::Vec<EdgeRuleAuthoring>,
         #[serde(rename = "schemaVersion")]
         pub schema_version: ::std::string::String,
-        pub source: OnrezaEdgeRuleSetV1Source,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub source: ::std::option::Option<OnrezaEdgeRuleSetV1Source>,
     }
     ///`OnrezaEdgeRuleSetV1Source`
     ///
@@ -12477,10 +12474,7 @@ pub mod onreza_functions_publish {
     ///            "id": "hello-api"
     ///          }
     ///        ],
-    ///        "schemaVersion": "EDGE_RULE_SET_V1",
-    ///        "source": {
-    ///          "origin": "build"
-    ///        }
+    ///        "schemaVersion": "EDGE_RULE_SET_V1"
     ///      },
     ///      "functions": [
     ///        {
@@ -12542,6 +12536,34 @@ pub mod onreza_functions_publish {
     ///      },
     ///      "maxItems": 1000
     ///    },
+    ///    "generatedEdgeRuleSets": {
+    ///      "default": [],
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "object",
+    ///        "required": [
+    ///          "edgeRules",
+    ///          "producer"
+    ///        ],
+    ///        "properties": {
+    ///          "edgeRules": {
+    ///            "description": "Generated EDGE_RULE_SET_V1 contribution. The platform composes it with user-authored rules.",
+    ///            "type": "object"
+    ///          },
+    ///          "producer": {
+    ///            "type": "string",
+    ///            "maxLength": 128,
+    ///            "minLength": 1
+    ///          },
+    ///          "version": {
+    ///            "type": "string",
+    ///            "maxLength": 128,
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "additionalProperties": false
+    ///      }
+    ///    },
     ///    "origin": {
     ///      "type": "string",
     ///      "enum": [
@@ -12569,6 +12591,13 @@ pub mod onreza_functions_publish {
         pub edge_rules_force: bool,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
         pub functions: ::std::vec::Vec<OnrezaFunctionsPublishPayloadV1FunctionsItem>,
+        #[serde(
+            rename = "generatedEdgeRuleSets",
+            default,
+            skip_serializing_if = "::std::vec::Vec::is_empty"
+        )]
+        pub generated_edge_rule_sets:
+            ::std::vec::Vec<OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItem>,
         pub origin: OnrezaFunctionsPublishPayloadV1Origin,
     }
     ///`OnrezaFunctionsPublishPayloadV1FunctionsItem`
@@ -12807,6 +12836,216 @@ pub mod onreza_functions_publish {
         }
     }
     impl<'de> ::serde::Deserialize<'de> for OnrezaFunctionsPublishPayloadV1FunctionsItemSourcePath {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "edgeRules",
+    ///    "producer"
+    ///  ],
+    ///  "properties": {
+    ///    "edgeRules": {
+    ///      "description": "Generated EDGE_RULE_SET_V1 contribution. The platform composes it with user-authored rules.",
+    ///      "type": "object"
+    ///    },
+    ///    "producer": {
+    ///      "type": "string",
+    ///      "maxLength": 128,
+    ///      "minLength": 1
+    ///    },
+    ///    "version": {
+    ///      "type": "string",
+    ///      "maxLength": 128,
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItem {
+        ///Generated EDGE_RULE_SET_V1 contribution. The platform composes it with user-authored rules.
+        #[serde(rename = "edgeRules")]
+        pub edge_rules: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
+        pub producer: OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemProducer,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub version:
+            ::std::option::Option<OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemVersion>,
+    }
+    ///`OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemProducer`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 128,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemProducer(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref for OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemProducer {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemProducer>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemProducer) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemProducer {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 128usize {
+                return Err("longer than 128 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemProducer
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemProducer
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemProducer
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemProducer
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemVersion`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 128,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemVersion(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref for OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemVersion {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemVersion>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemVersion) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemVersion {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 128usize {
+                return Err("longer than 128 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemVersion
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemVersion
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemVersion
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaFunctionsPublishPayloadV1GeneratedEdgeRuleSetsItemVersion
+    {
         fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
         where
             D: ::serde::Deserializer<'de>,
@@ -14157,10 +14396,6 @@ pub mod manifest {
     ///    "version"
     ///  ],
     ///  "properties": {
-    ///    "edgeRules": {
-    ///      "description": "Compiled EDGE_RULE_SET_V1 edge rule set emitted by build adapters. Validated by the platform against the edge-rules schema; see onreza-rules-v1.schema.json for the full structure.",
-    ///      "type": "object"
-    ///    },
     ///    "layers": {
     ///      "type": "array",
     ///      "items": {
@@ -14361,13 +14596,6 @@ pub mod manifest {
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaBuildOutputManifest {
-        ///Compiled EDGE_RULE_SET_V1 edge rule set emitted by build adapters. Validated by the platform against the edge-rules schema; see onreza-rules-v1.schema.json for the full structure.
-        #[serde(
-            rename = "edgeRules",
-            default,
-            skip_serializing_if = "::serde_json::Map::is_empty"
-        )]
-        pub edge_rules: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
         pub layers: ::std::vec::Vec<OnrezaBuildOutputManifestLayersItem>,
         #[serde(default, skip_serializing_if = "::serde_json::Map::is_empty")]
         pub meta: ::serde_json::Map<::std::string::String, ::serde_json::Value>,

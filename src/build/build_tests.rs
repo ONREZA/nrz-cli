@@ -10,6 +10,33 @@ fn output_hint(path: &str, source: BuildSettingSource) -> OutputDirectoryHint<'_
     OutputDirectoryHint { path, source }
 }
 
+#[test]
+fn build_output_serializes_nextjs_compatibility_report() {
+    let output = super::BuildOutput {
+        layers: vec![super::LayerInfo {
+            name: "server".to_string(),
+            target: "COMPUTE".to_string(),
+            directory: ".".to_string(),
+            entry: Some("server.js".to_string()),
+        }],
+        routes: 1,
+        output_dir: ".next/standalone".to_string(),
+        framework: Some("nextjs".to_string()),
+        framework_version: Some("16.2.9".to_string()),
+        compatibility: Some(serde_json::json!({
+            "platform": {
+                "prerenders": { "status": "partial_static_split" }
+            }
+        })),
+    };
+
+    let value = serde_json::to_value(output).unwrap();
+    assert_eq!(
+        value["compatibility"]["platform"]["prerenders"]["status"],
+        "partial_static_split"
+    );
+}
+
 fn write_manifest(output_dir: &std::path::Path) {
     std::fs::create_dir_all(output_dir.join(".onreza")).unwrap();
     std::fs::write(output_dir.join(".onreza/manifest.json"), "{}").unwrap();
@@ -1016,6 +1043,395 @@ async fn nextjs_standalone_run_with_hint_generates_manifest() {
     assert!(output.join("_static/_next/static/chunks/main.js").is_file());
     assert!(output.join(".next/static/chunks/main.js").is_file());
     assert!(output.join("public/favicon.ico").is_file());
+}
+
+#[tokio::test]
+async fn nextjs_adapter_descriptor_generates_manifest_before_legacy_standalone() {
+    let project = tempfile::tempdir().unwrap();
+
+    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
+    std::fs::write(
+        project.path().join(".next/standalone/server.js"),
+        "// server",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".next/server/app")).unwrap();
+    std::fs::write(
+        project.path().join(".next/server/app/index.html"),
+        "<main>Home</main>",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join("public")).unwrap();
+    std::fs::write(project.path().join("public/robots.txt"), "User-agent: *").unwrap();
+    std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
+    let static_file_path = project.path().join(".next/static/chunks/main.js");
+    std::fs::write(
+        project.path().join(".onreza/next-adapter-output.json"),
+        format!(
+            r#"{{
+          "version": 1,
+          "adapter": {{ "name": "@onreza/nrz-next-adapter", "version": "0.34.1" }},
+          "nextVersion": "16.2.9",
+          "buildId": "build-123",
+          "outputs": {{
+            "staticFiles": [{{
+              "type": "STATIC_FILE",
+              "pathname": "/_next/static/chunks/main.js",
+              "filePath": "{}"
+            }}],
+            "prerenders": [{{
+              "type": "PRERENDER",
+              "pathname": "/",
+              "fallback": {{
+                "filePath": "{}",
+                "initialHeaders": {{ "content-type": "text/html; charset=utf-8" }},
+                "initialRevalidate": false
+              }}
+            }}]
+          }}
+        }}"#,
+            static_file_path.display(),
+            project.path().join(".next/server/app/index.html").display()
+        ),
+    )
+    .unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("Next.js adapter descriptor should produce a manifest");
+    assert_eq!(manifest.layers.len(), 4);
+    assert_eq!(manifest.layers[0].directory, "_static");
+    assert_eq!(manifest.routes[0].pattern, "^/.*$");
+    assert_eq!(manifest.routes[0].fallthrough, Some(true));
+    assert_eq!(manifest.layers[1].name, "prerendered");
+    assert_eq!(manifest.layers[1].directory, "_prerender");
+    assert_eq!(manifest.routes[1].fallthrough, Some(true));
+    assert_eq!(manifest.layers[2].name, "public-assets");
+    assert_eq!(manifest.layers[2].directory, "public");
+    assert_eq!(manifest.routes[2].fallthrough, Some(true));
+    assert_eq!(manifest.layers[3].entry.as_deref(), Some("server.js"));
+    let prerender = manifest.prerender.as_ref().expect("prerender config");
+    assert_eq!(prerender.layer, "prerendered");
+    assert_eq!(prerender.pages["/"].html, "index.html");
+    assert_eq!(
+        manifest
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.pointer("/adapter/name"))
+            .and_then(|value| value.as_str()),
+        Some("@onreza/nrz-next-adapter")
+    );
+    assert_eq!(
+        manifest
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.pointer("/framework/version"))
+            .and_then(|value| value.as_str()),
+        Some("16.2.9")
+    );
+    assert_eq!(
+        manifest
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.pointer("/next/adapterCompatibility/outputs/staticFiles"))
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        manifest
+            .meta
+            .as_ref()
+            .and_then(|meta| {
+                meta.pointer("/next/adapterCompatibility/platform/prerenders/staticLayerCount")
+            })
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert!(
+        result
+            .output_dir
+            .join("_static/_next/static/chunks/main.js")
+            .is_file()
+    );
+    assert!(result.output_dir.join("_prerender/index.html").is_file());
+    assert!(result.output_dir.join("public/robots.txt").is_file());
+}
+
+#[tokio::test]
+async fn nextjs_adapter_manifest_meta_stays_compact_for_many_isr_routes() {
+    let project = tempfile::tempdir().unwrap();
+
+    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
+    std::fs::write(
+        project.path().join(".next/standalone/server.js"),
+        "// server",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
+    let prerenders = (0..300)
+        .map(|index| {
+            serde_json::json!({
+                "type": "PRERENDER",
+                "id": format!("/blog/post-{index}"),
+                "pathname": format!("/blog/post-{index}"),
+                "fallback": {
+                    "filePath": format!("/tmp/next/.next/server/app/blog/post-{index}.html"),
+                    "initialHeaders": { "content-type": "text/html; charset=utf-8" },
+                    "initialRevalidate": 60,
+                    "initialExpiration": 31_536_000
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    let descriptor = serde_json::json!({
+        "version": 1,
+        "adapter": { "name": "@onreza/nrz-next-adapter", "version": "0.34.1" },
+        "nextVersion": "16.2.9",
+        "buildId": "build-123",
+        "outputs": {
+            "prerenders": prerenders
+        }
+    });
+    std::fs::write(
+        project.path().join(".onreza/next-adapter-output.json"),
+        serde_json::to_string(&descriptor).unwrap(),
+    )
+    .unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("Next.js adapter descriptor should produce a manifest");
+    let meta = manifest.meta.as_ref().expect("adapter metadata");
+    let meta_size = serde_json::to_string(meta).unwrap().len();
+    assert!(
+        meta_size <= 16_384,
+        "adapter metadata must stay within platform manifest limit, got {meta_size} bytes"
+    );
+    assert_eq!(
+        meta.pointer("/next/adapterCompatibility/platform/prerenders/isrCount")
+            .and_then(|value| value.as_u64()),
+        Some(300)
+    );
+    assert!(
+        meta.pointer("/next/adapterCompatibility/platform/prerenders/routes")
+            .is_none()
+    );
+    assert!(
+        meta.pointer("/next/adapterCompatibility/platform/nextCache/routes")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn nextjs_adapter_descriptor_with_middleware_uses_compute_fallback() {
+    let project = tempfile::tempdir().unwrap();
+
+    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
+    std::fs::write(
+        project.path().join(".next/standalone/server.js"),
+        "// server",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join("public")).unwrap();
+    std::fs::write(project.path().join("public/robots.txt"), "User-agent: *").unwrap();
+    std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
+    let static_file_path = project.path().join(".next/static/chunks/main.js");
+    std::fs::write(
+        project.path().join(".onreza/next-adapter-output.json"),
+        format!(
+            r#"{{
+          "version": 1,
+          "adapter": {{ "name": "@onreza/nrz-next-adapter", "version": "0.34.1" }},
+          "nextVersion": "16.2.9",
+          "buildId": "build-123",
+          "outputs": {{
+            "staticFiles": [{{
+              "type": "STATIC_FILE",
+              "pathname": "/_next/static/chunks/main.js",
+              "filePath": "{}"
+            }}],
+            "middleware": {{
+              "type": "MIDDLEWARE",
+              "pathname": "/_middleware",
+              "runtime": "edge",
+              "edgeRuntime": {{ "entryKey": "middleware" }}
+            }}
+          }}
+        }}"#,
+            static_file_path.display(),
+        ),
+    )
+    .unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("Next.js adapter descriptor should produce a manifest");
+    assert_eq!(manifest.layers.len(), 1);
+    assert_eq!(manifest.layers[0].name, "server");
+    assert_eq!(manifest.layers[0].entry.as_deref(), Some("server.js"));
+    assert_eq!(manifest.routes.len(), 1);
+    assert_eq!(
+        manifest
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.pointer("/next/adapterCompatibility/platform/staticFiles/status"))
+            .and_then(|value| value.as_str()),
+        Some("compute_fallback")
+    );
+    assert_eq!(
+        manifest
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.pointer("/next/adapterCompatibility/platform/middleware/status"))
+            .and_then(|value| value.as_str()),
+        Some("compute_fallback_edge_runtime")
+    );
+    assert!(
+        result
+            .output_dir
+            .join(".next/static/chunks/main.js")
+            .is_file()
+    );
+    assert!(result.output_dir.join("public/robots.txt").is_file());
+    assert!(
+        !result
+            .output_dir
+            .join("_static/_next/static/chunks/main.js")
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn nextjs_adapter_descriptor_with_disjoint_middleware_keeps_static_layers() {
+    let project = tempfile::tempdir().unwrap();
+
+    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
+    std::fs::write(
+        project.path().join(".next/standalone/server.js"),
+        "// server",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
+    std::fs::write(
+        project.path().join(".next/static/chunks/main.js"),
+        "// main",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.path().join("public")).unwrap();
+    std::fs::write(project.path().join("public/robots.txt"), "User-agent: *").unwrap();
+    std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
+    let static_file_path = project.path().join(".next/static/chunks/main.js");
+    std::fs::write(
+        project.path().join(".onreza/next-adapter-output.json"),
+        format!(
+            r#"{{
+          "version": 1,
+          "adapter": {{ "name": "@onreza/nrz-next-adapter", "version": "0.34.1" }},
+          "nextVersion": "16.2.9",
+          "buildId": "build-123",
+          "outputs": {{
+            "staticFiles": [{{
+              "type": "STATIC_FILE",
+              "pathname": "/_next/static/chunks/main.js",
+              "filePath": "{}"
+            }}],
+            "middleware": {{
+              "type": "MIDDLEWARE",
+              "pathname": "/_middleware",
+              "runtime": "edge",
+              "config": {{
+                "matchers": [{{
+                  "source": "/private/:path*",
+                  "sourceRegex": "^(?:\\\\/(_next\\\\/data\\\\/[^/]{{1,}}))?\\\\/private(?:\\\\/((?:[^\\\\/#\\\\?]+?)(?:\\\\/(?:[^\\\\/#\\\\?]+?))*))?(\\\\.json|\\\\.rsc)?[\\\\/#\\\\?]?$"
+                }}]
+              }},
+              "edgeRuntime": {{ "entryKey": "middleware" }}
+            }}
+          }}
+        }}"#,
+            static_file_path.display(),
+        ),
+    )
+    .unwrap();
+
+    let detection = make_detection("nextjs", None);
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: project.path().to_string_lossy().into_owned(),
+        skip_validation: false,
+    };
+
+    let result = run_with_hint(args, true, &config, Some(&detection), None)
+        .await
+        .unwrap();
+
+    let manifest = result
+        .manifest
+        .expect("Next.js adapter descriptor should produce a manifest");
+    assert_eq!(manifest.layers.len(), 3);
+    assert_eq!(manifest.layers[0].name, "static-assets");
+    assert_eq!(manifest.layers[1].name, "public-assets");
+    assert_eq!(manifest.layers[2].name, "server");
+    assert_eq!(
+        manifest
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.pointer("/next/adapterCompatibility/platform/staticFiles/status"))
+            .and_then(|value| value.as_str()),
+        Some("guarded_static_split")
+    );
+    assert!(
+        result
+            .output_dir
+            .join("_static/_next/static/chunks/main.js")
+            .is_file()
+    );
+    assert!(result.output_dir.join("public/robots.txt").is_file());
 }
 
 #[tokio::test]

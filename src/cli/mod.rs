@@ -21,6 +21,7 @@ pub mod functions_handler;
 mod functions_handler_tests;
 pub mod kv;
 pub mod kv_handler;
+pub mod preview;
 pub mod projects;
 pub mod projects_handler;
 #[cfg(test)]
@@ -39,6 +40,7 @@ pub use domains::DomainsArgs;
 pub use env::EnvArgs;
 pub use functions::FunctionsArgs;
 pub use kv::KvArgs;
+pub use preview::PreviewArgs;
 pub use projects::ProjectsArgs;
 pub use rules::RulesArgs;
 pub use workspace::WorkspaceArgs;
@@ -107,6 +109,9 @@ pub enum Command {
 
     /// Manage projects
     Projects(ProjectsArgs),
+
+    /// Manage protected preview URL access
+    Preview(PreviewArgs),
 
     /// Inspect effective CLI configuration
     Config(ConfigArgs),

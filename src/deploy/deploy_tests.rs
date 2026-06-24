@@ -1492,6 +1492,7 @@ fn create_deployment_body_serializes_functions_payload() {
                 functions: vec![],
                 edge_rules: None,
                 edge_rules_force: false,
+                generated_edge_rule_sets: Vec::new(),
             },
         ))
         .unwrap(),
@@ -1524,11 +1525,170 @@ fn functions_payload_serializes_edge_rules_force() {
                 ]
             })),
             edge_rules_force: true,
+            generated_edge_rule_sets: Vec::new(),
         }))
         .unwrap()
         .unwrap();
 
     assert_eq!(value["edgeRulesForce"], true);
+}
+
+#[test]
+fn build_functions_payload_generates_nextjs_edge_rules_when_local_rules_absent() {
+    let tmp = tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join(".onreza")).unwrap();
+    fs::write(
+        tmp.path().join(".onreza/next-adapter-output.json"),
+        r#"
+{
+  "version": 1,
+  "adapter": { "name": "@onreza/nrz-next-adapter", "version": "0.34.1" },
+  "routing": {
+    "beforeMiddleware": [
+      {
+        "source": "/old",
+        "headers": { "Location": "/new" },
+        "status": 308
+      }
+    ]
+  },
+  "outputs": {}
+}
+"#,
+    )
+    .unwrap();
+
+    let payload = build_functions_payload(
+        &nrz::config::ProjectConfig::default(),
+        tmp.path(),
+        true,
+        false,
+    )
+    .unwrap()
+    .expect("generated Next.js Edge Rules should create a functions payload");
+    let value = serde_json::to_value(&payload).unwrap();
+
+    assert_eq!(value["origin"], "DEPLOYMENT");
+    assert_eq!(value["functions"].as_array().unwrap().len(), 0);
+    assert!(value.get("edgeRules").is_none());
+    assert_eq!(
+        value["generatedEdgeRuleSets"][0]["producer"],
+        "nextjs-adapter"
+    );
+    assert!(
+        value["generatedEdgeRuleSets"][0]["edgeRules"]
+            .get("source")
+            .is_none()
+    );
+    assert_eq!(
+        value["generatedEdgeRuleSets"][0]["edgeRules"]["rules"][0]["action"]["type"],
+        "redirect"
+    );
+    assert_eq!(
+        value["generatedEdgeRuleSets"][0]["edgeRules"]["rules"][0]["action"]["target"],
+        "/new"
+    );
+}
+
+#[test]
+fn build_functions_payload_sends_empty_nextjs_generated_contribution_for_clearing() {
+    let tmp = tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join(".onreza")).unwrap();
+    fs::write(
+        tmp.path().join(".onreza/next-adapter-output.json"),
+        r#"
+{
+  "version": 1,
+  "adapter": { "name": "@onreza/nrz-next-adapter", "version": "0.34.1" },
+  "routing": {},
+  "outputs": {}
+}
+"#,
+    )
+    .unwrap();
+
+    let payload = build_functions_payload(
+        &nrz::config::ProjectConfig::default(),
+        tmp.path(),
+        true,
+        false,
+    )
+    .unwrap()
+    .expect("empty Next.js generated contribution should clear stale adapter rules");
+    let value = serde_json::to_value(&payload).unwrap();
+
+    assert_eq!(value["origin"], "DEPLOYMENT");
+    assert_eq!(value["functions"].as_array().unwrap().len(), 0);
+    assert!(value.get("edgeRules").is_none());
+    assert_eq!(
+        value["generatedEdgeRuleSets"][0]["producer"],
+        "nextjs-adapter"
+    );
+    assert_eq!(
+        value["generatedEdgeRuleSets"][0]["edgeRules"]["rules"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn build_functions_payload_sends_user_and_nextjs_generated_rules_separately() {
+    let tmp = tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join(".onreza")).unwrap();
+    fs::write(
+        tmp.path().join(".onreza/next-adapter-output.json"),
+        r#"
+{
+  "version": 1,
+  "adapter": { "name": "@onreza/nrz-next-adapter", "version": "0.34.1" },
+  "routing": {
+    "beforeMiddleware": [
+      {
+        "source": "/old",
+        "headers": { "Location": "/new" },
+        "status": 308
+      }
+    ]
+  },
+  "outputs": {}
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("onreza.rules.toml"),
+        r#"
+schemaVersion = "EDGE_RULE_SET_V1"
+source = { origin = "build" }
+
+[[rules]]
+id = "user-owned"
+action = { type = "allow" }
+"#,
+    )
+    .unwrap();
+
+    let payload = build_functions_payload(
+        &nrz::config::ProjectConfig::default(),
+        tmp.path(),
+        true,
+        false,
+    )
+    .unwrap()
+    .expect("user Edge Rules should create a functions payload");
+    let value = serde_json::to_value(&payload).unwrap();
+
+    assert_eq!(value["edgeRules"]["rules"][0]["id"], "user-owned");
+    assert_eq!(
+        value["generatedEdgeRuleSets"][0]["producer"],
+        "nextjs-adapter"
+    );
+    assert_eq!(
+        value["generatedEdgeRuleSets"][0]["edgeRules"]["rules"][0]["action"]["target"],
+        "/new"
+    );
 }
 
 #[test]
@@ -3069,6 +3229,23 @@ fn is_nextjs_false_without_package_json() {
     assert!(!is_nextjs_project(dir.path()));
 }
 
+#[test]
+fn nextjs_prebuild_clears_stale_adapter_descriptor() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies":{"next":"15.5.0"}}"#,
+    )
+    .unwrap();
+    let descriptor = dir.path().join(".onreza/next-adapter-output.json");
+    fs::create_dir_all(descriptor.parent().unwrap()).unwrap();
+    fs::write(&descriptor, "{}").unwrap();
+
+    clear_nextjs_descriptor_before_build(dir.path()).unwrap();
+
+    assert!(!descriptor.exists());
+}
+
 // ── is_sveltekit_with_adapter_auto ───────────────────────────
 
 #[test]
@@ -3309,6 +3486,52 @@ fn create_deployment_error_maps_edge_rules_divergence() {
 }
 
 #[test]
+fn create_deployment_validation_error_in_json_mode_preserves_details() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: StatusCode::BAD_REQUEST,
+        code: "VALIDATION_ERROR".to_string(),
+        message: "Ошибка валидации данных".to_string(),
+        retry_after_seconds: None,
+        details: Some(serde_json::json!({
+            "fields": [{ "field": "manifest.meta", "message": "Некорректное значение" }]
+        })),
+    }
+    .into();
+
+    let mapped = map_create_deployment_error(error, true);
+
+    assert!(
+        mapped
+            .downcast_ref::<crate::output::AlreadyReportedError>()
+            .is_some(),
+        "validation error in JSON mode must be fully reported with details, got: {mapped:#}"
+    );
+}
+
+#[test]
+fn function_stage_validation_error_in_json_mode_preserves_details() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: StatusCode::BAD_REQUEST,
+        code: "VALIDATION_ERROR".to_string(),
+        message: "Ошибка валидации данных".to_string(),
+        retry_after_seconds: None,
+        details: Some(serde_json::json!({
+            "fields": [{ "field": "generatedEdgeRuleSets", "message": "Некорректное значение" }]
+        })),
+    }
+    .into();
+
+    let mapped = map_function_stage_error(error, true);
+
+    assert!(
+        mapped
+            .downcast_ref::<crate::output::AlreadyReportedError>()
+            .is_some(),
+        "stage validation error in JSON mode must be fully reported with details, got: {mapped:#}"
+    );
+}
+
+#[test]
 fn boundary_wrap_nuxt_missing_server_is_missing_process_entry() {
     // validate_process_output is an internal helper; the boundary wrap that
     // tags its failures with MISSING_PROCESS_ENTRY lives at the call site in
@@ -3519,6 +3742,7 @@ fn wire_functions_contract_validates_origin_against_server_enum() {
         functions: vec![],
         edge_rules: None,
         edge_rules_force: false,
+        generated_edge_rule_sets: Vec::new(),
     };
     assert!(
         conform_functions_to_wire_contract(Some(ok))
@@ -3533,9 +3757,44 @@ fn wire_functions_contract_validates_origin_against_server_enum() {
         functions: vec![],
         edge_rules: None,
         edge_rules_force: false,
+        generated_edge_rule_sets: Vec::new(),
     };
     assert!(
         conform_functions_to_wire_contract(Some(bad)).is_err(),
         "an unknown functions origin must not reach the server"
+    );
+}
+
+#[test]
+fn wire_functions_contract_accepts_generated_edge_rule_contributions() {
+    let payload = crate::functions::FunctionPublishPayload {
+        origin: "DEPLOYMENT",
+        functions: vec![],
+        edge_rules: None,
+        edge_rules_force: false,
+        generated_edge_rule_sets: vec![crate::functions::GeneratedEdgeRuleSet {
+            producer: "nextjs-adapter".to_string(),
+            version: Some("16.2.9".to_string()),
+            edge_rules: serde_json::json!({
+                "schemaVersion": "EDGE_RULE_SET_V1",
+                "rules": [],
+            }),
+        }],
+    };
+
+    let value = conform_functions_to_wire_contract(Some(payload))
+        .unwrap()
+        .expect("functions payload");
+
+    assert_eq!(
+        value["generatedEdgeRuleSets"][0]["producer"],
+        "nextjs-adapter"
+    );
+    assert_eq!(
+        value["generatedEdgeRuleSets"][0]["edgeRules"]["rules"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
     );
 }

@@ -137,6 +137,7 @@ async fn publish(
         functions: Vec::new(),
         edge_rules: Some(edge_rules),
         edge_rules_force: args.force_rules,
+        generated_edge_rule_sets: Vec::new(),
     };
     let response: Value = match ctx
         .client
@@ -269,7 +270,7 @@ async fn get_active_rule_set(
     response.rule_set.ok_or_else(|| {
         output::coded_error(
             "ONREZA_RULES_NOT_FOUND",
-            "no active Edge Rules found for this environment",
+            "no user-authored Edge Rules found for this environment",
         )
     })
 }
@@ -369,22 +370,11 @@ pub(crate) fn active_rule_set_to_authoring_value(
         })
         .collect::<Vec<_>>();
 
-    let origin = match rule_set.source.as_str() {
-        "BUILD" => "build",
-        "UI" => "ui",
-        other => {
-            return Err(anyhow::anyhow!(
-                "active Edge Rules response has unsupported source: {other}"
-            ));
-        }
-    };
-
     let value = json!({
         "schemaVersion": rule_set
             .schema_version
             .as_deref()
             .unwrap_or(EDGE_RULE_SET_SCHEMA_VERSION),
-        "source": { "origin": origin },
         "rules": rules,
     });
     serde_json::from_value::<nrz_contract::EdgeRuleSetAuthoring>(value.clone())

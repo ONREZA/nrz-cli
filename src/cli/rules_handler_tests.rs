@@ -34,7 +34,7 @@ fn active_rule_set_pull_conversion_drops_position_and_writes_rules_tables() {
     let authoring = active_rule_set_to_authoring_value(&active).unwrap();
     let toml = edge_rule_set_authoring_to_toml(&authoring).unwrap();
 
-    assert!(toml.contains("source = { origin = \"build\" }"));
+    assert!(!toml.contains("source"));
     assert!(toml.contains("[[rules]]"));
     assert!(!toml.contains("position"));
     assert!(
