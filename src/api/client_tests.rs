@@ -11,8 +11,8 @@ use axum::routing::put;
 use bytes::Bytes;
 
 use super::client::{
-    ApiClient, PresignedHeadVerify, PresignedPutHeaders, UploadRetryPolicy, explain_s3_failure,
-    extract_api_error, sha256_hex_to_base64,
+    ApiClient, ConditionalUploadConflict, PresignedHeadVerify, PresignedPutHeaders,
+    UploadRetryPolicy, explain_s3_failure, extract_api_error, sha256_hex_to_base64,
 };
 
 #[derive(Clone)]
@@ -81,6 +81,16 @@ async fn verify_head_handler() -> impl IntoResponse {
     (StatusCode::OK, headers)
 }
 
+async fn verify_head_size_mismatch_handler() -> impl IntoResponse {
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_LENGTH, HeaderValue::from_static("15"));
+    headers.insert(
+        "x-amz-checksum-sha256",
+        HeaderValue::from_str(&sha256_hex_to_base64(FAKE_SHA).unwrap()).unwrap(),
+    );
+    (StatusCode::OK, headers)
+}
+
 async fn spawn_mock(state: MockState) -> (String, tokio::task::JoinHandle<()>) {
     let app = Router::new()
         .route("/upload", put(handler))
@@ -117,6 +127,19 @@ async fn spawn_precondition_with_head_mock() -> (String, tokio::task::JoinHandle
     let app = Router::new().route(
         "/upload",
         put(precondition_failed_handler).head(verify_head_handler),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/upload"), handle)
+}
+
+async fn spawn_precondition_with_mismatched_head_mock() -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new().route(
+        "/upload",
+        put(precondition_failed_handler).head(verify_head_size_mismatch_handler),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -247,6 +270,33 @@ async fn conditional_precondition_failed_verifies_existing_object() {
         )
         .await
         .expect("conditional 412 with verified matching object should be idempotent success");
+}
+
+#[tokio::test]
+async fn conditional_precondition_failed_with_mismatch_reports_recoverable_conflict() {
+    let (url, _h) = spawn_precondition_with_mismatched_head_mock().await;
+    let verify_head = PresignedHeadVerify {
+        url: url.clone(),
+        content_length: 16,
+        sha256: FAKE_SHA.to_string(),
+    };
+
+    let client = test_client();
+    let error = client
+        .put_blob_with_headers_and_verify(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &PresignedPutHeaders::if_none_match_any(),
+            Some(&verify_head),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(
+        error.downcast_ref::<ConditionalUploadConflict>().is_some(),
+        "{error}"
+    );
 }
 
 #[tokio::test]

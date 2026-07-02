@@ -1886,6 +1886,7 @@ fn prepare_upload_request_serializes_source_bundle_v1_contract() {
         source_sha256: "b".repeat(64).as_str().try_into().unwrap(),
         source_size_bytes: "4096".try_into().unwrap(),
         multipart: None,
+        source_upload_recovery: None,
     };
 
     let value = serde_json::to_value(&body).unwrap();
@@ -1921,6 +1922,45 @@ fn prepare_upload_request_serializes_source_bundle_v1_contract() {
             "sourceSizeBytes",
             "workspaceId",
         ]
+    );
+}
+
+#[test]
+fn prepare_upload_request_serializes_source_upload_recovery_context() {
+    let failed_upload_session_id = Uuid::now_v7();
+    let body = CliPrepareUploadRequest {
+        deployment_id: Uuid::now_v7(),
+        workspace_id: Uuid::now_v7(),
+        project_id: Uuid::now_v7(),
+        deployment_attempt_id: Uuid::now_v7(),
+        operation_id: Uuid::now_v7(),
+        artifact_format: "SOURCE_BUNDLE_V1".into(),
+        cli_protocol_version: source_bundle_v1::CLI_PROTOCOL_VERSION.try_into().unwrap(),
+        logical_manifest_summary: CliLogicalManifestSummary {
+            file_count: 1,
+            logical_static_bytes: "12".try_into().unwrap(),
+            artifact_size_bytes: "0".try_into().unwrap(),
+            max_static_file_size_bytes: "12".try_into().unwrap(),
+        },
+        logical_manifest_sha256: "a".repeat(64).as_str().try_into().unwrap(),
+        source_format: source_bundle_v1::SOURCE_BUNDLE_FORMAT.into(),
+        source_sha256: "b".repeat(64).as_str().try_into().unwrap(),
+        source_size_bytes: "4096".try_into().unwrap(),
+        multipart: None,
+        source_upload_recovery: Some(CliPrepareUploadSourceUploadRecovery {
+            failed_upload_session_id,
+            reason: SOURCE_UPLOAD_RECOVERY_CONDITIONAL_PRECONDITION_FAILED.to_string(),
+        }),
+    };
+
+    let value = serde_json::to_value(&body).unwrap();
+    assert_eq!(
+        value["sourceUploadRecovery"]["reason"],
+        "conditional-precondition-failed"
+    );
+    assert_eq!(
+        value["sourceUploadRecovery"]["failedUploadSessionId"],
+        failed_upload_session_id.to_string()
     );
 }
 

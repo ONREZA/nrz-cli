@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -105,6 +106,37 @@ pub(crate) struct PresignedHeadVerify {
     pub(crate) url: String,
     pub(crate) content_length: u64,
     pub(crate) sha256: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ConditionalUploadConflict {
+    reason: String,
+}
+
+impl ConditionalUploadConflict {
+    fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+        }
+    }
+}
+
+impl fmt::Display for ConditionalUploadConflict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "conditional upload target exists but does not match expected source object: {}",
+            self.reason
+        )
+    }
+}
+
+impl std::error::Error for ConditionalUploadConflict {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PresignedHeadVerification {
+    Matches,
+    Conflicts(String),
 }
 
 impl PresignedPutHeaders {
@@ -463,8 +495,16 @@ impl ApiClient {
                         let verify_head = verify_head.with_context(|| {
                             "conditional create returned 412 but server did not provide verifyHead"
                         })?;
-                        self.verify_presigned_head(verify_head).await?;
-                        return Ok(PresignedPutResult { e_tag: None });
+                        match self.verify_presigned_head(verify_head).await? {
+                            PresignedHeadVerification::Matches => {
+                                return Ok(PresignedPutResult { e_tag: None });
+                            }
+                            PresignedHeadVerification::Conflicts(reason) => {
+                                return Err(anyhow::Error::new(ConditionalUploadConflict::new(
+                                    reason,
+                                )));
+                            }
+                        }
                     }
                     let retry_after = parse_retry_after(resp.headers());
                     let body = resp
@@ -522,7 +562,10 @@ impl ApiClient {
         }
     }
 
-    async fn verify_presigned_head(&self, verify: &PresignedHeadVerify) -> anyhow::Result<()> {
+    async fn verify_presigned_head(
+        &self,
+        verify: &PresignedHeadVerify,
+    ) -> anyhow::Result<PresignedHeadVerification> {
         let expected_checksum_b64 = sha256_hex_to_base64(&verify.sha256)
             .with_context(|| format!("invalid SHA-256 for HEAD verification: {}", verify.sha256))?;
         let resp = self
@@ -537,32 +580,39 @@ impl ApiClient {
             bail!("conditional upload target exists but HEAD verification returned {status}");
         }
 
-        let content_length = resp
+        let Some(content_length) = resp
             .headers()
             .get(CONTENT_LENGTH)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<u64>().ok())
-            .with_context(|| "conditional upload HEAD verification returned no Content-Length")?;
+        else {
+            return Ok(PresignedHeadVerification::Conflicts(
+                "HEAD verification returned no Content-Length".to_string(),
+            ));
+        };
         if content_length != verify.content_length {
-            bail!(
-                "conditional upload HEAD verification size mismatch: expected {}, got {}",
-                verify.content_length,
-                content_length
-            );
+            return Ok(PresignedHeadVerification::Conflicts(format!(
+                "size mismatch: expected {}, got {}",
+                verify.content_length, content_length
+            )));
         }
 
-        let checksum = resp
+        let Some(checksum) = resp
             .headers()
             .get("x-amz-checksum-sha256")
             .and_then(|value| value.to_str().ok())
-            .with_context(
-                || "conditional upload HEAD verification returned no x-amz-checksum-sha256",
-            )?;
+        else {
+            return Ok(PresignedHeadVerification::Conflicts(
+                "HEAD verification returned no x-amz-checksum-sha256".to_string(),
+            ));
+        };
         if checksum != expected_checksum_b64 {
-            bail!("conditional upload HEAD verification SHA-256 mismatch");
+            return Ok(PresignedHeadVerification::Conflicts(
+                "SHA-256 mismatch".to_string(),
+            ));
         }
 
-        Ok(())
+        Ok(PresignedHeadVerification::Matches)
     }
 }
 

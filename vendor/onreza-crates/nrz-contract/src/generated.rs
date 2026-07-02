@@ -6510,13 +6510,41 @@ pub mod cli_api {
     ///          "type": "string",
     ///          "pattern": "^[0-9]+$"
     ///        },
+    ///        "sourceUploadRecovery": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "failedUploadSessionId",
+    ///            "reason"
+    ///          ],
+    ///          "properties": {
+    ///            "failedUploadSessionId": {
+    ///              "type": "string",
+    ///              "format": "uuid",
+    ///              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    ///            },
+    ///            "reason": {
+    ///              "type": "string",
+    ///              "const": "conditional-precondition-failed"
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
     ///        "workspaceId": {
     ///          "type": "string",
     ///          "format": "uuid",
     ///          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     ///        }
     ///      },
-    ///      "additionalProperties": false
+    ///      "additionalProperties": false,
+    ///      "dependentSchemas": {
+    ///        "sourceUploadRecovery": {
+    ///          "not": {
+    ///            "required": [
+    ///              "multipart"
+    ///            ]
+    ///          }
+    ///        }
+    ///      }
     ///    },
     ///    "prepareUploadResponse": {
     ///      "type": "object",
@@ -9489,13 +9517,41 @@ pub mod cli_api {
     ///      "type": "string",
     ///      "pattern": "^[0-9]+$"
     ///    },
+    ///    "sourceUploadRecovery": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "failedUploadSessionId",
+    ///        "reason"
+    ///      ],
+    ///      "properties": {
+    ///        "failedUploadSessionId": {
+    ///          "type": "string",
+    ///          "format": "uuid",
+    ///          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    ///        },
+    ///        "reason": {
+    ///          "type": "string",
+    ///          "const": "conditional-precondition-failed"
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
     ///    "workspaceId": {
     ///      "type": "string",
     ///      "format": "uuid",
     ///      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     ///    }
     ///  },
-    ///  "additionalProperties": false
+    ///  "additionalProperties": false,
+    ///  "dependentSchemas": {
+    ///    "sourceUploadRecovery": {
+    ///      "not": {
+    ///        "required": [
+    ///          "multipart"
+    ///        ]
+    ///      }
+    ///    }
+    ///  }
     ///}
     /// ```
     /// </details>
@@ -9526,6 +9582,13 @@ pub mod cli_api {
         pub source_sha256: OnrezaCliApiV1PrepareUploadRequestSourceSha256,
         #[serde(rename = "sourceSizeBytes")]
         pub source_size_bytes: OnrezaCliApiV1PrepareUploadRequestSourceSizeBytes,
+        #[serde(
+            rename = "sourceUploadRecovery",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub source_upload_recovery:
+            ::std::option::Option<OnrezaCliApiV1PrepareUploadRequestSourceUploadRecovery>,
         #[serde(rename = "workspaceId")]
         pub workspace_id: ::uuid::Uuid,
     }
@@ -10338,6 +10401,39 @@ pub mod cli_api {
                     <D::Error as ::serde::de::Error>::custom(e.to_string())
                 })
         }
+    }
+    ///`OnrezaCliApiV1PrepareUploadRequestSourceUploadRecovery`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "failedUploadSessionId",
+    ///    "reason"
+    ///  ],
+    ///  "properties": {
+    ///    "failedUploadSessionId": {
+    ///      "type": "string",
+    ///      "format": "uuid",
+    ///      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    ///    },
+    ///    "reason": {
+    ///      "type": "string",
+    ///      "const": "conditional-precondition-failed"
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaCliApiV1PrepareUploadRequestSourceUploadRecovery {
+        #[serde(rename = "failedUploadSessionId")]
+        pub failed_upload_session_id: ::uuid::Uuid,
+        pub reason: ::std::string::String,
     }
     ///`OnrezaCliApiV1PrepareUploadResponse`
     ///

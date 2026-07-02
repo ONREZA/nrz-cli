@@ -24,7 +24,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::api::{ApiClient, PresignedHeadVerify, PresignedPutHeaders};
+use crate::api::{ApiClient, ConditionalUploadConflict, PresignedHeadVerify, PresignedPutHeaders};
 use crate::artifact::source_bundle_v1::{
     self, CLI_PROTOCOL_VERSION, CompletedMultipartPart, PresignedSourceMultipartChunk,
     SOURCE_BUNDLE_FORMAT, SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, SourceBundlePlan,
@@ -44,6 +44,7 @@ use nrz_contract::cli_api::{
     OnrezaCliApiV1PrepareUploadRequestLogicalManifestSummary as CliLogicalManifestSummary,
     OnrezaCliApiV1PrepareUploadRequestMultipart as CliPrepareMultipart,
     OnrezaCliApiV1PrepareUploadRequestMultipartPartsItem as CliPrepareMultipartPart,
+    OnrezaCliApiV1PrepareUploadRequestSourceUploadRecovery as CliPrepareUploadSourceUploadRecovery,
 };
 use nrz_contract::{
     CliMultipartCompleteRequest, CliMultipartCompleteResponse, CliPrepareUploadRequest,
@@ -67,6 +68,8 @@ const UPLOAD_FAILED_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_UPLOAD_FAILURE_LOG_LENGTH: usize = 4096;
 const REDACTED_URL_COMPONENT: &str = "REDACTED";
 const SOURCE_UPLOAD_PUT_FAILED: &str = "SOURCE_UPLOAD_PUT_FAILED";
+const SOURCE_UPLOAD_RECOVERY_CONDITIONAL_PRECONDITION_FAILED: &str =
+    "conditional-precondition-failed";
 const NEXTJS_ADAPTER_EDGE_RULE_PRODUCER: &str = "nextjs-adapter";
 const PNPM_BUILD_SCRIPT_COMPAT_ENV: [(&str, &str); 2] = [
     ("npm_config_dangerously_allow_all_builds", "true"),
@@ -1062,55 +1065,88 @@ async fn prepare_upload_and_complete(
     let attempt_uuid = Uuid::parse_str(deployment_attempt_id).with_context(|| {
         format!("deployment attempt id is not a valid UUID: {deployment_attempt_id}")
     })?;
-    let source_size_bytes = plan.source_size_string();
-    let body =
-        CliPrepareUploadRequest {
-            deployment_id: deployment_uuid,
-            workspace_id: workspace_uuid,
-            project_id: project_uuid,
-            deployment_attempt_id: attempt_uuid,
-            operation_id: Uuid::now_v7(),
-            artifact_format: "SOURCE_BUNDLE_V1".to_string(),
-            cli_protocol_version: CLI_PROTOCOL_VERSION
-                .try_into()
-                .map_err(|e| anyhow::anyhow!("invalid cli_protocol_version: {e}"))?,
-            logical_manifest_summary: to_contract_manifest_summary(&plan.logical_manifest_summary)?,
-            logical_manifest_sha256: plan.logical_manifest_sha256.as_str().try_into().map_err(
-                |e| anyhow::anyhow!("invalid logical_manifest_sha256 for prepare-upload: {e}"),
-            )?,
-            source_format: SOURCE_BUNDLE_FORMAT.to_string(),
-            source_sha256: plan
-                .source_sha256
-                .as_str()
-                .try_into()
-                .map_err(|e| anyhow::anyhow!("invalid source_sha256 for prepare-upload: {e}"))?,
-            source_size_bytes: source_size_bytes.as_str().try_into().map_err(|e| {
-                anyhow::anyhow!("invalid source_size_bytes for prepare-upload: {e}")
-            })?,
-            multipart: plan
-                .multipart
-                .as_ref()
-                .map(to_contract_multipart)
-                .transpose()?,
+    let body = build_prepare_upload_request(
+        deployment_uuid,
+        workspace_uuid,
+        project_uuid,
+        attempt_uuid,
+        plan,
+        None,
+    )?;
+
+    let mut prepared = prepare_upload_with_retry(client, deployment_uuid, &body, json).await?;
+
+    let multipart_completion =
+        match upload_source_object(client, &prepared, plan, json).await {
+            Ok(completion) => completion,
+            Err(error) if is_conditional_upload_conflict(&error) => {
+                output::status(
+                    json,
+                    "~",
+                    "Recovering SOURCE_BUNDLE_V1 source upload...",
+                    output::Phase::Deploy,
+                );
+                let recovery_body = build_prepare_upload_request(
+                    deployment_uuid,
+                    workspace_uuid,
+                    project_uuid,
+                    attempt_uuid,
+                    plan,
+                    Some(CliPrepareUploadSourceUploadRecovery {
+                        failed_upload_session_id: prepared.upload_session_id,
+                        reason: SOURCE_UPLOAD_RECOVERY_CONDITIONAL_PRECONDITION_FAILED.to_string(),
+                    }),
+                )?;
+                let recovered_prepared =
+                    match prepare_upload_with_retry(client, deployment_uuid, &recovery_body, json)
+                        .await
+                    {
+                        Ok(prepared) => prepared,
+                        Err(recovery_error) => {
+                            report_source_object_upload_failed(
+                                client,
+                                deployment_id,
+                                deployment_attempt_id,
+                                &prepared,
+                                &recovery_error,
+                                json,
+                            )
+                            .await;
+                            return Err(recovery_error);
+                        }
+                    };
+                match upload_source_object(client, &recovered_prepared, plan, json).await {
+                    Ok(completion) => {
+                        prepared = recovered_prepared;
+                        completion
+                    }
+                    Err(recovery_error) => {
+                        report_source_object_upload_failed(
+                            client,
+                            deployment_id,
+                            deployment_attempt_id,
+                            &recovered_prepared,
+                            &recovery_error,
+                            json,
+                        )
+                        .await;
+                        return Err(recovery_error);
+                    }
+                }
+            }
+            Err(error) => {
+                report_source_object_upload_failed(
+                    client,
+                    deployment_id,
+                    deployment_attempt_id,
+                    &prepared,
+                    &error,
+                    json,
+                )
+                .await;
+                return Err(error);
+            }
         };
-
-    let prepared = prepare_upload_with_retry(client, deployment_uuid, &body, json).await?;
-
-    let multipart_completion = match upload_source_object(client, &prepared, plan, json).await {
-        Ok(completion) => completion,
-        Err(error) => {
-            report_source_object_upload_failed(
-                client,
-                deployment_id,
-                deployment_attempt_id,
-                &prepared,
-                &error,
-                json,
-            )
-            .await;
-            return Err(error);
-        }
-    };
     // Completion endpoints are idempotent, but response failures are ambiguous:
     // the server may already have accepted the completion before the CLI hears
     // back. Do not send upload-failed after this point.
@@ -1136,6 +1172,58 @@ async fn prepare_upload_and_complete(
     .await?;
 
     Ok(())
+}
+
+fn build_prepare_upload_request(
+    deployment_uuid: Uuid,
+    workspace_uuid: Uuid,
+    project_uuid: Uuid,
+    deployment_attempt_uuid: Uuid,
+    plan: &SourceBundlePlan,
+    source_upload_recovery: Option<CliPrepareUploadSourceUploadRecovery>,
+) -> anyhow::Result<CliPrepareUploadRequest> {
+    let source_size_bytes = plan.source_size_string();
+    Ok(CliPrepareUploadRequest {
+        deployment_id: deployment_uuid,
+        workspace_id: workspace_uuid,
+        project_id: project_uuid,
+        deployment_attempt_id: deployment_attempt_uuid,
+        operation_id: Uuid::now_v7(),
+        artifact_format: "SOURCE_BUNDLE_V1".to_string(),
+        cli_protocol_version: CLI_PROTOCOL_VERSION
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("invalid cli_protocol_version: {e}"))?,
+        logical_manifest_summary: to_contract_manifest_summary(&plan.logical_manifest_summary)?,
+        logical_manifest_sha256: plan
+            .logical_manifest_sha256
+            .as_str()
+            .try_into()
+            .map_err(|e| {
+                anyhow::anyhow!("invalid logical_manifest_sha256 for prepare-upload: {e}")
+            })?,
+        source_format: SOURCE_BUNDLE_FORMAT.to_string(),
+        source_sha256: plan
+            .source_sha256
+            .as_str()
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("invalid source_sha256 for prepare-upload: {e}"))?,
+        source_size_bytes: source_size_bytes
+            .as_str()
+            .try_into()
+            .map_err(|e| anyhow::anyhow!("invalid source_size_bytes for prepare-upload: {e}"))?,
+        multipart: plan
+            .multipart
+            .as_ref()
+            .map(to_contract_multipart)
+            .transpose()?,
+        source_upload_recovery,
+    })
+}
+
+fn is_conditional_upload_conflict(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.is::<ConditionalUploadConflict>())
 }
 
 fn to_contract_manifest_summary(
