@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.0] - 2026-07-02
+
+### 🔧 Changed
+
+- **deps:** update deps ([9d4db2a](https://github.com/ONREZA/nrz-cli/commit/9d4db2ad6f042ef4b57bac61e3ab9659577e7841))
+
+### 🐛 Bug Fixes
+
+- **deploy:** recover source upload conflicts ([7e91ee3](https://github.com/ONREZA/nrz-cli/commit/7e91ee3aa2611216012646716c0ebcccc16da0d5))
+- **build:** harden static HTML detection ([e1336fb](https://github.com/ONREZA/nrz-cli/commit/e1336fbdc478eb9b42665e50345996c71ad082d5))
+
+### ♻️ Changed
+
+- **deploy:** introduce declarative deploy planning ([5bc5948](https://github.com/ONREZA/nrz-cli/commit/5bc594849382b91ffc128f5bc2939ebbab41023c))
+
+### ✨ Features
+
+- **deploy:** add nextjs adapter support ([60a6f5e](https://github.com/ONREZA/nrz-cli/commit/60a6f5ef86a3f355e46d63f6a0edbc0bb05c5d6a))
+
 ## [0.35.0-beta.0] - 2026-06-24
 
 ### ✨ Features
