@@ -72,7 +72,7 @@ debug = "node --inspect src/index.js"
 |------|-----|-------------|---------|
 | `install_command` | string | авто | Команда установки зависимостей перед build/deploy. Если не задана, определяется по package manager. Пустая строка означает явный skip. |
 | `command` | string | нет | Команда сборки, которая выполняется автоматически перед `nrz deploy` (если не передан `--skip-build`). Пример: `"npm run build"`. |
-| `output_directory` | string | авто | Единственная авторитетная директория build output. Если задана в `onreza.toml`, CLI не делает silent fallback в другие директории. |
+| `output_directory` | string | авто | Единственная авторитетная директория build output. Если задана в `onreza.toml`, CLI не делает silent fallback в другие директории. Compatibility alias: `output_dir`. |
 | `output_dirs` | string[] | см. ниже | Список директорий, в которых CLI ищет build output. Порядок важен — берётся первая существующая. |
 
 **Дефолтный `output_dirs`:**
@@ -100,7 +100,7 @@ output_dirs = ["dist"]
 | Поле | Тип | По умолчанию | Описание |
 |------|-----|-------------|---------|
 | `compute` | string | авто | Принудительно задать compute type вместо авто-определения. Значения: `"static"`, `"process"`. Используйте только если авто-определение даёт неверный результат. |
-| `entry` | string | авто | Точка входа для `PROCESS`-деплоев (Node.js/Bun сервер). Должна быть относительным путём без `..`. Пример: `"server.ts"`, `"dist/index.js"`. Если не задана, CLI определяет автоматически. |
+| `entry` | string | авто | Точка входа для `PROCESS`-деплоев (Node.js/Bun сервер). Должна быть относительным путём без `..`, не shell-командой. Пример: `"server.ts"`, `"dist/index.js"`. Compatibility alias: `entrypoint`. Если не задана, CLI определяет автоматически. |
 | `app` | string | нет | Монорепо: какой workspace/пакет деплоить. Матчится по имени пакета из `package.json`, имени директории, или относительному пути. Эквивалент CLI флага `--app` / `--filter`. |
 
 Для `nrz deploy --app web` CLI сначала выбирает workspace из root config, затем
@@ -130,9 +130,9 @@ output_dirs = ["dist"]
 
 Если entry не удалось определить однозначно:
 - для strict-фреймворков (`nextjs`, `nuxt`) деплой завершается ошибкой с actionable подсказкой
-- для остальных CLI отправляет `processEntry = null` и рантайм делает fallback на `bun <output_dir>` (best-effort), плюс выводится warning с рекомендацией явно задать `[deploy] entry`
+- для остальных деплой тоже завершается ошибкой с просьбой явно задать `[deploy] entry`
 
-CLI не патчит `package.json` в build output для PROCESS. Резолвленный entry передаётся в deployment metadata (`processEntry`) как явная команда запуска. Если entry не найден для non-strict фреймворка, поле `processEntry` не отправляется и используется runtime fallback.
+CLI не патчит `package.json` в build output для PROCESS. Резолвленный entry передаётся в deployment metadata (`processEntry`) как явная команда запуска. Если entry не найден или найден неоднозначно, деплой останавливается до отправки runtime metadata.
 
 Для `Next.js` в `compute = "process"` требуется runnable standalone output:
 - должен существовать `server.js` в корне выбранного output dir (обычно `.next/standalone/server.js`)

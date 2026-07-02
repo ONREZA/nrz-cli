@@ -164,7 +164,8 @@ pub(crate) async fn run_with_effective_config(
                 .output_directory()
                 .map(|setting| setting.source_or_preset())
                 .unwrap_or(BuildSettingSource::Preset),
-        });
+        })
+        .or_else(|| detected_output_directory_hint(detection));
     let (output_dir, has_manifest) = detect_output_dir_for_framework(
         project_dir,
         &effective.output_dirs(),
@@ -715,6 +716,19 @@ fn compute_aware_output_dirs(
             vec!["dist", "build"]
         }
         "tanstack-start" => vec![".output", "dist"],
+        "static-html" => {
+            if detection
+                .metadata
+                .build_info
+                .as_ref()
+                .and_then(|info| info.output_dir.as_deref())
+                == Some(".")
+            {
+                vec!["."]
+            } else {
+                crate::detect::presets::PACKAGE_STATIC_OUTPUT_DIRS.to_vec()
+            }
+        }
         slug => crate::detect::presets::framework_output_dirs(slug).to_vec(),
     }
 }
@@ -783,6 +797,21 @@ fn try_generate_ssr_manifest(
         }
         _ => None,
     }
+}
+
+fn detected_output_directory_hint(
+    detection: &crate::detect::types::DetectionResult,
+) -> Option<OutputDirectoryHint<'_>> {
+    detection
+        .metadata
+        .build_info
+        .as_ref()?
+        .output_dir
+        .as_deref()
+        .map(|path| OutputDirectoryHint {
+            path,
+            source: BuildSettingSource::Detected,
+        })
 }
 
 /// Try framework-specific and configured output directory names.

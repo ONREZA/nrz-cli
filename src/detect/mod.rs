@@ -72,36 +72,14 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
         return result;
     }
 
-    // 3. Fallback: static HTML site (no package.json + index.html)
-    if static_html::is_static_html_site(fs) {
-        let preset = presets::get_static_html_preset();
-        let html_files = static_html::find_html_files(fs);
-
-        return DetectionResult {
-            framework: preset.slug.to_string(),
-            name: preset.name.to_string(),
-            version: None,
-            suggested_compute: ComputeType::Static,
-            metadata: DetectionMetadata {
-                uses_typescript: None,
-                config_files: Vec::new(),
-                runtime: RuntimeInfo {
-                    runtime_type: RuntimeType::Static,
-                    version: None,
-                },
-                package_manager: None,
-                build_info: Some(BuildInfo {
-                    build_command: None,
-                    install_command: None,
-                    output_dir: Some(".".to_string()),
-                    entry_point: None,
-                }),
-                monorepo: None,
-                ssr_analysis: None,
-                structure: html_files,
-            },
-            reason: "Static HTML site detected (index.html found, no package.json)".into(),
-        };
+    // 3. Fallback: root static HTML site. A package.json may exist for tooling
+    // metadata; runtime entry signals should keep the project on PROCESS.
+    if static_html::is_static_html_site(fs)
+        && !pkg
+            .as_ref()
+            .is_some_and(|pkg| has_unknown_runtime_signal(fs, pkg))
+    {
+        return static_html_detection(fs, pkg.as_ref(), pm_info);
     }
 
     // 4. Unknown project
@@ -134,6 +112,61 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
         },
         reason,
     }
+}
+
+fn static_html_detection(
+    fs: &dyn Fs,
+    pkg: Option<&PackageJson>,
+    pm_info: Option<PackageManagerInfo>,
+) -> DetectionResult {
+    let preset = presets::get_static_html_preset();
+    let html_files = static_html::find_html_files(fs);
+    let has_package_json = fs.exists("package.json");
+    let output_dir = static_html_output_dir_hint(fs, has_package_json);
+    let monorepo = detect_monorepo_info(fs, pkg, pm_info.as_ref());
+
+    DetectionResult {
+        framework: preset.slug.to_string(),
+        name: preset.name.to_string(),
+        version: None,
+        suggested_compute: ComputeType::Static,
+        metadata: DetectionMetadata {
+            uses_typescript: None,
+            config_files: Vec::new(),
+            runtime: RuntimeInfo {
+                runtime_type: RuntimeType::Static,
+                version: None,
+            },
+            package_manager: pm_info,
+            build_info: Some(BuildInfo {
+                build_command: None,
+                install_command: None,
+                output_dir,
+                entry_point: None,
+            }),
+            monorepo,
+            ssr_analysis: None,
+            structure: html_files,
+        },
+        reason: if has_package_json {
+            "Static HTML site detected (root index.html found, no runtime entry signals)".into()
+        } else {
+            "Static HTML site detected (index.html found)".into()
+        },
+    }
+}
+
+fn static_html_output_dir_hint(fs: &dyn Fs, has_package_json: bool) -> Option<String> {
+    if has_package_json {
+        for dir in presets::PACKAGE_STATIC_OUTPUT_DIRS {
+            if fs.is_dir(dir) {
+                return Some((*dir).to_string());
+            }
+        }
+        return None;
+    }
+
+    Some(".".to_string())
 }
 
 fn detect_with_fs_and_framework_override(
@@ -558,23 +591,23 @@ fn infer_unknown_compute_type(fs: &dyn Fs, pkg: Option<&PackageJson>) -> Compute
         return ComputeType::Static;
     };
 
-    let has_runtime_script = pkg
-        .scripts
-        .iter()
-        .any(|(name, _)| is_runtime_script_name(name));
-    if has_runtime_script {
-        return ComputeType::Process;
-    }
-
-    if has_resolvable_entry(fs, pkg.main.as_deref()) {
-        return ComputeType::Process;
-    }
-
-    if has_resolvable_entry(fs, pkg.module.as_deref()) {
+    if has_unknown_runtime_signal(fs, pkg) {
         return ComputeType::Process;
     }
 
     ComputeType::Static
+}
+
+fn has_unknown_runtime_signal(fs: &dyn Fs, pkg: &PackageJson) -> bool {
+    has_runtime_script(pkg)
+        || has_resolvable_entry(fs, pkg.main.as_deref())
+        || has_resolvable_entry(fs, pkg.module.as_deref())
+}
+
+fn has_runtime_script(pkg: &PackageJson) -> bool {
+    pkg.scripts
+        .iter()
+        .any(|(name, _)| is_runtime_script_name(name))
 }
 
 /// Check if a package.json main/module field points to an existing file.

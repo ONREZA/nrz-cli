@@ -46,8 +46,12 @@ fn analyze_nextjs(fs: &dyn Fs) -> SsrAnalysis {
             features.push("output: 'standalone'".into());
         }
         if contains_value(&stripped, "output", "export") {
-            features.push("output: 'export' (static)".into());
-            is_static_compatible = true;
+            if next_static_export_is_env_gated(&stripped) {
+                features.push("output: 'export' (env-gated; ignored)".into());
+            } else {
+                features.push("output: 'export' (static)".into());
+                is_static_compatible = true;
+            }
         }
     }
 
@@ -76,14 +80,19 @@ fn analyze_nextjs(fs: &dyn Fs) -> SsrAnalysis {
     }
 
     // Check for "use server" directives (Server Actions / Server Components)
-    if fs.is_dir("app") && walk_for_content(fs, "app", "use server") {
+    if next_app_walk_for_content(fs, "use server") {
         features.push("\"use server\" directives".into());
         is_static_compatible = false;
     }
 
     // Check for revalidate export (ISR — needs runtime)
-    if fs.is_dir("app") && walk_for_content(fs, "app", "export const revalidate") {
+    if next_app_walk_for_content(fs, "export const revalidate") {
         features.push("revalidate (ISR)".into());
+        is_static_compatible = false;
+    }
+
+    if next_app_walk_for_content(fs, "force-dynamic") {
+        features.push("dynamic rendering".into());
         is_static_compatible = false;
     }
 
@@ -98,7 +107,7 @@ fn analyze_nextjs(fs: &dyn Fs) -> SsrAnalysis {
     }
 
     // Check for generateStaticParams (App Router SSG — informational)
-    if fs.is_dir("app") && walk_for_content(fs, "app", "generateStaticParams") {
+    if next_app_walk_for_content(fs, "generateStaticParams") {
         features.push("generateStaticParams (SSG)".into());
     }
 
@@ -726,12 +735,31 @@ fn contains_any_pattern(content: &str, patterns: &[&str]) -> bool {
     false
 }
 
-/// Check for Next.js route handlers (app/**/route.{ts,js}).
-fn has_route_handlers(fs: &dyn Fs) -> bool {
-    if !fs.is_dir("app") {
+fn next_static_export_is_env_gated(content: &str) -> bool {
+    if !contains_any_pattern(
+        content,
+        &["process.env", "import.meta.env", "Bun.env", "Deno.env"],
+    ) {
         return false;
     }
-    walk_for_file(fs, "app", &["route.ts", "route.js"])
+
+    let compact: String = content.chars().filter(|c| !c.is_whitespace()).collect();
+    ["'", "\"", "`"]
+        .iter()
+        .any(|quote| compact.contains(&format!("?{{output:{quote}export{quote}")))
+}
+
+fn next_app_walk_for_content(fs: &dyn Fs, needle: &str) -> bool {
+    ["app", "src/app"]
+        .iter()
+        .any(|dir| fs.is_dir(dir) && walk_for_content(fs, dir, needle))
+}
+
+/// Check for Next.js route handlers (app/**/route.{ts,js}, src/app/**/route.{ts,js}).
+fn has_route_handlers(fs: &dyn Fs) -> bool {
+    ["app", "src/app"]
+        .iter()
+        .any(|dir| fs.is_dir(dir) && walk_for_file(fs, dir, &["route.ts", "route.js"]))
 }
 
 /// Check for getServerSideProps in pages/ directory.

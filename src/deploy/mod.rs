@@ -3451,6 +3451,11 @@ fn sanitize_config_entry(entry: &str) -> anyhow::Result<String> {
     if trimmed.is_empty() {
         bail!("[deploy] entry in onreza.toml must not be empty");
     }
+    if looks_like_shell_command_entry(trimmed) {
+        bail!(
+            "[deploy] entry must be a relative file path inside the build output, not a shell command. Use entry = \"index.js\" instead of \"{entry}\"."
+        );
+    }
 
     let normalized = trimmed.replace('\\', "/");
     let lowered = normalized.to_ascii_lowercase();
@@ -3482,11 +3487,23 @@ fn sanitize_config_entry(entry: &str) -> anyhow::Result<String> {
     Ok(cleaned.to_string_lossy().replace('\\', "/"))
 }
 
+fn looks_like_shell_command_entry(entry: &str) -> bool {
+    let mut words = entry.split_whitespace();
+    let Some(first) = words.next() else {
+        return false;
+    };
+    words.next().is_some()
+        && matches!(
+            first,
+            "node" | "bun" | "deno" | "tsx" | "ts-node" | "npm" | "pnpm" | "yarn" | "npx"
+        )
+}
+
 /// Resolve and ensure entry point for PROCESS deployments.
 ///
 /// 1. Resolve entry: config `[deploy] entry` > framework auto-detect
 /// 2. Validate file existence when entry is resolved
-/// 3. If unresolved for non-strict frameworks, fallback to runtime default (`bun <output_dir>`)
+/// 3. If unresolved, return an actionable error.
 fn ensure_process_entry(
     output_dir: &Path,
     project_dir: &Path,
@@ -3537,28 +3554,20 @@ fn ensure_process_entry(
                     ));
                 }
 
-                let warning = format!(
-                    "Entry point auto-detection is ambiguous for PROCESS deployment ({} candidates in {}).\n\
-                     Falling back to runtime default (`bun` in output directory).\n\
+                return Err(output::coded_error(
+                    "ENTRY_POINT_AMBIGUOUS",
+                    format!(
+                        "Entry point auto-detection is ambiguous for PROCESS deployment ({} candidates in {}).\n\
                      Set [deploy] entry in onreza.toml to make startup explicit.",
-                    candidates.len(),
-                    output_dir.display()
-                );
-                return Ok((None, Some(warning)));
+                        candidates.len(),
+                        output_dir.display()
+                    ),
+                ));
             }
             crate::detect::EntryPointResolution::NotFound => {
-                if !is_strict_process_framework(&detection.framework) {
-                    let warning = format!(
-                        "Entry point auto-detection did not find a runnable file in {}.\n\
-                         Falling back to runtime default (`bun` in output directory).\n\
-                         Set [deploy] entry in onreza.toml to avoid runtime guesswork.",
-                        output_dir.display()
-                    );
-                    return Ok((None, Some(warning)));
-                }
-
-                if let Some(diagnostic) =
-                    framework_process_diagnostic(&detection.framework, detection, output_dir)
+                if is_strict_process_framework(&detection.framework)
+                    && let Some(diagnostic) =
+                        framework_process_diagnostic(&detection.framework, detection, output_dir)
                 {
                     bail!("{diagnostic}");
                 }

@@ -387,6 +387,136 @@ fn detect_static_html_is_static() {
 }
 
 #[test]
+fn detect_static_html_with_package_metadata_has_no_root_output_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("index.html"),
+        "<html><body>hello</body></html>",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"asset-pack","scripts":{"build":"bash copy-to-dist.sh"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "static-html");
+    assert_eq!(result.suggested_compute, ComputeType::Static);
+    assert!(
+        result
+            .metadata
+            .build_info
+            .as_ref()
+            .and_then(|info| info.output_dir.as_deref())
+            .is_none()
+    );
+}
+
+#[test]
+fn detect_static_html_with_package_build_output_prefers_artifact_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("index.html"),
+        "<html><body>source</body></html>",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
+    std::fs::write(dir.path().join("dist/index.html"), "<html>built</html>").unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "static-html");
+    assert_eq!(result.suggested_compute, ComputeType::Static);
+    assert_eq!(
+        result
+            .metadata
+            .build_info
+            .as_ref()
+            .and_then(|info| info.output_dir.as_deref()),
+        Some("dist")
+    );
+}
+
+#[test]
+fn detect_static_html_with_package_workspaces_preserves_monorepo_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("index.html"),
+        "<html><body>workspace root</body></html>",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"root","workspaces":["apps/*"],"scripts":{"build":"echo noop"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
+    std::fs::write(
+        dir.path().join("apps/web/package.json"),
+        r#"{"name":"web"}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "static-html");
+    let monorepo = result
+        .metadata
+        .monorepo
+        .expect("static-html fallback should preserve monorepo metadata");
+    assert_eq!(monorepo.tool, MonorepoTool::Npm);
+    assert_eq!(monorepo.workspaces, vec!["apps/*"]);
+    assert_eq!(monorepo.packages.len(), 1);
+    assert_eq!(monorepo.packages[0].path, "apps/web");
+    assert_eq!(monorepo.packages[0].name.as_deref(), Some("web"));
+}
+
+#[test]
+fn detect_static_html_with_resolvable_package_entry_is_process_other() {
+    for (package_json, entry_path) in [
+        (r#"{"main":"dist/server.js"}"#, "dist/server.js"),
+        (r#"{"module":"dist/server.mjs"}"#, "dist/server.mjs"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("index.html"),
+            "<html><body>hello</body></html>",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("package.json"), package_json).unwrap();
+        std::fs::create_dir_all(dir.path().join("dist")).unwrap();
+        std::fs::write(dir.path().join(entry_path), "console.log('server')").unwrap();
+
+        let result = detect(dir.path());
+        assert_eq!(result.framework, "other");
+        assert_eq!(result.suggested_compute, ComputeType::Process);
+    }
+}
+
+#[test]
+fn detect_static_html_with_runtime_script_is_process_other() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("index.html"),
+        "<html><body>hello</body></html>",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"start":"node server.js"}}"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "other");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
 fn detect_unknown_is_static() {
     let dir = tempfile::tempdir().unwrap();
     let result = detect(dir.path());
@@ -2144,6 +2274,71 @@ fn nextjs_output_dir_export_is_out() {
         .output_dir
         .as_deref();
     assert_eq!(output_dir, Some("out"));
+}
+
+#[test]
+fn nextjs_env_gated_export_is_not_static_export() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"next": "16.2.7", "react": "19.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("next.config.ts"),
+        r#"
+const isExport = process.env.STATIC_EXPORT === "true";
+export default isExport ? { output: "export" } : {};
+"#,
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nextjs");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+    assert_eq!(
+        result
+            .metadata
+            .build_info
+            .as_ref()
+            .and_then(|info| info.output_dir.as_deref()),
+        Some(".next")
+    );
+}
+
+#[test]
+fn nextjs_src_app_route_handlers_are_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"dependencies": {"next": "16.2.7", "react": "19.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("next.config.ts"),
+        r#"export default { output: "export" };"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("src/app/api/booking")).unwrap();
+    std::fs::write(
+        dir.path().join("src/app/api/booking/route.ts"),
+        "export async function POST() { return Response.json({ ok: true }); }",
+    )
+    .unwrap();
+
+    let result = detect(dir.path());
+    assert_eq!(result.framework, "nextjs");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+    assert!(
+        result
+            .metadata
+            .ssr_analysis
+            .as_ref()
+            .is_some_and(|analysis| analysis
+                .ssr_features
+                .iter()
+                .any(|feature| feature == "app/ route handlers"))
+    );
 }
 
 #[test]

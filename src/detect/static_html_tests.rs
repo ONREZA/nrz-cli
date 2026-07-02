@@ -9,11 +9,11 @@ fn detect_static_html_site() {
 }
 
 #[test]
-fn not_static_if_package_json_present() {
+fn static_if_package_json_present() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("index.html"), "<html></html>").unwrap();
     std::fs::write(dir.path().join("package.json"), "{}").unwrap();
-    assert!(!is_static_html_site(&LocalFs::new(dir.path())));
+    assert!(is_static_html_site(&LocalFs::new(dir.path())));
 }
 
 #[test]

@@ -1,16 +1,10 @@
-//! Static HTML site detection (fallback when no package.json).
+//! Static HTML site detection.
 
 use super::fs::Fs;
 
 /// Check if the directory looks like a static HTML site.
-/// Returns true when index.html exists and no package.json is present.
+/// Returns true when a non-empty root index.html exists.
 pub fn is_static_html_site(fs: &dyn Fs) -> bool {
-    // Must NOT have package.json
-    if fs.exists("package.json") {
-        return false;
-    }
-
-    // Must have a non-empty index.html
     match fs.read_file("index.html") {
         Some(content) => !content.is_empty(),
         None => false,

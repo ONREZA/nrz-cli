@@ -106,20 +106,22 @@ pub struct DevSection {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct BuildSection {
     pub output_dirs: Option<Vec<String>>,
     pub command: Option<String>,
     pub install_command: Option<String>,
+    #[serde(alias = "output_dir")]
     pub output_directory: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct DeploySection {
     /// Compute type override: "static", "process".
     pub compute: Option<String>,
     /// Explicit entry point for PROCESS deployments (e.g. "server.ts").
+    #[serde(alias = "entrypoint")]
     pub entry: Option<String>,
     /// Health check path for PROCESS deployments.
     /// String → HTTP check at that path; `false` → TCP only; absent → autodetect.
@@ -859,13 +861,19 @@ pub fn load(project_dir: &Path) -> anyhow::Result<ProjectConfig> {
                 .with_context(|| format!("failed to parse {}", path.display()))?;
             // Validate [deploy] entry: must be non-empty relative path
             if let Some(ref entry) = config.deploy.entry {
-                if entry.is_empty() {
+                let trimmed = entry.trim();
+                if trimmed.is_empty() {
                     anyhow::bail!("[deploy] entry must not be empty");
                 }
-                if entry.starts_with('/') {
+                if looks_like_shell_command(trimmed) {
+                    anyhow::bail!(
+                        "[deploy] entry must be a relative file path inside the build output, not a shell command. Use entry = \"index.js\" instead of \"{entry}\"."
+                    );
+                }
+                if trimmed.starts_with('/') {
                     anyhow::bail!("[deploy] entry must be a relative path, got: \"{entry}\"");
                 }
-                if entry.contains("..") {
+                if trimmed.contains("..") {
                     anyhow::bail!("[deploy] entry must not contain \"..\", got: \"{entry}\"");
                 }
             }
@@ -918,6 +926,18 @@ pub fn load(project_dir: &Path) -> anyhow::Result<ProjectConfig> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(ProjectConfig::default()),
         Err(e) => Err(anyhow::anyhow!("failed to read {}: {e}", path.display())),
     }
+}
+
+fn looks_like_shell_command(entry: &str) -> bool {
+    let mut words = entry.split_whitespace();
+    let Some(first) = words.next() else {
+        return false;
+    };
+    words.next().is_some()
+        && matches!(
+            first,
+            "node" | "bun" | "deno" | "tsx" | "ts-node" | "npm" | "pnpm" | "yarn" | "npx"
+        )
 }
 
 /// Generate a template `onreza.toml` with commented-out defaults.

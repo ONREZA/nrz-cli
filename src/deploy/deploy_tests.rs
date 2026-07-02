@@ -2723,7 +2723,7 @@ fn ensure_process_entry_resolves_module_field() {
 }
 
 #[test]
-fn ensure_process_entry_ambiguous_candidates_falls_back_for_non_strict_framework() {
+fn ensure_process_entry_ambiguous_candidates_errors_for_non_strict_framework() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("runtime")).unwrap();
     // Both files must exceed the heuristic-scan min-size threshold, otherwise
@@ -2740,12 +2740,12 @@ fn ensure_process_entry_ambiguous_candidates_falls_back_for_non_strict_framework
     .unwrap();
 
     let detection = make_detection("other", None);
-    let (entry, warning) =
-        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
-    assert!(entry.is_none());
-    let warning = warning.expect("expected fallback warning");
-    assert!(warning.contains("ambiguous"));
-    assert!(warning.contains("Falling back to runtime default"));
+    let err =
+        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).expect_err("error");
+    let msg = err.to_string();
+    assert!(msg.contains("ambiguous"));
+    assert!(msg.contains("[deploy] entry"));
+    expect_code(&err, "ENTRY_POINT_AMBIGUOUS");
 }
 
 #[test]
@@ -2795,18 +2795,40 @@ fn ensure_process_entry_config_entry_rejects_parent_traversal() {
 }
 
 #[test]
-fn ensure_process_entry_not_found_falls_back_for_non_strict_framework() {
+fn ensure_process_entry_config_entry_rejects_shell_command() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("index.js"), "console.log('ok')").unwrap();
+
+    let detection = make_detection("other", None);
+    let err = ensure_process_entry(
+        dir.path(),
+        dir.path(),
+        Some("node index.js"),
+        &detection,
+        true,
+    )
+    .expect_err("shell command entry should fail");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("not a shell command"),
+        "unexpected error: {msg}"
+    );
+    expect_code(&err, "INVALID_DEPLOY_ENTRY");
+}
+
+#[test]
+fn ensure_process_entry_not_found_errors_for_non_strict_framework() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("assets")).unwrap();
     fs::write(dir.path().join("assets/app.css"), "body{}").unwrap();
 
     let detection = make_detection("other", None);
-    let (entry, warning) =
-        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
-    assert!(entry.is_none());
-    let warning = warning.expect("expected fallback warning");
-    assert!(warning.contains("did not find a runnable file"));
-    assert!(warning.contains("bun"));
+    let err =
+        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).expect_err("error");
+    let msg = err.to_string();
+    assert!(msg.contains("Cannot determine entry point"));
+    assert!(msg.contains("[deploy] entry"));
+    assert!(!msg.contains("Falling back to runtime default"));
 }
 
 #[test]
@@ -2885,21 +2907,21 @@ fn is_strict_process_framework_covers_all_ssr() {
 // ── COMPUTE auto-gen bail: entry not found ────────────────────
 
 #[test]
-fn ensure_process_entry_none_is_the_bail_precondition() {
-    // Verify that ensure_process_entry returns None for a project with no runnable files —
-    // this is the exact state that triggers "Cannot auto-generate COMPUTE manifest" in
-    // the deploy run() flow when is_process && !has_manifest.
+fn ensure_process_entry_not_found_is_the_bail_precondition() {
+    // Verify that a project with no runnable files fails before COMPUTE manifest
+    // auto-generation instead of advertising a runtime default that deploy cannot
+    // actually encode.
     let dir = tempdir().unwrap();
     // Create a "dist" output dir with no .js/.mjs/.cjs files
     fs::create_dir(dir.path().join("dist")).unwrap();
     fs::write(dir.path().join("dist/style.css"), "body{}").unwrap();
 
     let detection = make_detection("other", None);
-    let (entry, _warning) =
-        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
+    let err =
+        ensure_process_entry(dir.path(), dir.path(), None, &detection, true).expect_err("error");
     assert!(
-        entry.is_none(),
-        "entry should be None when no runnable file exists (triggering COMPUTE bail)"
+        err.to_string().contains("Cannot determine entry point"),
+        "unexpected error: {err:#}"
     );
 }
 

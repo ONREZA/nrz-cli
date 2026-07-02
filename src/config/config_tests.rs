@@ -61,6 +61,82 @@ fn load_config_with_build_command() {
 }
 
 #[test]
+fn load_config_accepts_common_legacy_aliases() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        r#"
+[build]
+output_dir = "dist"
+
+[deploy]
+entrypoint = "server.cjs"
+"#,
+    )
+    .unwrap();
+
+    let config = load(dir.path()).unwrap();
+    assert_eq!(config.output_directory(), Some("dist"));
+    assert_eq!(config.deploy_entry(), Some("server.cjs"));
+}
+
+#[test]
+fn load_config_rejects_unsupported_deploy_runtime_key() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        r#"
+[deploy]
+runtime = "node20"
+"#,
+    )
+    .unwrap();
+
+    let err = load(dir.path()).expect_err("runtime must not be ignored");
+    let msg = format!("{err:#}");
+    assert!(msg.contains("failed to parse"));
+    assert!(msg.contains("runtime"), "unexpected error: {err:#}");
+}
+
+#[test]
+fn load_config_rejects_unsupported_deploy_working_dir_key() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        r#"
+[deploy]
+working_dir = "./"
+"#,
+    )
+    .unwrap();
+
+    let err = load(dir.path()).expect_err("working_dir must not be ignored");
+    let msg = format!("{err:#}");
+    assert!(msg.contains("failed to parse"));
+    assert!(msg.contains("working_dir"), "unexpected error: {err:#}");
+}
+
+#[test]
+fn load_config_rejects_command_shaped_entrypoint() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("onreza.toml"),
+        r#"
+[deploy]
+entrypoint = "node index.js"
+"#,
+    )
+    .unwrap();
+
+    let err = load(dir.path()).expect_err("entrypoint command must not be accepted");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("not a shell command"),
+        "unexpected error: {err:#}"
+    );
+}
+
+#[test]
 fn effective_config_merges_server_settings_into_onreza_shape() {
     let dir = tempfile::tempdir().unwrap();
     let config = ProjectConfig::default();

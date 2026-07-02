@@ -732,6 +732,71 @@ async fn static_project_without_adapter_auto_generates_manifest() {
 }
 
 #[tokio::test]
+async fn package_backed_static_html_prefers_build_artifact_over_root() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("index.html"), "<h1>source</h1>").unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir(dir.path().join("dist")).unwrap();
+    std::fs::write(dir.path().join("dist/index.html"), "<h1>built</h1>").unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: true,
+    };
+
+    let result = run_with_hint(args, true, &config, None, None)
+        .await
+        .unwrap();
+
+    assert_eq!(result.output_dir, dir.path().join("dist"));
+    let manifest = result
+        .manifest
+        .expect("STATIC auto-gen should produce a manifest");
+    assert_eq!(
+        manifest.layers[0].target,
+        super::manifest::LayerTarget::Static
+    );
+}
+
+#[tokio::test]
+async fn package_backed_static_html_without_artifact_does_not_deploy_root() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("index.html"), "<h1>source</h1>").unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"echo no output"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir(dir.path().join("node_modules")).unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let args = BuildArgs {
+        dir: dir.path().to_string_lossy().into_owned(),
+        skip_validation: true,
+    };
+
+    let err = run_with_hint(args, true, &config, None, None)
+        .await
+        .expect_err("package-backed static HTML without an artifact dir must fail");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("no output directory found"),
+        "unexpected error: {msg}"
+    );
+    let coded = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<crate::output::CodedError>())
+        .expect("missing-output error must carry a CodedError");
+    assert_eq!(coded.code, "MISSING_BUILD_OUTPUT");
+}
+
+#[tokio::test]
 async fn configured_vite_static_output_generates_static_manifest_even_with_server_dep() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(

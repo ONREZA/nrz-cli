@@ -2,6 +2,16 @@
 
 use super::types::{FrameworkPreset, PresetCategory, RuntimeType};
 
+pub const PACKAGE_STATIC_OUTPUT_DIRS: &[&str] = &[
+    "dist",
+    ".output",
+    "build",
+    "out",
+    "_site",
+    "www",
+    ".vitepress/dist",
+];
+
 /// All framework presets sorted by detection priority.
 pub static PRESETS: &[FrameworkPreset] = &[
     // Tier 0: Wrappers that also pull in a Tier 1 framework (must be checked first)
