@@ -8,4 +8,5 @@ RELEASE_NOTES.md
 *.new.exe
 
 # Config files
+.env
 yougile.config.json

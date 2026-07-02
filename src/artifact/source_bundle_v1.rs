@@ -10,9 +10,10 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use uuid::Uuid;
 
-use super::hash::{sha256_finalize_hex, sha256_hex};
-use super::{FileEntry, hash_file_streaming};
+use crate::artifact::FileEntry;
 use crate::build::manifest::{LayerTarget, Manifest};
+use crate::deploy::hash::{sha256_finalize_hex, sha256_hex};
+use crate::deploy::hash_file_streaming;
 
 pub(crate) const SOURCE_BUNDLE_SCHEMA_VERSION: &str = "SOURCE_BUNDLE_V1.0";
 pub(crate) const SOURCE_BUNDLE_FORMAT: &str = "tar.zst";

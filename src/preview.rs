@@ -12,6 +12,7 @@ const BYPASS_HEADER_NAME: &str = "X-ONREZA-Protection-Bypass";
 const DEFAULT_TTL_DISPLAY: &str = "1h";
 const MIN_TTL_SECONDS: u64 = 60;
 const MAX_TTL_SECONDS: u64 = 24 * 60 * 60;
+pub(crate) const AGENT_PREVIEW_ACCESS_TTL_SECONDS: u64 = 15 * 60;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -121,14 +122,7 @@ async fn access(
     ttl_seconds: u64,
     json: bool,
 ) -> anyhow::Result<()> {
-    let resp: CreatePreviewAccessResponse = client
-        .post(
-            &format!("/v1/preview-access/{project_id}"),
-            &CreatePreviewAccessBody { note, ttl_seconds },
-        )
-        .await
-        .context("failed to create preview access")?;
-    let output = build_preview_access_output(resp.access, url);
+    let output = create_preview_access(client, &project_id, note, url, ttl_seconds).await?;
 
     if json {
         output::json_output(&output);
@@ -139,16 +133,30 @@ async fn access(
     Ok(())
 }
 
+pub(crate) async fn create_preview_access(
+    client: &ApiClient,
+    project_id: &str,
+    note: String,
+    url: Option<String>,
+    ttl_seconds: u64,
+) -> anyhow::Result<PreviewAccessOutput> {
+    let resp: CreatePreviewAccessResponse = client
+        .post(
+            &format!("/v1/preview-access/{project_id}"),
+            &CreatePreviewAccessBody { note, ttl_seconds },
+        )
+        .await
+        .context("failed to create preview access")?;
+    Ok(build_preview_access_output(resp.access, url))
+}
+
 async fn revoke(
     client: &ApiClient,
     project_id: &str,
     secret_id: &str,
     json: bool,
 ) -> anyhow::Result<()> {
-    client
-        .delete_empty(&format!("/v1/preview-access/{project_id}/{secret_id}"))
-        .await
-        .context("failed to revoke preview access")?;
+    revoke_preview_access(client, project_id, secret_id).await?;
     let resp = DeleteBypassSecretResponse { success: true };
 
     if json {
@@ -162,6 +170,17 @@ async fn revoke(
     }
 
     Ok(())
+}
+
+pub(crate) async fn revoke_preview_access(
+    client: &ApiClient,
+    project_id: &str,
+    secret_id: &str,
+) -> anyhow::Result<()> {
+    client
+        .delete_empty(&format!("/v1/preview-access/{project_id}/{secret_id}"))
+        .await
+        .context("failed to revoke preview access")
 }
 
 fn build_preview_access_output(

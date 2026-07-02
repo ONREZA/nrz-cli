@@ -1,5 +1,6 @@
 use super::presets::*;
-use super::types::RuntimeType;
+use super::types::{FrameworkDetector, RuntimeType};
+use std::collections::HashSet;
 
 #[test]
 fn presets_sorted_by_priority() {
@@ -96,6 +97,69 @@ fn detection_presets_have_dependencies() {
             "detection preset '{}' must have dependencies",
             p.slug
         );
+    }
+}
+
+#[test]
+fn detection_rules_reference_existing_presets() {
+    let mut slugs = HashSet::new();
+
+    for rule in detection_rules() {
+        assert!(
+            slugs.insert(rule.slug),
+            "duplicate detection rule {}",
+            rule.slug
+        );
+        assert!(
+            get_preset_by_slug(rule.slug).is_some(),
+            "detection rule '{}' must reference a preset",
+            rule.slug
+        );
+        assert!(
+            !rule.every.is_empty() || !rule.some.is_empty(),
+            "detection rule '{}' must have at least one detector",
+            rule.slug
+        );
+
+        for superseded in rule.supersedes {
+            assert!(
+                get_preset_by_slug(superseded).is_some(),
+                "detection rule '{}' supersedes unknown preset '{}'",
+                rule.slug,
+                superseded
+            );
+        }
+    }
+}
+
+#[test]
+fn detection_rules_cover_dependency_presets() {
+    let rule_slugs = detection_rules()
+        .map(|rule| rule.slug)
+        .collect::<HashSet<_>>();
+    for preset in detection_presets() {
+        assert!(
+            rule_slugs.contains(preset.slug),
+            "preset '{}' must have a detection rule",
+            preset.slug
+        );
+    }
+}
+
+#[test]
+fn detection_rules_use_known_package_markers() {
+    for rule in detection_rules() {
+        let preset = get_preset_by_slug(rule.slug).unwrap();
+        for detector in rule.every.iter().chain(rule.some.iter()) {
+            if let FrameworkDetector::Package(package) = detector {
+                assert!(
+                    preset.dependencies.contains(package),
+                    "rule '{}' uses package '{}' missing from preset dependencies",
+                    rule.slug,
+                    package
+                );
+            }
+        }
     }
 }
 

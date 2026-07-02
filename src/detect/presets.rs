@@ -1,6 +1,10 @@
 //! Framework preset definitions — compile-time data, 1:1 with TS/Go.
 
-use super::types::{FrameworkPreset, PresetCategory, RuntimeType};
+use super::types::{
+    FrameworkDetectionRule, FrameworkDetector, FrameworkPreset, PresetCategory, RuntimeType,
+};
+
+use FrameworkDetector::{Content, ContentAny, Package, Path, RuntimeSignal};
 
 pub const PACKAGE_STATIC_OUTPUT_DIRS: &[&str] = &[
     "dist",
@@ -430,6 +434,388 @@ pub static STATIC_HTML_PRESET: FrameworkPreset = FrameworkPreset {
     runtime: RuntimeType::Static,
 };
 
+const SERVER_ENTRY_FILES: &[&str] = &[
+    "server.js",
+    "server.mjs",
+    "server.cjs",
+    "server.ts",
+    "server.mts",
+    "server.cts",
+    "app.js",
+    "app.mjs",
+    "app.cjs",
+    "app.ts",
+    "app.mts",
+    "app.cts",
+    "index.js",
+    "index.mjs",
+    "index.cjs",
+    "index.ts",
+    "index.mts",
+    "index.cts",
+    "main.js",
+    "main.mjs",
+    "main.cjs",
+    "main.ts",
+    "main.mts",
+    "main.cts",
+    "src/server.js",
+    "src/server.mjs",
+    "src/server.cjs",
+    "src/server.ts",
+    "src/server.mts",
+    "src/server.cts",
+    "src/app.js",
+    "src/app.mjs",
+    "src/app.cjs",
+    "src/app.ts",
+    "src/app.mts",
+    "src/app.cts",
+    "src/index.js",
+    "src/index.mjs",
+    "src/index.cjs",
+    "src/index.ts",
+    "src/index.mts",
+    "src/index.cts",
+    "src/main.js",
+    "src/main.mjs",
+    "src/main.cjs",
+    "src/main.ts",
+    "src/main.mts",
+    "src/main.cts",
+    "dist/server.js",
+    "dist/server.mjs",
+    "dist/server.cjs",
+    "dist/index.js",
+    "dist/index.mjs",
+    "dist/index.cjs",
+    "dist/main.js",
+    "dist/main.mjs",
+    "dist/main.cjs",
+    "dist/src/main.js",
+    "dist/src/main.mjs",
+    "dist/src/main.cjs",
+    "build/server.js",
+    "build/server.mjs",
+    "build/server.cjs",
+    "build/index.js",
+    "build/index.mjs",
+    "build/index.cjs",
+    "build/main.js",
+    "build/main.mjs",
+    "build/main.cjs",
+];
+
+const HONO_IMPORT: &str =
+    r#"(?m)(?:from\s+["']hono["']|require\(\s*["']hono["']\s*\)|import\(\s*["']hono["']\s*\))"#;
+const ELYSIA_IMPORT: &str = r#"(?m)(?:from\s+["']elysia["']|require\(\s*["']elysia["']\s*\)|import\(\s*["']elysia["']\s*\))"#;
+const NESTJS_IMPORT: &str = r#"(?m)(?:from\s+["']@nestjs/(?:core|common|platform-[^"']+)["']|require\(\s*["']@nestjs/(?:core|common|platform-[^"']+)["']\s*\)|import\(\s*["']@nestjs/(?:core|common|platform-[^"']+)["']\s*\))"#;
+const FASTIFY_IMPORT: &str = r#"(?m)(?:from\s+["']fastify["']|require\(\s*["']fastify["']\s*\)|import\(\s*["']fastify["']\s*\))"#;
+const EXPRESS_IMPORT: &str = r#"(?m)(?:from\s+["']express["']|require\(\s*["']express["']\s*\)|import\(\s*["']express["']\s*\))"#;
+const KOA_IMPORT: &str =
+    r#"(?m)(?:from\s+["']koa["']|require\(\s*["']koa["']\s*\)|import\(\s*["']koa["']\s*\))"#;
+const H3_IMPORT: &str =
+    r#"(?m)(?:from\s+["']h3["']|require\(\s*["']h3["']\s*\)|import\(\s*["']h3["']\s*\))"#;
+const NITRO_IMPORT: &str = r#"(?m)(?:from\s+["']nitropack["']|require\(\s*["']nitropack["']\s*\)|import\(\s*["']nitropack["']\s*\))"#;
+
+/// Declarative framework detection rules sorted by preset priority.
+pub static DETECTION_RULES: &[FrameworkDetectionRule] = &[
+    FrameworkDetectionRule {
+        slug: "blitzjs",
+        every: &[Package("@blitzjs/next")],
+        some: &[],
+        supersedes: &["nextjs"],
+    },
+    FrameworkDetectionRule {
+        slug: "keystone",
+        every: &[Package("@keystone-6/core")],
+        some: &[Path("keystone.ts"), Path("keystone.js"), RuntimeSignal],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "payload",
+        every: &[Package("@payloadcms/next")],
+        some: &[],
+        supersedes: &["nextjs"],
+    },
+    FrameworkDetectionRule {
+        slug: "hydrogen",
+        every: &[Package("@shopify/hydrogen")],
+        some: &[],
+        supersedes: &["react-router", "remix", "vite"],
+    },
+    FrameworkDetectionRule {
+        slug: "nextjs",
+        every: &[Package("next")],
+        some: &[],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "nuxt",
+        every: &[Package("nuxt")],
+        some: &[],
+        supersedes: &["nitro", "h3", "vue", "vite"],
+    },
+    FrameworkDetectionRule {
+        slug: "sveltekit",
+        every: &[Package("@sveltejs/kit")],
+        some: &[],
+        supersedes: &["vite"],
+    },
+    FrameworkDetectionRule {
+        slug: "react-router",
+        every: &[Package("@react-router/dev")],
+        some: &[],
+        supersedes: &["vite"],
+    },
+    FrameworkDetectionRule {
+        slug: "remix",
+        every: &[],
+        some: &[Package("@remix-run/react"), Package("@remix-run/dev")],
+        supersedes: &["vite"],
+    },
+    FrameworkDetectionRule {
+        slug: "gatsby",
+        every: &[Package("gatsby")],
+        some: &[],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "solidstart",
+        every: &[Package("@solidjs/start")],
+        some: &[],
+        supersedes: &["vite"],
+    },
+    FrameworkDetectionRule {
+        slug: "qwik",
+        every: &[],
+        some: &[
+            Package("@builder.io/qwik-city"),
+            Package("@qwik.dev/router"),
+        ],
+        supersedes: &["vite"],
+    },
+    FrameworkDetectionRule {
+        slug: "analog",
+        every: &[Package("@analogjs/platform")],
+        some: &[],
+        supersedes: &["angular", "vite"],
+    },
+    FrameworkDetectionRule {
+        slug: "tanstack-start",
+        every: &[Package("@tanstack/react-start")],
+        some: &[],
+        supersedes: &["vite"],
+    },
+    FrameworkDetectionRule {
+        slug: "expo",
+        every: &[Package("expo")],
+        some: &[],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "cra",
+        every: &[Package("react-scripts")],
+        some: &[],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "vue",
+        every: &[Package("@vue/cli-service")],
+        some: &[],
+        supersedes: &["vite"],
+    },
+    FrameworkDetectionRule {
+        slug: "angular",
+        every: &[Package("@angular/core")],
+        some: &[],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "preact",
+        every: &[Package("preact-cli")],
+        some: &[],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "astro",
+        every: &[Package("astro")],
+        some: &[],
+        supersedes: &["vite"],
+    },
+    FrameworkDetectionRule {
+        slug: "docusaurus",
+        every: &[Package("@docusaurus/core")],
+        some: &[],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "vitepress",
+        every: &[Package("vitepress")],
+        some: &[],
+        supersedes: &["vite"],
+    },
+    FrameworkDetectionRule {
+        slug: "eleventy",
+        every: &[Package("@11ty/eleventy")],
+        some: &[],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "hexo",
+        every: &[Package("hexo")],
+        some: &[],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "parcel",
+        every: &[Package("parcel")],
+        some: &[],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "stencil",
+        every: &[Package("@stencil/core")],
+        some: &[],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "hono",
+        every: &[Package("hono")],
+        some: &[
+            ContentAny {
+                paths: SERVER_ENTRY_FILES,
+                pattern: HONO_IMPORT,
+            },
+            RuntimeSignal,
+        ],
+        supersedes: &["express"],
+    },
+    FrameworkDetectionRule {
+        slug: "elysia",
+        every: &[Package("elysia")],
+        some: &[
+            ContentAny {
+                paths: SERVER_ENTRY_FILES,
+                pattern: ELYSIA_IMPORT,
+            },
+            RuntimeSignal,
+        ],
+        supersedes: &["express"],
+    },
+    FrameworkDetectionRule {
+        slug: "nestjs",
+        every: &[Package("@nestjs/core")],
+        some: &[
+            ContentAny {
+                paths: SERVER_ENTRY_FILES,
+                pattern: NESTJS_IMPORT,
+            },
+            RuntimeSignal,
+        ],
+        supersedes: &["express", "fastify"],
+    },
+    FrameworkDetectionRule {
+        slug: "fastify",
+        every: &[Package("fastify")],
+        some: &[
+            ContentAny {
+                paths: SERVER_ENTRY_FILES,
+                pattern: FASTIFY_IMPORT,
+            },
+            RuntimeSignal,
+        ],
+        supersedes: &["express"],
+    },
+    FrameworkDetectionRule {
+        slug: "adonis",
+        every: &[Package("@adonisjs/core")],
+        some: &[
+            Path("adonisrc.ts"),
+            Path("adonisrc.js"),
+            Path("bin/server.js"),
+            RuntimeSignal,
+        ],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "express",
+        every: &[Package("express")],
+        some: &[
+            ContentAny {
+                paths: SERVER_ENTRY_FILES,
+                pattern: EXPRESS_IMPORT,
+            },
+            RuntimeSignal,
+        ],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "koa",
+        every: &[Package("koa")],
+        some: &[
+            ContentAny {
+                paths: SERVER_ENTRY_FILES,
+                pattern: KOA_IMPORT,
+            },
+            RuntimeSignal,
+        ],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "h3",
+        every: &[Package("h3")],
+        some: &[
+            ContentAny {
+                paths: SERVER_ENTRY_FILES,
+                pattern: H3_IMPORT,
+            },
+            RuntimeSignal,
+        ],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "nitro",
+        every: &[Package("nitropack")],
+        some: &[
+            Path("nitro.config.ts"),
+            Path("nitro.config.js"),
+            Content {
+                path: "nitro.config.ts",
+                pattern: "defineNitroConfig",
+            },
+            ContentAny {
+                paths: SERVER_ENTRY_FILES,
+                pattern: NITRO_IMPORT,
+            },
+            RuntimeSignal,
+        ],
+        supersedes: &["h3"],
+    },
+    FrameworkDetectionRule {
+        slug: "redwoodjs",
+        every: &[Package("@redwoodjs/core")],
+        some: &[Path("redwood.toml"), RuntimeSignal],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "strapi",
+        every: &[Package("@strapi/strapi")],
+        some: &[
+            Path("config/server.ts"),
+            Path("config/server.js"),
+            RuntimeSignal,
+        ],
+        supersedes: &[],
+    },
+    FrameworkDetectionRule {
+        slug: "vite",
+        every: &[Package("vite")],
+        some: &[],
+        supersedes: &[],
+    },
+];
+
 /// Get a preset by slug, or `None`.
 pub fn get_preset_by_slug(slug: &str) -> Option<&'static FrameworkPreset> {
     PRESETS.iter().find(|p| p.slug == slug)
@@ -551,6 +937,12 @@ pub fn is_nextjs_wrapper(slug: &str) -> bool {
 }
 
 /// Get presets that have dependencies (used for detection), sorted by priority.
+#[allow(dead_code)]
 pub fn detection_presets() -> impl Iterator<Item = &'static FrameworkPreset> {
     PRESETS.iter().filter(|p| !p.dependencies.is_empty())
+}
+
+/// Get declarative detection rules sorted by preset priority.
+pub fn detection_rules() -> impl Iterator<Item = &'static FrameworkDetectionRule> {
+    DETECTION_RULES.iter()
 }

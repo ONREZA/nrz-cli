@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde::Serialize;
 
+use crate::artifact::BuildManifestSource;
 use crate::cli::BuildArgs;
 use crate::output;
 pub(crate) use nrz::config::BuildSettingSource;
@@ -43,6 +44,7 @@ struct BuildOutput {
 pub struct BuildResult {
     pub output_dir: std::path::PathBuf,
     pub manifest: Option<manifest::Manifest>,
+    pub manifest_source: BuildManifestSource,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -154,7 +156,7 @@ pub(crate) async fn run_with_effective_config(
             &internal_detection
         }
     };
-    let fw_dirs = compute_aware_output_dirs(detection);
+    let fw_dirs = crate::frameworks::compute_aware_output_dirs(detection);
     let output_directory_hint = effective
         .output_directory()
         .and_then(|setting| setting.value())
@@ -175,7 +177,7 @@ pub(crate) async fn run_with_effective_config(
     )?;
     tracing::info!(?output_dir, has_manifest, "found output directory");
 
-    let loaded_manifest = if has_manifest {
+    let (loaded_manifest, manifest_source) = if has_manifest {
         let manifest_path = output_dir.join(".onreza/manifest.json");
         let manifest = manifest::load_and_validate(&manifest_path)
             .map_err(|e| output::with_default_code(e, "INVALID_MANIFEST"))?;
@@ -243,7 +245,7 @@ pub(crate) async fn run_with_effective_config(
             );
         }
         emit_nextjs_adapter_compatibility_status(json, &manifest, output::Phase::Build);
-        Some(manifest)
+        (Some(manifest), BuildManifestSource::File)
     } else if let Some(auto) =
         try_generate_nextjs_adapter_manifest(project_dir, &output_dir, detection, json)?
     {
@@ -252,7 +254,7 @@ pub(crate) async fn run_with_effective_config(
                 .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
         emit_build_output(json, emit_json_result, &auto, &output_dir, Some(detection));
-        Some(auto)
+        (Some(auto), BuildManifestSource::Generated)
     } else if is_nextjs_standalone_framework(&detection.framework)
         && (detection
             .metadata
@@ -297,7 +299,7 @@ pub(crate) async fn run_with_effective_config(
                 .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
         emit_build_output(json, emit_json_result, &auto, &output_dir, Some(detection));
-        Some(auto)
+        (Some(auto), BuildManifestSource::Generated)
     } else if let Some(auto) = try_generate_ssr_manifest(detection, &output_dir) {
         output::status(
             json,
@@ -313,7 +315,7 @@ pub(crate) async fn run_with_effective_config(
                 .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
         emit_build_output(json, emit_json_result, &auto, &output_dir, Some(detection));
-        Some(auto)
+        (Some(auto), BuildManifestSource::Generated)
     } else if detection.suggested_compute == crate::detect::types::ComputeType::Static {
         let auto = manifest::generate_static_manifest();
         output::status(
@@ -323,7 +325,7 @@ pub(crate) async fn run_with_effective_config(
             output::Phase::Build,
         );
         emit_build_output(json, emit_json_result, &auto, &output_dir, Some(detection));
-        Some(auto)
+        (Some(auto), BuildManifestSource::Generated)
     } else {
         if !json {
             output::status(
@@ -333,12 +335,13 @@ pub(crate) async fn run_with_effective_config(
                 output::Phase::Build,
             );
         }
-        None
+        (None, BuildManifestSource::Absent)
     };
 
     Ok(BuildResult {
         output_dir,
         manifest: loaded_manifest,
+        manifest_source,
     })
 }
 
@@ -662,75 +665,6 @@ fn collect_public_asset_pathnames(
         pathnames.push(url_path);
     }
     Ok(())
-}
-
-/// Use SSR analysis from detection to refine the output directory list.
-///
-/// For Next.js, the correct output dir depends on the mode:
-/// - `output: 'export'` → `out/` (static HTML)
-/// - `output: 'standalone'` → `.next/standalone/` (self-contained server)
-/// - default SSR → `.next/` (requires `next start`)
-fn compute_aware_output_dirs(
-    detection: &crate::detect::types::DetectionResult,
-) -> Vec<&'static str> {
-    match detection.framework.as_str() {
-        "nextjs" | "blitzjs" | "payload" => {
-            if let Some(ref ssr) = detection.metadata.ssr_analysis {
-                if ssr.is_static_compatible {
-                    return vec!["out"];
-                }
-                if ssr.has_standalone_output() {
-                    return vec![".next/standalone", ".next"];
-                }
-            }
-            // Be optimistic and try standalone first even when SSR analysis
-            // misses `output: 'standalone'` in a complex config file.
-            vec![".next/standalone", ".next"]
-        }
-        "nuxt" => {
-            if let Some(ref ssr) = detection.metadata.ssr_analysis
-                && ssr.is_static_compatible
-            {
-                // Static Nuxt: serve from .output/public/ directly
-                return vec![".output/public", ".output"];
-            }
-            vec![".output"]
-        }
-        "remix" | "react-router" => {
-            if let Some(ref ssr) = detection.metadata.ssr_analysis
-                && ssr.is_static_compatible
-            {
-                return vec!["build/client", "build"];
-            }
-            vec!["build"]
-        }
-        "hydrogen" => {
-            // Oxygen (default) emits dist/*, Express recipe emits build/*.
-            // Try dist first — when it exists, the workers-runtime detector fires
-            // with a clear error; otherwise we fall through to build/.
-            if let Some(ref ssr) = detection.metadata.ssr_analysis
-                && ssr.is_static_compatible
-            {
-                return vec!["dist/client", "build/client", "build"];
-            }
-            vec!["dist", "build"]
-        }
-        "tanstack-start" => vec![".output", "dist"],
-        "static-html" => {
-            if detection
-                .metadata
-                .build_info
-                .as_ref()
-                .and_then(|info| info.output_dir.as_deref())
-                == Some(".")
-            {
-                vec!["."]
-            } else {
-                crate::detect::presets::PACKAGE_STATIC_OUTPUT_DIRS.to_vec()
-            }
-        }
-        slug => crate::detect::presets::framework_output_dirs(slug).to_vec(),
-    }
 }
 
 /// Try to auto-generate an SSR manifest for known frameworks.

@@ -75,6 +75,36 @@ pub struct FrameworkPreset {
     pub runtime: RuntimeType,
 }
 
+/// Declarative detector for a framework preset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameworkDetector {
+    /// Match a dependency or devDependency in package.json.
+    Package(&'static str),
+    /// Match a file or directory path.
+    Path(&'static str),
+    /// Match a regex against one file.
+    Content {
+        path: &'static str,
+        pattern: &'static str,
+    },
+    /// Match a regex against any file in a fixed candidate set.
+    ContentAny {
+        paths: &'static [&'static str],
+        pattern: &'static str,
+    },
+    /// Match runtime-like package.json entry signals: start-like scripts or
+    /// resolvable main/module files.
+    RuntimeSignal,
+}
+
+/// Framework detection rule separate from preset metadata.
+pub struct FrameworkDetectionRule {
+    pub slug: &'static str,
+    pub every: &'static [FrameworkDetector],
+    pub some: &'static [FrameworkDetector],
+    pub supersedes: &'static [&'static str],
+}
+
 /// SSR analysis result for SSR-capable frameworks.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,4 +1,13 @@
 use super::*;
+use std::path::Path;
+
+fn write_detection_file(root: &Path, rel: &str, content: &str) {
+    let path = root.join(rel);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(path, content).unwrap();
+}
 
 // ── infer_compute_type ──────────────────────────────────────
 
@@ -40,6 +49,11 @@ fn configured_vite_framework_overrides_server_dependency_autodetect() {
     )
     .unwrap();
     std::fs::write(dir.path().join("vite.config.js"), "x".repeat(600)).unwrap();
+    write_detection_file(
+        dir.path(),
+        "server.js",
+        "const express = require('express');",
+    );
 
     let autodetected = detect(dir.path());
     assert_eq!(autodetected.framework, "express");
@@ -819,6 +833,11 @@ fn detect_hono_is_process() {
         r#"{"dependencies": {"hono": "4.0.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "src/server.ts",
+        r#"import { Hono } from "hono";"#,
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "hono");
@@ -834,6 +853,11 @@ fn detect_hono_no_ssr_analysis() {
         r#"{"dependencies": {"hono": "4.0.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "src/server.ts",
+        r#"import { Hono } from "hono";"#,
+    );
 
     let result = detect(dir.path());
     assert!(result.metadata.ssr_analysis.is_none());
@@ -849,6 +873,11 @@ fn detect_elysia_is_process() {
         r#"{"dependencies": {"elysia": "1.0.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "src/server.ts",
+        r#"import { Elysia } from "elysia";"#,
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "elysia");
@@ -864,6 +893,11 @@ fn detect_elysia_runtime_is_bun() {
         r#"{"dependencies": {"elysia": "1.0.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "src/server.ts",
+        r#"import { Elysia } from "elysia";"#,
+    );
 
     let result = detect(dir.path());
     // Elysia preset has runtime: Bun
@@ -881,6 +915,11 @@ fn detect_elysia_no_ssr_analysis() {
         r#"{"dependencies": {"elysia": "1.0.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "src/server.ts",
+        r#"import { Elysia } from "elysia";"#,
+    );
 
     let result = detect(dir.path());
     assert!(result.metadata.ssr_analysis.is_none());
@@ -896,6 +935,11 @@ fn detect_express_is_process() {
         r#"{"dependencies": {"express": "4.18.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "server.js",
+        r#"const express = require("express");"#,
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "express");
@@ -911,6 +955,11 @@ fn detect_express_no_start_script_still_process() {
         r#"{"dependencies": {"express": "4.18.0"}, "scripts": {"test": "jest"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "server.js",
+        r#"const express = require("express");"#,
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "express");
@@ -925,6 +974,11 @@ fn detect_fastify_is_process() {
         r#"{"dependencies": {"fastify": "4.0.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "server.js",
+        r#"const fastify = require("fastify");"#,
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "fastify");
@@ -940,6 +994,11 @@ fn detect_nestjs_is_process() {
         r#"{"dependencies": {"@nestjs/core": "10.0.0", "express": "4.18.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "src/main.ts",
+        r#"import { NestFactory } from "@nestjs/core";"#,
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "nestjs");
@@ -956,6 +1015,11 @@ fn detect_nestjs_wins_over_express() {
         r#"{"dependencies": {"@nestjs/core": "10.0.0", "express": "4.18.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "src/main.ts",
+        r#"import { NestFactory } from "@nestjs/core";"#,
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "nestjs");
@@ -969,6 +1033,7 @@ fn detect_koa_is_process() {
         r#"{"dependencies": {"koa": "2.15.0"}}"#,
     )
     .unwrap();
+    write_detection_file(dir.path(), "server.js", r#"const Koa = require("koa");"#);
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "koa");
@@ -984,6 +1049,7 @@ fn detect_adonis_is_process() {
         r#"{"dependencies": {"@adonisjs/core": "6.0.0"}}"#,
     )
     .unwrap();
+    write_detection_file(dir.path(), "adonisrc.ts", "export default {};");
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "adonis");
@@ -999,6 +1065,11 @@ fn detect_h3_is_process() {
         r#"{"dependencies": {"h3": "1.10.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "server.ts",
+        r#"import { createApp } from "h3";"#,
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "h3");
@@ -1014,6 +1085,11 @@ fn detect_nitro_standalone_is_process() {
         r#"{"dependencies": {"nitropack": "2.8.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "nitro.config.ts",
+        "export default defineNitroConfig({});",
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "nitro");
@@ -1051,17 +1127,46 @@ fn nextjs_wins_over_express() {
 
 #[test]
 fn server_frameworks_no_ssr_analysis() {
-    for dep_json in [
-        r#"{"dependencies": {"express": "4.0.0"}}"#,
-        r#"{"dependencies": {"fastify": "4.0.0"}}"#,
-        r#"{"dependencies": {"@nestjs/core": "10.0.0"}}"#,
-        r#"{"dependencies": {"koa": "2.0.0"}}"#,
-        r#"{"dependencies": {"@adonisjs/core": "6.0.0"}}"#,
-        r#"{"dependencies": {"h3": "1.10.0"}}"#,
-        r#"{"dependencies": {"nitropack": "2.8.0"}}"#,
+    for (dep_json, file, content) in [
+        (
+            r#"{"dependencies": {"express": "4.0.0"}}"#,
+            "server.js",
+            r#"const express = require("express");"#,
+        ),
+        (
+            r#"{"dependencies": {"fastify": "4.0.0"}}"#,
+            "server.js",
+            r#"const fastify = require("fastify");"#,
+        ),
+        (
+            r#"{"dependencies": {"@nestjs/core": "10.0.0"}}"#,
+            "src/main.ts",
+            r#"import { NestFactory } from "@nestjs/core";"#,
+        ),
+        (
+            r#"{"dependencies": {"koa": "2.0.0"}}"#,
+            "server.js",
+            r#"const Koa = require("koa");"#,
+        ),
+        (
+            r#"{"dependencies": {"@adonisjs/core": "6.0.0"}}"#,
+            "adonisrc.ts",
+            "export default {};",
+        ),
+        (
+            r#"{"dependencies": {"h3": "1.10.0"}}"#,
+            "server.ts",
+            r#"import { createApp } from "h3";"#,
+        ),
+        (
+            r#"{"dependencies": {"nitropack": "2.8.0"}}"#,
+            "nitro.config.ts",
+            "export default defineNitroConfig({});",
+        ),
     ] {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("package.json"), dep_json).unwrap();
+        write_detection_file(dir.path(), file, content);
 
         let result = detect(dir.path());
         assert!(
@@ -1080,6 +1185,11 @@ fn hono_wins_over_express() {
         r#"{"dependencies": {"hono": "4.0.0", "express": "4.18.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "src/server.ts",
+        r#"import { Hono } from "hono";"#,
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "hono");
@@ -1093,6 +1203,11 @@ fn fastify_wins_over_express() {
         r#"{"dependencies": {"fastify": "4.0.0", "express": "4.18.0"}}"#,
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "server.js",
+        r#"const fastify = require("fastify");"#,
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "fastify");
@@ -1498,6 +1613,11 @@ fn nestjs_ignores_vite_config_outdir() {
         "export default { build: { outDir: 'coverage' } }",
     )
     .unwrap();
+    write_detection_file(
+        dir.path(),
+        "src/main.ts",
+        r#"import { NestFactory } from "@nestjs/core";"#,
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "nestjs");

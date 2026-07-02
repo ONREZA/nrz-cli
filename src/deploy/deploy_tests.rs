@@ -7,6 +7,14 @@ use axum::response::IntoResponse;
 use axum::routing::put;
 use tempfile::tempdir;
 
+use crate::artifact::source_bundle_v1;
+use crate::build;
+use crate::cli::BuildArgs;
+use crate::frameworks::{
+    clear_before_build as clear_nextjs_descriptor_before_build, is_nextjs_project,
+    is_sveltekit_with_adapter_auto,
+};
+
 use super::hash::sha256_hex;
 use super::*;
 
@@ -15,6 +23,8 @@ fn fe(path: &str, size: u64, content_hash: &str) -> FileEntry {
         path: path.into(),
         size,
         content_hash: content_hash.into(),
+        kind: crate::artifact::ArtifactFileKind::File,
+        symlink_resolved_path: None,
     }
 }
 
@@ -940,6 +950,106 @@ fn prepare_deploy_files_prunes_next_cache_only() {
 }
 
 #[test]
+fn prepare_deploy_files_prunes_root_static_metadata() {
+    let manifest = build_manifest::generate_static_manifest();
+    let detection = make_detection("static-html", None);
+    let files = vec![
+        fe("index.html", 10, "aa"),
+        fe("assets/app.js", 20, "bb"),
+        fe(".onreza/manifest.json", 30, "cc"),
+        fe("package.json", 40, "dd"),
+        fe("node_modules/pkg/index.js", 50, "ee"),
+        fe(".env.local", 60, "ff"),
+        fe("onreza.toml", 70, "gg"),
+    ];
+
+    let deployable = prepare_deploy_files(&manifest, files, &detection, true).unwrap();
+    let paths = deployable
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(paths, vec!["index.html", "assets/app.js"]);
+}
+
+#[test]
+fn prepare_deploy_files_keeps_static_build_output_node_modules_assets() {
+    let output = tempdir().unwrap();
+    fs::create_dir_all(output.path().join("node_modules/pkg")).unwrap();
+    fs::write(
+        output.path().join("index.html"),
+        r#"<script type="module" src="/node_modules/pkg/index.js"></script>"#,
+    )
+    .unwrap();
+    fs::write(
+        output.path().join("node_modules/pkg/index.js"),
+        "export const ok = true;",
+    )
+    .unwrap();
+
+    let manifest = build_manifest::generate_static_manifest();
+    let detection = make_detection("static-html", None);
+    let scanned = scan_runtime_artifact(output.path(), &RuntimeArtifactScan::All).unwrap();
+    let deployable = prepare_artifact_files(
+        &manifest,
+        scanned,
+        &detection,
+        crate::artifact::ArtifactRootScope::BuildOutput,
+        true,
+    )
+    .deployable_entries();
+    let paths = deployable
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(paths.contains(&"index.html"));
+    assert!(paths.contains(&"node_modules/pkg/index.js"));
+    source_bundle_v1::build_source_bundle_plan(output.path(), &manifest, &deployable).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn prepare_deploy_files_preserves_build_only_target_for_deployable_symlink() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("assets")).unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    std::os::unix::fs::symlink("../package.json", dir.path().join("assets/pkg")).unwrap();
+
+    let manifest = build_manifest::generate_static_manifest();
+    let detection = make_detection("static-html", None);
+    let scanned = scan_runtime_artifact(dir.path(), &RuntimeArtifactScan::All).unwrap();
+    let deployable = prepare_deploy_files(&manifest, scanned, &detection, true).unwrap();
+    let paths = deployable
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(paths.contains(&"assets/pkg"));
+    assert!(paths.contains(&"package.json"));
+    source_bundle_v1::build_source_bundle_plan(dir.path(), &manifest, &deployable).unwrap();
+}
+
+#[test]
+fn prepare_deploy_files_keeps_package_json_for_compute_runtime() {
+    let manifest = build_manifest::generate_compute_manifest("server.js");
+    let detection = make_detection("express", None);
+    let files = vec![
+        fe("package.json", 10, "aa"),
+        fe(".onreza/manifest.json", 20, "bb"),
+        fe("server.js", 30, "cc"),
+    ];
+
+    let deployable = prepare_deploy_files(&manifest, files, &detection, true).unwrap();
+    let paths = deployable
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(paths, vec!["package.json", "server.js"]);
+}
+
+#[test]
 fn node_process_runtime_artifact_uses_project_root_for_nestjs() {
     let dir = tempdir().unwrap();
     fs::write(
@@ -1272,6 +1382,12 @@ fn node_process_runtime_artifact_falls_back_when_build_output_outside_project() 
                 "@nestjs/core": "10.0.0"
             }
         }"#,
+    )
+    .unwrap();
+    fs::create_dir_all(project.path().join("src")).unwrap();
+    fs::write(
+        project.path().join("src/main.ts"),
+        "import { NestFactory } from '@nestjs/core';",
     )
     .unwrap();
     fs::create_dir_all(project.path().join("node_modules/@nestjs/core")).unwrap();
@@ -2254,6 +2370,8 @@ fn file_entry_serializes_with_camel_case_content_hash() {
         path: "a.js".into(),
         size: 42,
         content_hash: "abc123".into(),
+        kind: crate::artifact::ArtifactFileKind::File,
+        symlink_resolved_path: None,
     };
     let json = serde_json::to_value(&entry).unwrap();
     assert_eq!(json["contentHash"], "abc123");
@@ -3208,6 +3326,41 @@ fn compute_config_body_without_path_omits_field() {
     };
     let value = serde_json::to_value(&body).unwrap();
     assert!(value.get("healthCheckPath").is_none());
+}
+
+#[test]
+fn deploy_output_serializes_public_json_as_camel_case() {
+    let output = DeployOutput {
+        deployment_id: "dep_123".to_string(),
+        url: "https://example.test".to_string(),
+        status: "live".to_string(),
+        target: deploy_target_output(Some(false)),
+        preview_protected: true,
+        warnings: vec![],
+        health_check: Some(HealthCheckInfo::Http {
+            path: "/health".to_string(),
+            source: HealthCheckSourceTag::Config,
+        }),
+        verification: Some(verify::DeployVerificationOutput {
+            status: "passed",
+            url: "https://example.test/health".to_string(),
+            path: "/health".to_string(),
+            status_code: 200,
+            used_preview_bypass: true,
+            preview_access_revoked: Some(true),
+        }),
+    };
+
+    let value = serde_json::to_value(&output).unwrap();
+
+    assert_eq!(value["deploymentId"], "dep_123");
+    assert_eq!(value["target"]["environment"], "preview");
+    assert_eq!(value["previewProtected"], true);
+    assert_eq!(value["healthCheck"]["path"], "/health");
+    assert_eq!(value["verification"]["usedPreviewBypass"], true);
+    assert_eq!(value["verification"]["previewAccessRevoked"], true);
+    assert!(value.get("deployment_id").is_none());
+    assert!(value.get("health_check").is_none());
 }
 
 // ── is_nextjs_project ───────────────────────────────────────

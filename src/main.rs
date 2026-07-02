@@ -1,7 +1,9 @@
 mod api;
+mod artifact;
 mod auth;
 mod build;
 mod cli;
+mod context;
 mod deploy;
 mod deployments;
 #[cfg(test)]
@@ -11,6 +13,8 @@ mod detect_sync;
 #[cfg(test)]
 mod detect_sync_tests;
 mod dev;
+mod errors;
+mod frameworks;
 mod functions;
 mod init;
 mod link;
@@ -108,6 +112,16 @@ fn emit_terminal_error(json: bool, err: &anyhow::Error) {
         return;
     }
     let message = format!("{err:#}");
+    if let Some(cli_error) = errors::find_cli_error(err) {
+        output::log_error_structured(
+            cli_error.phase_name(),
+            &message,
+            &cli_error.code,
+            cli_error.details.as_ref(),
+        );
+        output::json_output(&cli_error.json());
+        return;
+    }
     let coded = err
         .chain()
         .find_map(|c| c.downcast_ref::<output::CodedError>());

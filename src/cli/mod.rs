@@ -45,7 +45,7 @@ pub use projects::ProjectsArgs;
 pub use rules::RulesArgs;
 pub use workspace::WorkspaceArgs;
 
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand, builder::BoolishValueParser};
 
 /// ONREZA platform CLI
 #[derive(Parser)]
@@ -59,11 +59,23 @@ pub struct Cli {
     pub command: Command,
 
     /// Machine-readable JSON output
-    #[arg(long, global = true, env = "NRZ_JSON")]
+    #[arg(
+        long,
+        global = true,
+        env = "NRZ_JSON",
+        action = ArgAction::SetTrue,
+        value_parser = BoolishValueParser::new()
+    )]
     pub json: bool,
 
     /// Force human-readable output; suppresses --json/NRZ_JSON and auto-JSON in non-TTY environments
-    #[arg(long, global = true, env = "NRZ_HUMAN")]
+    #[arg(
+        long,
+        global = true,
+        env = "NRZ_HUMAN",
+        action = ArgAction::SetTrue,
+        value_parser = BoolishValueParser::new()
+    )]
     pub human: bool,
 
     /// API token for authentication
@@ -257,6 +269,14 @@ pub struct DeployArgs {
     /// Production deployment
     #[arg(long)]
     pub prod: bool,
+
+    /// Build and validate deploy plan without creating a deployment
+    #[arg(long)]
+    pub dry: bool,
+
+    /// Verify the live deployment URL after deploy; preview deployments use a temporary bypass
+    #[arg(long, conflicts_with_all = ["dry", "resume_deployment"])]
+    pub verify: bool,
 
     /// Environment type (production or preview). Can be specified multiple times.
     #[arg(long, env = "NRZ_ENV")]

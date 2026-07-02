@@ -1,10 +1,10 @@
 use super::{
-    BuildSettingSource, OutputDirectoryHint, collect_body_files, compute_aware_output_dirs,
-    copy_dir_recursive, copy_missing_prisma_packages, detect_output_dir,
-    detect_output_dir_for_framework, prepare_nextjs_standalone, run_with_hint,
-    try_generate_ssr_manifest,
+    BuildSettingSource, OutputDirectoryHint, collect_body_files, copy_dir_recursive,
+    copy_missing_prisma_packages, detect_output_dir, detect_output_dir_for_framework,
+    prepare_nextjs_standalone, run_with_hint, try_generate_ssr_manifest,
 };
 use crate::cli::BuildArgs;
+use crate::frameworks::compute_aware_output_dirs;
 
 fn output_hint(path: &str, source: BuildSettingSource) -> OutputDirectoryHint<'_> {
     OutputDirectoryHint { path, source }

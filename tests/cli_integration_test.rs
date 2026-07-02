@@ -3,7 +3,8 @@
 //! Note: binary is run through a pipe, so stdout.is_terminal() = false
 //! and JSON mode activates automatically. All assertions check JSON in stdout.
 
-use assert_cmd::Command;
+mod support;
+
 use axum::{
     Json, Router,
     http::StatusCode,
@@ -13,116 +14,82 @@ use axum::{
 use predicates::str::contains;
 use serde_json::json;
 use std::fs;
-
-/// Get the binary command
-fn nrz() -> Command {
-    Command::cargo_bin("nrz").unwrap()
-}
+use support::cli::{nrz, stdout_json};
 
 fn spawn_project_settings_mock() -> String {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move {
-            let app = Router::new().route(
-                "/v1/projects/{project_id}",
-                get(
-                    |axum::extract::Path(_project_id): axum::extract::Path<String>| async {
-                        Json(json!({
-                            "frameworkPreset": "vite",
-                            "buildCommand": "npm run server-build",
-                            "buildCommandSource": "USER",
-                            "outputDirectory": "server-dist",
-                            "outputDirectorySource": "USER"
-                        }))
-                    },
-                ),
-            );
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let addr = listener.local_addr().unwrap();
-            tx.send(format!("http://{addr}")).unwrap();
-            axum::serve(listener, app).await.unwrap();
-        });
-    });
-    rx.recv().unwrap()
+    let app = Router::new().route(
+        "/v1/projects/{project_id}",
+        get(
+            |axum::extract::Path(_project_id): axum::extract::Path<String>| async {
+                Json(json!({
+                    "frameworkPreset": "vite",
+                    "buildCommand": "npm run server-build",
+                    "buildCommandSource": "USER",
+                    "outputDirectory": "server-dist",
+                    "outputDirectorySource": "USER"
+                }))
+            },
+        ),
+    );
+    support::api_mock::spawn(app)
 }
 
 fn spawn_project_settings_failure_mock(status: StatusCode) -> String {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move {
-            let app = Router::new().route(
-                "/v1/projects/{project_id}",
-                get(move || async move {
-                    (
-                        status,
-                        Json(json!({
-                            "error": "project settings unavailable"
-                        })),
-                    )
-                        .into_response()
-                }),
-            );
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let addr = listener.local_addr().unwrap();
-            tx.send(format!("http://{addr}")).unwrap();
-            axum::serve(listener, app).await.unwrap();
-        });
-    });
-    rx.recv().unwrap()
+    let app = Router::new().route(
+        "/v1/projects/{project_id}",
+        get(move || async move {
+            (
+                status,
+                Json(json!({
+                    "error": "project settings unavailable"
+                })),
+            )
+                .into_response()
+        }),
+    );
+    support::api_mock::spawn(app)
 }
 
 fn spawn_preview_access_mock() -> String {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move {
-            let app = Router::new()
-                .route(
-                    "/v1/preview-access/{project_id}",
-                    post(
-                        |axum::extract::Path(project_id): axum::extract::Path<String>,
-                         Json(body): Json<serde_json::Value>| async move {
-                            assert!(
-                                body.get("url").is_none(),
-                                "preview access request body must stay compatible with strict server schema"
-                            );
-                            Json(json!({
-                                "access": {
-                                    "projectId": project_id,
-                                    "secretId": "secret-1",
-                                    "note": body["note"].as_str().unwrap_or(""),
-                                    "expiresAt": "2026-06-24T17:00:00.000Z",
-                                    "ttlSeconds": body["ttlSeconds"].as_u64().unwrap_or(0),
-                                    "header": {
-                                        "name": "X-ONREZA-Protection-Bypass",
-                                        "value": "token-value"
-                                    },
-                                    "query": {
-                                        "name": "_bypass",
-                                        "value": "token-value"
-                                    }
-                                }
-                            }))
-                        },
-                    ),
-                )
-                .route(
-                    "/v1/preview-access/{project_id}/{secret_id}",
-                    delete(
-                        |axum::extract::Path(_params): axum::extract::Path<
-                            std::collections::HashMap<String, String>,
-                        >| async move { Json(json!({ "success": true })) },
-                    ),
-                );
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let addr = listener.local_addr().unwrap();
-            tx.send(format!("http://{addr}")).unwrap();
-            axum::serve(listener, app).await.unwrap();
-        });
-    });
-    rx.recv().unwrap()
+    let app = Router::new()
+        .route(
+            "/v1/preview-access/{project_id}",
+            post(
+                |axum::extract::Path(project_id): axum::extract::Path<String>,
+                 Json(body): Json<serde_json::Value>| async move {
+                    assert!(
+                        body.get("url").is_none(),
+                        "preview access request body must stay compatible with strict server schema"
+                    );
+                    Json(json!({
+                        "access": {
+                            "projectId": project_id,
+                            "secretId": "secret-1",
+                            "note": body["note"].as_str().unwrap_or(""),
+                            "expiresAt": "2026-06-24T17:00:00.000Z",
+                            "ttlSeconds": body["ttlSeconds"].as_u64().unwrap_or(0),
+                            "header": {
+                                "name": "X-ONREZA-Protection-Bypass",
+                                "value": "token-value"
+                            },
+                            "query": {
+                                "name": "_bypass",
+                                "value": "token-value"
+                            }
+                        }
+                    }))
+                },
+            ),
+        )
+        .route(
+            "/v1/preview-access/{project_id}/{secret_id}",
+            delete(
+                |axum::extract::Path(_params): axum::extract::Path<
+                    std::collections::HashMap<String, String>,
+                >| async move { Json(json!({ "success": true })) },
+            ),
+        );
+    support::api_mock::spawn(app)
 }
 
 #[test]
@@ -130,6 +97,42 @@ fn help_returns_exit_0() {
     let mut cmd = nrz();
     cmd.arg("--help");
     cmd.assert().success();
+}
+
+#[test]
+fn global_bool_env_accepts_numeric_values() {
+    for (key, value) in [
+        ("NRZ_JSON", "1"),
+        ("NRZ_JSON", "0"),
+        ("NRZ_HUMAN", "1"),
+        ("NRZ_HUMAN", "0"),
+    ] {
+        let output = nrz().env(key, value).arg("--help").output().unwrap();
+
+        assert!(
+            output.status.success(),
+            "{key}={value}\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn nrz_human_env_suppresses_auto_json_mode() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("index.html"), "<h1>hello</h1>").unwrap();
+
+    let output = nrz()
+        .current_dir(&temp)
+        .env("NRZ_HUMAN", "1")
+        .args(["detect"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Framework:"));
 }
 
 #[test]
@@ -450,6 +453,53 @@ fn deploy_app_not_found_lists_available() {
         .failure()
         .stdout(contains("not found"))
         .stdout(contains("@my/web"));
+}
+
+#[test]
+fn deploy_dry_json_outputs_plan_without_creating_deployment() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("index.html"), "<h1>hello</h1>").unwrap();
+
+    let output = nrz()
+        .current_dir(&temp)
+        .args([
+            "--token",
+            "test-token",
+            "--json",
+            "deploy",
+            "--dry",
+            "--skip-build",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json = stdout_json(&output);
+    assert_eq!(json["schemaVersion"], "DEPLOY_PLAN_V1");
+    assert_eq!(json["framework"]["slug"], "static-html");
+    assert_eq!(json["compute"], "STATIC");
+    assert_eq!(json["target"]["environment"], "default");
+    assert_eq!(json["build"]["outputManifestSource"], "generated");
+    assert_eq!(
+        json["runtimeArtifact"]["uploadStrategy"],
+        "source_bundle_v1"
+    );
+    assert_eq!(json["sourceBundle"]["format"], "tar.zst");
+    assert!(json["sourceBundle"]["sourceSizeBytes"].as_u64().unwrap() > 0);
+    assert!(json["sourceBundle"]["sourceSha256"].as_str().unwrap().len() >= 12);
+    assert!(
+        json["sourceBundle"]["logicalManifestSha256"]
+            .as_str()
+            .unwrap()
+            .len()
+            >= 12
+    );
+    assert_eq!(json["files"]["deployableFiles"], 1);
 }
 
 // ── nrz config ───────────────────────────────────────────────
@@ -817,6 +867,12 @@ fn detect_hono_is_process() {
         r#"{"dependencies": {"hono": "4.0.0"}}"#,
     )
     .unwrap();
+    fs::create_dir_all(temp.path().join("src")).unwrap();
+    fs::write(
+        temp.path().join("src/server.ts"),
+        r#"import { Hono } from "hono";"#,
+    )
+    .unwrap();
 
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["detect", "--json"]);
@@ -834,6 +890,12 @@ fn detect_elysia_is_process() {
         r#"{"dependencies": {"elysia": "1.0.0"}}"#,
     )
     .unwrap();
+    fs::create_dir_all(temp.path().join("src")).unwrap();
+    fs::write(
+        temp.path().join("src/server.ts"),
+        r#"import { Elysia } from "elysia";"#,
+    )
+    .unwrap();
 
     let mut cmd = nrz();
     cmd.current_dir(&temp).args(["detect", "--json"]);
@@ -841,6 +903,35 @@ fn detect_elysia_is_process() {
         .success()
         .stdout(contains("\"framework\":\"elysia\""))
         .stdout(contains("\"suggestedCompute\":\"PROCESS\""));
+}
+
+#[test]
+fn detect_stdin_hono_uses_entry_content_signal() {
+    let manifest = json!({
+        "tree": ["package.json", "src/server.ts"],
+        "files": {
+            "package.json": r#"{"dependencies":{"hono":"4.0.0"}}"#,
+            "src/server.ts": r#"import { Hono } from "hono";"#
+        }
+    });
+
+    let mut cmd = nrz();
+    cmd.args(["detect", "--stdin", "--json"])
+        .write_stdin(manifest.to_string());
+    cmd.assert()
+        .success()
+        .stdout(contains("\"framework\":\"hono\""))
+        .stdout(contains("\"suggestedCompute\":\"PROCESS\""));
+}
+
+#[test]
+fn detect_needed_files_includes_server_entry_candidates() {
+    let mut cmd = nrz();
+    cmd.args(["detect", "--needed-files", "--json"]);
+    cmd.assert()
+        .success()
+        .stdout(contains("\"src/server.ts\""))
+        .stdout(contains("\"nitro.config.ts\""));
 }
 
 #[test]

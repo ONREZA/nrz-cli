@@ -9,9 +9,8 @@ pub(crate) mod hash;
 pub(crate) mod health_check;
 #[cfg(test)]
 mod health_check_tests;
-pub(crate) mod source_bundle_v1;
-#[cfg(test)]
-mod source_bundle_v1_tests;
+mod plan;
+mod verify;
 
 use std::collections::{HashSet, VecDeque};
 use std::io::Read;
@@ -26,16 +25,16 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::api::{ApiClient, PresignedHeadVerify, PresignedPutHeaders};
-use crate::auth;
-use crate::build;
-use crate::build::manifest as build_manifest;
-use crate::cli::{BuildArgs, DeployArgs};
-use crate::deploy::hash::{sha256_finalize_hex, sha256_hex};
-use crate::deploy::source_bundle_v1::{
-    CLI_PROTOCOL_VERSION, CompletedMultipartPart, PresignedSourceMultipartChunk,
+use crate::artifact::source_bundle_v1::{
+    self, CLI_PROTOCOL_VERSION, CompletedMultipartPart, PresignedSourceMultipartChunk,
     SOURCE_BUNDLE_FORMAT, SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, SourceBundlePlan,
-    build_source_bundle_plan, source_bundle_contract_characters,
+    source_bundle_contract_characters,
 };
+use crate::artifact::{ArtifactRootScope, FileEntry, RuntimeArtifact, RuntimeArtifactScan};
+use crate::auth;
+use crate::build::manifest as build_manifest;
+use crate::cli::DeployArgs;
+use crate::deploy::hash::{sha256_finalize_hex, sha256_hex};
 use crate::detect::types::{ComputeType, RuntimeType};
 use crate::link;
 use crate::output;
@@ -75,19 +74,6 @@ const PNPM_BUILD_SCRIPT_COMPAT_ENV: [(&str, &str); 2] = [
 ];
 
 #[derive(Debug)]
-struct RuntimeArtifact {
-    root_dir: PathBuf,
-    manifest: build_manifest::Manifest,
-    scan: RuntimeArtifactScan,
-}
-
-#[derive(Debug, Clone)]
-enum RuntimeArtifactScan {
-    All,
-    Selected { roots: Vec<String> },
-}
-
-#[derive(Debug)]
 struct DeploySymlinkTarget {
     link_target: String,
     resolved_path: String,
@@ -114,16 +100,6 @@ fn authoritative_server_framework_preset(preset: Option<&str>) -> Option<&str> {
 type ProjectInfo = nrz::config::ProjectBuildSettings;
 
 // ── API structs ──────────────────────────────────────────────
-
-/// Per-file identity entry used by the deployment-create body and by
-/// SOURCE_BUNDLE_V1 logical manifest/archive construction.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct FileEntry {
-    path: String,
-    size: u64,
-    content_hash: String,
-}
 
 /// Body for `POST /v1/projects/:id/deployments`.
 ///
@@ -201,14 +177,45 @@ struct RuntimeStartupFailureDetails {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DeployOutput {
     deployment_id: String,
     url: String,
     status: String,
+    target: DeployTargetOutput,
+    preview_protected: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     health_check: Option<HealthCheckInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    verification: Option<verify::DeployVerificationOutput>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeployTargetOutput {
+    environment: &'static str,
+    production: Option<bool>,
+}
+
+fn deploy_target_output(production: Option<bool>) -> DeployTargetOutput {
+    DeployTargetOutput {
+        environment: deploy_target_environment(production),
+        production,
+    }
+}
+
+fn deploy_target_environment(production: Option<bool>) -> &'static str {
+    match production {
+        Some(true) => "production",
+        Some(false) => "preview",
+        None => "default",
+    }
+}
+
+fn deploy_preview_protected(production: Option<bool>) -> bool {
+    production != Some(true)
 }
 
 fn format_deployment_failure(error: &str, status: &DeploymentStatusResponse) -> String {
@@ -466,11 +473,9 @@ pub async fn run(
     workspace: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
-    let root_dir = Path::new(&args.dir)
-        .canonicalize()
-        .with_context(|| format!("project directory not found: {}", args.dir))?;
-    let project_context = crate::project_context::resolve(&root_dir, config, args.app.as_deref())?;
-    if let Some(app) = &project_context.selected_app {
+    let mut command_context =
+        crate::context::CommandContext::resolve(&args.dir, config, args.app.as_deref(), json)?;
+    if let Some(app) = &command_context.selected_app {
         output::status(
             json,
             "~",
@@ -481,8 +486,6 @@ pub async fn run(
             output::Phase::Deploy,
         );
     }
-    let project_dir = project_context.project_dir.clone();
-    let config = &project_context.config;
 
     // Verify auth early to avoid wasting time on build if token is invalid
     let tok = auth::resolve_token(token, workspace)?;
@@ -491,24 +494,27 @@ pub async fn run(
     if let Some(deployment_id) = resume_deployment_id
         && deployment_id.is_empty()
     {
-        return Err(output::coded_error(
+        return Err(crate::errors::CliError::new(
             "INVALID_ARGUMENT",
-            "--resume-deployment requires a non-empty deployment ID".to_string(),
-        ));
+            "--resume-deployment requires a non-empty deployment ID",
+        )
+        .phase(output::Phase::Deploy)
+        .details(serde_json::json!({ "argument": "--resume-deployment" }))
+        .hint("Pass a deployment ID or omit --resume-deployment.")
+        .into_anyhow());
     }
 
     // Early-resolve project_id before build/detect so server settings can be
     // imported into the same effective config as local onreza.toml.
-    let mut early_project_id = args
-        .project_id
-        .as_deref()
-        .or(config.project.id.as_deref())
-        .map(String::from);
+    command_context.apply_project_id_override(args.project_id.as_deref())?;
+    let mut early_project_id = command_context.effective.project_id().map(str::to_string);
     if early_project_id.is_none()
         && let Some(deployment_id) = resume_deployment_id
     {
-        early_project_id =
-            Some(resolve_project_id_for_resume(&client, deployment_id, None, config).await?);
+        early_project_id = Some(
+            resolve_project_id_for_resume(&client, deployment_id, None, &command_context.config)
+                .await?,
+        );
     }
 
     // Fetch project settings from server if project_id is known
@@ -542,274 +548,32 @@ pub async fn run(
         None
     };
 
-    let mut effective =
-        EffectiveProjectConfig::from_project_config(project_dir.clone(), config.clone());
-    effective.apply_server_settings(server_settings.as_ref());
+    command_context.apply_server_settings(server_settings.as_ref());
 
     // Explicit compute intent is safe to resolve before build because it comes
     // only from CLI/config. Framework detection stays post-build: generated
     // outputs such as root index.html are part of the detection surface.
-    let explicit_compute =
-        resolve_explicit_compute_type(args.compute.as_deref(), effective.deploy_compute())?;
-    validate_prebuild_compute_intent(&project_dir, explicit_compute)?;
-
-    // Run install step (default: enabled, skip with --skip-install or --skip-build)
-    if !args.skip_build && !args.skip_install {
-        run_install_step(&project_dir, json, &effective)?;
-    }
-
-    // Pre-build env injection for framework compatibility.
-    let build_env: Vec<(String, String)> = {
-        let mut env = Vec::new();
-
-        // Next.js: prefer the official Adapter API on supported versions. Older
-        // versions keep the legacy standalone env fallback.
-        if is_nextjs_project(&project_dir) {
-            match crate::nextjs_adapter::prepare_build_adapter(&project_dir) {
-                Ok(Some(adapter)) => {
-                    output::status(
-                        json,
-                        "~",
-                        "Next.js detected, enabling ONREZA adapter (NEXT_ADAPTER_PATH)",
-                        output::Phase::Deploy,
-                    );
-                    env.push((
-                        "NEXT_ADAPTER_PATH".to_string(),
-                        adapter.path.to_string_lossy().into_owned(),
-                    ));
-                    env.push((
-                        "ONREZA_NEXT_ADAPTER_VERSION".to_string(),
-                        env!("CARGO_PKG_VERSION").to_string(),
-                    ));
-                }
-                Ok(None) => {
-                    output::status(
-                        json,
-                        "~",
-                        "Next.js detected, enabling standalone output (NEXT_PRIVATE_STANDALONE=1)",
-                        output::Phase::Deploy,
-                    );
-                    env.push(("NEXT_PRIVATE_STANDALONE".to_string(), "1".to_string()));
-                }
-                Err(err) => {
-                    output::warn(
-                        json,
-                        format!(
-                            "Could not prepare Next.js adapter: {err:#}. Falling back to standalone output."
-                        ),
-                        output::Phase::Deploy,
-                    );
-                    env.push(("NEXT_PRIVATE_STANDALONE".to_string(), "1".to_string()));
-                }
-            }
-        }
-
-        // SvelteKit: adapter-auto checks platform env vars to pick an adapter.
-        // GCP_BUILDPACKS makes it choose adapter-node, which produces the build/
-        // output we expect. Without this, adapter-auto fails silently on unknown hosts.
-        if is_sveltekit_with_adapter_auto(&project_dir) {
-            output::status(
-                json,
-                "~",
-                "SvelteKit adapter-auto detected, enabling adapter-node (GCP_BUILDPACKS=1)",
-                output::Phase::Deploy,
-            );
-            env.push(("GCP_BUILDPACKS".to_string(), "1".to_string()));
-        }
-
-        env
-    };
-
-    // Run build step (default: enabled, skip with --skip-build)
-    if !args.skip_build
-        && let Some(cmd) =
-            resolve_build_command(args.build_command.as_deref(), &project_dir, &effective)
-    {
-        clear_nextjs_descriptor_before_build(&project_dir)?;
-        run_build_step(&cmd, &project_dir, json, &build_env)?;
-    }
-
-    // Detect after build so generated static HTML roots, manifests, and output
-    // markers participate in framework/output resolution.
-    let detection =
-        crate::detect::detect_with_framework_override(&project_dir, effective.framework_override());
-
-    // Validate build output
-    output::status(
-        json,
-        "~",
-        "Validating build output...",
-        output::Phase::Deploy,
-    );
-    let build_result = build::run_with_effective_config(
-        BuildArgs {
-            dir: project_dir.to_string_lossy().into_owned(),
-            skip_validation: false,
-        },
-        json,
-        &effective,
-        Some(&detection),
-        false,
-    )
+    let explicit_compute = resolve_explicit_compute_type(
+        args.compute.as_deref(),
+        command_context.effective.deploy_compute(),
+    )?;
+    let deploy_plan = plan::build(plan::DeployPlanRequest {
+        args: &args,
+        command: &command_context,
+        explicit_compute,
+    })
     .await?;
 
-    let build_output_dir = build_result.output_dir;
-    let loaded_manifest = build_result.manifest;
-    let has_manifest = loaded_manifest.is_some();
-
-    let compute =
-        resolve_deploy_compute_type(explicit_compute, loaded_manifest.as_ref(), &detection);
-    let mut warnings: Vec<String> = Vec::new();
-
-    // Inform about SSR framework compute mode when auto-detected
-    if !has_manifest
-        && args.compute.is_none()
-        && effective.deploy_compute().is_none()
-        && crate::detect::presets::is_ssr_framework(&detection.framework)
-    {
-        let msg = match compute {
-            ComputeType::Process => {
-                let mut m = format!("{} deploying as PROCESS (server runtime).", detection.name);
-                let hint = framework_static_hint(&detection.framework);
-                if !hint.is_empty() {
-                    m.push_str(&format!(
-                        " For a fully static export, {hint} and redeploy with --compute static."
-                    ));
-                }
-                m
-            }
-            ComputeType::Static => format!(
-                "{} deploying as STATIC. \
-                 For server-side rendering, use --compute process.",
-                detection.name
-            ),
-        };
-        output::warn(json, &msg, output::Phase::Deploy);
-        warnings.push(msg);
+    if args.dry {
+        let source_bundle = deploy_plan.materialize_source_bundle(json)?;
+        let explain = deploy_plan.explain(
+            &command_context,
+            early_project_id.as_deref(),
+            &source_bundle,
+        );
+        emit_deploy_plan_explain(json, &explain)?;
+        return Ok(());
     }
-
-    let is_process = compute == ComputeType::Process;
-
-    // manifest_raw starts from build result (may already be Some for STATIC auto-gen)
-    let mut manifest_raw: Option<serde_json::Value> = loaded_manifest
-        .as_ref()
-        .map(serde_json::to_value)
-        .transpose()
-        .context("failed to serialize manifest")?;
-
-    // When a manifest is present, process entry comes from the manifest's COMPUTE layer —
-    // skip pre-flight validation and auto-detection.
-    // When no manifest: find entry and auto-generate COMPUTE manifest.
-    if is_process && !has_manifest {
-        validate_process_output(&build_output_dir, &project_dir, &detection)
-            .map_err(|e| output::with_default_code(e, "MISSING_PROCESS_ENTRY"))?;
-        let (entry, warning) = ensure_process_entry(
-            &build_output_dir,
-            &project_dir,
-            effective.deploy_entry(),
-            &detection,
-            json,
-        )
-        .map_err(|e| output::with_default_code(e, "MISSING_PROCESS_ENTRY"))?;
-        if let Some(ref w) = warning {
-            output::warn(json, w, output::Phase::Deploy);
-            warnings.push(w.clone());
-        }
-        match entry {
-            Some(ref e) => {
-                let auto = build_manifest::generate_compute_manifest(e);
-                output::status(
-                    json,
-                    "~",
-                    format!("Auto-generated COMPUTE manifest (entry: {e})"),
-                    output::Phase::Deploy,
-                );
-                manifest_raw = Some(
-                    serde_json::to_value(&auto)
-                        .context("failed to serialize auto-generated manifest")?,
-                );
-            }
-            None => {
-                return Err(output::coded_error(
-                    "MISSING_PROCESS_ENTRY",
-                    format!(
-                        "Cannot auto-generate COMPUTE manifest: entry point not detected in {}.\n\n\
-                         Create .onreza/manifest.json manually.\n\
-                         See: docs.onreza.ru/manifest",
-                        build_output_dir.display()
-                    ),
-                ));
-            }
-        }
-    }
-
-    let manifest_raw = resolve_manifest_for_compute(compute, manifest_raw)?;
-    let manifest_for_planning: build_manifest::Manifest =
-        serde_json::from_value(manifest_raw.clone())
-            .context("failed to parse resolved deployment manifest")?;
-    let runtime_artifact = resolve_runtime_artifact(
-        &project_context.root_dir,
-        &project_dir,
-        build_output_dir.clone(),
-        manifest_for_planning,
-        &detection,
-        json,
-    )?;
-    let manifest_raw = conform_manifest_to_wire_contract(
-        serde_json::to_value(&runtime_artifact.manifest)
-            .context("failed to serialize runtime artifact manifest")?,
-    )?;
-
-    // Scan the deployable runtime artifact into a flat file list with streaming
-    // SHA-256 + size per file. Build output and runtime artifact root are separate:
-    // PROCESS Node project builds may execute from a root that also carries
-    // package metadata and node_modules.
-    output::status(
-        json,
-        "~",
-        "Scanning runtime artifact...",
-        output::Phase::Deploy,
-    );
-    let runtime_artifact_root_for_scan = runtime_artifact.root_dir.clone();
-    let runtime_artifact_scan = runtime_artifact.scan.clone();
-    let scanned_files = tokio::task::spawn_blocking(move || {
-        scan_runtime_artifact(&runtime_artifact_root_for_scan, &runtime_artifact_scan)
-    })
-    .await
-    .context("file scan task failed (panic or runtime shutdown)")??;
-
-    let files = prepare_deploy_files(&runtime_artifact.manifest, scanned_files, &detection, json)?;
-    if files.is_empty() {
-        return Err(output::coded_error(
-            "INVALID_BUILD_OUTPUT",
-            format!(
-                "output directory has no deployable files after framework normalization: {}",
-                runtime_artifact.root_dir.display()
-            ),
-        ));
-    }
-    ensure_no_unresolved_lfs_pointers(
-        &runtime_artifact.root_dir,
-        &files,
-        effective.git_lfs_enabled(),
-    )?;
-    let functions =
-        build_functions_payload(effective.config(), &project_dir, json, args.force_rules)?;
-    let has_compute_layer = manifest_has_compute_layer(&runtime_artifact.manifest);
-
-    // Resolve health check path (PROCESS only)
-    let health_check = if has_compute_layer {
-        Some(resolve_health_check(
-            args.health_check_path.as_deref(),
-            config,
-            &project_dir,
-            &detection,
-            &build_output_dir,
-            json,
-        )?)
-    } else {
-        None
-    };
 
     // SOURCE_BUNDLE_V1 prepare-upload needs the authenticated workspace ID for
     // direct CLI deploy and builder resume. Admission/limits are enforced
@@ -829,26 +593,22 @@ pub async fn run(
                     &client,
                     deployment_id,
                     args.project_id.as_deref(),
-                    config,
+                    &command_context.config,
                 )
                 .await?
             }
         };
-        let runtime_artifact_root = runtime_artifact.root_dir;
-        let runtime_artifact_manifest = runtime_artifact.manifest;
-        return resume_deploy(
-            &client,
+        let upload_plan = deploy_plan.materialize_source_bundle(json)?;
+        return resume_deploy(ResumeDeployRequest {
+            client: &client,
             deployment_id,
-            &ws_info.id,
-            &project_id,
-            functions,
-            manifest_raw,
-            runtime_artifact_manifest,
-            files,
-            &runtime_artifact_root,
+            workspace_id: &ws_info.id,
+            project_id: &project_id,
+            functions: deploy_plan.functions,
+            upload_plan,
             json,
-            warnings,
-        )
+            warnings: deploy_plan.warnings,
+        })
         .await;
     }
 
@@ -857,7 +617,7 @@ pub async fn run(
     // Resolve project: --project-id > onreza.toml > interactive
     let project_id = if let Some(pid) = &args.project_id {
         pid.clone()
-    } else if let Some(id) = effective.project_id() {
+    } else if let Some(id) = command_context.effective.project_id() {
         id.to_string()
     } else {
         if json {
@@ -872,12 +632,12 @@ pub async fn run(
         );
         let selected = link::select_project_interactive(&client).await?;
         nrz::config::save_or_update(
-            &project_dir,
+            &command_context.project_dir,
             &selected.project_id,
             Some(&selected.project_name),
             None,
         )?;
-        crate::init::add_to_gitignore(&project_dir);
+        crate::init::add_to_gitignore(&command_context.project_dir);
         output::success(
             false,
             format!(
@@ -888,6 +648,11 @@ pub async fn run(
         );
         selected.project_id
     };
+    let deploy_files = deploy_plan.files.clone();
+    let deploy_warnings = deploy_plan.warnings.clone();
+    let deploy_health_check = deploy_plan.health_check.clone();
+    let deploy_production = deploy_plan.production;
+    let sync_detection = deploy_plan.artifact.build.detection.clone();
 
     // Git info
     let branch = git_cmd(&["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -897,24 +662,33 @@ pub async fn run(
             "git not available, using synthetic commit SHA",
             output::Phase::Deploy,
         );
-        synthetic_sha(&files)
+        synthetic_sha(&deploy_files)
     });
 
     // Validate required env vars from [env] declarations
     if !args.skip_env_check {
-        crate::cli::env_handler::validate_env_for_deploy(&client, &project_id, json, config)
-            .await?;
+        crate::cli::env_handler::validate_env_for_deploy(
+            &client,
+            &project_id,
+            json,
+            &command_context.config,
+        )
+        .await?;
     }
+
+    let upload_plan = deploy_plan.materialize_source_bundle(json)?;
+    let deploy_functions = deploy_plan.functions;
 
     // Sync detection results to API (best-effort, non-blocking)
     let sync_client = client.clone();
     let sync_project_id = project_id.clone();
     let _sync = tokio::spawn(async move {
-        crate::detect_sync::sync_detection_to_api(&sync_client, &sync_project_id, &detection).await;
+        crate::detect_sync::sync_detection_to_api(&sync_client, &sync_project_id, &sync_detection)
+            .await;
     });
 
     // Sync compute config (health check path) for PROCESS deployments
-    if let Some(ref hc) = health_check {
+    if let Some(ref hc) = deploy_health_check {
         let hc_client = client.clone();
         let hc_project_id = project_id.clone();
         let hc_clone = hc.clone();
@@ -923,22 +697,10 @@ pub async fn run(
         });
     }
 
-    output::status(
-        json,
-        "~",
-        "Creating SOURCE_BUNDLE_V1 archive...",
-        output::Phase::Deploy,
-    );
-    let upload_plan = build_source_bundle_plan(
-        &runtime_artifact.root_dir,
-        &runtime_artifact.manifest,
-        &files,
-    )
-    .context("failed to prepare SOURCE_BUNDLE_V1 upload plan")?;
     output::success(
         json,
         format!(
-            "SOURCE_BUNDLE_V1 archive created ({}, sha256: {}...)",
+            "SOURCE_BUNDLE_V1 archive ready ({}, sha256: {}...)",
             format_u64_bytes(upload_plan.source_size_bytes),
             &upload_plan.source_sha256[..12]
         ),
@@ -948,14 +710,13 @@ pub async fn run(
 
     // Create deployment
     output::status(json, "~", "Creating deployment...", output::Phase::Deploy);
-    let production = resolve_deploy_production_override(args.prod, &args.env)?;
     let body = CreateDeploymentBody {
-        manifest: manifest_raw,
-        files: files.clone(),
-        production,
+        manifest: deploy_plan.manifest_raw,
+        files: deploy_files.clone(),
+        production: deploy_production,
         branch,
         commit_sha,
-        functions: conform_functions_to_wire_contract(functions)?,
+        functions: conform_functions_to_wire_contract(deploy_functions)?,
     };
 
     let deployment: CreateDeploymentResponse = match client
@@ -999,14 +760,34 @@ pub async fn run(
             "live" => {
                 finish_spinner(spinner, "");
                 let url = status.url.as_deref().unwrap_or(&deployment.url);
+                let target = deploy_target_output(deploy_production);
+                let preview_protected = deploy_preview_protected(deploy_production);
+                let verification = if args.verify {
+                    Some(
+                        verify::verify_deployment(verify::DeployVerificationRequest {
+                            api_client: &client,
+                            project_id: &project_id,
+                            url,
+                            preview_protected,
+                            health_check: deploy_health_check.as_ref(),
+                            json,
+                        })
+                        .await?,
+                    )
+                } else {
+                    None
+                };
 
                 if json {
                     output::json_output(&DeployOutput {
                         deployment_id: deployment.id,
                         url: url.to_string(),
                         status: "live".into(),
-                        warnings,
-                        health_check: health_check.as_ref().map(|hc| hc.to_info()),
+                        target,
+                        preview_protected,
+                        warnings: deploy_warnings.clone(),
+                        health_check: deploy_health_check.as_ref().map(|hc| hc.to_info()),
+                        verification,
                     });
                 } else {
                     eprintln!();
@@ -1015,8 +796,16 @@ pub async fn run(
                         console::style("✓").green().bold(),
                         console::style(url).underlined().bold(),
                     );
+                    if let Some(verification) = &verification {
+                        eprintln!(
+                            "  {} Verified {} ({})",
+                            console::style("✓").green().bold(),
+                            console::style(&verification.url).underlined(),
+                            verification.status_code
+                        );
+                    }
                     eprintln!();
-                    if production != Some(true) {
+                    if preview_protected {
                         crate::preview::print_preview_access_hint(&project_id, Some(url));
                     }
                 }
@@ -1038,6 +827,16 @@ pub async fn run(
             }
         }
     }
+}
+
+fn emit_deploy_plan_explain(json: bool, explain: &plan::DeployPlanExplain) -> anyhow::Result<()> {
+    if json {
+        output::json_output(explain);
+    } else {
+        eprintln!("Deployment plan:");
+        eprintln!("{}", serde_json::to_string_pretty(explain)?);
+    }
+    Ok(())
 }
 
 // ── Health check resolution ──────────────────────────────────
@@ -2360,20 +2159,29 @@ async fn resolve_project_id_for_resume(
     Ok(deployment.project.id)
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn resume_deploy(
-    client: &ApiClient,
-    deployment_id: &str,
-    workspace_id: &str,
-    project_id: &str,
+struct ResumeDeployRequest<'a> {
+    client: &'a ApiClient,
+    deployment_id: &'a str,
+    workspace_id: &'a str,
+    project_id: &'a str,
     functions: Option<crate::functions::FunctionPublishPayload>,
-    _manifest: serde_json::Value,
-    manifest_for_planning: build_manifest::Manifest,
-    files: Vec<FileEntry>,
-    output_dir: &Path,
-    json: bool,
+    upload_plan: SourceBundlePlan,
     warnings: Vec<String>,
-) -> anyhow::Result<()> {
+    json: bool,
+}
+
+async fn resume_deploy(request: ResumeDeployRequest<'_>) -> anyhow::Result<()> {
+    let ResumeDeployRequest {
+        client,
+        deployment_id,
+        workspace_id,
+        project_id,
+        functions,
+        upload_plan,
+        warnings,
+        json,
+    } = request;
+
     output::status(
         json,
         "~",
@@ -2385,14 +2193,15 @@ async fn resume_deploy(
         stage_deployment_functions(client, deployment_id, project_id, functions, json).await?;
     }
 
-    output::status(
+    output::success(
         json,
-        "~",
-        "Creating SOURCE_BUNDLE_V1 archive...",
+        format!(
+            "SOURCE_BUNDLE_V1 archive ready ({}, sha256: {}...)",
+            format_u64_bytes(upload_plan.source_size_bytes),
+            &upload_plan.source_sha256[..12]
+        ),
         output::Phase::Deploy,
     );
-    let upload_plan = build_source_bundle_plan(output_dir, &manifest_for_planning, &files)
-        .context("failed to prepare SOURCE_BUNDLE_V1 upload plan")?;
     let deployment_attempt_id = Uuid::now_v7().to_string();
 
     prepare_upload_and_complete(
@@ -3787,48 +3596,6 @@ fn resolve_build_command(
     Some(format!("{pm} run build"))
 }
 
-/// Lightweight pre-build check: does the project use Next.js (directly or via wrapper like Payload v3)?
-fn is_nextjs_project(project_dir: &Path) -> bool {
-    let Some(pkg) = crate::detect::package_json::PackageJson::load(project_dir) else {
-        return false;
-    };
-    pkg.has_dependency("next")
-}
-
-fn clear_nextjs_descriptor_before_build(project_dir: &Path) -> anyhow::Result<()> {
-    if is_nextjs_project(project_dir) {
-        crate::nextjs_adapter::clear_descriptor(project_dir)?;
-    }
-    Ok(())
-}
-
-/// Check if the project uses SvelteKit with adapter-auto (needs GCP_BUILDPACKS env injection).
-fn is_sveltekit_with_adapter_auto(project_dir: &Path) -> bool {
-    let Some(pkg) = crate::detect::package_json::PackageJson::load(project_dir) else {
-        return false;
-    };
-    if !pkg.has_dependency("@sveltejs/kit") {
-        return false;
-    }
-    if pkg.has_dependency("@sveltejs/adapter-node")
-        || pkg.has_dependency("@sveltejs/adapter-static")
-        || pkg.has_dependency("@sveltejs/adapter-vercel")
-        || pkg.has_dependency("@sveltejs/adapter-cloudflare")
-        || pkg.has_dependency("@sveltejs/adapter-netlify")
-    {
-        return false;
-    }
-    let config_content = ["svelte.config.js", "svelte.config.ts"]
-        .iter()
-        .map(|n| project_dir.join(n))
-        .find(|p| p.is_file())
-        .and_then(|p| std::fs::read_to_string(p).ok());
-    match config_content {
-        Some(content) => content.contains("adapter-auto"),
-        None => true,
-    }
-}
-
 /// Run a shell command, streaming stdout/stderr through structured JSON progress logs in JSON mode.
 ///
 /// In JSON mode: pipes stdout/stderr, wraps each line via `output::log_line()` on stderr.
@@ -4424,7 +4191,7 @@ const SCAN_HASH_CHUNK_BYTES: usize = 64 * 1024;
 /// second read on any reasonable build host).
 ///
 /// Safe relative symlinks are preserved as SOURCE_BUNDLE_V1 logical entries.
-fn scan_dir(dir: &Path) -> anyhow::Result<Vec<FileEntry>> {
+pub(crate) fn scan_dir(dir: &Path) -> anyhow::Result<Vec<FileEntry>> {
     let mut files = Vec::new();
     let canonical_base = std::fs::canonicalize(dir)
         .with_context(|| format!("failed to canonicalize {}", dir.display()))?;
@@ -4492,48 +4259,60 @@ fn runtime_scan_path_is_covered<'a>(path: &str, mut roots: impl Iterator<Item = 
     roots.any(|root| root == "." || path == root || path.starts_with(&format!("{root}/")))
 }
 
+#[cfg(test)]
 fn prepare_deploy_files(
     manifest: &build_manifest::Manifest,
     files: Vec<FileEntry>,
     detection: &crate::detect::types::DetectionResult,
     json: bool,
 ) -> anyhow::Result<Vec<FileEntry>> {
-    let original_count = files.len();
-    let original_bytes = files.iter().map(|file| file.size).sum::<u64>();
-    let mut pruned_count = 0usize;
-    let mut pruned_bytes = 0u64;
-    let mut deployable = Vec::with_capacity(files.len());
+    Ok(prepare_artifact_files(
+        manifest,
+        files,
+        detection,
+        ArtifactRootScope::ProjectRoot,
+        json,
+    )
+    .deployable_entries())
+}
 
-    for file in files {
-        if is_framework_build_only_path(manifest, detection, &file.path) {
-            pruned_count += 1;
-            pruned_bytes = pruned_bytes.saturating_add(file.size);
-            continue;
-        }
-        deployable.push(file);
-    }
+fn prepare_artifact_files(
+    manifest: &build_manifest::Manifest,
+    files: Vec<FileEntry>,
+    detection: &crate::detect::types::DetectionResult,
+    root_scope: ArtifactRootScope,
+    json: bool,
+) -> crate::artifact::ArtifactFileCollection {
+    let collection =
+        crate::artifact::classify_artifact_files(manifest, files, detection, root_scope);
 
-    if pruned_count > 0 {
+    if collection.summary.pruned_files > 0 {
         output::status(
             json,
             "~",
             format!(
-                "Pruned {pruned_count}/{original_count} build-only artifact(s) from SOURCE_BUNDLE_V1 ({})",
-                format_u64_bytes(pruned_bytes)
+                "Pruned {pruned_count}/{original_count} build-only artifact(s) from SOURCE_BUNDLE_V1 ({pruned_bytes})",
+                pruned_count = collection.summary.pruned_files,
+                original_count = collection.summary.scanned_files,
+                pruned_bytes = format_u64_bytes(collection.summary.pruned_bytes),
             ),
             output::Phase::Deploy,
         );
         tracing::info!(
-            pruned_count,
-            original_count,
-            pruned_bytes,
-            original_bytes,
+            pruned_count = collection.summary.pruned_files,
+            original_count = collection.summary.scanned_files,
+            pruned_bytes = collection.summary.pruned_bytes,
+            original_bytes = collection
+                .summary
+                .deployable_bytes
+                .saturating_add(collection.summary.pruned_bytes),
             "pruned framework build-only artifacts before SOURCE_BUNDLE_V1 packaging"
         );
     }
 
+    let deployable = collection.deployable_entries();
     warn_large_deploy_files(json, &deployable);
-    Ok(deployable)
+    collection
 }
 
 fn ensure_no_unresolved_lfs_pointers(
@@ -4599,24 +4378,6 @@ fn is_git_lfs_pointer_file(path: &Path) -> anyhow::Result<bool> {
             && content.contains("\noid sha256:")
             && content.contains("\nsize "),
     )
-}
-
-fn is_framework_build_only_path(
-    manifest: &build_manifest::Manifest,
-    detection: &crate::detect::types::DetectionResult,
-    path: &str,
-) -> bool {
-    if !manifest_has_compute_layer(manifest) {
-        return false;
-    }
-    if !matches!(
-        detection.framework.as_str(),
-        "nextjs" | "blitzjs" | "payload"
-    ) {
-        return false;
-    }
-
-    path == ".next/cache" || path.starts_with(".next/cache/") || path.contains("/.next/cache/")
 }
 
 fn warn_large_deploy_files(json: bool, files: &[FileEntry]) {
@@ -4706,6 +4467,8 @@ fn scan_runtime_path_with_type(
             path: rel,
             size: 0,
             content_hash: sha256_hex(symlink.link_target.as_bytes()),
+            kind: crate::artifact::ArtifactFileKind::Symlink,
+            symlink_resolved_path: Some(symlink.resolved_path.clone()),
         });
         symlink_targets.push(symlink.resolved_path);
         return Ok(());
@@ -4724,6 +4487,8 @@ fn scan_runtime_path_with_type(
             path: rel_str,
             size,
             content_hash,
+            kind: crate::artifact::ArtifactFileKind::File,
+            symlink_resolved_path: None,
         });
     }
 
@@ -4837,7 +4602,7 @@ fn resolve_deploy_symlink_target(rel: &str, target: &str) -> anyhow::Result<Stri
 }
 
 /// Streaming SHA-256 + size for a single file. Returns `(size, lowercase_hex_sha256)`.
-fn hash_file_streaming(path: &Path) -> anyhow::Result<(u64, String)> {
+pub(crate) fn hash_file_streaming(path: &Path) -> anyhow::Result<(u64, String)> {
     let mut file =
         std::fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut hasher = Sha256::new();

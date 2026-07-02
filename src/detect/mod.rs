@@ -36,6 +36,7 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::Context;
 use fs::{Fs, LocalFs};
 use package_json::PackageJson;
+use regex::Regex;
 use types::*;
 
 /// Full framework detection — returns a complete `DetectionResult`.
@@ -65,10 +66,8 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
     // 1. Detect package manager
     let pm_info = package_manager::detect_package_manager(fs, pkg.as_ref());
 
-    // 2. Try to detect framework from package.json dependencies
-    if let Some(ref pkg) = pkg
-        && let Some(result) = detect_from_package_json(fs, pkg, &pm_info)
-    {
+    // 2. Try to detect framework from declarative detector rules.
+    if let Some(result) = detect_from_framework_rules(fs, pkg.as_ref(), &pm_info) {
         return result;
     }
 
@@ -274,80 +273,205 @@ fn detection_from_configured_preset(
     }
 }
 
-/// Detect framework from package.json dependencies using preset priorities.
-fn detect_from_package_json(
+#[derive(Debug, Clone)]
+struct DetectorEvidence {
+    reason: String,
+    version: Option<String>,
+}
+
+struct FrameworkRuleMatch {
+    rule: &'static FrameworkDetectionRule,
+    preset: &'static FrameworkPreset,
+    evidence: Vec<DetectorEvidence>,
+    version: Option<String>,
+}
+
+/// Detect framework from declarative detector rules using match/supersede order.
+fn detect_from_framework_rules(
     fs: &dyn Fs,
-    pkg: &PackageJson,
+    pkg: Option<&PackageJson>,
     pm_info: &Option<PackageManagerInfo>,
 ) -> Option<DetectionResult> {
-    // Iterate presets in priority order (already sorted)
-    for preset in presets::detection_presets() {
-        let matched_dep = preset
-            .dependencies
+    let mut matches = Vec::new();
+
+    for rule in presets::detection_rules() {
+        let Some(evidence) = match_detection_rule(fs, pkg, rule) else {
+            continue;
+        };
+        let preset = presets::get_preset_by_slug(rule.slug)
+            .unwrap_or_else(|| panic!("detection rule '{}' must reference a preset", rule.slug));
+        let version = evidence.iter().find_map(|m| m.version.clone());
+        matches.push(FrameworkRuleMatch {
+            rule,
+            preset,
+            evidence,
+            version,
+        });
+    }
+
+    remove_superseded_matches(&mut matches);
+    let matched = matches.into_iter().next()?;
+    Some(detection_from_rule_match(fs, pkg, pm_info, matched))
+}
+
+fn match_detection_rule(
+    fs: &dyn Fs,
+    pkg: Option<&PackageJson>,
+    rule: &'static FrameworkDetectionRule,
+) -> Option<Vec<DetectorEvidence>> {
+    let mut evidence = Vec::new();
+
+    for detector in rule.every {
+        evidence.push(match_detector(fs, pkg, detector)?);
+    }
+
+    if !rule.some.is_empty() {
+        let mut some_evidence = Vec::new();
+        for detector in rule.some {
+            if let Some(matched) = match_detector(fs, pkg, detector) {
+                some_evidence.push(matched);
+            }
+        }
+        if some_evidence.is_empty() {
+            return None;
+        }
+        evidence.extend(some_evidence);
+    }
+
+    Some(evidence)
+}
+
+fn match_detector(
+    fs: &dyn Fs,
+    pkg: Option<&PackageJson>,
+    detector: &FrameworkDetector,
+) -> Option<DetectorEvidence> {
+    match *detector {
+        FrameworkDetector::Package(name) => {
+            let pkg = pkg?;
+            let version = pkg.dependency_version(name)?;
+            Some(DetectorEvidence {
+                reason: format!("package:{name}"),
+                version: Some(version.to_string()),
+            })
+        }
+        FrameworkDetector::Path(path) => fs.exists(path).then(|| DetectorEvidence {
+            reason: format!("path:{path}"),
+            version: None,
+        }),
+        FrameworkDetector::Content { path, pattern } => {
+            content_matches(fs, path, pattern).then(|| DetectorEvidence {
+                reason: format!("content:{path}"),
+                version: None,
+            })
+        }
+        FrameworkDetector::ContentAny { paths, pattern } => paths.iter().find_map(|path| {
+            content_matches(fs, path, pattern).then(|| DetectorEvidence {
+                reason: format!("content:{path}"),
+                version: None,
+            })
+        }),
+        FrameworkDetector::RuntimeSignal => {
+            let pkg = pkg?;
+            has_unknown_runtime_signal(fs, pkg).then(|| DetectorEvidence {
+                reason: "runtime:package-json".to_string(),
+                version: None,
+            })
+        }
+    }
+}
+
+fn content_matches(fs: &dyn Fs, path: &str, pattern: &str) -> bool {
+    let Some(content) = fs.read_file(path) else {
+        return false;
+    };
+    Regex::new(pattern)
+        .expect("framework detector regex must compile")
+        .is_match(&content)
+}
+
+fn remove_superseded_matches(matches: &mut Vec<FrameworkRuleMatch>) {
+    let matched_slugs = matches
+        .iter()
+        .map(|m| m.rule.slug)
+        .collect::<HashSet<&'static str>>();
+    let mut superseded = HashSet::new();
+
+    loop {
+        let before = superseded.len();
+        let next_superseded = matches
             .iter()
-            .find(|&&dep| pkg.has_dependency(dep));
+            .filter(|m| !superseded.contains(m.rule.slug))
+            .flat_map(|m| m.rule.supersedes.iter().copied())
+            .filter(|slug| matched_slugs.contains(slug))
+            .collect::<Vec<_>>();
 
-        if let Some(&dep) = matched_dep {
-            let version = pkg.dependency_version(dep).map(|s| s.to_string());
-            let pm_type = pm_info
-                .as_ref()
-                .map(|pm| pm.pm_type)
-                .unwrap_or(PackageManagerType::Npm);
+        for slug in next_superseded {
+            superseded.insert(slug);
+        }
 
-            // Build info
-            let build_cmd = preset
-                .build_script
-                .map(|script| package_manager::build_command(pm_type, script));
-
-            // SSR analysis for capable frameworks (needed before output_dir resolution)
-            let ssr_analysis = ssr::analyze_ssr(fs, preset.slug);
-
-            // Output directory — context-dependent based on framework + SSR analysis
-            let output_dir = resolve_framework_output_dir(preset, ssr_analysis.as_ref(), fs);
-
-            // Config files
-            let config_files = detect_config_files(fs, preset.slug);
-
-            // Infer compute type
-            let suggested_compute =
-                infer_compute_type(preset.runtime, preset.slug, ssr_analysis.as_ref());
-
-            let entry_point = framework_entry_point(preset.slug);
-
-            return Some(DetectionResult {
-                framework: preset.slug.to_string(),
-                name: preset.name.to_string(),
-                version,
-                suggested_compute,
-                metadata: DetectionMetadata {
-                    uses_typescript: detect_typescript(fs),
-                    config_files,
-                    runtime: RuntimeInfo {
-                        runtime_type: infer_runtime(preset.runtime, pm_info),
-                        version: None,
-                    },
-                    package_manager: pm_info.clone(),
-                    build_info: Some(BuildInfo {
-                        build_command: build_cmd,
-                        install_command: Some(
-                            package_manager::install_command(pm_type).to_string(),
-                        ),
-                        output_dir: Some(output_dir),
-                        entry_point,
-                    }),
-                    monorepo: detect_monorepo_info(fs, Some(pkg), pm_info.as_ref()),
-                    ssr_analysis,
-                    structure: detect_structure(fs),
-                },
-                reason: format!(
-                    "Detected {dep} in dependencies (priority {})",
-                    preset.priority
-                ),
-            });
+        if superseded.len() == before {
+            break;
         }
     }
 
-    None
+    matches.retain(|m| !superseded.contains(m.rule.slug));
+}
+
+fn detection_from_rule_match(
+    fs: &dyn Fs,
+    pkg: Option<&PackageJson>,
+    pm_info: &Option<PackageManagerInfo>,
+    matched: FrameworkRuleMatch,
+) -> DetectionResult {
+    let preset = matched.preset;
+    let pm_type = pm_info
+        .as_ref()
+        .map(|pm| pm.pm_type)
+        .unwrap_or(PackageManagerType::Npm);
+    let build_cmd = preset
+        .build_script
+        .map(|script| package_manager::build_command(pm_type, script));
+    let ssr_analysis = ssr::analyze_ssr(fs, preset.slug);
+    let output_dir = resolve_framework_output_dir(preset, ssr_analysis.as_ref(), fs);
+    let config_files = detect_config_files(fs, preset.slug);
+    let suggested_compute = infer_compute_type(preset.runtime, preset.slug, ssr_analysis.as_ref());
+    let entry_point = framework_entry_point(preset.slug);
+    let evidence = matched
+        .evidence
+        .iter()
+        .map(|m| m.reason.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    DetectionResult {
+        framework: preset.slug.to_string(),
+        name: preset.name.to_string(),
+        version: matched.version,
+        suggested_compute,
+        metadata: DetectionMetadata {
+            uses_typescript: detect_typescript(fs),
+            config_files,
+            runtime: RuntimeInfo {
+                runtime_type: infer_runtime(preset.runtime, pm_info),
+                version: None,
+            },
+            package_manager: pm_info.clone(),
+            build_info: Some(BuildInfo {
+                build_command: build_cmd,
+                install_command: Some(package_manager::install_command(pm_type).to_string()),
+                output_dir: Some(output_dir),
+                entry_point,
+            }),
+            monorepo: detect_monorepo_info(fs, pkg, pm_info.as_ref()),
+            ssr_analysis,
+            structure: detect_structure(fs),
+        },
+        reason: format!(
+            "Detected {} via {} (priority {})",
+            preset.slug, evidence, preset.priority
+        ),
+    }
 }
 
 /// Detect TypeScript usage (tsconfig.json or tsconfig.app.json).
@@ -782,6 +906,42 @@ const SCRIPT_EXECUTOR_MODULE_TOKENS: &[&str] = &[
     "tsx/register",
 ];
 const ENTRY_SCAN_SKIP_DIRS: &[&str] = &["node_modules", ".git", ".onreza"];
+const ENTRY_SCAN_CONFIG_FILES: &[&str] = &[
+    "next.config.js",
+    "next.config.mjs",
+    "next.config.ts",
+    "next.config.mts",
+    "nuxt.config.ts",
+    "nuxt.config.js",
+    "svelte.config.js",
+    "svelte.config.ts",
+    "astro.config.mjs",
+    "astro.config.ts",
+    "astro.config.js",
+    "remix.config.js",
+    "react-router.config.ts",
+    "react-router.config.js",
+    "vite.config.ts",
+    "vite.config.mts",
+    "vite.config.js",
+    "vite.config.mjs",
+    "app.config.ts",
+    "app.config.js",
+    "gatsby-config.js",
+    "gatsby-config.ts",
+    "docusaurus.config.js",
+    "docusaurus.config.ts",
+    ".vitepress/config.ts",
+    ".vitepress/config.js",
+    "keystone.ts",
+    "keystone.js",
+    "adonisrc.ts",
+    "adonisrc.js",
+    "nitro.config.ts",
+    "nitro.config.js",
+    "config/server.ts",
+    "config/server.js",
+];
 const ENTRY_SCAN_LIMIT: usize = 4096;
 /// Files smaller than this are ESM re-export stubs (e.g. `@cloudflare/vite-plugin`
 /// emits a 0.19 kB `dist/server/index.js` that just re-exports the real worker bundle
@@ -1127,7 +1287,7 @@ fn is_runnable_file(path: &Path) -> bool {
 
 fn is_entry_scan_config_file(path: &Path) -> bool {
     let rel = stringify_path(path).to_ascii_lowercase();
-    if crate::detect::fs::DETECTION_CONTENT_FILES
+    if ENTRY_SCAN_CONFIG_FILES
         .iter()
         .any(|known| rel == known.to_ascii_lowercase())
     {

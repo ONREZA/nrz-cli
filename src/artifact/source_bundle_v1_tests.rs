@@ -5,7 +5,9 @@ use std::path::PathBuf;
 
 use tempfile::tempdir;
 
-use super::hash::sha256_hex;
+use crate::deploy::hash::sha256_hex;
+use crate::deploy::scan_dir;
+
 use super::source_bundle_v1::*;
 use super::*;
 
@@ -569,6 +571,8 @@ fn source_bundle_plan_rejects_overlong_symlink_target() {
         path: "long-link".into(),
         size: 0,
         content_hash: sha256_hex(target.as_bytes()),
+        kind: crate::artifact::ArtifactFileKind::Symlink,
+        symlink_resolved_path: None,
     }];
 
     let err = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap_err();
