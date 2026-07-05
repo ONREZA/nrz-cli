@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.1] - 2026-07-05
+
+### 🐛 Bug Fixes
+
+- **build:** preserve prerender route fallthrough conditions ([72ec1af](https://github.com/ONREZA/nrz-cli/commit/72ec1aff42ba2236e13dcb0aedc0e96bb845e4cc))
+
 ## [0.35.0] - 2026-07-02
 
 ### 🔧 Changed
