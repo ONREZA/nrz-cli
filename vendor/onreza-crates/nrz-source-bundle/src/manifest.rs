@@ -79,6 +79,24 @@ pub struct SourceLogicalManifestRoute {
     pub priority: Option<i32>,
     #[serde(default)]
     pub methods: Option<Vec<String>>,
+    #[serde(default)]
+    pub fallthrough_when: Option<Vec<RouteFallthroughCondition>>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub enum RouteFallthroughCondition {
+    Header {
+        name: String,
+        #[serde(default)]
+        value: Option<String>,
+    },
+    Query {
+        name: String,
+        #[serde(default)]
+        value: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

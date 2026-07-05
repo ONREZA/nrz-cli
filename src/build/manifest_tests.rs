@@ -7,7 +7,8 @@ use super::manifest::{
     generate_compute_manifest, generate_nextjs_adapter_manifest_for_server,
     generate_nextjs_standalone_manifest_for_server, generate_nuxt_manifest,
     generate_remix_manifest, generate_static_manifest, generate_sveltekit_manifest,
-    load_and_validate, primary_compute_target, validate, verify_files,
+    load_and_validate, nextjs_prerender_variant_fallthrough_conditions, primary_compute_target,
+    validate, verify_files,
 };
 
 // ── Fixtures ─────────────────────────────────────────────────
@@ -1716,6 +1717,10 @@ fn nextjs_adapter_manifest_with_static_files_is_valid() {
     assert_eq!(m.routes[1].pattern, "^/.*$");
     assert_eq!(m.routes[1].priority, Some(75));
     assert_eq!(m.routes[1].fallthrough, Some(true));
+    assert_eq!(
+        m.routes[1].fallthrough_when,
+        Some(nextjs_prerender_variant_fallthrough_conditions())
+    );
     assert_eq!(m.routes[2].pattern, "^/.*$");
     assert_eq!(m.routes[2].priority, Some(50));
     assert_eq!(m.routes[2].fallthrough, Some(true));

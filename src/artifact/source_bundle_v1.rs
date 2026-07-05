@@ -164,6 +164,8 @@ pub(crate) struct SourceLogicalManifestRoute {
     pub(crate) priority: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) methods: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fallthrough_when: Option<Vec<crate::build::manifest::RouteFallthroughCondition>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -449,6 +451,7 @@ fn build_logical_manifest(
             layer_name: route.layer.clone(),
             priority: route.priority,
             methods: route.methods.clone(),
+            fallthrough_when: route.fallthrough_when.clone(),
         })
         .collect();
 

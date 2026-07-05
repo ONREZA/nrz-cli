@@ -3951,6 +3951,28 @@ fn wire_manifest_contract_rejects_unknown_layer_fields() {
 }
 
 #[test]
+fn wire_manifest_contract_preserves_route_fallthrough_when() {
+    let fallthrough_when = serde_json::json!([
+        { "type": "header", "name": "rsc", "value": "1" },
+        { "type": "query", "name": "_rsc" },
+    ]);
+    let manifest = serde_json::json!({
+        "version": 1,
+        "layers": [{ "name": "static", "target": "STATIC", "directory": "." }],
+        "routes": [{
+            "pattern": "^/.*",
+            "layer": "static",
+            "fallthrough": true,
+            "fallthroughWhen": fallthrough_when.clone(),
+        }],
+    });
+
+    let wire = conform_manifest_to_wire_contract(manifest)
+        .expect("fallthroughWhen must be part of the manifest wire contract");
+    assert_eq!(wire["routes"][0]["fallthroughWhen"], fallthrough_when);
+}
+
+#[test]
 fn wire_functions_contract_validates_origin_against_server_enum() {
     let ok = crate::functions::FunctionPublishPayload {
         origin: "DEPLOYMENT",

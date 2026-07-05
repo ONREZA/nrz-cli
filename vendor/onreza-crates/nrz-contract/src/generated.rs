@@ -14631,6 +14631,59 @@ pub mod manifest {
     ///          "fallthrough": {
     ///            "type": "boolean"
     ///          },
+    ///          "fallthroughWhen": {
+    ///            "type": "array",
+    ///            "items": {
+    ///              "oneOf": [
+    ///                {
+    ///                  "type": "object",
+    ///                  "required": [
+    ///                    "name",
+    ///                    "type"
+    ///                  ],
+    ///                  "properties": {
+    ///                    "name": {
+    ///                      "type": "string",
+    ///                      "maxLength": 64,
+    ///                      "minLength": 1
+    ///                    },
+    ///                    "type": {
+    ///                      "type": "string",
+    ///                      "const": "header"
+    ///                    },
+    ///                    "value": {
+    ///                      "type": "string",
+    ///                      "maxLength": 512
+    ///                    }
+    ///                  }
+    ///                },
+    ///                {
+    ///                  "type": "object",
+    ///                  "required": [
+    ///                    "name",
+    ///                    "type"
+    ///                  ],
+    ///                  "properties": {
+    ///                    "name": {
+    ///                      "type": "string",
+    ///                      "maxLength": 64,
+    ///                      "minLength": 1
+    ///                    },
+    ///                    "type": {
+    ///                      "type": "string",
+    ///                      "const": "query"
+    ///                    },
+    ///                    "value": {
+    ///                      "type": "string",
+    ///                      "maxLength": 512
+    ///                    }
+    ///                  }
+    ///                }
+    ///              ]
+    ///            },
+    ///            "maxItems": 16,
+    ///            "minItems": 1
+    ///          },
     ///          "headers": {
     ///            "type": "object",
     ///            "additionalProperties": {
@@ -15459,6 +15512,59 @@ pub mod manifest {
     ///    "fallthrough": {
     ///      "type": "boolean"
     ///    },
+    ///    "fallthroughWhen": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "oneOf": [
+    ///          {
+    ///            "type": "object",
+    ///            "required": [
+    ///              "name",
+    ///              "type"
+    ///            ],
+    ///            "properties": {
+    ///              "name": {
+    ///                "type": "string",
+    ///                "maxLength": 64,
+    ///                "minLength": 1
+    ///              },
+    ///              "type": {
+    ///                "type": "string",
+    ///                "const": "header"
+    ///              },
+    ///              "value": {
+    ///                "type": "string",
+    ///                "maxLength": 512
+    ///              }
+    ///            }
+    ///          },
+    ///          {
+    ///            "type": "object",
+    ///            "required": [
+    ///              "name",
+    ///              "type"
+    ///            ],
+    ///            "properties": {
+    ///              "name": {
+    ///                "type": "string",
+    ///                "maxLength": 64,
+    ///                "minLength": 1
+    ///              },
+    ///              "type": {
+    ///                "type": "string",
+    ///                "const": "query"
+    ///              },
+    ///              "value": {
+    ///                "type": "string",
+    ///                "maxLength": 512
+    ///              }
+    ///            }
+    ///          }
+    ///        ]
+    ///      },
+    ///      "maxItems": 16,
+    ///      "minItems": 1
+    ///    },
     ///    "headers": {
     ///      "type": "object",
     ///      "additionalProperties": {
@@ -15512,6 +15618,13 @@ pub mod manifest {
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub fallthrough: ::std::option::Option<bool>,
         #[serde(
+            rename = "fallthroughWhen",
+            default,
+            skip_serializing_if = "::std::vec::Vec::is_empty"
+        )]
+        pub fallthrough_when:
+            ::std::vec::Vec<OnrezaBuildOutputManifestRoutesItemFallthroughWhenItem>,
+        #[serde(
             default,
             skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
         )]
@@ -15524,6 +15637,233 @@ pub mod manifest {
         pub priority: i64,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub revalidate: ::std::option::Option<::std::num::NonZeroU64>,
+    }
+    ///`OnrezaBuildOutputManifestRoutesItemFallthroughWhenItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "oneOf": [
+    ///    {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "name",
+    ///        "type"
+    ///      ],
+    ///      "properties": {
+    ///        "name": {
+    ///          "type": "string",
+    ///          "maxLength": 64,
+    ///          "minLength": 1
+    ///        },
+    ///        "type": {
+    ///          "type": "string",
+    ///          "const": "header"
+    ///        },
+    ///        "value": {
+    ///          "type": "string",
+    ///          "maxLength": 512
+    ///        }
+    ///      }
+    ///    },
+    ///    {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "name",
+    ///        "type"
+    ///      ],
+    ///      "properties": {
+    ///        "name": {
+    ///          "type": "string",
+    ///          "maxLength": 64,
+    ///          "minLength": 1
+    ///        },
+    ///        "type": {
+    ///          "type": "string",
+    ///          "const": "query"
+    ///        },
+    ///        "value": {
+    ///          "type": "string",
+    ///          "maxLength": 512
+    ///        }
+    ///      }
+    ///    }
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(tag = "type")]
+    pub enum OnrezaBuildOutputManifestRoutesItemFallthroughWhenItem {
+        #[serde(rename = "header")]
+        Header {
+            name: OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            value:
+                ::std::option::Option<OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue>,
+        },
+        #[serde(rename = "query")]
+        Query {
+            name: OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName,
+            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            value:
+                ::std::option::Option<OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue>,
+        },
+    }
+    ///`OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 64,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName(::std::string::String);
+    impl ::std::ops::Deref for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 64usize {
+                return Err("longer than 64 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 512
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue(::std::string::String);
+    impl ::std::ops::Deref for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 512usize {
+                return Err("longer than 512 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
     }
     ///`OnrezaBuildOutputManifestRoutesItemLayer`
     ///

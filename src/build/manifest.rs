@@ -13,6 +13,9 @@ const MAX_DIRECTORY_LEN: usize = 256;
 const MAX_ENTRY_LEN: usize = 512;
 const MAX_META_BYTES: usize = 16_384;
 const MAX_REVALIDATE_SECS: u64 = 31_536_000; // 1 year in seconds
+const MAX_ROUTE_FALLTHROUGH_CONDITIONS: usize = 16;
+const MAX_ROUTE_REQUEST_NAME_LEN: usize = 64;
+const MAX_ROUTE_REQUEST_VALUE_LEN: usize = 512;
 
 const VALID_HTTP_METHODS: &[&str] = &["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 
@@ -124,6 +127,23 @@ pub struct Route {
     pub headers: Option<std::collections::HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallthrough: Option<bool>,
+    #[serde(rename = "fallthroughWhen", skip_serializing_if = "Option::is_none")]
+    pub fallthrough_when: Option<Vec<RouteFallthroughCondition>>,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum RouteFallthroughCondition {
+    Header {
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
+    },
+    Query {
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -404,6 +424,30 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                 }
             }
         }
+        if let Some(conditions) = &route.fallthrough_when {
+            if conditions.is_empty() {
+                anyhow::bail!(
+                    "route '{}' fallthroughWhen must not be empty",
+                    route.pattern
+                );
+            }
+            if conditions.len() > MAX_ROUTE_FALLTHROUGH_CONDITIONS {
+                anyhow::bail!(
+                    "route '{}' fallthroughWhen exceeds {} conditions",
+                    route.pattern,
+                    MAX_ROUTE_FALLTHROUGH_CONDITIONS
+                );
+            }
+            if layer_target != LayerTarget::Static {
+                anyhow::bail!(
+                    "route '{}' fallthroughWhen is only supported on STATIC layers",
+                    route.pattern
+                );
+            }
+            for condition in conditions {
+                validate_route_fallthrough_condition(route, condition)?;
+            }
+        }
         if let Some(revalidate) = route.revalidate {
             if layer_target == LayerTarget::Static {
                 anyhow::bail!(
@@ -485,6 +529,39 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn validate_route_fallthrough_condition(
+    route: &Route,
+    condition: &RouteFallthroughCondition,
+) -> anyhow::Result<()> {
+    let (name, value) = match condition {
+        RouteFallthroughCondition::Header { name, value }
+        | RouteFallthroughCondition::Query { name, value } => (name, value),
+    };
+    if name.is_empty() {
+        anyhow::bail!(
+            "route '{}' fallthroughWhen condition name must not be empty",
+            route.pattern
+        );
+    }
+    if name.chars().count() > MAX_ROUTE_REQUEST_NAME_LEN {
+        anyhow::bail!(
+            "route '{}' fallthroughWhen condition name exceeds {} chars",
+            route.pattern,
+            MAX_ROUTE_REQUEST_NAME_LEN
+        );
+    }
+    if let Some(value) = value
+        && value.chars().count() > MAX_ROUTE_REQUEST_VALUE_LEN
+    {
+        anyhow::bail!(
+            "route '{}' fallthroughWhen condition value exceeds {} chars",
+            route.pattern,
+            MAX_ROUTE_REQUEST_VALUE_LEN
+        );
+    }
+    Ok(())
+}
+
 /// Auto-generate a minimal STATIC manifest for plain static deploys.
 pub fn generate_static_manifest() -> Manifest {
     Manifest {
@@ -505,6 +582,7 @@ pub fn generate_static_manifest() -> Manifest {
             methods: None,
             headers: None,
             fallthrough: None,
+            fallthrough_when: None,
         }],
         prerender: None,
         middleware: None,
@@ -534,6 +612,7 @@ pub fn generate_compute_manifest(entry: &str) -> Manifest {
             methods: None,
             headers: None,
             fallthrough: None,
+            fallthrough_when: None,
         }],
         prerender: None,
         middleware: None,
@@ -597,6 +676,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         methods: None,
         headers: None,
         fallthrough: None,
+        fallthrough_when: None,
     }];
 
     if has_public {
@@ -608,6 +688,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
             methods: None,
             headers: None,
             fallthrough: None,
+            fallthrough_when: None,
         });
     }
 
@@ -619,6 +700,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         methods: None,
         headers: None,
         fallthrough: None,
+        fallthrough_when: None,
     });
 
     Manifest {
@@ -662,6 +744,7 @@ pub fn generate_nextjs_adapter_manifest_for_server(
             methods: None,
             headers: None,
             fallthrough: Some(true),
+            fallthrough_when: None,
         });
     }
 
@@ -682,6 +765,7 @@ pub fn generate_nextjs_adapter_manifest_for_server(
             methods: None,
             headers: None,
             fallthrough: Some(true),
+            fallthrough_when: Some(nextjs_prerender_variant_fallthrough_conditions()),
         });
     }
 
@@ -702,6 +786,7 @@ pub fn generate_nextjs_adapter_manifest_for_server(
             methods: None,
             headers: None,
             fallthrough: Some(true),
+            fallthrough_when: None,
         });
     }
 
@@ -721,6 +806,7 @@ pub fn generate_nextjs_adapter_manifest_for_server(
         methods: None,
         headers: None,
         fallthrough: None,
+        fallthrough_when: None,
     });
 
     Manifest {
@@ -746,6 +832,35 @@ pub fn generate_nextjs_adapter_manifest_for_server(
         edge_rules: None,
         meta: None,
     }
+}
+
+pub fn nextjs_prerender_variant_fallthrough_conditions() -> Vec<RouteFallthroughCondition> {
+    vec![
+        RouteFallthroughCondition::Header {
+            name: "rsc".to_string(),
+            value: Some("1".to_string()),
+        },
+        RouteFallthroughCondition::Header {
+            name: "next-router-state-tree".to_string(),
+            value: None,
+        },
+        RouteFallthroughCondition::Header {
+            name: "next-router-prefetch".to_string(),
+            value: None,
+        },
+        RouteFallthroughCondition::Header {
+            name: "next-router-segment-prefetch".to_string(),
+            value: None,
+        },
+        RouteFallthroughCondition::Header {
+            name: "next-url".to_string(),
+            value: None,
+        },
+        RouteFallthroughCondition::Query {
+            name: "_rsc".to_string(),
+            value: None,
+        },
+    ]
 }
 
 fn join_manifest_path(prefix: &str, path: &str) -> String {
@@ -801,6 +916,7 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
                 methods: None,
                 headers: None,
                 fallthrough: None,
+                fallthrough_when: None,
             });
         }
         if config.static_catch_all_route {
@@ -812,6 +928,7 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
                 methods: None,
                 headers: None,
                 fallthrough: None,
+                fallthrough_when: None,
             });
         }
     }
@@ -832,6 +949,7 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
         methods: None,
         headers: None,
         fallthrough: None,
+        fallthrough_when: None,
     });
 
     Manifest {

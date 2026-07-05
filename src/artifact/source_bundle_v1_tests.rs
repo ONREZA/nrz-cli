@@ -121,7 +121,16 @@ fn source_bundle_marks_prerender_files_under_layer_root() {
             { "name": "server", "target": "COMPUTE", "directory": "server", "entry": "server.js" }
         ],
         "routes": [
-            { "pattern": "^/.*$", "layer": "prerendered", "priority": 75, "fallthrough": true },
+            {
+                "pattern": "^/.*$",
+                "layer": "prerendered",
+                "priority": 75,
+                "fallthrough": true,
+                "fallthroughWhen": [
+                    { "type": "header", "name": "rsc", "value": "1" },
+                    { "type": "query", "name": "_rsc" }
+                ]
+            },
             { "pattern": "^/.*$", "layer": "server", "priority": 0 }
         ],
         "prerender": {
@@ -142,6 +151,11 @@ fn source_bundle_marks_prerender_files_under_layer_root() {
         .unwrap();
     assert_eq!(prerender.role, SourceLogicalManifestFileRole::Prerender);
     assert_eq!(prerender.layer_name.as_deref(), Some("prerendered"));
+
+    assert_eq!(
+        plan.logical_manifest.routes[0].fallthrough_when.as_ref(),
+        manifest.routes[0].fallthrough_when.as_ref()
+    );
 }
 
 #[test]
@@ -333,6 +347,7 @@ fn canonical_logical_manifest_json_matches_source_bundle_v1_golden() {
             layer_name: "api".into(),
             priority: Some(10),
             methods: Some(vec!["GET".into(), "POST".into()]),
+            fallthrough_when: None,
         }],
         entrypoints: vec!["api/handler.js".into()],
     };
