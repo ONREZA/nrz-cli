@@ -1132,6 +1132,196 @@ fn node_process_runtime_artifact_uses_project_root_for_nestjs() {
     );
 }
 
+#[test]
+fn astro_node_runtime_artifact_includes_project_dependencies() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{
+            "dependencies": {
+                "@astrojs/internal-helpers": "1.0.0"
+            }
+        }"#,
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("dist/server/chunks")).unwrap();
+    fs::write(
+        dir.path().join("dist/server/entry.mjs"),
+        "import '@astrojs/internal-helpers/path'",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("dist/server/chunks/errors.mjs"),
+        "import '@astrojs/internal-helpers/path'",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("node_modules/@astrojs/internal-helpers")).unwrap();
+    fs::write(
+        dir.path()
+            .join("node_modules/@astrojs/internal-helpers/path.js"),
+        "export const joinPaths = () => {}",
+    )
+    .unwrap();
+
+    let detection = make_detection(
+        "astro",
+        Some(crate::detect::types::SsrAnalysis {
+            is_static_compatible: false,
+            ssr_features: vec!["output: 'server' (SSR)".into()],
+        }),
+    );
+    let manifest = build_manifest::generate_astro_ssr_manifest(false);
+
+    let artifact = resolve_runtime_artifact(
+        dir.path(),
+        dir.path(),
+        dir.path().join("dist"),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(artifact.root_dir, dir.path());
+    let compute_layer = artifact
+        .manifest
+        .layers
+        .iter()
+        .find(|layer| layer.target == build_manifest::LayerTarget::Compute)
+        .unwrap();
+    assert_eq!(compute_layer.directory, ".");
+    assert_eq!(
+        compute_layer.entry.as_deref(),
+        Some("dist/server/entry.mjs")
+    );
+
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let paths = scanned
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+    assert!(paths.contains(&"dist/server/entry.mjs"));
+    assert!(paths.contains(&"node_modules/@astrojs/internal-helpers/path.js"));
+    assert!(paths.contains(&"package.json"));
+}
+
+#[test]
+fn adapter_node_runtimes_include_project_dependencies() {
+    for (framework, entry, manifest) in [
+        (
+            "sveltekit",
+            "index.js",
+            build_manifest::generate_sveltekit_manifest(false),
+        ),
+        (
+            "remix",
+            "server/index.js",
+            build_manifest::generate_remix_manifest(false),
+        ),
+        (
+            "react-router",
+            "server/index.js",
+            build_manifest::generate_remix_manifest(false),
+        ),
+    ] {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("package.json"),
+            r#"{"dependencies":{"runtime-pkg":"1.0.0"}}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(
+            dir.path()
+                .join("build")
+                .join(Path::new(entry).parent().unwrap()),
+        )
+        .unwrap();
+        fs::write(dir.path().join("build").join(entry), "import 'runtime-pkg'").unwrap();
+        fs::create_dir_all(dir.path().join("node_modules/runtime-pkg")).unwrap();
+        fs::write(
+            dir.path().join("node_modules/runtime-pkg/index.js"),
+            "export const runtime = true",
+        )
+        .unwrap();
+
+        let detection = make_detection(framework, None);
+        let artifact = resolve_runtime_artifact(
+            dir.path(),
+            dir.path(),
+            dir.path().join("build"),
+            manifest,
+            &detection,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(artifact.root_dir, dir.path(), "framework: {framework}");
+        let compute_layer = artifact
+            .manifest
+            .layers
+            .iter()
+            .find(|layer| layer.target == build_manifest::LayerTarget::Compute)
+            .unwrap();
+        assert_eq!(compute_layer.directory, ".", "framework: {framework}");
+        assert_eq!(
+            compute_layer.entry.as_deref(),
+            Some(format!("build/{entry}").as_str()),
+            "framework: {framework}"
+        );
+
+        let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+        let paths = scanned
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+        assert!(paths.contains(&format!("build/{entry}").as_str()));
+        assert!(paths.contains(&"node_modules/runtime-pkg/index.js"));
+        assert!(paths.contains(&"package.json"));
+    }
+}
+
+#[tokio::test]
+async fn runtime_artifact_scan_failure_preserves_upload_error_code() {
+    let dir = tempdir().unwrap();
+    let missing = dir.path().join("missing-runtime-artifact");
+
+    let error =
+        super::plan::scan_runtime_artifact_for_plan(missing.clone(), RuntimeArtifactScan::All)
+            .await
+            .expect_err("missing runtime artifact must fail before upload");
+
+    expect_code(&error, "UPLOAD_FAILED");
+    assert!(
+        error
+            .to_string()
+            .contains("failed to scan runtime artifact"),
+        "{error:#}"
+    );
+    assert!(error.to_string().contains(&missing.display().to_string()));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn runtime_artifact_scan_preserves_invalid_output_error_code() {
+    let dir = tempdir().unwrap();
+    std::os::unix::fs::symlink("missing-target", dir.path().join("broken-link")).unwrap();
+
+    let error = super::plan::scan_runtime_artifact_for_plan(
+        dir.path().to_path_buf(),
+        RuntimeArtifactScan::All,
+    )
+    .await
+    .expect_err("broken runtime symlink must be rejected");
+
+    expect_code(&error, "INVALID_BUILD_OUTPUT");
+    assert!(
+        error
+            .to_string()
+            .contains("failed to scan runtime artifact"),
+        "{error:#}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn node_process_runtime_artifact_prefers_workspace_root_for_hoisted_app_symlink() {
@@ -2999,6 +3189,39 @@ fn ensure_process_entry_not_found_is_error_for_strict_framework() {
         err.to_string().contains("Nuxt PROCESS deployment expects"),
         "unexpected error: {err:#}"
     );
+}
+
+#[test]
+fn ensure_process_entry_astro_client_chunks_report_missing_node_output() {
+    let dir = tempdir().unwrap();
+    let output_dir = dir.path().join("dist");
+    fs::create_dir_all(output_dir.join("client/_astro")).unwrap();
+    fs::write(
+        output_dir.join("client/_astro/app.js"),
+        format!("console.log('client') // {}", "x".repeat(600)),
+    )
+    .unwrap();
+    fs::write(
+        output_dir.join("client/_astro/runtime.js"),
+        format!("console.log('runtime') // {}", "x".repeat(600)),
+    )
+    .unwrap();
+
+    let detection = make_detection(
+        "astro",
+        Some(crate::detect::types::SsrAnalysis {
+            is_static_compatible: false,
+            ssr_features: vec!["SSR adapter integration".into()],
+        }),
+    );
+    let error = ensure_process_entry(&output_dir, dir.path(), None, &detection, true)
+        .expect_err("Astro client chunks are not a PROCESS entry point");
+    let message = error.to_string();
+
+    expect_code(&error, "MISSING_PROCESS_ENTRY");
+    assert!(message.contains("Astro Node adapter"), "{message}");
+    assert!(message.contains("dist/server/entry.mjs"), "{message}");
+    assert!(!message.contains("client/_astro/app.js"), "{message}");
 }
 
 #[test]

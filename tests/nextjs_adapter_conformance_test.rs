@@ -105,12 +105,13 @@ fn next16_version() -> String {
     std::env::var("NRZ_NEXTJS_CONFORMANCE_NEXT_VERSION").unwrap_or_else(|_| "16.2.9".into())
 }
 
-fn write_next16_package(project: &Path, next_version: &str) {
+fn write_next16_package(project: &Path, next_version: &str, esm: bool) {
+    let module_type = if esm { "\n  \"type\": \"module\"," } else { "" };
     write(
         &project.join("package.json"),
         &format!(
             r#"{{
-  "private": true,
+  "private": true,{module_type}
   "scripts": {{ "build": "next build" }},
   "dependencies": {{
     "next": "{next_version}",
@@ -192,9 +193,9 @@ fn nextjs_16_2_adapter_conformance_builds_descriptor_and_cli_report() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let adapter_path = manifest_dir.join("assets/next-adapter/onreza-next-adapter.cjs");
 
-    write_next16_package(project.path(), &next_version);
+    write_next16_package(project.path(), &next_version, true);
     write(
-        &project.path().join("next.config.js"),
+        &project.path().join("next.config.mjs"),
         r#"
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -233,7 +234,7 @@ const nextConfig = {
   },
 }
 
-module.exports = nextConfig
+export default nextConfig
 "#,
     );
     write(
@@ -353,7 +354,7 @@ export const config = {
     assert_eq!(descriptor["config"]["images"]["loader"], "custom");
     assert_eq!(
         descriptor["config"]["images"]["loaderFile"],
-        "./.onreza/cache/next-adapter/onreza-image-loader.js"
+        "./.onreza/cache/next-adapter/onreza-image-loader.mjs"
     );
     assert_eq!(descriptor["config"]["images"]["path"], "/_onreza/image");
     assert_eq!(
@@ -462,7 +463,7 @@ fn nextjs_16_2_pages_i18n_conformance_builds_static_locales() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let adapter_path = manifest_dir.join("assets/next-adapter/onreza-next-adapter.cjs");
 
-    write_next16_package(project.path(), &next_version);
+    write_next16_package(project.path(), &next_version, false);
     write(
         &project.path().join("next.config.mjs"),
         r#"

@@ -1879,9 +1879,16 @@ fn framework_entry_point_analog() {
 }
 
 #[test]
+fn framework_entry_point_astro() {
+    assert_eq!(
+        framework_entry_point("astro"),
+        Some("server/entry.mjs".into())
+    );
+}
+
+#[test]
 fn framework_entry_point_unknown_returns_none() {
     assert_eq!(framework_entry_point("vite"), None);
-    assert_eq!(framework_entry_point("astro"), None);
     assert_eq!(framework_entry_point("other"), None);
 }
 

@@ -12,7 +12,7 @@ const ADAPTER_CACHE_RELATIVE_DIR: &str = ".onreza/cache/next-adapter";
 const NEXT_CACHE_SUBSTRATE_SCHEMA_VERSION: &str = "NEXT_CACHE_SUBSTRATE_V1";
 const ONREZA_IMAGE_OPTIMIZER_PATH: &str = "/_onreza/image";
 const ONREZA_IMAGE_LOADER_RELATIVE_PATH: &str =
-    "./.onreza/cache/next-adapter/onreza-image-loader.js";
+    "./.onreza/cache/next-adapter/onreza-image-loader.mjs";
 const MIN_ADAPTER_VERSION: (u64, u64, u64) = (16, 2, 0);
 
 #[derive(Debug)]
@@ -2906,7 +2906,7 @@ mod tests {
             "config": {
                 "images": {
                     "loader": "custom",
-                    "loaderFile": "./.onreza/cache/next-adapter/onreza-image-loader.js",
+                    "loaderFile": "./.onreza/cache/next-adapter/onreza-image-loader.mjs",
                     "path": "/_onreza/image"
                 }
             },
@@ -2933,7 +2933,7 @@ mod tests {
         );
         assert_eq!(
             summary["config"]["images"]["loaderFile"],
-            "./.onreza/cache/next-adapter/onreza-image-loader.js"
+            "./.onreza/cache/next-adapter/onreza-image-loader.mjs"
         );
         assert!(
             descriptor

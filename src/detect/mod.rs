@@ -802,6 +802,7 @@ fn framework_entry_point(slug: &str) -> Option<String> {
         "nestjs" => Some("main.js".into()),
         "adonis" => Some("bin/server.js".into()),
         "tanstack-start" => Some("server/index.mjs".into()),
+        "astro" => Some("server/entry.mjs".into()),
         // Hydrogen has two layouts and no single correct FrameworkHint:
         //  - Oxygen (default) → dist/server/index.js is a workers bundle; we detect
         //    that upstream via the workers-runtime target check and bail.

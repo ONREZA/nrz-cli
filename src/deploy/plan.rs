@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use serde::Serialize;
@@ -8,7 +8,7 @@ use crate::artifact::source_bundle_v1::{
 };
 use crate::artifact::{
     ArtifactFileCollection, ArtifactRootScope, BuildArtifact, BuildManifestSource, FileEntry,
-    RuntimeArtifact,
+    RuntimeArtifact, RuntimeArtifactScan,
 };
 use crate::build;
 use crate::build::manifest as build_manifest;
@@ -20,6 +20,29 @@ pub(super) struct DeployPlanRequest<'a> {
     pub(super) args: &'a DeployArgs,
     pub(super) command: &'a crate::context::CommandContext,
     pub(super) explicit_compute: Option<ComputeType>,
+}
+
+pub(super) async fn scan_runtime_artifact_for_plan(
+    root_dir: PathBuf,
+    scan: RuntimeArtifactScan,
+) -> anyhow::Result<Vec<FileEntry>> {
+    tokio::task::spawn_blocking(move || super::scan_runtime_artifact(&root_dir, &scan))
+        .await
+        .map_err(|error| {
+            output::coded_error(
+                "UPLOAD_FAILED",
+                format!("runtime artifact scan task failed: {error}"),
+            )
+        })?
+        .map_err(|error| {
+            if error.chain().any(|cause| cause.is::<output::CodedError>()) {
+                return error.context("failed to scan runtime artifact");
+            }
+            output::coded_error(
+                "UPLOAD_FAILED",
+                format!("failed to scan runtime artifact: {error:#}"),
+            )
+        })
 }
 
 pub(super) struct ArtifactPlan {
@@ -400,11 +423,9 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     );
     let runtime_artifact_root_for_scan = runtime_artifact.root_dir.clone();
     let runtime_artifact_scan = runtime_artifact.scan.clone();
-    let scanned_files = tokio::task::spawn_blocking(move || {
-        super::scan_runtime_artifact(&runtime_artifact_root_for_scan, &runtime_artifact_scan)
-    })
-    .await
-    .context("file scan task failed (panic or runtime shutdown)")??;
+    let scanned_files =
+        scan_runtime_artifact_for_plan(runtime_artifact_root_for_scan, runtime_artifact_scan)
+            .await?;
 
     let artifact_files = super::prepare_artifact_files(
         &runtime_artifact.manifest,

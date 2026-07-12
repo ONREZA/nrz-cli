@@ -6,7 +6,7 @@ const OUTPUT_RELATIVE_PATH =
   process.env.ONREZA_NEXT_ADAPTER_OUTPUT || '.onreza/next-adapter-output.json'
 const ONREZA_IMAGE_OPTIMIZER_PATH = '/_onreza/image'
 const ONREZA_IMAGE_LOADER_RELATIVE_PATH =
-  './.onreza/cache/next-adapter/onreza-image-loader.js'
+  './.onreza/cache/next-adapter/onreza-image-loader.mjs'
 
 function jsonReplacer(_key, value) {
   if (typeof value === 'function' || typeof value === 'symbol') {
@@ -186,7 +186,7 @@ function imageLoaderSource(config) {
     typeof config.basePath === 'string' && config.basePath !== '/'
       ? config.basePath
       : ''
-  return `'use strict'
+  return `'use client'
 
 const BASE_PATH = ${JSON.stringify(basePath)}
 
@@ -214,16 +214,13 @@ function sourceBundlePath(src) {
   return '/public/' + normalized
 }
 
-function onrezaImageLoader({ src, width, quality }) {
+export default function onrezaImageLoader({ src, width, quality }) {
   const params = new URLSearchParams()
   params.set('url', sourceBundlePath(src))
   params.set('w', String(width))
   params.set('q', String(quality || 75))
   return '/_onreza/image?' + params.toString()
 }
-
-module.exports = onrezaImageLoader
-module.exports.default = onrezaImageLoader
 `
 }
 

@@ -71,6 +71,11 @@ async fn precondition_failed_handler() -> impl IntoResponse {
     (StatusCode::PRECONDITION_FAILED, "exists")
 }
 
+async fn delayed_precondition_failed_handler() -> impl IntoResponse {
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    (StatusCode::PRECONDITION_FAILED, "exists")
+}
+
 async fn verify_head_handler() -> impl IntoResponse {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_LENGTH, HeaderValue::from_static("16"));
@@ -84,6 +89,38 @@ async fn verify_head_handler() -> impl IntoResponse {
 async fn verify_head_size_mismatch_handler() -> impl IntoResponse {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_LENGTH, HeaderValue::from_static("15"));
+    headers.insert(
+        "x-amz-checksum-sha256",
+        HeaderValue::from_str(&sha256_hex_to_base64(FAKE_SHA).unwrap()).unwrap(),
+    );
+    (StatusCode::OK, headers)
+}
+
+async fn transient_verify_head_handler(
+    State(attempts): State<Arc<AtomicU32>>,
+) -> impl IntoResponse {
+    if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+        return (StatusCode::SERVICE_UNAVAILABLE, HeaderMap::new());
+    }
+
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_LENGTH, HeaderValue::from_static("16"));
+    headers.insert(
+        "x-amz-checksum-sha256",
+        HeaderValue::from_str(&sha256_hex_to_base64(FAKE_SHA).unwrap()).unwrap(),
+    );
+    (StatusCode::OK, headers)
+}
+
+async fn initially_missing_verify_head_handler(
+    State(attempts): State<Arc<AtomicU32>>,
+) -> impl IntoResponse {
+    if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+        return (StatusCode::NOT_FOUND, HeaderMap::new());
+    }
+
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_LENGTH, HeaderValue::from_static("16"));
     headers.insert(
         "x-amz-checksum-sha256",
         HeaderValue::from_str(&sha256_hex_to_base64(FAKE_SHA).unwrap()).unwrap(),
@@ -141,6 +178,57 @@ async fn spawn_precondition_with_mismatched_head_mock() -> (String, tokio::task:
         "/upload",
         put(precondition_failed_handler).head(verify_head_size_mismatch_handler),
     );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/upload"), handle)
+}
+
+async fn spawn_precondition_with_transient_head_mock(
+    attempts: Arc<AtomicU32>,
+) -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new()
+        .route(
+            "/upload",
+            put(precondition_failed_handler).head(transient_verify_head_handler),
+        )
+        .with_state(attempts);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/upload"), handle)
+}
+
+async fn spawn_delayed_precondition_with_transient_head_mock(
+    attempts: Arc<AtomicU32>,
+) -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new()
+        .route(
+            "/upload",
+            put(delayed_precondition_failed_handler).head(transient_verify_head_handler),
+        )
+        .with_state(attempts);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (format!("http://{addr}/upload"), handle)
+}
+
+async fn spawn_precondition_with_initially_missing_head_mock(
+    attempts: Arc<AtomicU32>,
+) -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new()
+        .route(
+            "/upload",
+            put(precondition_failed_handler).head(initially_missing_verify_head_handler),
+        )
+        .with_state(attempts);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let handle = tokio::spawn(async move {
@@ -270,6 +358,82 @@ async fn conditional_precondition_failed_verifies_existing_object() {
         )
         .await
         .expect("conditional 412 with verified matching object should be idempotent success");
+}
+
+#[tokio::test]
+async fn conditional_precondition_failed_retries_transient_head() {
+    let attempts = Arc::new(AtomicU32::new(0));
+    let (url, _h) = spawn_precondition_with_transient_head_mock(attempts.clone()).await;
+    let verify_head = PresignedHeadVerify {
+        url: url.clone(),
+        content_length: 16,
+        sha256: FAKE_SHA.to_string(),
+    };
+
+    let client = test_client();
+    client
+        .put_blob_with_headers_and_verify(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &PresignedPutHeaders::if_none_match_any(),
+            Some(&verify_head),
+        )
+        .await
+        .expect("conditional HEAD should recover from a transient provider response");
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn conditional_head_uses_its_own_retry_budget() {
+    let attempts = Arc::new(AtomicU32::new(0));
+    let (url, _h) = spawn_delayed_precondition_with_transient_head_mock(attempts.clone()).await;
+    let verify_head = PresignedHeadVerify {
+        url: url.clone(),
+        content_length: 16,
+        sha256: FAKE_SHA.to_string(),
+    };
+
+    let client = test_client();
+    client
+        .put_blob_with_policy_headers_and_verify(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &UploadRetryPolicy::expires_before_head_for_tests(),
+            &PresignedPutHeaders::if_none_match_any(),
+            Some(&verify_head),
+        )
+        .await
+        .expect("HEAD verification must not inherit an exhausted PUT retry budget");
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn conditional_head_retries_initial_not_found() {
+    let attempts = Arc::new(AtomicU32::new(0));
+    let (url, _h) = spawn_precondition_with_initially_missing_head_mock(attempts.clone()).await;
+    let verify_head = PresignedHeadVerify {
+        url: url.clone(),
+        content_length: 16,
+        sha256: FAKE_SHA.to_string(),
+    };
+
+    let client = test_client();
+    client
+        .put_blob_with_headers_and_verify(
+            &url,
+            payload(),
+            FAKE_SHA,
+            &PresignedPutHeaders::if_none_match_any(),
+            Some(&verify_head),
+        )
+        .await
+        .expect("HEAD should recover when object visibility briefly lags the 412 PUT");
+
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

@@ -2666,6 +2666,11 @@ fn is_node_project_runtime_framework(framework: &str) -> bool {
     if matches!(framework, "nextjs" | "blitzjs" | "payload" | "nitro") {
         return false;
     }
+    // These adapters emit Node entrypoints that still resolve packages from the
+    // installed project runtime instead of producing a self-contained output.
+    if matches!(framework, "astro" | "sveltekit" | "remix" | "react-router") {
+        return true;
+    }
     if framework == "other" {
         return true;
     }
@@ -3215,6 +3220,12 @@ fn framework_process_diagnostic(
              Rebuild and redeploy."
                 .to_string(),
         ),
+        "astro" => Some(format!(
+            "Astro Node adapter PROCESS deployment expects server/entry.mjs in {}.\n\n\
+             Configure @astrojs/node with mode: 'standalone', run `astro build`, and keep \
+             the default dist output so the build creates dist/server/entry.mjs.",
+            output_dir.display()
+        )),
         "react-router" => Some(format!(
             "React Router PROCESS deployment expects server/index.js in {}.\n\n\
              Make sure you ran `npx react-router build` and the build \
@@ -3415,6 +3426,13 @@ fn ensure_process_entry(
                 .map_err(|err| output::with_default_code(err, "INVALID_DEPLOY_ENTRY"))?,
         )
     } else {
+        if detection.framework == "astro" && !output_dir.join("server/entry.mjs").is_file() {
+            return Err(output::coded_error(
+                "MISSING_PROCESS_ENTRY",
+                framework_process_diagnostic(&detection.framework, detection, output_dir)
+                    .expect("Astro PROCESS diagnostic must exist"),
+            ));
+        }
         match crate::detect::resolve_entry_point_detailed(
             &detection.framework,
             output_dir,

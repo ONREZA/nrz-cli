@@ -422,6 +422,28 @@ impl ApiClient {
         .map(|_| ())
     }
 
+    #[cfg(test)]
+    pub(crate) async fn put_blob_with_policy_headers_and_verify(
+        &self,
+        url: &str,
+        data: Bytes,
+        sha256_hex: &str,
+        policy: &UploadRetryPolicy,
+        headers: &PresignedPutHeaders,
+        verify_head: Option<&PresignedHeadVerify>,
+    ) -> anyhow::Result<()> {
+        self.put_blob_capture_with_policy_and_headers(
+            url,
+            data,
+            sha256_hex,
+            policy,
+            headers,
+            verify_head,
+        )
+        .await
+        .map(|_| ())
+    }
+
     pub(crate) async fn put_blob_capture(
         &self,
         url: &str,
@@ -495,7 +517,13 @@ impl ApiClient {
                         let verify_head = verify_head.with_context(|| {
                             "conditional create returned 412 but server did not provide verifyHead"
                         })?;
-                        match self.verify_presigned_head(verify_head).await? {
+                        match self
+                            .verify_presigned_head(
+                                verify_head,
+                                &UploadRetryPolicy::head_verification(),
+                            )
+                            .await?
+                        {
                             PresignedHeadVerification::Matches => {
                                 return Ok(PresignedPutResult { e_tag: None });
                             }
@@ -565,20 +593,72 @@ impl ApiClient {
     async fn verify_presigned_head(
         &self,
         verify: &PresignedHeadVerify,
+        policy: &UploadRetryPolicy,
     ) -> anyhow::Result<PresignedHeadVerification> {
         let expected_checksum_b64 = sha256_hex_to_base64(&verify.sha256)
             .with_context(|| format!("invalid SHA-256 for HEAD verification: {}", verify.sha256))?;
-        let resp = self
-            .upload_client
-            .head(&verify.url)
-            .send()
-            .await
-            .map_err(|err| err.without_url())
-            .context("failed to HEAD existing conditional upload target")?;
+        let mut attempt = 0u32;
+        let started = Instant::now();
+
+        let resp = loop {
+            attempt += 1;
+            let result = self.upload_client.head(&verify.url).send().await;
+            let (reason, retry_after) = match result {
+                Ok(resp) if resp.status().is_success() => break resp,
+                Ok(resp) => {
+                    let status = resp.status();
+                    let retry_after = parse_retry_after(resp.headers());
+                    if !is_transient_head_verification_status(status) {
+                        bail!(
+                            "conditional upload target exists but HEAD verification returned {status}"
+                        );
+                    }
+                    let body = resp
+                        .text()
+                        .await
+                        .unwrap_or_else(|error| format!("<failed to read response: {error}>"));
+                    (
+                        format!("HEAD HTTP {status}: {}", truncate(&body, 200)),
+                        retry_after,
+                    )
+                }
+                Err(error) => {
+                    let is_transient = is_transient_reqwest_err(&error);
+                    let error = error.without_url();
+                    if !is_transient {
+                        return Err(anyhow::Error::new(error)
+                            .context("failed to HEAD existing conditional upload target"));
+                    }
+                    (format!("HEAD network error: {error}"), None)
+                }
+            };
+
+            let elapsed = started.elapsed();
+            let remaining = policy.budget.saturating_sub(elapsed);
+            if attempt >= policy.max_attempts || remaining.is_zero() {
+                bail!(
+                    "conditional upload HEAD verification failed after {attempt} attempt(s) in {elapsed:?}: {reason}"
+                );
+            }
+            if let Some(retry_after) = retry_after
+                && retry_after > remaining
+            {
+                bail!(
+                    "conditional upload HEAD verification cannot retry: Retry-After {retry_after:?} exceeds remaining budget {remaining:?}"
+                );
+            }
+
+            let delay = next_delay(attempt, retry_after, policy).min(remaining);
+            tracing::warn!(
+                attempt,
+                delay_ms = delay.as_millis() as u64,
+                %reason,
+                "conditional upload HEAD verification retrying"
+            );
+            tokio::time::sleep(delay).await;
+        };
         let status = resp.status();
-        if !status.is_success() {
-            bail!("conditional upload target exists but HEAD verification returned {status}");
-        }
+        debug_assert!(status.is_success());
 
         let Some(content_length) = resp
             .headers()
@@ -636,6 +716,15 @@ impl UploadRetryPolicy {
         }
     }
 
+    const fn head_verification() -> Self {
+        Self {
+            max_attempts: 4,
+            budget: Duration::from_secs(30),
+            base: Duration::from_millis(250),
+            cap: Duration::from_secs(2),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) const fn fast_for_tests() -> Self {
         Self {
@@ -659,6 +748,16 @@ impl UploadRetryPolicy {
     }
 
     #[cfg(test)]
+    pub(crate) const fn expires_before_head_for_tests() -> Self {
+        Self {
+            max_attempts: 1,
+            budget: Duration::from_millis(1),
+            base: Duration::from_millis(1),
+            cap: Duration::from_millis(1),
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) const fn max_attempts(&self) -> u32 {
         self.max_attempts
     }
@@ -668,6 +767,12 @@ fn is_transient_status(status: reqwest::StatusCode) -> bool {
     status == reqwest::StatusCode::TOO_MANY_REQUESTS
         || status == reqwest::StatusCode::REQUEST_TIMEOUT
         || status.is_server_error()
+}
+
+fn is_transient_head_verification_status(status: reqwest::StatusCode) -> bool {
+    // A 412 PUT proves the key existed, but an immediately following HEAD may
+    // briefly observe a replica/cache that has not caught up yet.
+    status == reqwest::StatusCode::NOT_FOUND || is_transient_status(status)
 }
 
 fn is_transient_reqwest_err(err: &reqwest::Error) -> bool {
