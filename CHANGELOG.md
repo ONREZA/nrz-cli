@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.35.2] - 2026-07-12
+
+### 🐛 Bug Fixes
+
+- **deploy:** harden artifact upload paths ([7f57276](https://github.com/ONREZA/nrz-cli/commit/7f57276655c7836d1465903034bf2cd654ebb959))
+
 ## [0.35.1] - 2026-07-05
 
 ### 🐛 Bug Fixes
