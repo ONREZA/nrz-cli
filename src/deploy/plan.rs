@@ -20,6 +20,7 @@ pub(super) struct DeployPlanRequest<'a> {
     pub(super) args: &'a DeployArgs,
     pub(super) command: &'a crate::context::CommandContext,
     pub(super) explicit_compute: Option<ComputeType>,
+    pub(super) build_logs: Option<&'a super::BuildLogEmitter>,
 }
 
 pub(super) async fn scan_runtime_artifact_for_plan(
@@ -253,7 +254,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     super::validate_prebuild_compute_intent(project_dir, request.explicit_compute)?;
 
     if !args.skip_build && !args.skip_install {
-        super::run_install_step(project_dir, json, effective)?;
+        super::run_install_step(project_dir, json, effective, request.build_logs)?;
     }
 
     let build_preparation = crate::frameworks::prepare_build(project_dir)?;
@@ -274,7 +275,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         && let Some(cmd) = build_command.as_deref()
     {
         crate::frameworks::clear_before_build(project_dir)?;
-        super::run_build_step(cmd, project_dir, json, &build_env)?;
+        super::run_build_step(cmd, project_dir, json, &build_env, request.build_logs)?;
     }
 
     let detection =

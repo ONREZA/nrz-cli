@@ -294,6 +294,14 @@ pub struct DeployArgs {
     #[arg(long)]
     pub skip_install: bool,
 
+    /// Disable centralized build-log upload for this deployment
+    #[arg(long)]
+    pub no_log_upload: bool,
+
+    /// Include debug build-log events in centralized upload
+    #[arg(long)]
+    pub log_upload_debug: bool,
+
     /// Custom build command (overrides [build] command in onreza.toml)
     #[arg(long)]
     pub build_command: Option<String>,

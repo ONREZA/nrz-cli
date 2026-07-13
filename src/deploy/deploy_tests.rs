@@ -1763,6 +1763,7 @@ fn process_without_manifest_is_error() {
 #[test]
 fn create_deployment_body_serializes_required_fields() {
     let body = CreateDeploymentBody {
+        build_log_protocol: build_log_protocol(),
         manifest: serde_json::json!({ "version": 1 }),
         files: vec![],
         production: None,
@@ -1787,6 +1788,7 @@ fn create_deployment_body_serializes_required_fields() {
 #[test]
 fn create_deployment_body_serializes_functions_payload() {
     let body = CreateDeploymentBody {
+        build_log_protocol: build_log_protocol(),
         manifest: serde_json::json!({ "version": 1 }),
         files: vec![],
         production: Some(false),
@@ -3793,6 +3795,7 @@ fn run_command_streaming_emits_coded_error_on_nonzero_exit() {
         crate::output::Phase::Build,
         "debug",
         &[],
+        None,
     )
     .expect_err("non-zero exit must fail");
 
@@ -3819,6 +3822,7 @@ fn run_command_streaming_emits_phase_specific_code_for_install() {
         crate::output::Phase::Install,
         "user",
         &[],
+        None,
     )
     .expect_err("non-zero exit must fail");
     let coded = err
@@ -3849,6 +3853,7 @@ fn run_command_streaming_does_not_hang_on_orphaned_grandchild() {
             crate::output::Phase::Build,
             "debug",
             &[],
+            None,
         );
         let _ = tx.send(result.is_ok());
     });

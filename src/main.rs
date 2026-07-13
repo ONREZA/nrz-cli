@@ -127,9 +127,8 @@ fn emit_terminal_error(json: bool, err: &anyhow::Error) {
         .find_map(|c| c.downcast_ref::<output::CodedError>());
     match coded {
         Some(c) => {
-            // Builder log channel (stderr frame): lets the Builder extract the
-            // error code even for fast failures (e.g. INVALID_CONFIG) that emit
-            // no prior structured frame.
+            // Structured stderr channel: preserves the error code for JSON log
+            // consumers even for fast failures that emit no prior frame.
             output::log_error_structured("error", &message, &c.code, None);
             // CLI/automation terminal envelope (stdout).
             output::terminal_error(&message, Some(&c.code));
