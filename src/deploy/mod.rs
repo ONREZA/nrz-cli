@@ -679,7 +679,7 @@ pub async fn run(
             .as_ref()
             .and_then(BuildLogSession::emitter)
         {
-            emitter.info(BuildLogPhase::Detect, "Build output detected and validated");
+            emitter.info(BuildLogPhase::Detect, "Build output validated");
         }
 
         // ── Resume mode: builder calls us with an existing deployment ID ──

@@ -352,6 +352,16 @@ impl BuildLogEmitter {
         );
     }
 
+    pub(super) fn debug(&self, phase: BuildLogPhase, message: &str) {
+        self.emit(
+            BuildLogStream::Debug,
+            BuildLogLevel::Debug,
+            phase,
+            self.lifecycle_origin,
+            message,
+        );
+    }
+
     pub(super) fn error(&self, phase: BuildLogPhase, message: &str) {
         self.emit(
             BuildLogStream::User,
@@ -516,7 +526,7 @@ impl BuildLogSession {
                 receiver,
             ));
             emit_upload_notice(project_dir, workspace_id, project_id, config.source, json);
-            emitter.info(BuildLogPhase::Init, "Build log session started");
+            emitter.debug(BuildLogPhase::Init, "Build log session started");
             (Some(emitter), Some(uploader))
         } else {
             (None, None)
@@ -552,7 +562,7 @@ impl BuildLogSession {
             Ok(Ok(_)) => {
                 self.attached = true;
                 if let Some(emitter) = &self.emitter {
-                    emitter.info(
+                    emitter.debug(
                         BuildLogPhase::Deploy,
                         "Build log session attached to deployment",
                     );
@@ -574,7 +584,7 @@ impl BuildLogSession {
     pub(super) async fn finish(&mut self, result: &anyhow::Result<()>) {
         if let Some(emitter) = &self.emitter {
             match result {
-                Ok(()) => emitter.info(BuildLogPhase::Complete, "Deployment command completed"),
+                Ok(()) => emitter.info(BuildLogPhase::Complete, "Build artifacts uploaded"),
                 Err(error) => emitter.error(BuildLogPhase::Error, &error.to_string()),
             }
             emitter.close();

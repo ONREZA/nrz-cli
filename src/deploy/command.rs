@@ -319,7 +319,10 @@ pub(super) fn run_install_step(
         output::Phase::Deploy,
     );
     if let Some(build_logs) = build_logs {
-        build_logs.info(BuildLogPhase::Install, "Installing dependencies");
+        build_logs.info(
+            BuildLogPhase::Install,
+            &format!("Installing dependencies: {cmd}"),
+        );
     }
     // Install child output → debug stream (npm noise), nrz markers go through output::status/success
     run_command_streaming(
@@ -697,7 +700,7 @@ pub(super) fn run_build_step(
 
     output::status(json, ">", format!("Building: {cmd}"), output::Phase::Deploy);
     if let Some(build_logs) = build_logs {
-        build_logs.info(BuildLogPhase::Build, "Build command started");
+        build_logs.info(BuildLogPhase::Build, &format!("Building: {cmd}"));
     }
     // Build child output → user stream (webpack/vite output is useful)
     run_command_streaming(
@@ -711,7 +714,7 @@ pub(super) fn run_build_step(
     )?;
     output::success(json, "Build completed", output::Phase::Deploy);
     if let Some(build_logs) = build_logs {
-        build_logs.info(BuildLogPhase::Build, "Build command completed");
+        build_logs.info(BuildLogPhase::Build, "Build completed");
     }
     Ok(())
 }
