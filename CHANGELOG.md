@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.36.0-beta.2] - 2026-07-14
+
+### ✨ Features
+
+- **cli:** materialize execution context ([b5157dd](https://github.com/ONREZA/nrz-cli/commit/b5157dd8a1baa0012c3d3da403ad369292a97bb2))
+- **deploy:** add build log upload ([bb4c61a](https://github.com/ONREZA/nrz-cli/commit/bb4c61aae510a50509048630ee7a37067ccc9772))
+
+### 🐛 Bug Fixes
+
+- **deploy:** clarify uploaded build logs ([0698b12](https://github.com/ONREZA/nrz-cli/commit/0698b1247e2dd1882889969f381033961ec49037))
+- **deploy:** batch build log uploads ([5e33373](https://github.com/ONREZA/nrz-cli/commit/5e33373eae2afffaf54023dcc03b8ec2464c5c92))
+
+### 📚 Documentation
+
+- **cli:** add beta migration guide ([c8a5be4](https://github.com/ONREZA/nrz-cli/commit/c8a5be49fade255ec1413ba1343a09cebc2af6e7))
+
 ## [0.36.0-beta.1] - 2026-07-14
 
 ### 🐛 Bug Fixes
