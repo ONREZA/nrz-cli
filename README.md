@@ -75,6 +75,10 @@ nrz deploy --prod
 Prerelease binaries can be tested with `nrz upgrade --channel beta`,
 or a pinned version such as `nrz upgrade --version v0.33.0-beta.0`.
 
+Breaking beta migrations and exact required actions are documented in
+[`docs/breaking-changes.md`](docs/breaking-changes.md). Sections marked
+`UNRELEASED` are plans, not current CLI behavior.
+
 ## Agent Skills
 
 This repository includes reusable skills for AI coding assistants in `skills/`:
