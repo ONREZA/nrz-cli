@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.36.0-beta.1] - 2026-07-14
+
+### 🐛 Bug Fixes
+
+- **deploy:** batch build log uploads ([5e33373](https://github.com/ONREZA/nrz-cli/commit/5e33373eae2afffaf54023dcc03b8ec2464c5c92))
+
+### ✨ Features
+
+- **deploy:** add build log upload ([bb4c61a](https://github.com/ONREZA/nrz-cli/commit/bb4c61aae510a50509048630ee7a37067ccc9772))
+
 ## [0.36.0-beta.0] - 2026-07-13
 
 ### ✨ Features
