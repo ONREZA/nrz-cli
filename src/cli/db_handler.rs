@@ -178,27 +178,6 @@ struct QueryResult {
     duration_ms: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DevEnvResponse {
-    pub env_vars: std::collections::HashMap<String, String>,
-    pub database: DevEnvDatabase,
-    pub branch: Option<DevEnvBranch>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct DevEnvDatabase {
-    pub id: String,
-    pub name: String,
-    pub status: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct DevEnvBranch {
-    pub id: String,
-    pub name: String,
-}
-
 // ── Request bodies ──────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -1009,35 +988,6 @@ async fn cmd_schema(
 
 fn project_attachment_url(base: &str, db_id: &str, project_id: &str) -> String {
     format!("{base}/{db_id}/attachments/{project_id}")
-}
-
-fn query_value(value: &str) -> String {
-    percent_encoding::utf8_percent_encode(value, percent_encoding::NON_ALPHANUMERIC).to_string()
-}
-
-fn dev_env_url(project_id: &str, database: Option<&str>, branch: Option<&str>) -> String {
-    let mut params = vec![format!("projectId={}", query_value(project_id))];
-    if let Some(database) = database {
-        params.push(format!("database={}", query_value(database)));
-    }
-    if let Some(branch) = branch {
-        params.push(format!("branch={}", query_value(branch)));
-    }
-    format!("{KAIKI_DATABASES_BASE}/dev-env?{}", params.join("&"))
-}
-
-/// Fetch dev-env connection for `nrz dev` integration.
-pub async fn fetch_dev_env(
-    client: &ApiClient,
-    project_id: &str,
-    database: Option<&str>,
-    branch: Option<&str>,
-) -> anyhow::Result<DevEnvResponse> {
-    let url = dev_env_url(project_id, database, branch);
-
-    client.get(&url).await.context(
-        "failed to fetch dev environment — is a managed database configured for this project?",
-    )
 }
 
 async fn fetch_connection_uri(

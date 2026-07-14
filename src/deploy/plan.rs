@@ -21,6 +21,8 @@ pub(super) struct DeployPlanRequest<'a> {
     pub(super) command: &'a crate::context::CommandContext,
     pub(super) explicit_compute: Option<ComputeType>,
     pub(super) build_logs: Option<&'a super::BuildLogEmitter>,
+    pub(super) execution_env: &'a [(String, String)],
+    pub(super) target_production: Option<bool>,
 }
 
 pub(super) async fn scan_runtime_artifact_for_plan(
@@ -249,12 +251,18 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     let project_dir = &command.project_dir;
     let effective = &command.effective;
     let mut warnings = Vec::new();
-    let production = super::resolve_deploy_production_override(args.prod, &args.env)?;
+    let production = request.target_production;
 
     super::validate_prebuild_compute_intent(project_dir, request.explicit_compute)?;
 
     if !args.skip_build && !args.skip_install {
-        super::run_install_step(project_dir, json, effective, request.build_logs)?;
+        super::run_install_step(
+            project_dir,
+            json,
+            effective,
+            request.execution_env,
+            request.build_logs,
+        )?;
     }
 
     let build_preparation = crate::frameworks::prepare_build(project_dir)?;
@@ -267,7 +275,8 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             output::status(json, "~", &patch.message, output::Phase::Deploy);
         }
     }
-    let build_env = build_preparation.env_pairs();
+    let build_env =
+        super::merge_command_environment(request.execution_env, &build_preparation.env_pairs());
 
     let build_command =
         super::resolve_build_command(args.build_command.as_deref(), project_dir, effective);

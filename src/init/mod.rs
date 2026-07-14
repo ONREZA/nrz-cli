@@ -319,15 +319,16 @@ fn resolve_project_name(name_arg: &Option<String>, project_dir: &Path) -> String
 
 pub fn add_to_gitignore(project_dir: &Path) {
     let gitignore = project_dir.join(".gitignore");
-    if !gitignore.exists() {
-        return;
-    }
-    let content = match std::fs::read_to_string(&gitignore) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("  Warning: could not read .gitignore: {e}");
-            return;
+    let content = if gitignore.exists() {
+        match std::fs::read_to_string(&gitignore) {
+            Ok(content) => content,
+            Err(error) => {
+                eprintln!("  Warning: could not read .gitignore: {error}");
+                return;
+            }
         }
+    } else {
+        String::new()
     };
     // Check if .onreza/ is already in .gitignore
     if content.lines().any(|line| {
@@ -340,7 +341,11 @@ pub fn add_to_gitignore(project_dir: &Path) {
         return;
     }
     // Append .onreza/ to .gitignore
-    let separator = if content.ends_with('\n') { "" } else { "\n" };
+    let separator = if content.is_empty() || content.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
     if let Err(e) = std::fs::write(&gitignore, format!("{content}{separator}.onreza/\n")) {
         eprintln!("  Warning: could not update .gitignore: {e}");
     }

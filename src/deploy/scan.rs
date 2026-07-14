@@ -447,20 +447,3 @@ pub(crate) fn hash_file_streaming(path: &Path) -> anyhow::Result<(u64, String)> 
     }
     Ok((size, sha256_finalize_hex(hasher)))
 }
-
-// ── Synthetic commit SHA ─────────────────────────────────────
-
-/// Stable per-deployment commit SHA derived from the file manifest. Used as a
-/// fallback when `git rev-parse HEAD` is unavailable. Includes per-file content
-/// hashes so two deploys of byte-identical bundles produce the same synthetic
-/// SHA — which is exactly what cross-deploy CAS dedup keys off.
-pub(super) fn synthetic_sha(files: &[FileEntry]) -> String {
-    let mut hasher = Sha256::new();
-    for f in files {
-        hasher.update(f.path.as_bytes());
-        hasher.update(b":");
-        hasher.update(f.content_hash.as_bytes());
-        hasher.update(b"\n");
-    }
-    sha256_finalize_hex(hasher)
-}

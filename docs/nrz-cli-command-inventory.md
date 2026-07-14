@@ -1,6 +1,6 @@
 # Инвентаризация команд nrz-cli
 
-Срез: 2026-06-21.
+Срез: 2026-07-14.
 
 Проверено по текущему коду и help текущего debug-бинаря:
 
@@ -34,6 +34,10 @@ mindmap
       dev
       build
       deploy
+      context
+        show
+        use
+        clear
       deployments
       logs
       rollback
@@ -60,9 +64,8 @@ mindmap
         list
         set
         delete
-        pull
-        push
         validate
+        exec
     Edge
       domains
         list
@@ -94,23 +97,29 @@ mindmap
 
 Важный runtime нюанс: если stdout не TTY, CLI сам включает JSON mode, если не передан `--human`.
 
-`--env` больше не является root-level global flag. Он объявлен только там, где реально используется:
+Platform execution context выбирается единообразно:
 
-| Команда | `--env` / `NRZ_ENV` |
+| Команда | `--environment` / `NRZ_ENVIRONMENT` |
 | --- | --- |
-| `nrz deploy` | Target deploy environment: `production/prod` или `preview`. |
-| `nrz env ...` | Target filtering/selection для platform env vars: `production`, `preview`, `development`. Флаг global внутри `env`, поэтому работает и после nested subcommand. |
-| `nrz kv ...` | Local KV namespace. Default: `development`. Флаг global внутри `kv`, поэтому работает и после nested subcommand. |
+| `nrz deploy` | Точный Environment для admission и неизменяемого deployment snapshot. |
+| `nrz dev` | Точный Environment для локальной материализации; `--local` явно отключает platform config. |
+| `nrz env ...` | Точный Environment для list/set/delete/validate/exec; `--all` разрешает явную project-wide мутацию. |
+| `nrz rules pull/publish/status` | Точный Environment для чтения и публикации Edge Rules. |
+| `nrz functions invoke` | Точный Environment с активной Function revision. |
+| `nrz domains add` | Точный Environment для нового hostname binding. |
 
-`--project-id` унифицирован для project-scoped nested groups: у `db`, `env`, `domains` он объявлен global внутри группы и работает после nested subcommand (`nrz env validate --project-id ...`, `nrz domains list --project-id ...`, `nrz db query --project-id ...`).
+Приоритет: explicit flag → `NRZ_ENVIRONMENT` → gitignored
+`.onreza/environment.json`. `nrz context use <environment>` сохраняет выбор для
+checkout. Legacy `--env`/`NRZ_ENV` остался только у локального KV namespace.
 
 ## Верхнеуровневые команды
 
 | Команда | Что умеет сейчас | Ключевые флаги / особенности |
 | --- | --- | --- |
-| `nrz dev [DIR]` | Запускает локальный dev server с ONREZA bootstrap, KV/context emulator и best-effort injection `DATABASE_URL` из managed DB. | `--alias`, `--command`, `--port`, `--inspect`, `--inspect-brk`, `--db-branch`. Команда запуска берется по приоритету: `--alias` -> `--command` -> `[dev].command`. |
+| `nrz dev [DIR]` | Материализует выбранный Environment snapshot и запускает локальный dev server с ONREZA bootstrap и KV/context emulator. | `--environment`, `--local`, `--alias`, `--command`, `--port`, `--inspect`, `--inspect-brk`, `--db-branch`. `--local` — единственный local-only путь. |
 | `nrz build [DIR]` | Находит output dir, валидирует `.onreza/manifest.json` или генерирует manifest для supported static/SSR outputs. | `--skip-validation`. |
-| `nrz deploy [DIR]` | Основной deploy flow: install, build, detect, env validation, manifest/runtime artifact resolution, source bundle, functions payload, upload, polling live status. `--verify` после `live` проверяет deployment URL; для protected preview CLI создает временный bypass через preview access и ревокает его после проверки. | `--prod`, `--env production|preview`, `--project-id`, `--dry`, `--verify`, `--skip-build`, `--skip-install`, `--build-command`, `--skip-env-check`, `--compute static|process`, `--health-check-path`, `--app` (`--filter` alias). Internal `--resume-deployment` скрыт из help. |
+| `nrz deploy [DIR]` | До сборки выполняет admission, получает неизменяемый Environment snapshot, затем запускает install/build с ним, загружает source/functions и отслеживает live status. | `--environment`; `--prod` — compatibility selector для Environment `production` и конфликтует с `--environment`. Также: `--project-id`, `--dry`, `--verify`, `--skip-build`, `--skip-install`, `--build-command`, `--skip-env-check`, `--compute static|process`, `--health-check-path`, `--app` (`--filter` alias). Internal runner resume скрыт из help. |
+| `nrz context ...` | Управляет личным выбором platform Environment для checkout. | `use <ENVIRONMENT>`, `show`, `clear`; состояние хранится в `.onreza/environment.json`. |
 | `nrz detect [DIR]` | Определяет framework, package manager, runtime/build metadata, monorepo packages. | `--slug-only`, `--save`. Internal remote-detection flags `--stdin` и `--needed-files` скрыты из help. |
 | `nrz config explain [DIR]` | Показывает effective build/deploy config с учетом root/app config, CLI override и server project settings. | `--app` (`--filter` alias), `--project-id`, `--local`. Без `--local` при наличии project id пытается fetch server settings. |
 | `nrz init` | Создает local scaffold (`onreza.toml`, `.onreza/`, `.gitignore`) и опционально создает/линкует platform project. | `--name`, `--skip-detection`, `--create`, `--project-id`, `--local`. В JSON/non-interactive без `--create/--project-id` остается local-only. |
@@ -121,8 +130,8 @@ mindmap
 | `nrz functions check [DIR]` | Локальная проверка ONREZA Functions policy и `onreza.rules.toml`. | Ошибка `ONREZA_FUNCTIONS_NOT_FOUND`, если нет function entries и rules-файла; policy failure кодируется как `ONREZA_FUNCTIONS_POLICY`. |
 | `nrz kv ...` | Локальный KV store для dev/emulator state. | Не ходит в API. Хранилище: `.onreza/data/kv.<env>.json` от текущей директории; default env namespace `development`. |
 | `nrz db ...` | Managed PostgreSQL (kaiki) операции. | Management идет через `/v1/kaiki/databases`; project-scoped команды фильтруют/обновляют `projectAttachments`. `query` и `schema` получают connection URI через API и выполняют SQL локально из `nrz`. Database auto-resolve: explicit arg -> config `[db].database` -> auto-inject attachment -> первый attached DB. |
-| `nrz env ...` | Управление platform env vars и локальными dotenv imports/exports. | `--project-id` global внутри `env`; target env берется из command-scoped `--env` для `list/set/push`. |
-| `nrz domains ...` | Custom domain hostnames проекта через workspace-domain API. | `--project-id` global внутри `domains`; `add` по умолчанию ищет production environment и создает/переиспользует workspace domain zone. |
+| `nrz env ...` | Безопасное управление platform env vars, проверка и запуск команд с материализованным snapshot. | `--project-id` global внутри группы; точный context выбирается через `--environment`/`NRZ_ENVIRONMENT`/`nrz context`. Dotenv pull/push отсутствуют. |
+| `nrz domains ...` | Custom domain hostnames проекта через workspace-domain API. | `--project-id` global внутри `domains`; `add --environment` использует единый execution-context resolver и создает/переиспользует workspace domain zone. |
 | `nrz projects ...` | CRUD projects через API. | `create --link` также пишет `onreza.toml` в cwd. |
 | `nrz login` | Device flow login или сохранение explicit token. | Если передан `--token`, валидирует `/v1/user` и сохраняет workspace `personal`. |
 | `nrz whoami` | Показывает текущего user и workspace context. | Требует token/workspace context. |
@@ -155,14 +164,11 @@ mindmap
 
 | Команда | Назначение | Опции |
 | --- | --- | --- |
-| `nrz env list` | Список env vars проекта. | `--project-id`, command-scoped `--env` фильтрует selected targets. |
-| `nrz env set <KEY> <VALUE>` | Создает/обновляет переменную. | `--secret`, command-scoped `--env` задает target environments. |
-| `nrz env delete <KEY>` | Удаляет переменную. | `--project-id`. |
-| `nrz env pull [FILE]` | Экспортирует env vars в dotenv file. | Default file: `.env.local`. |
-| `nrz env push [FILE]` | Импортирует dotenv file на платформу. | `--overwrite`, `--dry-run`, `--secret`, `--declared-only`; default file: `.env.local`. |
-| `nrz env validate` | Сверяет platform env vars с `[env.declarations]` в `onreza.toml`. | При missing required vars возвращает ошибку; `deploy` вызывает эту проверку pre-flight, если не задан `--skip-env-check`. |
-
-Секретность при `env push`: `--secret` -> `[env.declarations]` visibility -> heuristic по имени (`KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `PRIVATE`, `CERT`, `CREDENTIALS`).
+| `nrz env list` | Список metadata переменных проекта без plaintext secrets. | `--environment` фильтрует по точному Environment. |
+| `nrz env set <KEY>` | Создает/обновляет одну переменную. | `--value` для plain; secret только через `--stdin`/`--from-file`; категория берётся из `--secret`/`--plain` или `[env.declarations]`; `--note`; `--environment` или `--all`; destructive category/scope change требует safety flags. |
+| `nrz env delete <KEY> --all` | Удаляет единственную legacy definition ключа. | Требует точный `--all` и подтверждение через prompt/`--yes`; targeted overrides появятся только в новой config model. |
+| `nrz env validate` | Материализует один context и сверяет key set с `[env.declarations]`. | Значения не выводятся; missing required vars возвращают ошибку. |
+| `nrz env exec -- <COMMAND>` | Запускает процесс с одним materialized Environment snapshot. | Private CLI credentials удаляются из child environment. |
 
 ## Project/account subcommands
 
@@ -181,7 +187,7 @@ mindmap
 | Команда | Назначение | Опции |
 | --- | --- | --- |
 | `nrz domains list` | Список custom domain hostnames проекта из workspace-domain projection. | `--project-id`. |
-| `nrz domains add <DOMAIN>` | Привязывает hostname к environment через workspace-domain API. | `--environment-id`; если не задан, ищет production environment; parent zone создается/переиспользуется сервером. |
+| `nrz domains add <DOMAIN>` | Привязывает hostname к environment через workspace-domain API. | `--environment`; без флага использует `NRZ_ENVIRONMENT` или repository context, без implicit production fallback. |
 | `nrz domains remove <DOMAIN_ID>` | Удаляет hostname binding. | `--project-id`. |
 | `nrz domains verify <DOMAIN_ID>` | Запускает verify/check parent workspace domain zone для hostname binding. | `--project-id`. |
 | `nrz kv get <KEY>` | Читает local KV value. | `--env`; expired values считаются отсутствующими. |
@@ -190,6 +196,8 @@ mindmap
 | `nrz kv list` | Список local KV keys. | `--env`, `--prefix`, `--limit` (default 100). |
 | `nrz kv clear` | Удаляет весь local KV файл выбранного env namespace. | `--env`, `--force` обязателен для реальной очистки. |
 | `nrz functions check [DIR]` | Проверяет local ONREZA Functions/rules payload до publish/deploy. | JSON output включает functions reports, edge rules report и policy error/code при нарушениях. |
+| `nrz functions invoke <NAME>` | Вызывает активную Function revision. | `--environment` или общий сохранённый context. |
+| `nrz rules pull/publish/status` | Читает или публикует user-authored Edge Rules. | `--environment` или общий сохранённый context. |
 
 ## Найденные устаревшие или мертвые упоминания
 
@@ -206,6 +214,6 @@ mindmap
 | `nrz db push` | `docs/onreza-toml.md` | Команды нет; упоминание удалено. |
 | `nrz db reset --remote` | `skills/nrz-cli-ci-automation/SKILL.md` | Команды и `--remote` флага нет; упоминание удалено. |
 | `[deploy].skip_migrations`, `[migrations]`, `[db].default_env` | `docs/onreza-toml.md` | В текущем `src/` не используются; удалены из docs. |
-| `nrz env validate --project-id ...`, `nrz env push ... --project-id ...`, `nrz domains list --project-id ...` | skills/examples style | После перевода `--project-id` в group-global обе позиции работают; примеры оставлены валидными. |
+| `nrz env pull/push` | docs/skills/examples | Команды удалены: Server — source of truth, ephemeral локальное использование идет через `nrz env exec`. |
 
 Практический вывод: после cleanup текущая поверхность стала логичнее. Главные оставшиеся продуктовые решения, если они понадобятся позже: нужен ли отдельный интерактивный `db shell`, и нужно ли переносить local KV state из старого `.onreza/data/kv.json` в новый env-scoped файл автоматически.

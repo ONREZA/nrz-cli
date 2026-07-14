@@ -9,4 +9,5 @@ RELEASE_NOTES.md
 
 # Config files
 .env
+.onreza/
 yougile.config.json

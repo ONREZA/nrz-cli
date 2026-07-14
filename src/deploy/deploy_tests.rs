@@ -376,42 +376,6 @@ fn scan_files_rejects_symlink_parent_traversal_after_regular_file() {
     assert!(err.to_string().contains("broken symlink"), "{err}");
 }
 
-// ── synthetic_sha tests ─────────────────────────────────────
-
-#[test]
-fn synthetic_sha_deterministic() {
-    let files = vec![fe("a.js", 100, "aa"), fe("b.css", 200, "bb")];
-    let sha1 = synthetic_sha(&files);
-    let sha2 = synthetic_sha(&files);
-    assert_eq!(sha1, sha2);
-}
-
-#[test]
-fn synthetic_sha_differs_for_different_files() {
-    let files_a = vec![fe("a.js", 100, "aa")];
-    let files_b = vec![fe("b.js", 100, "aa")];
-    assert_ne!(synthetic_sha(&files_a), synthetic_sha(&files_b));
-}
-
-#[test]
-fn synthetic_sha_differs_for_same_path_different_hash() {
-    // Now that synthetic_sha mixes content_hash into the digest, two deploys
-    // of the same paths but mutated bytes produce distinct synthetic SHAs.
-    // This is what makes the synthetic SHA a valid commit-SHA fallback for
-    // cross-deploy CAS dedup keying.
-    let files_a = vec![fe("a.js", 100, "aaaa")];
-    let files_b = vec![fe("a.js", 100, "bbbb")];
-    assert_ne!(synthetic_sha(&files_a), synthetic_sha(&files_b));
-}
-
-#[test]
-fn synthetic_sha_is_64_hex_chars() {
-    let files = vec![fe("x.txt", 1, "ff")];
-    let sha = synthetic_sha(&files);
-    assert_eq!(sha.len(), 64);
-    assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
-}
-
 // ── resolve_build_command tests ──────────────────────────────
 
 #[test]
@@ -1761,62 +1725,6 @@ fn process_without_manifest_is_error() {
 }
 
 #[test]
-fn create_deployment_body_serializes_required_fields() {
-    let body = CreateDeploymentBody {
-        build_log_protocol: build_log_protocol(),
-        manifest: serde_json::json!({ "version": 1 }),
-        files: vec![],
-        production: None,
-        branch: None,
-        commit_sha: "deadbeef".into(),
-        functions: None,
-    };
-
-    let value = serde_json::to_value(&body).unwrap();
-    assert!(value.get("manifest").is_some());
-    assert!(value.get("production").is_none());
-    assert_eq!(
-        value.get("commitSha").and_then(|v| v.as_str()),
-        Some("deadbeef")
-    );
-    assert!(value.get("computeType").is_none());
-    assert!(value.get("processEntry").is_none());
-    assert!(value.get("bundle").is_none());
-    assert!(value.get("functions").is_none());
-}
-
-#[test]
-fn create_deployment_body_serializes_functions_payload() {
-    let body = CreateDeploymentBody {
-        build_log_protocol: build_log_protocol(),
-        manifest: serde_json::json!({ "version": 1 }),
-        files: vec![],
-        production: Some(false),
-        branch: None,
-        commit_sha: "deadbeef".into(),
-        functions: conform_functions_to_wire_contract(Some(
-            crate::functions::FunctionPublishPayload {
-                origin: "DEPLOYMENT",
-                functions: vec![],
-                edge_rules: None,
-                edge_rules_force: false,
-                generated_edge_rule_sets: Vec::new(),
-            },
-        ))
-        .unwrap(),
-    };
-
-    let value = serde_json::to_value(&body).unwrap();
-    assert_eq!(
-        value
-            .get("functions")
-            .and_then(|functions| functions.get("origin"))
-            .and_then(|origin| origin.as_str()),
-        Some("DEPLOYMENT")
-    );
-}
-
-#[test]
 fn functions_payload_serializes_edge_rules_force() {
     let value =
         conform_functions_to_wire_contract(Some(crate::functions::FunctionPublishPayload {
@@ -1996,38 +1904,6 @@ action = { type = "allow" }
     assert_eq!(
         value["generatedEdgeRuleSets"][0]["edgeRules"]["rules"][0]["action"]["target"],
         "/new"
-    );
-}
-
-#[test]
-fn deploy_env_preview_forces_preview_override() {
-    let env = vec!["preview".to_string()];
-    assert_eq!(
-        resolve_deploy_production_override(false, &env).unwrap(),
-        Some(false)
-    );
-}
-
-#[test]
-fn deploy_without_env_preserves_branch_inference() {
-    assert_eq!(
-        resolve_deploy_production_override(false, &[]).unwrap(),
-        None
-    );
-}
-
-#[test]
-fn deploy_prod_conflicts_with_preview_env() {
-    let env = vec!["preview".to_string()];
-    let error = resolve_deploy_production_override(true, &env).unwrap_err();
-    assert!(error.to_string().contains("conflicts"));
-}
-
-#[test]
-fn stage_deployment_functions_path_targets_project_activation_family() {
-    assert_eq!(
-        stage_deployment_functions_path("project-1", "deployment-1"),
-        "/v1/projects/project-1/function-activations/deployments/deployment-1/functions/stage"
     );
 }
 
@@ -3881,29 +3757,6 @@ fn expect_code(err: &anyhow::Error, expected: &str) {
 }
 
 #[test]
-fn function_stage_error_preserves_publish_failure_details() {
-    let error: anyhow::Error = crate::api::StructuredApiError {
-        status: StatusCode::BAD_REQUEST,
-        code: "FUNCTION_PUBLISH_FAILED".to_string(),
-        message: "Ошибка валидации".to_string(),
-        retry_after_seconds: None,
-        details: Some(serde_json::json!({
-            "attemptId": "11111111-1111-1111-1111-111111111111",
-            "category": "POLICY",
-            "message": "function 'api' failed the function policy check",
-        })),
-    }
-    .into();
-
-    let mapped = map_function_stage_error(error, false);
-    let rendered = format!("{mapped:#}");
-
-    assert!(rendered.contains("failed to stage ONREZA Functions for deployment"));
-    assert!(rendered.contains("ONREZA Functions publish failed [POLICY]"));
-    assert!(rendered.contains("11111111-1111-1111-1111-111111111111"));
-}
-
-#[test]
 fn create_deployment_error_maps_edge_rules_divergence() {
     let error: anyhow::Error = crate::api::StructuredApiError {
         status: StatusCode::BAD_REQUEST,
@@ -3948,29 +3801,6 @@ fn create_deployment_validation_error_in_json_mode_preserves_details() {
             .downcast_ref::<crate::output::AlreadyReportedError>()
             .is_some(),
         "validation error in JSON mode must be fully reported with details, got: {mapped:#}"
-    );
-}
-
-#[test]
-fn function_stage_validation_error_in_json_mode_preserves_details() {
-    let error: anyhow::Error = crate::api::StructuredApiError {
-        status: StatusCode::BAD_REQUEST,
-        code: "VALIDATION_ERROR".to_string(),
-        message: "Ошибка валидации данных".to_string(),
-        retry_after_seconds: None,
-        details: Some(serde_json::json!({
-            "fields": [{ "field": "generatedEdgeRuleSets", "message": "Некорректное значение" }]
-        })),
-    }
-    .into();
-
-    let mapped = map_function_stage_error(error, true);
-
-    assert!(
-        mapped
-            .downcast_ref::<crate::output::AlreadyReportedError>()
-            .is_some(),
-        "stage validation error in JSON mode must be fully reported with details, got: {mapped:#}"
     );
 }
 
@@ -4261,5 +4091,34 @@ fn wire_functions_contract_accepts_generated_edge_rule_contributions() {
             .unwrap()
             .len(),
         0
+    );
+}
+
+#[test]
+fn pre_source_mutations_use_the_stable_execution_contract() {
+    let body = PreSourceFailureBody {
+        protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
+        attempt: 2,
+        error_code: PreSourceFailureCode::MaterializationFailed,
+    };
+
+    let value = serde_json::to_value(body).unwrap();
+    assert_eq!(value["protocolVersion"], "execution-context-v1");
+    assert_eq!(value["attempt"], 2);
+    assert_eq!(value["errorCode"], "MATERIALIZATION_FAILED");
+
+    let source = DeploymentSourceBody {
+        protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
+        attempt: 2,
+        operation_id: "019b8952-ca22-76f0-b134-88becec7c629".to_string(),
+        manifest: serde_json::json!({ "version": 1 }),
+        functions: None,
+    };
+    let source_value = serde_json::to_value(source).unwrap();
+    assert_eq!(source_value["protocolVersion"], "execution-context-v1");
+    assert_eq!(source_value["attempt"], 2);
+    assert_eq!(
+        source_value["operationId"],
+        "019b8952-ca22-76f0-b134-88becec7c629"
     );
 }

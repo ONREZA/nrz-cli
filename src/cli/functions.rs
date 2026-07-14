@@ -36,8 +36,8 @@ pub struct FunctionsInvokeArgs {
     pub project_id: Option<String>,
 
     /// Target environment (production, preview, development, custom name, or environment ID)
-    #[arg(long, env = "NRZ_ENV")]
-    pub env: Option<String>,
+    #[arg(long)]
+    pub environment: Option<String>,
 
     /// HTTP method for fetch-style invokes
     #[arg(long, value_parser = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])]

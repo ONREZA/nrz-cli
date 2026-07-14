@@ -46,7 +46,10 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::api::{ApiClient, ConditionalUploadConflict, PresignedHeadVerify, PresignedPutHeaders};
+use crate::api::{
+    ApiClient, ConditionalUploadConflict, PresignedHeadVerify, PresignedPutHeaders,
+    classify_api_retry,
+};
 use crate::artifact::source_bundle_v1::{
     self, CLI_PROTOCOL_VERSION, CompletedMultipartPart, PresignedSourceMultipartChunk,
     SOURCE_BUNDLE_FORMAT, SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, SourceBundlePlan,
@@ -60,7 +63,7 @@ use crate::deploy::hash::{sha256_finalize_hex, sha256_hex};
 use crate::detect::types::{ComputeType, RuntimeType};
 use crate::link;
 use crate::output;
-use nrz::config::{EffectiveProjectConfig, EnvVisibility, ProjectConfig};
+use nrz::config::{EffectiveProjectConfig, ProjectBuildSettings, ProjectConfig};
 use nrz_contract::cli_api::{
     OnrezaCliApiV1MultipartCompleteRequestPartsItem as CliMultipartCompletePart,
     OnrezaCliApiV1PrepareUploadRequestLogicalManifestSummary as CliLogicalManifestSummary,
@@ -87,6 +90,10 @@ const PREPARE_UPLOAD_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 const UPLOAD_FAILED_RETRY_BUDGET: Duration = Duration::from_secs(5 * 60);
 const UPLOAD_FAILED_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
 const UPLOAD_FAILED_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
+const SOURCE_REGISTRATION_RETRY_BUDGET: Duration = Duration::from_secs(10 * 60);
+const SOURCE_REGISTRATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(370);
+const SOURCE_REGISTRATION_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
+const SOURCE_REGISTRATION_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_UPLOAD_FAILURE_LOG_LENGTH: usize = 4096;
 const REDACTED_URL_COMPONENT: &str = "REDACTED";
 const SOURCE_UPLOAD_PUT_FAILED: &str = "SOURCE_UPLOAD_PUT_FAILED";
@@ -104,16 +111,6 @@ struct DeploySymlinkTarget {
     resolved_path: String,
 }
 
-// ── Workspace / plan ─────────────────────────────────────────
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkspaceInfo {
-    id: String,
-    #[allow(dead_code)]
-    slug: String,
-}
-
 // ── Project settings from server ─────────────────────────────
 
 #[cfg(test)]
@@ -126,37 +123,88 @@ type ProjectInfo = nrz::config::ProjectBuildSettings;
 
 // ── API structs ──────────────────────────────────────────────
 
-/// Body for `POST /v1/projects/:id/deployments`.
-///
-/// `manifest` and `commitSha` are required by the server (`deployments.ts` body schema:
-/// `manifest: ManifestSchema`, `commitSha: z.string().min(1)`). We mirror that on the
-/// CLI side so a missing value fails Rust type checks instead of producing a cryptic
-/// 400 from zod. `manifest` is filled by the build step (or the auto-gen fallbacks
-/// in `run`); `commitSha` falls back to `synthetic_sha(&files)` when git isn't available.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateDeploymentBody {
-    build_log_protocol: &'static str,
+struct AdmitDeploymentBody<'a> {
+    protocol_version: &'static str,
+    environment_id: &'a str,
+    branch: &'a str,
+    commit_sha: &'a str,
+    selection_source: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AdmissionDeployment {
+    id: String,
+    attempt: u32,
+    status: String,
+    url: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AdmissionResponse {
+    protocol_version: String,
+    context: crate::execution_context::ExecutionContext,
+    deployment: AdmissionDeployment,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeploymentSourceBody {
+    protocol_version: &'static str,
+    attempt: u32,
+    operation_id: String,
     manifest: serde_json::Value,
-    files: Vec<FileEntry>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    production: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    branch: Option<String>,
-    commit_sha: String,
-    /// ONREZA Functions published alongside this deployment. Function source is
-    /// DB-backed and intentionally not part of SOURCE_BUNDLE_V1.
     #[serde(skip_serializing_if = "Option::is_none")]
     functions: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateDeploymentResponse {
+struct DeploymentSourceResponse {
     id: String,
-    #[allow(dead_code)]
     status: String,
-    url: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum PreSourceFailureCode {
+    MaterializationFailed,
+    ConfigInvalid,
+    BuildFailed,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreSourceFailureBody {
+    protocol_version: &'static str,
+    attempt: u32,
+    error_code: PreSourceFailureCode,
+}
+
+#[derive(Debug, Deserialize)]
+struct PreSourceFailureResponse {
+    #[allow(dead_code)]
+    accepted: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunnerDeploymentContext {
+    id: String,
+    attempt: u32,
+    status: String,
+    url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunnerContextResponse {
+    protocol_version: String,
+    context: crate::execution_context::ExecutionContext,
+    deployment: RunnerDeploymentContext,
+    settings: ProjectBuildSettings,
 }
 
 #[derive(Debug, Deserialize)]
@@ -530,18 +578,26 @@ pub async fn run(
         .into_anyhow());
     }
 
-    // Early-resolve project_id before build/detect so server settings can be
-    // imported into the same effective config as local onreza.toml.
+    let runner_context = if let Some(deployment_id) = resume_deployment_id {
+        let context: RunnerContextResponse = client
+            .get(&format!("/v1/deployments/{deployment_id}/runner-context"))
+            .await
+            .context("failed to fetch exact deployment runner context")?;
+        if context.protocol_version != crate::execution_context::EXECUTION_CONTEXT_PROTOCOL {
+            bail!("unsupported execution context protocol");
+        }
+        Some(context)
+    } else {
+        None
+    };
+
+    // Resolve project settings before build. Platform runners use only their
+    // exact deployment-scoped context and never need project-wide API access.
     command_context.apply_project_id_override(args.project_id.as_deref())?;
-    let mut early_project_id = command_context.effective.project_id().map(str::to_string);
-    if early_project_id.is_none()
-        && let Some(deployment_id) = resume_deployment_id
-    {
-        early_project_id = Some(
-            resolve_project_id_for_resume(&client, deployment_id, None, &command_context.config)
-                .await?,
-        );
-    }
+    let mut early_project_id = runner_context
+        .as_ref()
+        .map(|runner| runner.context.project_id.clone())
+        .or_else(|| command_context.effective.project_id().map(str::to_string));
     if !args.dry && early_project_id.is_none() {
         if json {
             bail!(
@@ -573,7 +629,9 @@ pub async fn run(
     }
 
     // Fetch project settings from server if project_id is known
-    let server_settings = if let Some(ref pid) = early_project_id {
+    let server_settings = if let Some(runner) = &runner_context {
+        Some(runner.settings.clone())
+    } else if let Some(ref pid) = early_project_id {
         match crate::project_settings::fetch_for_effective_config(&client, pid).await? {
             crate::project_settings::ProjectSettingsFetch::Applied(info) => {
                 tracing::info!(
@@ -618,6 +676,8 @@ pub async fn run(
             command: &command_context,
             explicit_compute,
             build_logs: None,
+            execution_env: &[],
+            target_production: args.prod.then_some(true),
         })
         .await?;
         let source_bundle = deploy_plan.materialize_source_bundle(json)?;
@@ -630,41 +690,191 @@ pub async fn run(
         return Ok(());
     }
 
-    // SOURCE_BUNDLE_V1 prepare-upload needs the authenticated workspace ID for
-    // direct CLI deploy and builder resume. Admission/limits are enforced
-    // server-side from the logical manifest plus source archive descriptor.
-    let ws_info: WorkspaceInfo = client
-        .get("/v1/workspace")
-        .await
-        .context("failed to fetch workspace info")?;
-
     let project_id = early_project_id
         .clone()
-        .context("project must be resolved before build-log session creation")?;
-    let build_log_redaction_keys = command_context
-        .config
-        .env
-        .declarations
-        .iter()
-        .filter(|(_, declaration)| declaration.visibility == EnvVisibility::Sensitive)
-        .map(|(key, _)| key.clone())
-        .collect::<Vec<_>>();
-    let mut build_log_session = BuildLogSession::start(
-        &client,
-        &project_id,
-        &ws_info.id,
-        &command_context.project_dir,
-        &build_log_redaction_keys,
-        BuildLogUploadConfig::from_args(&args),
-        json,
-    )
-    .await;
-    if let Some(deployment_id) = resume_deployment_id
-        && let Some(session) = build_log_session.as_mut()
-    {
-        session.attach(deployment_id).await;
-    }
+        .context("project must be resolved before deployment admission")?;
 
+    let (deployment, execution_context, materialized) = if let Some(runner) = &runner_context {
+        let materialized = match crate::execution_context::materialize_deployment(
+            &client,
+            &runner.deployment.id,
+            "DEPLOY",
+        )
+        .await
+        {
+            Ok(materialized) => materialized,
+            Err(error) => {
+                report_pre_source_failure(
+                    &client,
+                    &runner.deployment.id,
+                    runner.deployment.attempt,
+                    PreSourceFailureCode::MaterializationFailed,
+                    json,
+                )
+                .await;
+                return Err(error);
+            }
+        };
+        (
+            AdmissionDeployment {
+                id: runner.deployment.id.clone(),
+                attempt: runner.deployment.attempt,
+                status: runner.deployment.status.clone(),
+                url: runner.deployment.url.clone().unwrap_or_default(),
+            },
+            runner.context.clone(),
+            materialized,
+        )
+    } else {
+        if args.prod && args.environment.is_some() {
+            bail!("--prod conflicts with --environment; select one exact environment");
+        }
+        let selector = args
+            .environment
+            .as_deref()
+            .or(args.prod.then_some("production"));
+        let preliminary_branch = git_cmd(&["rev-parse", "--abbrev-ref", "HEAD"]);
+        let context = crate::execution_context::resolve_for_mutation(
+            &client,
+            &project_id,
+            &command_context.project_dir,
+            selector,
+            preliminary_branch.as_deref(),
+        )
+        .await?;
+        let branch = preliminary_branch
+            .or_else(|| context.source_ref.clone())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "local".to_string());
+        let commit_sha = git_cmd(&["rev-parse", "HEAD"]).unwrap_or_else(|| {
+            output::warn(
+                json,
+                "git not available, using a synthetic source revision",
+                output::Phase::Deploy,
+            );
+            Uuid::now_v7().simple().to_string()
+        });
+        output::status(json, "~", "Admitting deployment...", output::Phase::Deploy);
+        let admitted: AdmissionResponse = client
+            .post(
+                &format!("/v1/projects/{project_id}/deployments/admit"),
+                &AdmitDeploymentBody {
+                    protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
+                    environment_id: &context.environment_id,
+                    branch: &branch,
+                    commit_sha: &commit_sha,
+                    selection_source: &context.selection_source,
+                },
+            )
+            .await
+            .map_err(|error| map_create_deployment_error(error, json))?;
+        if admitted.protocol_version != crate::execution_context::EXECUTION_CONTEXT_PROTOCOL {
+            bail!("unsupported execution context protocol");
+        }
+        let materialized = match crate::execution_context::materialize_deployment(
+            &client,
+            &admitted.deployment.id,
+            "DEPLOY",
+        )
+        .await
+        {
+            Ok(materialized) => materialized,
+            Err(error) => {
+                report_pre_source_failure(
+                    &client,
+                    &admitted.deployment.id,
+                    admitted.deployment.attempt,
+                    PreSourceFailureCode::MaterializationFailed,
+                    json,
+                )
+                .await;
+                return Err(error);
+            }
+        };
+        (admitted.deployment, admitted.context, materialized)
+    };
+
+    if deployment.status != "BUILDING" {
+        let error = anyhow::anyhow!(
+            "deployment {} is in {} state, expected BUILDING",
+            deployment.id,
+            deployment.status
+        );
+        report_pre_source_failure(
+            &client,
+            &deployment.id,
+            deployment.attempt,
+            PreSourceFailureCode::ConfigInvalid,
+            json,
+        )
+        .await;
+        return Err(error);
+    }
+    if materialized.context.environment_id != execution_context.environment_id {
+        let error = anyhow::anyhow!(
+            "ENV_SNAPSHOT_SCOPE_MISMATCH: deployment context changed during admission"
+        );
+        report_pre_source_failure(
+            &client,
+            &deployment.id,
+            deployment.attempt,
+            PreSourceFailureCode::ConfigInvalid,
+            json,
+        )
+        .await;
+        return Err(error);
+    }
+    if !args.skip_env_check
+        && let Err(error) = crate::cli::env_handler::validate_materialized_env_for_deploy(
+            &materialized.variables,
+            json,
+            &command_context.config,
+        )
+    {
+        report_pre_source_failure(
+            &client,
+            &deployment.id,
+            deployment.attempt,
+            PreSourceFailureCode::ConfigInvalid,
+            json,
+        )
+        .await;
+        return Err(error);
+    }
+    if let Err(error) =
+        crate::execution_context::warn_local_dotenv_drift(&command_context.project_dir, json)
+    {
+        report_pre_source_failure(
+            &client,
+            &deployment.id,
+            deployment.attempt,
+            PreSourceFailureCode::ConfigInvalid,
+            json,
+        )
+        .await;
+        return Err(error);
+    }
+    let mut execution_env = crate::execution_context::execution_environment(&materialized)
+        .into_iter()
+        .collect::<Vec<_>>();
+    execution_env.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut build_log_secret_values = crate::execution_context::secret_values(&materialized);
+    build_log_secret_values.push(tok.clone());
+    let mut build_log_session = BuildLogSession::start(build_logs::StartBuildLogSession {
+        client: &client,
+        project_id: &project_id,
+        deployment_id: &deployment.id,
+        workspace_id: &execution_context.workspace_id,
+        project_dir: &command_context.project_dir,
+        secret_values: &build_log_secret_values,
+        config: BuildLogUploadConfig::from_args(&args, deployment.attempt),
+        json,
+    })
+    .await;
+    let target_production = Some(execution_context.environment_type == "PRODUCTION");
+
+    let admitted_deployment_id = deployment.id.clone();
+    let mut source_registered = false;
     let deploy_result = async {
         let deploy_plan = plan::build(plan::DeployPlanRequest {
             args: &args,
@@ -673,6 +883,8 @@ pub async fn run(
             build_logs: build_log_session
                 .as_ref()
                 .and_then(BuildLogSession::emitter),
+            execution_env: &execution_env,
+            target_production,
         })
         .await?;
         if let Some(emitter) = build_log_session
@@ -681,17 +893,24 @@ pub async fn run(
         {
             emitter.info(BuildLogPhase::Detect, "Build output validated");
         }
+        let upload_plan = deploy_plan.materialize_source_bundle(json)?;
+        register_deployment_source(
+            &client,
+            &admitted_deployment_id,
+            deployment.attempt,
+            deploy_plan.manifest_raw.clone(),
+            conform_functions_to_wire_contract(deploy_plan.functions)?,
+        )
+        .await?;
+        source_registered = true;
 
         // ── Resume mode: builder calls us with an existing deployment ID ──
-        if let Some(deployment_id) = &args.resume_deployment {
-            let deployment_id = deployment_id.trim();
-            let upload_plan = deploy_plan.materialize_source_bundle(json)?;
+        if resume_deployment_id.is_some() {
             return resume_deploy(ResumeDeployRequest {
                 client: &client,
-                deployment_id,
-                workspace_id: &ws_info.id,
+                deployment_id: &deployment.id,
+                workspace_id: &execution_context.workspace_id,
                 project_id: &project_id,
-                functions: deploy_plan.functions,
                 upload_plan,
                 json,
                 warnings: deploy_plan.warnings,
@@ -701,36 +920,10 @@ pub async fn run(
 
         // ── Normal flow continues below ─────────────────────────────────
 
-        let deploy_files = deploy_plan.files.clone();
         let deploy_warnings = deploy_plan.warnings.clone();
         let deploy_health_check = deploy_plan.health_check.clone();
         let deploy_production = deploy_plan.production;
         let sync_detection = deploy_plan.artifact.build.detection.clone();
-
-        // Git info
-        let branch = git_cmd(&["rev-parse", "--abbrev-ref", "HEAD"]);
-        let commit_sha = git_cmd(&["rev-parse", "HEAD"]).unwrap_or_else(|| {
-            output::warn(
-                json,
-                "git not available, using synthetic commit SHA",
-                output::Phase::Deploy,
-            );
-            synthetic_sha(&deploy_files)
-        });
-
-        // Validate required env vars from [env] declarations
-        if !args.skip_env_check {
-            crate::cli::env_handler::validate_env_for_deploy(
-                &client,
-                &project_id,
-                json,
-                &command_context.config,
-            )
-            .await?;
-        }
-
-        let upload_plan = deploy_plan.materialize_source_bundle(json)?;
-        let deploy_functions = deploy_plan.functions;
 
         // Sync detection results to API (best-effort, non-blocking)
         let sync_client = client.clone();
@@ -765,28 +958,6 @@ pub async fn run(
         );
         let deployment_attempt_id = Uuid::now_v7().to_string();
 
-        // Create deployment
-        output::status(json, "~", "Creating deployment...", output::Phase::Deploy);
-        let body = CreateDeploymentBody {
-            build_log_protocol: build_log_protocol(),
-            manifest: deploy_plan.manifest_raw,
-            files: deploy_files.clone(),
-            production: deploy_production,
-            branch,
-            commit_sha,
-            functions: conform_functions_to_wire_contract(deploy_functions)?,
-        };
-
-        let deployment: CreateDeploymentResponse = match client
-            .post(&format!("/v1/projects/{}/deployments", project_id), &body)
-            .await
-        {
-            Ok(deployment) => deployment,
-            Err(error) => return Err(map_create_deployment_error(error, json)),
-        };
-        if let Some(session) = build_log_session.as_mut() {
-            session.attach(&deployment.id).await;
-        }
         if let Some(emitter) = build_log_session
             .as_ref()
             .and_then(BuildLogSession::emitter)
@@ -797,7 +968,7 @@ pub async fn run(
         prepare_upload_and_complete(
             &client,
             &deployment.id,
-            &ws_info.id,
+            &execution_context.workspace_id,
             &project_id,
             &deployment_attempt_id,
             json,
@@ -906,10 +1077,46 @@ pub async fn run(
     }
     .await;
 
+    if deploy_result.is_err() && !source_registered {
+        report_pre_source_failure(
+            &client,
+            &admitted_deployment_id,
+            deployment.attempt,
+            PreSourceFailureCode::BuildFailed,
+            json,
+        )
+        .await;
+    }
     if let Some(session) = build_log_session.as_mut() {
         session.finish(&deploy_result).await;
     }
     deploy_result
+}
+
+async fn report_pre_source_failure(
+    client: &ApiClient,
+    deployment_id: &str,
+    attempt: u32,
+    error_code: PreSourceFailureCode,
+    json: bool,
+) {
+    let result: anyhow::Result<PreSourceFailureResponse> = client
+        .post(
+            &format!("/v1/deployments/{deployment_id}/execution-context/fail-before-source"),
+            &PreSourceFailureBody {
+                protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
+                attempt,
+                error_code,
+            },
+        )
+        .await;
+    if let Err(error) = result {
+        output::warn(
+            json,
+            format!("Could not mark admitted deployment failed: {error}"),
+            output::Phase::Deploy,
+        );
+    }
 }
 
 fn emit_deploy_plan_explain(json: bool, explain: &plan::DeployPlanExplain) -> anyhow::Result<()> {
@@ -920,43 +1127,6 @@ fn emit_deploy_plan_explain(json: bool, explain: &plan::DeployPlanExplain) -> an
         eprintln!("{}", serde_json::to_string_pretty(explain)?);
     }
     Ok(())
-}
-
-fn resolve_deploy_production_override(prod: bool, env: &[String]) -> anyhow::Result<Option<bool>> {
-    let mut selected = None;
-
-    for raw in env {
-        let value = raw.trim();
-        if value.is_empty() {
-            continue;
-        }
-        let production = match value.to_ascii_uppercase().as_str() {
-            "PRODUCTION" | "PROD" => true,
-            "PREVIEW" => false,
-            "DEVELOPMENT" | "DEV" => {
-                anyhow::bail!("nrz deploy supports only --env production or --env preview");
-            }
-            _ => {
-                anyhow::bail!(
-                    "nrz deploy does not support arbitrary environment IDs or names in --env yet; use --env production or --env preview"
-                );
-            }
-        };
-
-        if selected.is_some_and(|current| current != production) {
-            anyhow::bail!("nrz deploy accepts only one target environment");
-        }
-        selected = Some(production);
-    }
-
-    if prod {
-        if selected == Some(false) {
-            anyhow::bail!("--prod conflicts with --env preview");
-        }
-        return Ok(Some(true));
-    }
-
-    Ok(selected)
 }
 
 // ── Compute config sync ──────────────────────────────────────
@@ -995,18 +1165,6 @@ async fn sync_compute_config(
 /// Drive the SOURCE_BUNDLE_V1 upload protocol:
 /// prepare-upload → source object PUT(s) → multipart-complete? → upload-complete.
 #[allow(clippy::too_many_arguments)]
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DeploymentProjectLookup {
-    project: DeploymentProjectInfo,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DeploymentProjectInfo {
-    id: String,
-}
-
 #[derive(Debug, Serialize)]
 struct ResumeDeployOutput {
     deployment_id: String,
@@ -1015,29 +1173,76 @@ struct ResumeDeployOutput {
     warnings: Vec<String>,
 }
 
-async fn resolve_project_id_for_resume(
+async fn register_deployment_source(
     client: &ApiClient,
     deployment_id: &str,
-    explicit_project_id: Option<&str>,
-    config: &ProjectConfig,
-) -> anyhow::Result<String> {
-    if let Some(project_id) = explicit_project_id.filter(|value| !value.trim().is_empty()) {
-        return Ok(project_id.to_string());
-    }
-    if let Some(project_id) = config
-        .project
-        .id
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        return Ok(project_id.to_string());
-    }
+    attempt: u32,
+    manifest: serde_json::Value,
+    functions: Option<serde_json::Value>,
+) -> anyhow::Result<()> {
+    let path = format!("/v1/deployments/{deployment_id}/source");
+    let namespace = Uuid::parse_str(deployment_id).context("deployment ID is not a valid UUID")?;
+    let operation_id = Uuid::new_v5(
+        &namespace,
+        format!("onreza:deployment-source:{attempt}").as_bytes(),
+    )
+    .to_string();
+    let body = DeploymentSourceBody {
+        protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
+        attempt,
+        operation_id,
+        manifest,
+        functions,
+    };
+    let started = Instant::now();
+    let mut delay = SOURCE_REGISTRATION_INITIAL_RETRY_DELAY;
 
-    let deployment: DeploymentProjectLookup = client
-        .get(&format!("/v1/deployments/{deployment_id}"))
-        .await
-        .context("failed to resolve project for resumed deployment")?;
-    Ok(deployment.project.id)
+    loop {
+        let remaining = SOURCE_REGISTRATION_RETRY_BUDGET.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            bail!(
+                "failed to register admitted deployment source after waiting {:?}",
+                SOURCE_REGISTRATION_RETRY_BUDGET
+            );
+        }
+        let response = tokio::time::timeout(
+            SOURCE_REGISTRATION_REQUEST_TIMEOUT.min(remaining),
+            client.post::<_, DeploymentSourceResponse>(&path, &body),
+        )
+        .await;
+        match response {
+            Ok(Ok(response)) => {
+                if response.id != deployment_id || response.status != "UPLOADING" {
+                    bail!("deployment source registration returned an unexpected state");
+                }
+                return Ok(());
+            }
+            Ok(Err(error)) => {
+                let Some(retry) = classify_api_retry(&error) else {
+                    return Err(error.context("failed to register admitted deployment source"));
+                };
+                let remaining = SOURCE_REGISTRATION_RETRY_BUDGET.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(error.context(format!(
+                        "failed to register admitted deployment source after waiting {:?}",
+                        SOURCE_REGISTRATION_RETRY_BUDGET
+                    )));
+                }
+                tokio::time::sleep(retry.retry_after.unwrap_or(delay).min(remaining)).await;
+            }
+            Err(_) => {
+                let remaining = SOURCE_REGISTRATION_RETRY_BUDGET.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    bail!(
+                        "failed to register admitted deployment source after waiting {:?}",
+                        SOURCE_REGISTRATION_RETRY_BUDGET
+                    );
+                }
+                tokio::time::sleep(delay.min(remaining)).await;
+            }
+        }
+        delay = (delay * 2).min(SOURCE_REGISTRATION_MAX_RETRY_DELAY);
+    }
 }
 
 struct ResumeDeployRequest<'a> {
@@ -1045,7 +1250,6 @@ struct ResumeDeployRequest<'a> {
     deployment_id: &'a str,
     workspace_id: &'a str,
     project_id: &'a str,
-    functions: Option<crate::functions::FunctionPublishPayload>,
     upload_plan: SourceBundlePlan,
     warnings: Vec<String>,
     json: bool,
@@ -1057,7 +1261,6 @@ async fn resume_deploy(request: ResumeDeployRequest<'_>) -> anyhow::Result<()> {
         deployment_id,
         workspace_id,
         project_id,
-        functions,
         upload_plan,
         warnings,
         json,
@@ -1069,10 +1272,6 @@ async fn resume_deploy(request: ResumeDeployRequest<'_>) -> anyhow::Result<()> {
         format!("Resuming deployment {deployment_id}"),
         output::Phase::Deploy,
     );
-
-    if let Some(functions) = &functions {
-        stage_deployment_functions(client, deployment_id, project_id, functions, json).await?;
-    }
 
     output::success(
         json,
@@ -1115,87 +1314,6 @@ async fn resume_deploy(request: ResumeDeployRequest<'_>) -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-async fn stage_deployment_functions(
-    client: &ApiClient,
-    deployment_id: &str,
-    project_id: &str,
-    functions: &crate::functions::FunctionPublishPayload,
-    json: bool,
-) -> anyhow::Result<()> {
-    let edge_rule_count = functions_payload_edge_rule_count(functions);
-    output::status(
-        json,
-        "~",
-        function_stage_message(functions.functions.len(), edge_rule_count),
-        output::Phase::Deploy,
-    );
-    let stage_result: anyhow::Result<serde_json::Value> = client
-        .post(
-            &stage_deployment_functions_path(project_id, deployment_id),
-            functions,
-        )
-        .await;
-    if let Err(error) = stage_result {
-        return Err(map_function_stage_error(error, json));
-    }
-    output::success(
-        json,
-        function_stage_success_message(functions.functions.len(), edge_rule_count),
-        output::Phase::Deploy,
-    );
-    Ok(())
-}
-
-fn functions_payload_edge_rule_count(
-    functions: &crate::functions::FunctionPublishPayload,
-) -> usize {
-    functions
-        .edge_rules
-        .as_ref()
-        .map_or(0, crate::functions::edge_rule_count)
-        + functions
-            .generated_edge_rule_sets
-            .iter()
-            .map(|rule_set| crate::functions::edge_rule_count(&rule_set.edge_rules))
-            .sum::<usize>()
-}
-
-fn map_function_stage_error(error: anyhow::Error, json: bool) -> anyhow::Error {
-    let Some(api_error) = error.downcast_ref::<crate::api::StructuredApiError>() else {
-        return error.context("failed to stage ONREZA Functions for deployment");
-    };
-    if let Some(mapped) = map_edge_rules_diverged_error(
-        api_error,
-        json,
-        "failed to stage ONREZA Functions for deployment",
-    ) {
-        return mapped;
-    }
-    if api_error.code != "FUNCTION_PUBLISH_FAILED" {
-        if json {
-            let message = format!("failed to stage ONREZA Functions for deployment: {api_error}");
-            return output::report_terminal_error(
-                "deploy",
-                &message,
-                &api_error.code,
-                api_error.details.as_ref(),
-            );
-        }
-        return error.context("failed to stage ONREZA Functions for deployment");
-    }
-
-    let message = format_function_publish_failure(api_error);
-    if json {
-        return output::report_terminal_error(
-            "deploy",
-            &message,
-            &api_error.code,
-            api_error.details.as_ref(),
-        );
-    }
-    anyhow::anyhow!(message).context("failed to stage ONREZA Functions for deployment")
 }
 
 fn map_create_deployment_error(error: anyhow::Error, json: bool) -> anyhow::Error {
@@ -1299,12 +1417,6 @@ fn format_function_publish_failure(error: &crate::api::StructuredApiError) -> St
     rendered
 }
 
-fn stage_deployment_functions_path(project_id: &str, deployment_id: &str) -> String {
-    format!(
-        "/v1/projects/{project_id}/function-activations/deployments/{deployment_id}/functions/stage"
-    )
-}
-
 fn format_function_publish_summary(
     function_count: usize,
     source_file_count: usize,
@@ -1316,22 +1428,6 @@ fn format_function_publish_summary(
     format!(
         "{function_count} function(s), {source_file_count} source file(s), {edge_rule_count} edge rule(s) ready"
     )
-}
-
-fn function_stage_message(function_count: usize, edge_rule_count: usize) -> &'static str {
-    match (function_count > 0, edge_rule_count > 0) {
-        (true, true) => "Staging ONREZA Functions and Edge Rules...",
-        (false, true) => "Staging Edge Rules...",
-        _ => "Staging ONREZA Functions...",
-    }
-}
-
-fn function_stage_success_message(function_count: usize, edge_rule_count: usize) -> &'static str {
-    match (function_count > 0, edge_rule_count > 0) {
-        (true, true) => "ONREZA Functions and Edge Rules staged for deployment",
-        (false, true) => "Edge Rules staged for deployment",
-        _ => "ONREZA Functions staged for deployment",
-    }
 }
 
 // ── Runtime artifact resolution ───────────────────────────────

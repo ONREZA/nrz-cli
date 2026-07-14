@@ -8,3 +8,4 @@ pub(crate) use client::ConditionalUploadConflict;
 pub(crate) use client::PresignedHeadVerify;
 pub(crate) use client::PresignedPutHeaders;
 pub use client::StructuredApiError;
+pub(crate) use client::classify_api_retry;

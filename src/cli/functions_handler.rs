@@ -8,10 +8,10 @@ use serde_json::{Value, json};
 
 use crate::api::ApiClient;
 use crate::auth;
-use crate::cli::environment;
 use crate::cli::functions::{
     FunctionsArgs, FunctionsCheckArgs, FunctionsCommand, FunctionsInvokeArgs,
 };
+use crate::execution_context;
 use crate::functions;
 use crate::output::{self, Phase};
 use nrz::config;
@@ -173,14 +173,21 @@ async fn invoke(
     workspace: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
-    let _project_dir = Path::new(&args.dir)
+    let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
     let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
-    let environment_id =
-        environment::resolve_environment_id(&client, &project_id, args.env.as_deref()).await?;
+    let environment_id = execution_context::resolve_for_mutation(
+        &client,
+        &project_id,
+        &project_dir,
+        args.environment.as_deref(),
+        None,
+    )
+    .await?
+    .environment_id;
     let functions = list_remote_functions(&client, &project_id, &environment_id).await?;
     let function = resolve_function_by_name(&functions.functions, &args.name)?;
     let revision_id = function.active_revision_id()?;

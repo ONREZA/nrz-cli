@@ -20,9 +20,9 @@ pub enum DomainsCommand {
         /// Domain name (e.g. example.com)
         domain: String,
 
-        /// Environment ID (default: production)
+        /// Target environment (name or ID)
         #[arg(long)]
-        environment_id: Option<String>,
+        environment: Option<String>,
     },
 
     /// Remove a custom domain hostname

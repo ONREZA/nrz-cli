@@ -12,13 +12,13 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::api::{ApiClient, StructuredApiError};
+use crate::api::{ApiClient, classify_api_retry};
 use crate::cli::DeployArgs;
 use crate::output;
 
-const BUILD_LOG_PROTOCOL: &str = "BUILD_LOG_INGEST_V2";
 const CREATE_TIMEOUT: Duration = Duration::from_secs(10);
 const MUTATION_TIMEOUT: Duration = Duration::from_secs(10);
+const MUTATION_RETRY_BUDGET: Duration = Duration::from_secs(30);
 const UPLOAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
 const UPLOAD_RETRY_BUDGET: Duration = Duration::from_secs(30);
 const UPLOAD_RETRY_INITIAL_DELAY: Duration = Duration::from_millis(250);
@@ -33,7 +33,6 @@ const FLUSH_INTERVAL: Duration = Duration::from_secs(2);
 const NOTICE_FILE: &str = "build-log-upload-notice-v2";
 const TRUNCATION_MARKER: &str = "…[TRUNCATED]";
 const REDACTED: &str = "[REDACTED]";
-const REDACTION_KEYS_ENV: &str = "NRZ_BUILD_LOG_REDACT_KEYS";
 const PLATFORM_SECRET_ENV_KEYS: &[&str] = &["NRZ_TOKEN"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -85,12 +84,13 @@ pub(super) enum BuildLogOrigin {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct BuildLogUploadConfig {
     source: BuildLogSource,
+    attempt: u32,
     upload_enabled: bool,
     include_debug: bool,
 }
 
 impl BuildLogUploadConfig {
-    pub(super) fn from_args(args: &DeployArgs) -> Self {
+    pub(super) fn from_args(args: &DeployArgs, attempt: u32) -> Self {
         let source = match std::env::var("NRZ_BUILD_LOG_SOURCE") {
             Ok(value) if value.trim().eq_ignore_ascii_case("REMOTE_BUILDER") => {
                 BuildLogSource::RemoteBuilder
@@ -103,16 +103,13 @@ impl BuildLogUploadConfig {
             .unwrap_or(false);
         Self {
             source,
+            attempt,
             upload_enabled: !args.no_log_upload && env_upload_enabled,
             include_debug: source == BuildLogSource::RemoteBuilder
                 || args.log_upload_debug
                 || env_debug,
         }
     }
-}
-
-pub(super) fn build_log_protocol() -> &'static str {
-    BUILD_LOG_PROTOCOL
 }
 
 pub(super) fn parse_env_toggle(value: Option<&str>) -> Option<bool> {
@@ -128,6 +125,8 @@ pub(super) fn parse_env_toggle(value: Option<&str>) -> Option<bool> {
 struct CreateSessionRequest<'a> {
     id: &'a str,
     project_id: &'a str,
+    deployment_id: &'a str,
+    attempt: u32,
     producer_id: &'a str,
     source: BuildLogSource,
     cli_version: &'static str,
@@ -153,7 +152,6 @@ struct SessionResponse {
     shipping_policy: String,
     next_seq: u32,
     accepted_bytes: usize,
-    diagnostic_path: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -181,12 +179,6 @@ struct AppendEventsResponse {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AttachRequest<'a> {
-    deployment_id: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct FinishRequest {
     status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -208,30 +200,23 @@ pub(super) struct ExactValueRedactor {
     pattern: Option<Regex>,
 }
 
+const NON_SENSITIVE_EXACT_VALUES: &[&str] =
+    &["production", "preview", "development", "true", "false"];
+
 impl ExactValueRedactor {
-    fn from_environment(configured_keys: &[String]) -> anyhow::Result<Self> {
-        let mut keys = configured_keys.to_vec();
-        if let Ok(value) = std::env::var(REDACTION_KEYS_ENV) {
-            keys.extend(
-                serde_json::from_str::<Vec<String>>(&value)
-                    .context("invalid NRZ_BUILD_LOG_REDACT_KEYS contract")?,
-            );
-        }
-        keys.extend(
+    fn from_materialized_values(configured_values: &[String]) -> anyhow::Result<Self> {
+        let mut values = configured_values.to_vec();
+        values.extend(
             PLATFORM_SECRET_ENV_KEYS
                 .iter()
-                .map(|key| (*key).to_string()),
+                .filter_map(|key| match std::env::var(key) {
+                    Ok(value) => Some(Ok(value)),
+                    Err(std::env::VarError::NotPresent) => None,
+                    Err(error @ std::env::VarError::NotUnicode(_)) => Some(Err(error)),
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .context("platform build-log secret is not valid UTF-8")?,
         );
-
-        let values = keys
-            .iter()
-            .filter_map(|key| match std::env::var(key) {
-                Ok(value) => Some(Ok(value)),
-                Err(std::env::VarError::NotPresent) => None,
-                Err(error @ std::env::VarError::NotUnicode(_)) => Some(Err(error)),
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .context("protected build-log environment value is not valid UTF-8")?;
 
         Self::from_values(values)
     }
@@ -252,6 +237,11 @@ impl ExactValueRedactor {
                 parts
             })
             .filter(|value| !value.is_empty())
+            .filter(|value| {
+                !NON_SENSITIVE_EXACT_VALUES
+                    .iter()
+                    .any(|allowed| value.eq_ignore_ascii_case(allowed))
+            })
             .filter(|value| unique.insert(value.clone()))
             .collect::<Vec<_>>();
         values.sort_unstable_by_key(|value| std::cmp::Reverse(value.len()));
@@ -398,21 +388,32 @@ pub(super) struct BuildLogSession {
     phase: Arc<Mutex<BuildLogPhase>>,
     dropped: Arc<std::sync::atomic::AtomicU64>,
     redactor: Arc<ExactValueRedactor>,
-    diagnostic_path: String,
-    attached: bool,
     json: bool,
 }
 
+pub(super) struct StartBuildLogSession<'a> {
+    pub client: &'a ApiClient,
+    pub project_id: &'a str,
+    pub deployment_id: &'a str,
+    pub workspace_id: &'a str,
+    pub project_dir: &'a Path,
+    pub secret_values: &'a [String],
+    pub config: BuildLogUploadConfig,
+    pub json: bool,
+}
+
 impl BuildLogSession {
-    pub(super) async fn start(
-        client: &ApiClient,
-        project_id: &str,
-        workspace_id: &str,
-        project_dir: &Path,
-        redaction_keys: &[String],
-        config: BuildLogUploadConfig,
-        json: bool,
-    ) -> Option<Self> {
+    pub(super) async fn start(request: StartBuildLogSession<'_>) -> Option<Self> {
+        let StartBuildLogSession {
+            client,
+            project_id,
+            deployment_id,
+            workspace_id,
+            project_dir,
+            secret_values,
+            config,
+            json,
+        } = request;
         if !config.upload_enabled {
             return None;
         }
@@ -446,7 +447,7 @@ impl BuildLogSession {
             }
         }
 
-        let redactor = match ExactValueRedactor::from_environment(redaction_keys) {
+        let redactor = match ExactValueRedactor::from_materialized_values(secret_values) {
             Ok(redactor) => Arc::new(redactor),
             Err(error) => {
                 output::warn(
@@ -467,6 +468,8 @@ impl BuildLogSession {
         let request = CreateSessionRequest {
             id: &id,
             project_id,
+            deployment_id,
+            attempt: config.attempt,
             producer_id: &producer_id,
             source: config.source,
             cli_version: env!("CARGO_PKG_VERSION"),
@@ -540,45 +543,12 @@ impl BuildLogSession {
             phase,
             dropped,
             redactor,
-            diagnostic_path: response.session.diagnostic_path,
-            attached: false,
             json,
         })
     }
 
     pub(super) fn emitter(&self) -> Option<&BuildLogEmitter> {
         self.emitter.as_ref()
-    }
-
-    pub(super) async fn attach(&mut self, deployment_id: &str) {
-        let path = format!("/v1/build-log-sessions/{}/attach-deployment", self.id);
-        let result = tokio::time::timeout(
-            MUTATION_TIMEOUT,
-            self.client
-                .post::<_, serde_json::Value>(&path, &AttachRequest { deployment_id }),
-        )
-        .await;
-        match result {
-            Ok(Ok(_)) => {
-                self.attached = true;
-                if let Some(emitter) = &self.emitter {
-                    emitter.debug(
-                        BuildLogPhase::Deploy,
-                        "Build log session attached to deployment",
-                    );
-                }
-            }
-            Ok(Err(error)) => output::warn(
-                self.json,
-                format!("Could not attach build-log session: {error}"),
-                output::Phase::Deploy,
-            ),
-            Err(_) => output::warn(
-                self.json,
-                "Could not attach build-log session: request timed out",
-                output::Phase::Deploy,
-            ),
-        }
     }
 
     pub(super) async fn finish(&mut self, result: &anyhow::Result<()>) {
@@ -628,27 +598,50 @@ impl BuildLogSession {
             }),
         };
         let path = format!("/v1/build-log-sessions/{}/finish", self.id);
-        let finish_result = tokio::time::timeout(
-            MUTATION_TIMEOUT,
-            self.client.post::<_, serde_json::Value>(&path, &request),
-        )
-        .await;
-        if !matches!(finish_result, Ok(Ok(_))) {
+        if finish_session(&self.client, &path, &request).await.is_err() {
             output::warn(
                 self.json,
                 "Could not finalize build-log session",
                 output::Phase::Deploy,
             );
         }
-        if result.is_err() && !self.attached {
-            output::warn(
-                self.json,
-                format!(
-                    "Build diagnostics: {} (session {})",
-                    self.diagnostic_path, self.id
-                ),
-                output::Phase::Deploy,
-            );
+    }
+}
+
+async fn finish_session(
+    client: &ApiClient,
+    path: &str,
+    request: &FinishRequest,
+) -> anyhow::Result<()> {
+    let started = Instant::now();
+    let mut delay = UPLOAD_RETRY_INITIAL_DELAY;
+    loop {
+        let result = tokio::time::timeout(
+            MUTATION_TIMEOUT,
+            client.post::<_, serde_json::Value>(path, request),
+        )
+        .await;
+        match result {
+            Ok(Ok(_)) => return Ok(()),
+            Ok(Err(error)) => {
+                let Some(retry) = classify_api_retry(&error) else {
+                    return Err(error);
+                };
+                let remaining = MUTATION_RETRY_BUDGET.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(error);
+                }
+                tokio::time::sleep(retry.retry_after.unwrap_or(delay).min(remaining)).await;
+                delay = (delay * 2).min(UPLOAD_RETRY_MAX_DELAY);
+            }
+            Err(error) => {
+                let remaining = MUTATION_RETRY_BUDGET.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(error.into());
+                }
+                tokio::time::sleep(delay.min(remaining)).await;
+                delay = (delay * 2).min(UPLOAD_RETRY_MAX_DELAY);
+            }
         }
     }
 }
@@ -720,29 +713,24 @@ async fn upload_batch(
                 response.next_seq,
                 expected_next_seq
             ),
-            Ok(Err(error)) if !is_retryable(&error) => return Err(error),
+            Ok(Err(error)) if classify_api_retry(&error).is_none() => return Err(error),
             Ok(Err(error)) if started.elapsed() >= UPLOAD_RETRY_BUDGET => return Err(error),
-            Ok(Err(_)) | Err(_) if started.elapsed() < UPLOAD_RETRY_BUDGET => {
-                tokio::time::sleep(delay).await;
+            Ok(Err(error)) if started.elapsed() < UPLOAD_RETRY_BUDGET => {
+                let retry =
+                    classify_api_retry(&error).expect("retryable error was classified above");
+                let remaining = UPLOAD_RETRY_BUDGET.saturating_sub(started.elapsed());
+                tokio::time::sleep(retry.retry_after.unwrap_or(delay).min(remaining)).await;
+                delay = (delay * 2).min(UPLOAD_RETRY_MAX_DELAY);
+            }
+            Err(_) if started.elapsed() < UPLOAD_RETRY_BUDGET => {
+                let remaining = UPLOAD_RETRY_BUDGET.saturating_sub(started.elapsed());
+                tokio::time::sleep(delay.min(remaining)).await;
                 delay = (delay * 2).min(UPLOAD_RETRY_MAX_DELAY);
             }
             Err(_) => anyhow::bail!("build-log batch upload timed out"),
             Ok(Err(error)) => return Err(error),
         }
     }
-}
-
-fn is_retryable(error: &anyhow::Error) -> bool {
-    if let Some(error) = error.downcast_ref::<StructuredApiError>() {
-        return error.status.as_u16() == 408
-            || error.status.as_u16() == 429
-            || error.status.is_server_error();
-    }
-    error.chain().any(|cause| {
-        cause
-            .downcast_ref::<reqwest::Error>()
-            .is_some_and(|error| error.is_timeout() || error.is_connect() || error.is_request())
-    })
 }
 
 fn error_code(error: &anyhow::Error) -> Option<String> {
@@ -782,7 +770,7 @@ fn emit_upload_notice(
     output::status(
         json,
         "~",
-        "Build logs are uploaded to ONREZA. Values of environment variables declared as sensitive are masked only in the uploaded copy; local output stays unchanged. Disable with --no-log-upload or NRZ_LOG_UPLOAD=0.",
+        "Build logs are uploaded to ONREZA. Values classified as sensitive by ONREZA are masked only in the uploaded copy; local output stays unchanged. Disable with --no-log-upload or NRZ_LOG_UPLOAD=0.",
         output::Phase::Deploy,
     );
     if std::fs::create_dir_all(&state_dir).is_err() {

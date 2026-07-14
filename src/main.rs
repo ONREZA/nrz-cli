@@ -14,6 +14,7 @@ mod detect_sync;
 mod detect_sync_tests;
 mod dev;
 mod errors;
+mod execution_context;
 mod frameworks;
 mod functions;
 mod init;
@@ -50,7 +51,19 @@ async fn main() {
 
     let cli = Cli::parse();
     let json = !cli.human && (cli.json || !std::io::stdout().is_terminal());
-    let token = cli.token.clone();
+    let platform_runner = std::env::var("NRZ_RUNNER").is_ok_and(|value| value == "PLATFORM");
+    if platform_runner && let Err(error) = auth::harden_platform_runner_process() {
+        emit_terminal_error(json, &error);
+        std::process::exit(1);
+    }
+    let token_file = std::env::var_os("NRZ_TOKEN_FILE").map(PathBuf::from);
+    let token = match auth::consume_process_token(cli.token.clone(), token_file.as_deref()) {
+        Ok(token) => token,
+        Err(error) => {
+            emit_terminal_error(json, &error);
+            std::process::exit(1);
+        }
+    };
     let workspace = cli.workspace.clone();
 
     let config_dir = config_dir_for_command(&cli.command);
@@ -83,6 +96,7 @@ fn config_dir_for_command(command: &Command) -> PathBuf {
         Command::Dev(args) => Path::new(&args.dir).to_path_buf(),
         Command::Build(args) => Path::new(&args.dir).to_path_buf(),
         Command::Deploy(args) => Path::new(&args.dir).to_path_buf(),
+        Command::Context(args) => Path::new(&args.dir).to_path_buf(),
         Command::Config(args) => match &args.command {
             cli::config::ConfigCommand::Explain(args) => Path::new(&args.dir).to_path_buf(),
         },
@@ -145,7 +159,7 @@ async fn run_command(
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     match command {
-        Command::Dev(args) => dev::run(args, config).await,
+        Command::Dev(args) => dev::run(args, token, workspace, config).await,
         Command::Build(args) => build::run(args, json, config).await.map(|_| ()),
         Command::Deploy(args) => deploy::run(args, json, token, workspace, config).await,
         Command::Db(args) => cli::db_handler::run(args, json, token, workspace, config).await,
@@ -163,6 +177,9 @@ async fn run_command(
         Command::Deployments(args) => deployments::run(args, json, token, workspace, config).await,
         Command::Logs(args) => logs::run(args, json, token, workspace, config).await,
         Command::Env(args) => cli::env_handler::run(args, json, token, workspace, config).await,
+        Command::Context(args) => {
+            execution_context::run(args, json, token, workspace, config).await
+        }
         Command::Domains(args) => {
             cli::domains_handler::run(args, json, token, workspace, config).await
         }

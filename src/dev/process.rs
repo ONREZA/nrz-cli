@@ -40,12 +40,16 @@ pub async fn spawn_dev_server(
     cmd.args(args)
         .current_dir(project_dir)
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .env("NODE_OPTIONS", node_options);
+        .stderr(Stdio::inherit());
 
     for (key, val) in extra_env {
         cmd.env(key, val);
     }
+    for key in crate::execution_context::private_cli_environment_keys() {
+        cmd.env_remove(key);
+    }
+    // Emulator bootstrap is a platform patch and wins over materialized NODE_OPTIONS.
+    cmd.env("NODE_OPTIONS", node_options);
 
     let mut child = cmd.spawn().context("failed to start dev server")?;
 

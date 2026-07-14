@@ -68,7 +68,7 @@ nrz deploy --prod
 | Runtime | `nrz deployments`, `nrz logs` |
 | Database | `nrz db list`, `nrz db query "SELECT 1"`, `nrz db schema`, `nrz db branches` |
 | KV | `nrz kv get <key> --env preview`, `nrz kv set <key> <value> --ttl 60 --env preview`, `nrz kv list --prefix app_` |
-| Environment | `nrz env list`, `nrz env pull`, `nrz env push .env.local --declared-only`, `nrz env validate` |
+| Environment | `nrz context use <environment>`, `nrz env list`, `nrz env set`, `nrz env validate`, `nrz env exec -- <command>` |
 | Domains | `nrz domains list`, `nrz domains add example.com`, `nrz domains verify <domain_id>` |
 | Account | `nrz whoami`, `nrz workspace list`, `nrz workspace switch <slug>`, `nrz upgrade` |
 
@@ -99,12 +99,12 @@ npx ctx7 skills install /onreza/nrz-cli nrz-cli-project-bootstrap
 
 The CLI is designed for both human and machine usage:
 - Global flags: `--json`, `--token`, `--workspace`.
-- Env vars: `NRZ_JSON`, `NRZ_TOKEN`, `NRZ_WORKSPACE`; `NRZ_ENV` is command-scoped for `deploy`, `env`, and `kv`.
+- Env vars: `NRZ_JSON`, `NRZ_TOKEN`, `NRZ_WORKSPACE`; `NRZ_ENVIRONMENT` selects the platform execution context for every Environment-aware command. Legacy `NRZ_ENV` is scoped only to the local `kv` namespace.
 - In JSON mode, commands return structured output in `stdout`; errors are JSON with exit code `1`.
 
 Example:
 ```bash
-nrz deploy --json --token "$NRZ_TOKEN" --workspace my-team --env production
+nrz deploy --json --token "$NRZ_TOKEN" --workspace my-team --environment production
 ```
 
 ## Configuration

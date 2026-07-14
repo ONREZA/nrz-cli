@@ -86,7 +86,7 @@ anyhow = "1"
 url = "2"
 
 # Operation/idempotency identifiers for the SOURCE_BUNDLE_V1 upload contract
-uuid = { version = "1", features = ["v7"] }
+uuid = { version = "1", features = ["v5", "v7"] }
 
 # Unix signals (graceful shutdown)
 libc = "0.2"

@@ -170,18 +170,11 @@ branch = "dev"
 
 Декларация переменных окружения проекта.
 
-### [env] — настройки
-
-| Поле | Тип | По умолчанию | Описание |
-|------|-----|-------------|---------|
-| `strict` | boolean | `false` | Режим строгой загрузки: `nrz env push` загружает только переменные, объявленные в `[env.declarations]`. Аналог флага `--declared-only`. |
-
 ### [env.declarations] — переменные
 
 Объявляет какие env vars нужны проекту, их видимость и обязательность. Используется в:
-- `nrz env push` — определяет `is_secret` без эвристики по имени
-- `nrz env validate` — проверяет что все required переменные заданы
-- `nrz deploy` — pre-flight проверка перед деплоем (можно отключить `--skip-env-check`)
+- `nrz env validate` — проверяет один материализованный Environment snapshot
+- `nrz deploy` — проверяет материализованный snapshot перед сборкой (можно отключить `--skip-env-check`)
 
 **Два формата объявления:**
 
@@ -208,9 +201,6 @@ ANALYTICS_KEY = { visibility = "sensitive", required = false }
 
 **Пример полного [env]:**
 ```toml
-[env]
-strict = true
-
 [env.declarations]
 DATABASE_URL = "sensitive"
 JWT_SECRET = "sensitive"
@@ -248,9 +238,6 @@ command = "npm run build"
 database = "primary"
 branch = "dev"
 
-[env]
-strict = true
-
 [env.declarations]
 DATABASE_URL = "sensitive"
 NEXTAUTH_SECRET = "sensitive"
@@ -280,7 +267,7 @@ SENTRY_DSN = { visibility = "sensitive", required = false }
 CLI flag > env var (NRZ_*) > onreza.toml > hardcoded default
 ```
 
-Например, `--env production` у `nrz deploy` выбирает production deploy target, `NRZ_TOKEN` переопределяет любой сохранённый токен.
+Например, `--environment production` у `nrz deploy` выбирает точный platform Environment, `NRZ_TOKEN` переопределяет любой сохранённый токен. Если флаг не задан, используется `NRZ_ENVIRONMENT`, затем выбор из `.onreza/environment.json`.
 
 ## Локальные файлы (.onreza/)
 

@@ -34,6 +34,34 @@ pub struct StructuredApiError {
     pub details: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ApiRetry {
+    pub(crate) retry_after: Option<Duration>,
+}
+
+pub(crate) fn classify_api_retry(error: &anyhow::Error) -> Option<ApiRetry> {
+    if let Some(error) = error.downcast_ref::<StructuredApiError>() {
+        let retryable = error.status == reqwest::StatusCode::REQUEST_TIMEOUT
+            || error.status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            || error.status.is_server_error()
+            || matches!(
+                error.code.as_str(),
+                "OPERATION_IN_PROGRESS" | "SERVICE_UNAVAILABLE" | "TOO_MANY_REQUESTS"
+            );
+        return retryable.then_some(ApiRetry {
+            retry_after: error.retry_after_seconds.map(Duration::from_secs),
+        });
+    }
+    error
+        .chain()
+        .any(|cause| {
+            cause
+                .downcast_ref::<reqwest::Error>()
+                .is_some_and(|error| error.is_timeout() || error.is_connect() || error.is_request())
+        })
+        .then_some(ApiRetry { retry_after: None })
+}
+
 impl std::fmt::Display for StructuredApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(

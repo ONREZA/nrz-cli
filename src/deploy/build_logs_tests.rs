@@ -47,6 +47,22 @@ fn masks_exact_environment_values_only_in_sanitized_copy() {
 }
 
 #[test]
+fn preserves_common_non_sensitive_build_vocabulary() {
+    let redactor = ExactValueRedactor::from_values([
+        "production".to_string(),
+        "actual-secret-value".to_string(),
+    ])
+    .unwrap();
+
+    let sanitized = sanitize_message(
+        "vite building for production with actual-secret-value",
+        &redactor,
+    );
+
+    assert_eq!(sanitized, "vite building for production with [REDACTED]");
+}
+
+#[test]
 fn masks_multiline_environment_values_after_output_is_split_into_lines() {
     let redactor =
         ExactValueRedactor::from_values(["first-secret\nsecond-secret".to_string()]).unwrap();

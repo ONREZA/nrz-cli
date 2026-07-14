@@ -46,14 +46,14 @@ pub(super) fn run_command_streaming(
     let (shell, shell_args) = ("cmd", ["/C", cmd]);
 
     if !json && build_logs.is_none() {
-        let status = std::process::Command::new(shell)
-            .args(shell_args)
-            .current_dir(project_dir)
-            .envs(
-                extra_env
-                    .iter()
-                    .map(|(key, value)| (key.as_str(), value.as_str())),
-            )
+        let mut command = std::process::Command::new(shell);
+        command.args(shell_args).current_dir(project_dir).envs(
+            extra_env
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
+        remove_private_cli_environment(&mut command);
+        let status = command
             .status()
             .with_context(|| format!("failed to start command: {cmd}"))?;
         if !status.success() {
@@ -87,6 +87,7 @@ pub(super) fn run_command_streaming(
         )
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    remove_private_cli_environment(&mut command);
 
     // Run the build in its own process group. Build tools spawn long-lived
     // grandchildren (jest/SWC workers, an OG-image headless Chromium, dev
@@ -305,12 +306,14 @@ pub(super) fn run_install_step(
     project_dir: &Path,
     json: bool,
     effective: &EffectiveProjectConfig,
+    execution_env: &[(String, String)],
     build_logs: Option<&BuildLogEmitter>,
 ) -> anyhow::Result<()> {
     let Some(cmd) = resolve_install_command(project_dir, effective) else {
         return Ok(());
     };
     let (cmd, install_env) = prepare_install_command(&cmd, project_dir, json);
+    let install_env = merge_command_environment(execution_env, &install_env);
 
     output::status(
         json,
@@ -339,6 +342,23 @@ pub(super) fn run_install_step(
         build_logs.info(BuildLogPhase::Install, "Dependencies installed");
     }
     Ok(())
+}
+
+pub(super) fn merge_command_environment(
+    base: &[(String, String)],
+    overrides: &[(String, String)],
+) -> Vec<(String, String)> {
+    let mut merged = std::collections::BTreeMap::new();
+    for (key, value) in base.iter().chain(overrides) {
+        merged.insert(key.clone(), value.clone());
+    }
+    merged.into_iter().collect()
+}
+
+fn remove_private_cli_environment(command: &mut std::process::Command) {
+    for key in crate::execution_context::private_cli_environment_keys() {
+        command.env_remove(key);
+    }
 }
 
 pub(super) fn resolve_install_command(
