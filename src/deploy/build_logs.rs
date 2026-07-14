@@ -648,33 +648,15 @@ async fn upload_events(
     session_id: String,
     mut receiver: mpsc::Receiver<BuildLogEvent>,
 ) -> UploadOutcome {
-    let mut batch = Vec::with_capacity(MAX_EVENTS_PER_BATCH);
-    let mut closed = false;
     loop {
-        if batch.is_empty() && !closed {
-            match tokio::time::timeout(FLUSH_INTERVAL, receiver.recv()).await {
-                Ok(Some(event)) => batch.push(event),
-                Ok(None) => closed = true,
-                Err(_) => {}
-            }
-        }
-        while batch.len() < MAX_EVENTS_PER_BATCH {
-            match receiver.try_recv() {
-                Ok(event) => batch.push(event),
-                Err(mpsc::error::TryRecvError::Empty) => break,
-                Err(mpsc::error::TryRecvError::Disconnected) => {
-                    closed = true;
-                    break;
-                }
-            }
-        }
-        if !batch.is_empty() {
-            if let Err(error) = upload_batch(&client, &session_id, &batch).await {
-                return UploadOutcome {
-                    degraded_reason: Some(error.to_string()),
-                };
-            }
-            batch.clear();
+        let (batch, closed) =
+            collect_upload_batch(&mut receiver, MAX_EVENTS_PER_BATCH, FLUSH_INTERVAL).await;
+        if !batch.is_empty()
+            && let Err(error) = upload_batch(&client, &session_id, &batch).await
+        {
+            return UploadOutcome {
+                degraded_reason: Some(error.to_string()),
+            };
         }
         if closed {
             return UploadOutcome {
@@ -682,6 +664,28 @@ async fn upload_events(
             };
         }
     }
+}
+
+pub(super) async fn collect_upload_batch<T>(
+    receiver: &mut mpsc::Receiver<T>,
+    max_events: usize,
+    flush_interval: Duration,
+) -> (Vec<T>, bool) {
+    let Some(first) = receiver.recv().await else {
+        return (Vec::new(), true);
+    };
+    let mut batch = Vec::with_capacity(max_events);
+    batch.push(first);
+    let deadline = tokio::time::Instant::now() + flush_interval;
+
+    while batch.len() < max_events {
+        match tokio::time::timeout_at(deadline, receiver.recv()).await {
+            Ok(Some(event)) => batch.push(event),
+            Ok(None) => return (batch, true),
+            Err(_) => break,
+        }
+    }
+    (batch, false)
 }
 
 async fn upload_batch(

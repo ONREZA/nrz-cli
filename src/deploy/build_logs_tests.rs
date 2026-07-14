@@ -1,4 +1,8 @@
-use super::build_logs::{ExactValueRedactor, parse_env_toggle, sanitize_message, truncate_utf8};
+use std::time::Duration;
+
+use super::build_logs::{
+    ExactValueRedactor, collect_upload_batch, parse_env_toggle, sanitize_message, truncate_utf8,
+};
 
 #[test]
 fn parses_build_log_upload_environment_toggles() {
@@ -67,4 +71,19 @@ fn truncates_on_a_utf8_boundary() {
 
     assert!(truncated.len() <= 24);
     assert!(truncated.ends_with("…[TRUNCATED]"));
+}
+
+#[tokio::test]
+async fn upload_batch_collects_events_arriving_inside_flush_window() {
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(4);
+    sender.send(1).await.unwrap();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        sender.send(2).await.unwrap();
+    });
+
+    let (batch, closed) = collect_upload_batch(&mut receiver, 4, Duration::from_millis(100)).await;
+
+    assert_eq!(batch, vec![1, 2]);
+    assert!(closed);
 }
