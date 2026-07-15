@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.36.0] - 2026-07-15
+
+### ✨ Features
+
+- **deploy:** unify remote build execution ([fb083db](https://github.com/ONREZA/nrz-cli/commit/fb083dbba1c8b78fe431ecd74026d88b84293572))
+
 ## [0.36.0-beta.2] - 2026-07-14
 
 ### ✨ Features
