@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.36.1] - 2026-07-15
+
+### 🐛 Bug Fixes
+
+- **cli:** align server api contracts ([4d095b7](https://github.com/ONREZA/nrz-cli/commit/4d095b7ec5894331f5debcb2ac60e0592d96e323))
+
 ## [0.36.0] - 2026-07-15
 
 ### ✨ Features
