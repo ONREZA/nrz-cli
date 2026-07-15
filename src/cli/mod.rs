@@ -12,9 +12,7 @@ pub mod env;
 pub mod env_handler;
 #[cfg(test)]
 mod env_handler_tests;
-pub mod environment;
-#[cfg(test)]
-mod environment_tests;
+pub mod execution_context;
 pub mod functions;
 pub mod functions_handler;
 #[cfg(test)]
@@ -38,6 +36,7 @@ pub use db::DbArgs;
 pub use detect::DetectArgs;
 pub use domains::DomainsArgs;
 pub use env::EnvArgs;
+pub use execution_context::ContextArgs;
 pub use functions::FunctionsArgs;
 pub use kv::KvArgs;
 pub use preview::PreviewArgs;
@@ -136,6 +135,9 @@ pub enum Command {
 
     /// Manage environment variables
     Env(EnvArgs),
+
+    /// Select the execution environment for this checkout
+    Context(ContextArgs),
 
     /// Manage custom domains
     Domains(DomainsArgs),
@@ -244,6 +246,14 @@ pub struct DevArgs {
     #[arg(long)]
     pub db_branch: Option<String>,
 
+    /// Platform environment ID or exact name
+    #[arg(long)]
+    pub environment: Option<String>,
+
+    /// Run without platform configuration materialization
+    #[arg(long)]
+    pub local: bool,
+
     /// Path to project directory
     #[arg(default_value = ".")]
     pub dir: String,
@@ -278,9 +288,9 @@ pub struct DeployArgs {
     #[arg(long, conflicts_with_all = ["dry", "resume_deployment"])]
     pub verify: bool,
 
-    /// Environment type (production or preview). Can be specified multiple times.
-    #[arg(long, env = "NRZ_ENV")]
-    pub env: Vec<String>,
+    /// Platform environment ID or exact name
+    #[arg(long)]
+    pub environment: Option<String>,
 
     /// Project ID (skip interactive selection)
     #[arg(long)]
@@ -293,6 +303,14 @@ pub struct DeployArgs {
     /// Skip dependency installation before build
     #[arg(long)]
     pub skip_install: bool,
+
+    /// Disable centralized build-log upload for this deployment
+    #[arg(long)]
+    pub no_log_upload: bool,
+
+    /// Include debug build-log events in centralized upload
+    #[arg(long)]
+    pub log_upload_debug: bool,
 
     /// Custom build command (overrides [build] command in onreza.toml)
     #[arg(long)]

@@ -212,49 +212,6 @@ DATABASE_URL = "sensitive"
 }
 
 #[test]
-fn strict_defaults_false() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("onreza.toml"),
-        "[env.declarations]\nDB_URL = \"sensitive\"\n",
-    )
-    .unwrap();
-
-    let config = load(dir.path()).unwrap();
-    assert!(!config.env_strict());
-}
-
-#[test]
-fn strict_set_true() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("onreza.toml"),
-        r#"
-[env]
-strict = true
-
-[env.declarations]
-DB_URL = "sensitive"
-"#,
-    )
-    .unwrap();
-
-    let config = load(dir.path()).unwrap();
-    assert!(config.env_strict());
-    assert_eq!(config.env.declarations.len(), 1);
-}
-
-#[test]
-fn strict_false_explicit() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("onreza.toml"), "[env]\nstrict = false\n").unwrap();
-
-    let config = load(dir.path()).unwrap();
-    assert!(!config.env_strict());
-    assert!(config.env.declarations.is_empty());
-}
-
-#[test]
 fn invalid_env_var_name_with_spaces_errors() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(

@@ -8,16 +8,16 @@ pub struct EnvArgs {
     /// Project ID (skip auto-detection)
     #[arg(long, global = true)]
     pub project_id: Option<String>,
-
-    /// Target environment type (production, preview, development). Can be specified multiple times.
-    #[arg(long, global = true, env = "NRZ_ENV")]
-    pub env: Vec<String>,
 }
 
 #[derive(Subcommand)]
 pub enum EnvCommand {
     /// List environment variables
-    List,
+    List {
+        /// Exact environment ID or name
+        #[arg(long)]
+        environment: Option<String>,
+    },
 
     /// Set an environment variable
     Set {
@@ -25,49 +25,79 @@ pub enum EnvCommand {
         key: String,
 
         /// Variable value
-        value: String,
+        #[arg(long, conflicts_with_all = ["stdin", "from_file"])]
+        value: Option<String>,
+
+        /// Read the value from stdin and trim one terminal newline
+        #[arg(long, conflicts_with_all = ["value", "from_file"])]
+        stdin: bool,
+
+        /// Read the exact value from a UTF-8 file
+        #[arg(long, conflicts_with_all = ["value", "stdin"])]
+        from_file: Option<String>,
 
         /// Mark as secret (value will be encrypted)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "plain")]
         secret: bool,
+
+        /// Store as a plain value
+        #[arg(long, conflicts_with = "secret")]
+        plain: bool,
+
+        /// Non-secret metadata describing the variable
+        #[arg(long)]
+        note: Option<String>,
+
+        /// Exact environment ID or name
+        #[arg(long, conflicts_with = "all")]
+        environment: Option<String>,
+
+        /// Apply to all project environments
+        #[arg(long, conflicts_with = "environment")]
+        all: bool,
+
+        /// Allow replacing the existing environment scope
+        #[arg(long)]
+        replace_scope: bool,
+
+        /// Allow changing plain/secret category
+        #[arg(long)]
+        change_category: bool,
+
+        /// Confirm a destructive scope/category change non-interactively
+        #[arg(long)]
+        yes: bool,
     },
 
     /// Delete an environment variable
     Delete {
         /// Variable name
         key: String,
+
+        /// Delete the project-wide definition
+        #[arg(long)]
+        all: bool,
+
+        /// Confirm deletion non-interactively
+        #[arg(long)]
+        yes: bool,
     },
 
-    /// Pull environment variables to a local file
-    Pull {
-        /// Output file path
-        #[arg(default_value = ".env.local")]
-        file: String,
+    /// Validate one materialized environment against onreza.toml declarations
+    Validate {
+        /// Exact environment ID or name
+        #[arg(long)]
+        environment: Option<String>,
     },
 
-    /// Push environment variables from a local file to the platform
-    Push {
-        /// Input file path (dotenv format)
-        #[arg(default_value = ".env.local")]
-        file: String,
-
-        /// Overwrite existing variables (default: skip existing)
+    /// Run a command with one materialized environment snapshot
+    Exec {
+        /// Exact environment ID or name
         #[arg(long)]
-        overwrite: bool,
+        environment: Option<String>,
 
-        /// Show what would be uploaded without making any changes
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Mark all imported variables as secrets
-        #[arg(long)]
-        secret: bool,
-
-        /// Only push variables declared in [env.declarations] (default when env.strict = true)
-        #[arg(long)]
-        declared_only: bool,
+        /// Command and arguments after `--`
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
     },
-
-    /// Validate environment variables against [env] declarations in onreza.toml
-    Validate,
 }

@@ -5,9 +5,13 @@ pub mod workspace;
 #[cfg(test)]
 mod config_tests;
 #[cfg(test)]
+mod token_file_tests;
+#[cfg(test)]
 mod workspace_tests;
 
-use anyhow::Context;
+use std::path::Path;
+
+use anyhow::{Context, bail};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +51,69 @@ struct StatusOutput {
 pub fn resolve_token(token: Option<&str>, ws: Option<&str>) -> anyhow::Result<String> {
     let ctx = workspace::resolve_workspace_context(token, ws)?;
     Ok(ctx.token)
+}
+
+const MAX_TOKEN_FILE_BYTES: u64 = 16 * 1024;
+
+/// Consume an ephemeral token file before any user-controlled child process is started.
+pub fn consume_process_token(
+    explicit: Option<String>,
+    token_file: Option<&Path>,
+) -> anyhow::Result<Option<String>> {
+    let Some(path) = token_file else {
+        return Ok(explicit);
+    };
+
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("failed to inspect API token file {}", path.display()))?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_TOKEN_FILE_BYTES {
+        bail!(
+            "API token file must be a non-empty regular file no larger than {MAX_TOKEN_FILE_BYTES} bytes"
+        );
+    }
+
+    let read_result = std::fs::read(path);
+    let remove_result = std::fs::remove_file(path);
+    let mut bytes =
+        read_result.with_context(|| format!("failed to read API token file {}", path.display()))?;
+    remove_result.with_context(|| {
+        format!(
+            "failed to remove consumed API token file {}",
+            path.display()
+        )
+    })?;
+
+    if explicit.is_some() {
+        bytes.fill(0);
+        bail!("--token/NRZ_TOKEN conflicts with NRZ_TOKEN_FILE");
+    }
+
+    let mut token = String::from_utf8(bytes).context("API token file must contain valid UTF-8")?;
+    if token.ends_with("\r\n") {
+        token.truncate(token.len() - 2);
+    } else if token.ends_with('\n') {
+        token.pop();
+    }
+    if token.is_empty() || token.contains(['\0', '\r', '\n']) {
+        bail!("API token file contains an invalid token");
+    }
+    Ok(Some(token))
+}
+
+/// Prevent same-UID build children from inspecting runner credentials in the parent process.
+#[cfg(target_os = "linux")]
+pub fn harden_platform_runner_process() -> anyhow::Result<()> {
+    // SAFETY: PR_SET_DUMPABLE only changes the current process security flag.
+    let result = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) };
+    if result == 0 {
+        return Ok(());
+    }
+    Err(std::io::Error::last_os_error()).context("failed to harden platform runner process")
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn harden_platform_runner_process() -> anyhow::Result<()> {
+    bail!("platform runner credential isolation requires Linux")
 }
 
 pub async fn login(json: bool, token: Option<&str>) -> anyhow::Result<()> {

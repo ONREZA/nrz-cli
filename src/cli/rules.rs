@@ -32,8 +32,8 @@ pub struct RulesPullArgs {
     pub project_id: Option<String>,
 
     /// Target environment (production, preview, development, custom name, or environment ID)
-    #[arg(long, env = "NRZ_ENV")]
-    pub env: Option<String>,
+    #[arg(long)]
+    pub environment: Option<String>,
 
     /// Overwrite onreza.rules.toml without prompting
     #[arg(long)]
@@ -51,8 +51,8 @@ pub struct RulesPublishArgs {
     pub project_id: Option<String>,
 
     /// Target environment (production, preview, development, custom name, or environment ID)
-    #[arg(long, env = "NRZ_ENV")]
-    pub env: Option<String>,
+    #[arg(long)]
+    pub environment: Option<String>,
 
     /// Replace UI-authored Edge Rules when onreza.rules.toml intentionally owns them
     #[arg(long)]
@@ -70,8 +70,8 @@ pub struct RulesStatusArgs {
     pub project_id: Option<String>,
 
     /// Target environment (production, preview, development, custom name, or environment ID)
-    #[arg(long, env = "NRZ_ENV")]
-    pub env: Option<String>,
+    #[arg(long)]
+    pub environment: Option<String>,
 }
 
 #[derive(Parser)]

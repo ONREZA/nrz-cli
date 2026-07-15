@@ -235,12 +235,9 @@ impl<'de> Deserialize<'de> for EnvVarDecl {
     }
 }
 
-/// The `[env]` section: options + variable declarations.
+/// The `[env]` section: variable declarations.
 ///
 /// ```toml
-/// [env]
-/// strict = true                    # only push declared vars
-///
 /// [env.declarations]
 /// DATABASE_URL = "sensitive"
 /// PUBLIC_API_URL = "plain"
@@ -249,8 +246,6 @@ impl<'de> Deserialize<'de> for EnvVarDecl {
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct EnvSection {
-    /// When true, `nrz env push` only uploads variables declared in `[env.declarations]`.
-    pub strict: bool,
     /// Variable declarations keyed by name.
     pub declarations: HashMap<String, EnvVarDecl>,
 }
@@ -303,10 +298,7 @@ impl ProjectConfig {
                 database: child.db.database.or(parent.db.database),
                 branch: child.db.branch.or(parent.db.branch),
             },
-            env: EnvSection {
-                strict: child.env.strict || parent.env.strict,
-                declarations,
-            },
+            env: EnvSection { declarations },
         }
     }
 
@@ -404,11 +396,6 @@ impl ProjectConfig {
     /// Returns the declared visibility for a key, if declared.
     pub fn env_visibility(&self, key: &str) -> Option<EnvVisibility> {
         self.env.declarations.get(key).map(|d| d.visibility)
-    }
-
-    /// Whether `env push` should only upload variables declared in `[env]`.
-    pub fn env_strict(&self) -> bool {
-        self.env.strict
     }
 }
 
@@ -996,9 +983,6 @@ pub fn generate_template(
 # [db]
 # database = ""          # managed database id or name (auto-resolved if omitted)
 # branch = ""            # branch for nrz dev (main if omitted)
-
-# [env]
-# strict = false
 
 # [env.declarations]
 # DATABASE_URL = "sensitive"

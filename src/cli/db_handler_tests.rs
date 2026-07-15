@@ -27,10 +27,6 @@ fn db_urls_use_current_kaiki_server_routes() {
         project_attachment_url(KAIKI_DATABASES_BASE, "db-1", "project-1"),
         "/v1/kaiki/databases/db-1/attachments/project-1"
     );
-    assert_eq!(
-        dev_env_url("project-1", Some("primary db"), Some("feature/a")),
-        "/v1/kaiki/databases/dev-env?projectId=project%2D1&database=primary%20db&branch=feature%2Fa"
-    );
 }
 
 #[test]
@@ -116,32 +112,6 @@ fn connection_response_deserializes_server_snake_case_uri() {
     .expect("server connection response deserializes");
 
     assert_eq!(resp.connection_uri, "postgres://user:pass@host/db");
-}
-
-#[test]
-fn dev_env_response_deserializes_server_camel_case_env_vars() {
-    let resp: DevEnvResponse = serde_json::from_value(serde_json::json!({
-        "envVars": {
-            "DATABASE_URL": "postgres://user:pass@host/db"
-        },
-        "database": {
-            "id": "db-1",
-            "name": "primary",
-            "status": "ACTIVE"
-        },
-        "branch": {
-            "id": "branch-1",
-            "name": "main"
-        }
-    }))
-    .expect("server dev-env response deserializes");
-
-    assert_eq!(
-        resp.env_vars.get("DATABASE_URL").map(String::as_str),
-        Some("postgres://user:pass@host/db")
-    );
-    assert_eq!(resp.database.id, "db-1");
-    assert_eq!(resp.branch.as_ref().map(|b| b.name.as_str()), Some("main"));
 }
 
 #[test]

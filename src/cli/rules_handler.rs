@@ -7,10 +7,10 @@ use serde_json::{Map, Value, json};
 
 use crate::api::ApiClient;
 use crate::auth;
-use crate::cli::environment;
 use crate::cli::rules::{
     RulesArgs, RulesCheckArgs, RulesCommand, RulesPublishArgs, RulesPullArgs, RulesStatusArgs,
 };
+use crate::execution_context;
 use crate::functions;
 use crate::output;
 use nrz::config;
@@ -68,8 +68,9 @@ async fn pull(
         token,
         workspace,
         config,
+        &project_dir,
         args.project_id.as_deref(),
-        args.env.as_deref(),
+        args.environment.as_deref(),
     )
     .await?;
     let active = get_active_rule_set(&ctx.client, &ctx.project_id, &ctx.environment_id).await?;
@@ -128,8 +129,9 @@ async fn publish(
         token,
         workspace,
         config,
+        &project_dir,
         args.project_id.as_deref(),
-        args.env.as_deref(),
+        args.environment.as_deref(),
     )
     .await?;
     let body = functions::FunctionPublishPayload {
@@ -182,8 +184,9 @@ async fn status(
         token,
         workspace,
         config,
+        &project_dir,
         args.project_id.as_deref(),
-        args.env.as_deref(),
+        args.environment.as_deref(),
     )
     .await?;
     let local = load_local_rules_for_status(&project_dir);
@@ -210,13 +213,22 @@ async fn remote_context(
     token: Option<&str>,
     workspace: Option<&str>,
     config: &ProjectConfig,
+    project_dir: &Path,
     project_id: Option<&str>,
-    env: Option<&str>,
+    environment: Option<&str>,
 ) -> anyhow::Result<RemoteContext> {
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
     let project_id = config::resolve_project_id(project_id, config)?;
-    let environment_id = environment::resolve_environment_id(&client, &project_id, env).await?;
+    let environment_id = execution_context::resolve_for_mutation(
+        &client,
+        &project_id,
+        project_dir,
+        environment,
+        None,
+    )
+    .await?
+    .environment_id;
     Ok(RemoteContext {
         client,
         project_id,

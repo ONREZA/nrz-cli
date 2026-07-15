@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::api::ApiClient;
 use crate::auth;
+use crate::execution_context;
 use crate::output;
 use nrz::config;
 use nrz::config::ProjectConfig;
@@ -47,19 +48,6 @@ struct DomainEnvironment {
     #[serde(rename = "type")]
     env_type: String,
     name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct EnvironmentsResponse {
-    environments: Vec<Environment>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Environment {
-    id: String,
-    #[serde(rename = "type")]
-    env_type: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -115,17 +103,8 @@ pub async fn run(
         DomainsCommand::List => list(&client, &project_id, json).await,
         DomainsCommand::Add {
             domain,
-            environment_id,
-        } => {
-            add(
-                &client,
-                &project_id,
-                &domain,
-                environment_id.as_deref(),
-                json,
-            )
-            .await
-        }
+            environment,
+        } => add(&client, &project_id, &domain, environment.as_deref(), json).await,
         DomainsCommand::Remove { domain_id } => {
             remove(&client, &project_id, &domain_id, json).await
         }
@@ -190,14 +169,18 @@ async fn add(
     client: &ApiClient,
     project_id: &str,
     domain: &str,
-    environment_id: Option<&str>,
+    environment: Option<&str>,
     json: bool,
 ) -> anyhow::Result<()> {
-    let env_id = if let Some(id) = environment_id {
-        id.to_string()
-    } else {
-        find_production_environment(client, project_id).await?
-    };
+    let env_id = execution_context::resolve_for_mutation(
+        client,
+        project_id,
+        std::path::Path::new("."),
+        environment,
+        None,
+    )
+    .await?
+    .environment_id;
 
     let body = AttachHostnameBody {
         domain: domain.to_string(),
@@ -327,20 +310,4 @@ pub(crate) fn project_domain_delete_url(project_id: &str, domain_id: &str) -> St
 
 pub(crate) fn workspace_zone_verify_url(zone_id: &str) -> String {
     format!("/v1/workspace-domains/domains/{zone_id}/verify")
-}
-
-async fn find_production_environment(
-    client: &ApiClient,
-    project_id: &str,
-) -> anyhow::Result<String> {
-    let resp: EnvironmentsResponse = client
-        .get(&format!("/v1/environments/{}", project_id))
-        .await
-        .context("failed to fetch environments")?;
-
-    resp.environments
-        .iter()
-        .find(|e| e.env_type.eq_ignore_ascii_case("PRODUCTION"))
-        .map(|e| e.id.clone())
-        .ok_or_else(|| anyhow::anyhow!("no production environment found"))
 }

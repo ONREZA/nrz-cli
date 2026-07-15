@@ -6,23 +6,26 @@ description: Use when users manage ONREZA environment variables, managed Postgre
 # nrz CLI Env, DB, and KV
 
 ## When to use
-- Syncing `.env.local` with platform variables
+- Managing platform variables without local plaintext copies
 - Running SQL against managed PostgreSQL from the local CLI
 - Managing local KV data during development
 
 ## Environment variables
 ```bash
-# inspect
-nrz env list --project-id <project_id>
+# select one exact Environment for this checkout
+nrz context use <environment>
 
-# pull platform vars to file
-nrz env pull .env.local --project-id <project_id>
+# inspect metadata (secret plaintext is never returned)
+nrz env list --environment <environment> --project-id <project_id>
 
-# push local vars (declared vars only)
-nrz env push .env.local --declared-only --project-id <project_id>
+# write one plain or secret value
+nrz env set PUBLIC_URL --value https://example.com --plain --environment <environment> --project-id <project_id>
+printf %s "$API_TOKEN" | nrz env set API_TOKEN --stdin --secret --environment <environment> --project-id <project_id>
+nrz env delete OLD_KEY --all --yes --project-id <project_id>
 
-# validate required vars from [env.declarations]
-nrz env validate --project-id <project_id>
+# validate or execute with an ephemeral materialized snapshot
+nrz env validate --environment <environment> --project-id <project_id>
+nrz env exec --environment <environment> --project-id <project_id> -- <command>
 ```
 
 ## Database
@@ -43,5 +46,6 @@ nrz kv delete feature_flag --env preview
 
 ## Safety checklist
 - Confirm local vs remote target before destructive actions.
+- Never copy secret values into argv or dotenv files; use `--stdin` or `--from-file`.
 - Use `--force` only when command is explicitly approved.
 - Prefer `--json` in automation for reliable parsing.

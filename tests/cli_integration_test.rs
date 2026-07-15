@@ -148,7 +148,10 @@ fn root_help_does_not_expose_env_as_global_flag() {
 fn command_scoped_env_flags_are_visible_only_where_used() {
     for args in [
         ["deploy", "--help"].as_slice(),
-        ["env", "--help"].as_slice(),
+        ["env", "list", "--help"].as_slice(),
+        ["env", "set", "--help"].as_slice(),
+        ["env", "validate", "--help"].as_slice(),
+        ["env", "exec", "--help"].as_slice(),
         ["kv", "--help"].as_slice(),
     ] {
         let output = nrz().args(args).output().unwrap();

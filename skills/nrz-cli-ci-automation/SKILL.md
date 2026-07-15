@@ -13,7 +13,8 @@ Produce deterministic CI steps for `nrz` with machine-readable output and no int
 - Pass auth/context explicitly via flags or env:
   - `NRZ_TOKEN`
   - `NRZ_WORKSPACE`
-- Use command-scoped `--env`/`NRZ_ENV` for `deploy`, `env`, or `kv`.
+- Use `--environment`/`NRZ_ENVIRONMENT` for platform execution context.
+- Legacy `--env`/`NRZ_ENV` selects only a local KV namespace.
 - Pass `--project-id` when available to skip project selection prompts.
 
 ## Recommended CI sequence
@@ -22,14 +23,13 @@ set -euo pipefail
 
 nrz detect --save --json
 nrz build --json
-nrz env validate --project-id "$NRZ_PROJECT_ID" --json
+nrz env validate --environment production --project-id "$NRZ_PROJECT_ID" --json
 nrz deploy \
-  --prod \
+  --environment production \
   --project-id "$NRZ_PROJECT_ID" \
   --json \
   --token "$NRZ_TOKEN" \
-  --workspace "$NRZ_WORKSPACE" \
-  --env production
+  --workspace "$NRZ_WORKSPACE"
 ```
 
 ## CI diagnostics

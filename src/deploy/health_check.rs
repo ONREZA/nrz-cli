@@ -4,6 +4,11 @@
 
 use std::path::Path;
 
+use nrz::config::{HealthCheckPathConfig, ProjectConfig};
+
+use super::{HealthCheckSource, ResolvedHealthCheck};
+use crate::output;
+
 /// Skip files larger than 512 KB to avoid loading bundled output into memory.
 const MAX_SCAN_FILE_SIZE: u64 = 512 * 1024;
 
@@ -59,6 +64,122 @@ pub fn detect_health_path(
         "nextjs" => detect_nextjs(project_dir),
         _ => detect_generic_grep(project_dir).or_else(|| detect_nestjs(project_dir)),
     }
+}
+
+/// Resolve health check path for PROCESS deployments.
+///
+/// Priority: CLI flag > config > autodetect > TCP default.
+pub(super) fn resolve_health_check(
+    cli_flag: Option<&str>,
+    config: &ProjectConfig,
+    project_dir: &Path,
+    detection: &crate::detect::types::DetectionResult,
+    output_dir: &Path,
+    json: bool,
+) -> anyhow::Result<ResolvedHealthCheck> {
+    if let Some(flag) = cli_flag {
+        if flag.eq_ignore_ascii_case("none")
+            || flag.eq_ignore_ascii_case("false")
+            || flag.eq_ignore_ascii_case("tcp")
+        {
+            output::success(
+                json,
+                "Health check: TCP (from --health-check-path)",
+                output::Phase::Deploy,
+            );
+            return Ok(ResolvedHealthCheck {
+                path: None,
+                source: HealthCheckSource::Flag,
+            });
+        }
+        validate_health_path(flag, "--health-check-path")?;
+        output::success(
+            json,
+            format!("Health check: HTTP {flag} (from --health-check-path)"),
+            output::Phase::Deploy,
+        );
+        return Ok(ResolvedHealthCheck {
+            path: Some(flag.to_string()),
+            source: HealthCheckSource::Flag,
+        });
+    }
+
+    if let Some(health_check) = config.health_check_path() {
+        match health_check {
+            HealthCheckPathConfig::Tcp => {
+                output::success(
+                    json,
+                    "Health check: TCP (configured)",
+                    output::Phase::Deploy,
+                );
+                return Ok(ResolvedHealthCheck {
+                    path: None,
+                    source: HealthCheckSource::Config,
+                });
+            }
+            HealthCheckPathConfig::Http(path) => {
+                output::success(
+                    json,
+                    format!("Health check: HTTP {path} (from config)"),
+                    output::Phase::Deploy,
+                );
+                return Ok(ResolvedHealthCheck {
+                    path: Some(path.clone()),
+                    source: HealthCheckSource::Config,
+                });
+            }
+        }
+    }
+
+    if let Some(detected) = detect_health_path(project_dir, &detection.framework, output_dir) {
+        output::success(
+            json,
+            format!(
+                "Found health endpoint: {} (source: {})",
+                detected.path, detected.source_description
+            ),
+            output::Phase::Deploy,
+        );
+        return Ok(ResolvedHealthCheck {
+            path: Some(detected.path),
+            source: HealthCheckSource::Detected,
+        });
+    }
+
+    output::status(
+        json,
+        "ℹ",
+        "No health check endpoint detected. Using TCP readiness check.\n    \
+         To add HTTP health check, create a /health endpoint or set\n    \
+         deploy.health_check_path in onreza.toml",
+        output::Phase::Deploy,
+    );
+    Ok(ResolvedHealthCheck {
+        path: None,
+        source: HealthCheckSource::Default,
+    })
+}
+
+pub(super) fn validate_health_path(path: &str, source: &str) -> anyhow::Result<()> {
+    if !path.starts_with('/') {
+        return Err(output::coded_error(
+            "INVALID_ARGUMENT",
+            format!("{source} must start with '/', got: \"{path}\""),
+        ));
+    }
+    if path.contains("..") {
+        return Err(output::coded_error(
+            "INVALID_ARGUMENT",
+            format!("{source} must not contain '..', got: \"{path}\""),
+        ));
+    }
+    if path.contains('?') || path.contains('#') {
+        return Err(output::coded_error(
+            "INVALID_ARGUMENT",
+            format!("{source} must not contain query or fragment, got: \"{path}\""),
+        ));
+    }
+    Ok(())
 }
 
 // ── Next.js ──────────────────────────────────────────────────

@@ -25,7 +25,7 @@ nrz build
 nrz deploy
 
 # CI/non-interactive
-nrz deploy --prod --project-id <project_id> --json --token "$NRZ_TOKEN" --workspace <workspace_slug> --env production
+nrz deploy --environment production --project-id <project_id> --json --token "$NRZ_TOKEN" --workspace <workspace_slug>
 ```
 
 ## Troubleshooting map
@@ -36,8 +36,8 @@ nrz deploy --prod --project-id <project_id> --json --token "$NRZ_TOKEN" --worksp
   - Retry with `nrz deploy --compute process`.
 - Environment validation error:
 ```bash
-nrz env validate --project-id <project_id>
-nrz env push .env.local --declared-only --project-id <project_id>
+nrz env validate --environment <environment> --project-id <project_id>
+nrz env list --environment <environment> --project-id <project_id>
 ```
 ## Post-deploy checks
 ```bash

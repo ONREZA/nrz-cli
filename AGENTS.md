@@ -8,7 +8,10 @@ Integration tests are in `tests/` (for example `tests/cli_integration_test.rs`).
 ## LLM-First CLI Contract
 Every command must support machine and human modes:
 - Global flags/env: `--json`/`NRZ_JSON`, `--token`/`NRZ_TOKEN`, `--workspace`/`NRZ_WORKSPACE`.
-- Command-scoped env: `--env`/`NRZ_ENV` only on commands that use environments (`deploy`, `env`, `kv`).
+- Execution context: `--environment`/`NRZ_ENVIRONMENT` for `deploy`,
+  Environment-backed `dev`, and `env`; repository selection is managed through
+  `nrz context`.
+- Local KV namespace: legacy `--env`/`NRZ_ENV` is scoped only to `kv`.
 - JSON mode: one JSON object to `stdout`; errors as `{"error":"..."}` with exit code `1`.
 - Human mode: readable output/errors in `stderr`.
 - Avoid interactive-only behavior; provide non-interactive alternatives (`--project-id`, `--force`, etc.).

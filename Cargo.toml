@@ -1,6 +1,6 @@
 [package]
 name = "nrz"
-version = "0.35.2"
+version = "0.36.0-beta.2"
 edition = "2024"
 description = "ONREZA platform CLI — dev, build, deploy"
 license = "MIT"
@@ -30,6 +30,7 @@ tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # Logging
 tracing = "0.1"
@@ -85,7 +86,7 @@ anyhow = "1"
 url = "2"
 
 # Operation/idempotency identifiers for the SOURCE_BUNDLE_V1 upload contract
-uuid = { version = "1", features = ["v7"] }
+uuid = { version = "1", features = ["v5", "v7"] }
 
 # Unix signals (graceful shutdown)
 libc = "0.2"

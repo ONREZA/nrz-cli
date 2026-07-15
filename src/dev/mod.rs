@@ -4,14 +4,12 @@ mod process;
 #[cfg(test)]
 mod inject_tests;
 
-use std::collections::HashMap;
-
 use anyhow::Context;
 
 use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::DevArgs;
-use nrz::config::ProjectConfig;
+use nrz::config::{self, ProjectConfig};
 use nrz::emulator::kv::KvStore;
 use nrz::emulator::server::EmulatorServer;
 
@@ -26,7 +24,12 @@ use nrz::emulator::server::EmulatorServer;
 /// 7. Build NODE_OPTIONS (bootstrap + optional inspector)
 /// 8. Spawn dev command as child process with injected env vars
 /// 9. Cleanup on exit
-pub async fn run(args: DevArgs, config: &ProjectConfig) -> anyhow::Result<()> {
+pub async fn run(
+    args: DevArgs,
+    token: Option<&str>,
+    workspace: Option<&str>,
+    config: &ProjectConfig,
+) -> anyhow::Result<()> {
     let project_dir = std::path::Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
@@ -62,9 +65,34 @@ pub async fn run(args: DevArgs, config: &ProjectConfig) -> anyhow::Result<()> {
     std::fs::write(&bootstrap_path, &bootstrap)
         .with_context(|| format!("failed to write bootstrap: {}", bootstrap_path.display()))?;
 
-    // 4. Fetch DATABASE_URL from managed database (best-effort)
-    let db_branch = args.db_branch.as_deref().or(config.db_branch());
-    let extra_env = fetch_db_env_vars(config, db_branch).await;
+    // 4. Resolve one platform execution context unless explicitly local-only.
+    let extra_env = if args.local {
+        std::collections::HashMap::new()
+    } else {
+        let project_id = config::resolve_project_id(None, config)?;
+        let token = auth::resolve_token(token, workspace.or(config.project.workspace.as_deref()))?;
+        let client = ApiClient::authenticated(&token)?;
+        let source_ref = args.db_branch.as_deref().or(config.db_branch());
+        let context = crate::execution_context::resolve_for_mutation(
+            &client,
+            &project_id,
+            &project_dir,
+            args.environment.as_deref(),
+            source_ref,
+        )
+        .await?;
+        let materialized =
+            crate::execution_context::materialize_desired(&client, &context, source_ref, "DEV")
+                .await?;
+        crate::execution_context::warn_local_dotenv_drift(&project_dir, false)?;
+        eprintln!(
+            "  {} environment {} ({})",
+            console::style("~").cyan().bold(),
+            materialized.context.environment_name,
+            materialized.context.environment_id,
+        );
+        crate::execution_context::execution_environment(&materialized)
+    };
 
     // 5. Create KV store + emulator server
     let kv = KvStore::new();
@@ -115,59 +143,6 @@ pub async fn run(args: DevArgs, config: &ProjectConfig) -> anyhow::Result<()> {
     let _ = std::fs::remove_file(&bootstrap_path);
 
     result
-}
-
-/// Fetch managed database env vars for dev mode (best-effort, never fails).
-async fn fetch_db_env_vars(
-    config: &ProjectConfig,
-    branch: Option<&str>,
-) -> HashMap<String, String> {
-    let project_id = match config.project.id.as_deref() {
-        Some(id) if !id.is_empty() => id,
-        _ => {
-            tracing::debug!("skipping DATABASE_URL injection: no project ID configured");
-            return HashMap::new();
-        }
-    };
-
-    // Try to resolve token silently — if not authenticated, skip
-    let tok = match auth::resolve_token(None, config.project.workspace.as_deref()) {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::debug!("skipping DATABASE_URL injection: not authenticated ({e:#})");
-            return HashMap::new();
-        }
-    };
-
-    let client = match ApiClient::authenticated(&tok) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("skipping DATABASE_URL injection: failed to create API client ({e:#})");
-            return HashMap::new();
-        }
-    };
-
-    match crate::cli::db_handler::fetch_dev_env(&client, project_id, config.db_database(), branch)
-        .await
-    {
-        Ok(resp) => {
-            for key in resp.env_vars.keys() {
-                eprintln!(
-                    "  {} {key} injected from managed database",
-                    console::style("~").cyan().bold(),
-                );
-            }
-            resp.env_vars
-        }
-        Err(e) => {
-            eprintln!(
-                "  {} failed to fetch DATABASE_URL from managed database: {e:#}",
-                console::style("!").yellow().bold(),
-            );
-            tracing::debug!("managed DB env fetch error details: {e:#}");
-            HashMap::new()
-        }
-    }
 }
 
 async fn wait_for_emulator(port: u16, host: &str) -> anyhow::Result<()> {

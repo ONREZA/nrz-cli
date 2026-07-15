@@ -68,7 +68,7 @@ pub fn json_output<T: Serialize>(data: &T) {
 /// mode). This is the machine-readable result automation/LLMs read from stdout —
 /// the counterpart of [`json_output`] for the success case. It is deliberately
 /// separate from the stderr structured-log frame channel ([`log_error_structured`])
-/// that the Builder consumes: stdout = terminal result, stderr = log stream.
+/// consumed by JSON log tooling: stdout = terminal result, stderr = log stream.
 pub fn terminal_error(message: &str, code: Option<&str>) {
     let mut obj = serde_json::json!({ "error": cap_message(message) });
     if let Some(code) = code {
@@ -203,10 +203,9 @@ pub fn warn(json: bool, msg: impl std::fmt::Display, phase: Phase) {
 ///
 /// Wire format: `<FRAME_SENTINEL>{"s":"error","p":..,"l":"error","m":..,"code":..,"details":{..}}\n`
 ///
-/// Used by Builder to extract structured error info (e.g., LIMIT_EXCEEDED with limitType)
-/// and persist it to the deployment record for frontend upsell dialogs. Shares the
-/// single stderr frame channel with [`log_line`] — emitting it on stdout (as it once
-/// did) let error frames interleave with progress frames across two merged fds.
+/// Used by JSON log consumers to preserve structured error info (for example,
+/// LIMIT_EXCEEDED with limitType). Shares the single stderr frame channel with
+/// [`log_line`].
 pub fn log_error_structured(
     phase: &str,
     message: &str,
@@ -310,7 +309,7 @@ pub fn already_reported_error() -> anyhow::Error {
 
 /// Fully emit a terminal coded error on BOTH channels and return an
 /// [`AlreadyReportedError`] so `main`'s terminal handler does not re-emit it:
-/// the structured frame on stderr (Builder — carries `details`) and the terminal
+/// the structured frame on stderr (carries `details`) and the terminal
 /// envelope on stdout (CLI/automation). Use at JSON-mode call sites that detect a
 /// terminal failure with richer details than a bare [`CodedError`] would carry.
 pub fn report_terminal_error(
