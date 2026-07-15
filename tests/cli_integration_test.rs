@@ -7,6 +7,7 @@ mod support;
 
 use axum::{
     Json, Router,
+    body::Bytes,
     http::StatusCode,
     response::IntoResponse,
     routing::{delete, get, post},
@@ -92,11 +93,151 @@ fn spawn_preview_access_mock() -> String {
     support::api_mock::spawn(app)
 }
 
+fn spawn_device_flow_mock() -> String {
+    let app = Router::new()
+        .route(
+            "/v1/device",
+            post(|body: Bytes| async move {
+                assert!(body.is_empty(), "device code request body must be empty");
+                Json(json!({
+                    "device_code": "device-code",
+                    "user_code": "ABCD-EFGH",
+                    "verification_uri": "https://example.test/device",
+                    "verification_uri_complete": "https://example.test/device?code=ABCD-EFGH",
+                    "expires_in": 60,
+                    "interval": 0
+                }))
+            }),
+        )
+        .route(
+            "/v1/device/token",
+            post(|Json(body): Json<serde_json::Value>| async move {
+                assert_eq!(body["device_code"], "device-code");
+                assert_eq!(
+                    body["grant_type"],
+                    "urn:ietf:params:oauth:grant-type:device_code"
+                );
+                Json(json!({
+                    "access_token": "access-token",
+                    "token_type": "Bearer",
+                    "workspace_slug": "test-workspace",
+                    "workspace_name": "Test Workspace"
+                }))
+            }),
+        );
+    support::api_mock::spawn(app)
+}
+
+fn spawn_nullable_project_mock() -> String {
+    let app = Router::new()
+        .route(
+            "/v1/projects",
+            get(|| async {
+                Json(json!({
+                    "projects": [{
+                        "id": "project-1",
+                        "name": "internal-name",
+                        "displayName": null,
+                        "frameworkPreset": null,
+                        "updatedAt": null
+                    }],
+                    "total": 1
+                }))
+            }),
+        )
+        .route(
+            "/v1/projects/{project_id}",
+            get(
+                |axum::extract::Path(project_id): axum::extract::Path<String>| async move {
+                    Json(json!({
+                        "id": project_id,
+                        "name": "internal-name",
+                        "displayName": null
+                    }))
+                },
+            ),
+        );
+    support::api_mock::spawn(app)
+}
+
 #[test]
 fn help_returns_exit_0() {
     let mut cmd = nrz();
     cmd.arg("--help");
     cmd.assert().success();
+}
+
+#[test]
+fn login_requests_device_code_without_body() {
+    let api_url = spawn_device_flow_mock();
+    let config_dir = tempfile::tempdir().unwrap();
+
+    let output = nrz()
+        .env("NRZ_API_URL", api_url)
+        .env("XDG_CONFIG_HOME", config_dir.path())
+        .arg("login")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let objects = output
+        .stdout
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(objects.len(), 2);
+    assert_eq!(objects[0]["status"], "awaiting_authorization");
+    assert_eq!(objects[1]["workspace_slug"], "test-workspace");
+    assert!(config_dir.path().join("nrz/config.json").is_file());
+}
+
+#[test]
+fn projects_list_accepts_null_display_name() {
+    let api_url = spawn_nullable_project_mock();
+    let output = nrz()
+        .env("NRZ_API_URL", api_url)
+        .args(["--token", "test-token", "projects", "list"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value = stdout_json(&output);
+    assert_eq!(value["projects"][0]["displayName"], serde_json::Value::Null);
+}
+
+#[test]
+fn link_uses_project_name_when_display_name_is_null() {
+    let api_url = spawn_nullable_project_mock();
+    let temp = tempfile::tempdir().unwrap();
+
+    let output = nrz()
+        .current_dir(&temp)
+        .env("NRZ_API_URL", api_url)
+        .args(["--token", "test-token", "link", "--project-id", "project-1"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value = stdout_json(&output);
+    assert_eq!(value["project_name"], "internal-name");
+    let config = fs::read_to_string(temp.path().join("onreza.toml")).unwrap();
+    assert!(config.contains("name = \"internal-name\""), "{config}");
 }
 
 #[test]

@@ -31,10 +31,7 @@ pub enum TokenResponse {
 
 pub async fn request_device_code(client: &ApiClient) -> anyhow::Result<DeviceCodeResponse> {
     client
-        .post(
-            "/v1/device",
-            &serde_json::Value::Object(serde_json::Map::new()),
-        )
+        .post_empty("/v1/device")
         .await
         .context("failed to request device code")
 }

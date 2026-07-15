@@ -24,7 +24,7 @@ struct ProjectsResponse {
 struct ProjectSummary {
     id: String,
     name: String,
-    display_name: String,
+    display_name: Option<String>,
     framework_preset: Option<String>,
     updated_at: Option<String>,
 }
@@ -207,7 +207,8 @@ async fn list(client: &ApiClient, limit: u32, json: bool) -> anyhow::Result<()> 
         for p in &resp.projects {
             let framework = p.framework_preset.as_deref().unwrap_or("-");
             let updated = p.updated_at.as_deref().unwrap_or("-");
-            eprintln!("  {:<30} {:<15} {}", p.display_name, framework, updated);
+            let display_name = p.display_name.as_deref().unwrap_or(&p.name);
+            eprintln!("  {:<30} {:<15} {}", display_name, framework, updated);
         }
 
         eprintln!();

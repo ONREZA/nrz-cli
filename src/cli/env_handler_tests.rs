@@ -38,6 +38,22 @@ fn exact_environment_filter_matches_selected_id_only() {
 }
 
 #[test]
+fn exact_environment_filter_accepts_unnamed_environment() {
+    let variable: EnvVar = serde_json::from_value(json!({
+        "key": "PREVIEW_ONLY",
+        "value": "x",
+        "isSecret": false,
+        "scopeType": "SELECTED",
+        "environments": [
+            { "id": "environment-1", "name": null, "type": "PREVIEW" }
+        ]
+    }))
+    .unwrap();
+
+    assert!(env_var_matches_environment(&variable, "environment-1"));
+}
+
+#[test]
 fn category_uses_explicit_flag_or_project_declaration() {
     assert!(resolve_category(true, false, Some(EnvVisibility::Plain)).unwrap());
     assert!(!resolve_category(false, true, Some(EnvVisibility::Sensitive)).unwrap());

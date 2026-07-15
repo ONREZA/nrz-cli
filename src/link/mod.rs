@@ -22,9 +22,14 @@ struct ProjectListResponse {
 #[serde(rename_all = "camelCase")]
 struct Project {
     id: String,
-    #[allow(dead_code)]
     name: String,
-    display_name: String,
+    display_name: Option<String>,
+}
+
+impl Project {
+    fn display_name(&self) -> &str {
+        self.display_name.as_deref().unwrap_or(&self.name)
+    }
 }
 
 /// Minimal project info returned from interactive selection or API lookup.
@@ -106,7 +111,7 @@ pub async fn find_project_by_id(
 
     Ok(SelectedProject {
         project_id: project.id,
-        project_name: project.display_name,
+        project_name: project.display_name.unwrap_or(project.name),
     })
 }
 
@@ -126,7 +131,7 @@ pub async fn select_project_interactive(client: &ApiClient) -> anyhow::Result<Se
         eprintln!(
             "  {} {}",
             console::style(format!("{}.", i + 1)).dim(),
-            project.display_name,
+            project.display_name(),
         );
     }
     eprintln!();
@@ -136,6 +141,6 @@ pub async fn select_project_interactive(client: &ApiClient) -> anyhow::Result<Se
 
     Ok(SelectedProject {
         project_id: project.id.clone(),
-        project_name: project.display_name.clone(),
+        project_name: project.display_name().to_string(),
     })
 }

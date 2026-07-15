@@ -43,7 +43,7 @@ pub(crate) struct EnvVar {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct EnvVarEnvironment {
     id: String,
-    name: String,
+    name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -275,7 +275,7 @@ fn format_scope(v: &EnvVar) -> String {
         Some("SELECTED") if !v.environments.is_empty() => v
             .environments
             .iter()
-            .map(|e| e.name.as_str())
+            .map(|e| e.name.as_deref().unwrap_or(&e.id))
             .collect::<Vec<_>>()
             .join(", "),
         Some(other) => other.to_string(),
