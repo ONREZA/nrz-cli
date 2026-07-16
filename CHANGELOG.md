@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.36.2] - 2026-07-16
+
+### 🐛 Bug Fixes
+
+- **deploy:** preserve deployment correctness ([0e7ac20](https://github.com/ONREZA/nrz-cli/commit/0e7ac20996af9f2a5fe03fd64ef165b98f315953))
+
 ## [0.36.1] - 2026-07-15
 
 ### 🐛 Bug Fixes
