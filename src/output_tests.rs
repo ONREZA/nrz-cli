@@ -1,4 +1,7 @@
-use super::output::{FRAME_SENTINEL, Phase, cap_message, render_frame};
+use super::output::{
+    FRAME_SENTINEL, Phase, cap_message, render_frame, report_terminal_error,
+    reported_terminal_diagnostic,
+};
 
 #[test]
 fn phase_as_str_all_variants() {
@@ -132,4 +135,29 @@ fn render_frame_embeds_newlines_in_json_without_breaking_framing() {
     );
     assert_eq!(frame.matches('\n').count(), 1);
     assert!(frame.ends_with('\n'));
+}
+
+#[test]
+fn reported_terminal_error_preserves_the_terminal_diagnostic() {
+    let details = serde_json::json!({
+        "fields": [{
+            "field": "functions.edgeRules.rules.0.action.target",
+            "message": "external rewrite target must be an absolute https URL"
+        }]
+    });
+    let error = report_terminal_error(
+        "deploy",
+        "source registration rejected the generated Edge Rules",
+        "VALIDATION_ERROR",
+        Some(&details),
+    );
+    let diagnostic = reported_terminal_diagnostic(&error).expect("terminal diagnostic");
+
+    assert_eq!(diagnostic.code, "VALIDATION_ERROR");
+    assert_eq!(
+        diagnostic.message,
+        "source registration rejected the generated Edge Rules"
+    );
+    assert_eq!(diagnostic.details.as_ref(), Some(&details));
+    assert_eq!(error.to_string(), diagnostic.message);
 }

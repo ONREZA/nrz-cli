@@ -19,4 +19,5 @@ mod rules_authoring_tests;
 pub use collect::{CollectedFunction, CollectedFunctions, collect};
 pub use payload::{FunctionPublishPayload, GeneratedEdgeRuleSet, build_payload};
 pub use policy::run_policy_preview;
+pub(crate) use rules::validate_edge_rules_value;
 pub use rules::{EdgeRulesCheckReport, check_edge_rules, edge_rule_count, load_edge_rules};

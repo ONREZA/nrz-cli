@@ -186,6 +186,8 @@ struct FinishRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     error_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    error_details: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     failure_phase: Option<BuildLogPhase>,
 }
 
@@ -204,7 +206,7 @@ const NON_SENSITIVE_EXACT_VALUES: &[&str] =
     &["production", "preview", "development", "true", "false"];
 
 impl ExactValueRedactor {
-    fn from_materialized_values(configured_values: &[String]) -> anyhow::Result<Self> {
+    pub(super) fn from_materialized_values(configured_values: &[String]) -> anyhow::Result<Self> {
         let mut values = configured_values.to_vec();
         values.extend(
             PLATFORM_SECRET_ENV_KEYS
@@ -265,6 +267,27 @@ impl ExactValueRedactor {
             || value.to_string(),
             |pattern| pattern.replace_all(value, REDACTED).into_owned(),
         )
+    }
+
+    pub(super) fn sanitize_json(&self, value: &serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::String(value) => {
+                serde_json::Value::String(sanitize_message(value, self))
+            }
+            serde_json::Value::Array(values) => serde_json::Value::Array(
+                values
+                    .iter()
+                    .map(|value| self.sanitize_json(value))
+                    .collect(),
+            ),
+            serde_json::Value::Object(values) => serde_json::Value::Object(
+                values
+                    .iter()
+                    .map(|(key, value)| (key.clone(), self.sanitize_json(value)))
+                    .collect(),
+            ),
+            _ => value.clone(),
+        }
     }
 }
 
@@ -397,7 +420,7 @@ pub(super) struct StartBuildLogSession<'a> {
     pub deployment_id: &'a str,
     pub workspace_id: &'a str,
     pub project_dir: &'a Path,
-    pub secret_values: &'a [String],
+    pub redactor: ExactValueRedactor,
     pub config: BuildLogUploadConfig,
     pub json: bool,
 }
@@ -410,7 +433,7 @@ impl BuildLogSession {
             deployment_id,
             workspace_id,
             project_dir,
-            secret_values,
+            redactor,
             config,
             json,
         } = request;
@@ -447,19 +470,7 @@ impl BuildLogSession {
             }
         }
 
-        let redactor = match ExactValueRedactor::from_materialized_values(secret_values) {
-            Ok(redactor) => Arc::new(redactor),
-            Err(error) => {
-                output::warn(
-                    json,
-                    format!(
-                        "Build-log upload disabled: environment redaction could not be initialized ({error})"
-                    ),
-                    output::Phase::Deploy,
-                );
-                return None;
-            }
-        };
+        let redactor = Arc::new(redactor);
         let id = uuid_from_env("NRZ_BUILD_LOG_SESSION_ID").unwrap_or_else(Uuid::now_v7);
         let producer_id = uuid_from_env("NRZ_BUILD_LOG_PRODUCER_ID").unwrap_or(id);
         let id = id.to_string();
@@ -588,8 +599,17 @@ impl BuildLogSession {
         let error = result.as_ref().err();
         let request = FinishRequest {
             status: if result.is_ok() { "FINISHED" } else { "FAILED" },
-            message: error.map(|error| sanitize_message(&error.to_string(), &self.redactor)),
+            message: error.map(|error| {
+                let message = output::reported_terminal_diagnostic(error).map_or_else(
+                    || error.to_string(),
+                    |diagnostic| diagnostic.message.clone(),
+                );
+                sanitize_message(&message, &self.redactor)
+            }),
             error_code: error.and_then(error_code),
+            error_details: error
+                .and_then(error_details)
+                .map(|details| self.redactor.sanitize_json(&details)),
             failure_phase: error.map(|_| {
                 *self
                     .phase
@@ -733,7 +753,10 @@ async fn upload_batch(
     }
 }
 
-fn error_code(error: &anyhow::Error) -> Option<String> {
+pub(super) fn error_code(error: &anyhow::Error) -> Option<String> {
+    if let Some(diagnostic) = output::reported_terminal_diagnostic(error) {
+        return Some(diagnostic.code.clone());
+    }
     if let Some(error) = crate::errors::find_cli_error(error) {
         return Some(error.code.clone());
     }
@@ -741,6 +764,13 @@ fn error_code(error: &anyhow::Error) -> Option<String> {
         .chain()
         .find_map(|cause| cause.downcast_ref::<output::CodedError>())
         .map(|error| error.code.clone())
+}
+
+pub(super) fn error_details(error: &anyhow::Error) -> Option<serde_json::Value> {
+    if let Some(diagnostic) = output::reported_terminal_diagnostic(error) {
+        return diagnostic.details.clone();
+    }
+    crate::errors::find_cli_error(error).and_then(|error| error.details.clone())
 }
 
 fn uuid_from_env(name: &str) -> Option<Uuid> {

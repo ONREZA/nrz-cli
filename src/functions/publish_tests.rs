@@ -185,6 +185,31 @@ action = { type = "unknown" }
 }
 
 #[test]
+fn load_edge_rules_reports_plain_http_external_rewrite_contract() {
+    let tmp = tempfile::tempdir().unwrap();
+    write(
+        tmp.path(),
+        "onreza.rules.toml",
+        r#"
+schemaVersion = "EDGE_RULE_SET_V1"
+source = { origin = "build" }
+
+[[rules]]
+id = "plain-http-upstream"
+action = { type = "rewrite", target = "http://example.test/api", external = true }
+"#,
+    );
+
+    let error = load_edge_rules(tmp.path()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("external rewrite target must be an absolute https URL"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
 fn load_edge_rules_reports_primary_contract_error_not_fallback_position() {
     let tmp = tempfile::tempdir().unwrap();
     write(
@@ -342,6 +367,11 @@ action = { type = "rewrite", target = "/posts/{slug}.html" }
 id = "move-docs"
 condition.path = { type = "glob", value = "/docs/{rest...}" }
 action = { type = "redirect", target = "/guides/{rest}", statusCode = 308 }
+
+[[rules]]
+id = "external-api"
+condition.path = { type = "glob", value = "/api/{rest...}" }
+action = { type = "rewrite", target = "https://api.example.test/{rest}", external = true }
 
 [[rules]]
 id = "uri-template"

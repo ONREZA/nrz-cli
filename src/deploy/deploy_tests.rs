@@ -510,6 +510,46 @@ fn build_command_none_without_package_json() {
     assert!(result.is_none());
 }
 
+#[test]
+fn recursive_deploy_build_commands_are_classified_as_invalid_config() {
+    for command in [
+        "nrz deploy",
+        "/usr/local/bin/nrz deploy --prod",
+        "npx nrz deploy",
+        "npx --yes nrz@latest deploy",
+        "npx -p nrz nrz deploy",
+        "bunx nrz deploy",
+        "CI=1 npx nrz deploy",
+        "npm ci && npx nrz deploy",
+    ] {
+        assert!(is_recursive_deploy_command(command), "command: {command}");
+    }
+
+    let error = run_build_step("npx nrz deploy", Path::new("."), true, &[], None)
+        .expect_err("recursive deploy must be rejected before spawning a child process");
+    expect_code(&error, "INVALID_CONFIG");
+    assert!(error.to_string().contains("npm run build"));
+}
+
+#[test]
+fn recursive_deploy_install_commands_are_classified_as_invalid_config() {
+    let dir = tempdir().unwrap();
+    let effective = effective_with_server_settings(
+        dir.path(),
+        nrz::config::ProjectConfig::default(),
+        server_install_settings(
+            Some("npx -p nrz nrz deploy"),
+            Some(nrz::config::BuildSettingSource::User),
+        ),
+    );
+
+    let error = run_install_step(dir.path(), true, &effective, &[], None)
+        .expect_err("recursive deploy must be rejected before the install child starts");
+
+    expect_code(&error, "INVALID_CONFIG");
+    assert!(error.to_string().contains("npm ci"));
+}
+
 // ── resolve_build_command server fallback ────────────────────
 
 #[test]
@@ -3805,6 +3845,133 @@ fn create_deployment_validation_error_in_json_mode_preserves_details() {
 }
 
 #[test]
+fn source_registration_validation_error_preserves_actionable_diagnostic() {
+    let details = serde_json::json!({
+        "fields": [{
+            "field": "functions.edgeRules.rules.0.action.target",
+            "message": "external rewrite target must be an absolute https URL"
+        }]
+    });
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: StatusCode::BAD_REQUEST,
+        code: "VALIDATION_ERROR".to_string(),
+        message: "Validation failed".to_string(),
+        retry_after_seconds: None,
+        details: Some(details.clone()),
+    }
+    .into();
+
+    let mapped =
+        map_source_registration_error(error, true, "failed to register admitted deployment source");
+    let diagnostic = pre_source_failure_diagnostic(&mapped, None).expect("pre-source diagnostic");
+
+    assert_eq!(diagnostic.code, "VALIDATION_ERROR");
+    assert!(
+        diagnostic
+            .message
+            .contains("functions.edgeRules.rules.0.action.target")
+    );
+    assert!(
+        diagnostic
+            .message
+            .contains("external rewrite target must be an absolute https URL")
+    );
+    assert_eq!(diagnostic.details.as_ref(), Some(&details));
+
+    let body = PreSourceFailureBody {
+        protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
+        attempt: 0,
+        error_code: PreSourceFailureCode::BuildFailed,
+        diagnostic: Some(diagnostic),
+    };
+    let value = serde_json::to_value(body).unwrap();
+    assert_eq!(value["errorCode"], "BUILD_FAILED");
+    assert_eq!(value["diagnostic"]["code"], "VALIDATION_ERROR");
+    assert_eq!(value["diagnostic"]["details"], details);
+}
+
+#[test]
+fn human_source_registration_error_preserves_structured_details() {
+    let details = serde_json::json!({
+        "fields": [{"field": "manifest.layers.0", "message": "invalid layer"}]
+    });
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: StatusCode::BAD_REQUEST,
+        code: "VALIDATION_ERROR".to_string(),
+        message: "Validation failed".to_string(),
+        retry_after_seconds: None,
+        details: Some(details.clone()),
+    }
+    .into();
+
+    let mapped = map_source_registration_error(
+        error,
+        false,
+        "failed to register admitted deployment source",
+    );
+    let diagnostic = pre_source_failure_diagnostic(&mapped, None).expect("pre-source diagnostic");
+
+    assert_eq!(diagnostic.code, "VALIDATION_ERROR");
+    assert_eq!(diagnostic.details.as_ref(), Some(&details));
+}
+
+#[test]
+fn pre_source_failure_uses_the_build_log_secret_redactor() {
+    let redactor =
+        ExactValueRedactor::from_values(["materialized-secret-value".to_string()]).unwrap();
+    let error: anyhow::Error = output::CodedError::new(
+        "BUILD_EXIT_CODE",
+        "build failed with materialized-secret-value",
+    )
+    .into();
+
+    let diagnostic = pre_source_failure_diagnostic(&error, Some(&redactor))
+        .expect("coded build failure must have a diagnostic");
+
+    assert_eq!(diagnostic.code, "BUILD_EXIT_CODE");
+    assert_eq!(diagnostic.message, "build failed with [REDACTED]");
+}
+
+#[test]
+fn pre_source_failure_redacts_structured_details() {
+    let redactor =
+        ExactValueRedactor::from_values(["materialized-secret-value".to_string()]).unwrap();
+    let error = crate::errors::CliError::new("VALIDATION_ERROR", "validation failed")
+        .details(serde_json::json!({
+            "fields": [{
+                "field": "manifest.layers.0",
+                "message": "materialized-secret-value is invalid"
+            }]
+        }))
+        .into_anyhow();
+
+    let diagnostic = pre_source_failure_diagnostic(&error, Some(&redactor))
+        .expect("typed error must have a diagnostic");
+
+    assert_eq!(
+        diagnostic.details,
+        Some(serde_json::json!({
+            "fields": [{
+                "field": "manifest.layers.0",
+                "message": "[REDACTED] is invalid"
+            }]
+        }))
+    );
+}
+
+#[test]
+fn untyped_pre_source_failure_keeps_actionable_internal_diagnostic() {
+    let error = anyhow::anyhow!("source bundle invariant failed");
+
+    let diagnostic = pre_source_failure_diagnostic(&error, None)
+        .expect("untyped failures must still be persisted");
+
+    assert_eq!(diagnostic.code, "INTERNAL_ERROR");
+    assert_eq!(diagnostic.message, "source bundle invariant failed");
+    assert!(diagnostic.details.is_none());
+}
+
+#[test]
 fn boundary_wrap_nuxt_missing_server_is_missing_process_entry() {
     // validate_process_output is an internal helper; the boundary wrap that
     // tags its failures with MISSING_PROCESS_ENTRY lives at the call site in
@@ -4100,6 +4267,7 @@ fn pre_source_mutations_use_the_stable_execution_contract() {
         protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
         attempt: 2,
         error_code: PreSourceFailureCode::MaterializationFailed,
+        diagnostic: None,
     };
 
     let value = serde_json::to_value(body).unwrap();

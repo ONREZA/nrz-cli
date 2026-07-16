@@ -4,14 +4,20 @@ This document is an implementation-facing support matrix for the ONREZA
 Next.js adapter. Keep it current when adapter behavior changes; the contents can
 later be moved into user-facing documentation.
 
-Detailed platform contract work is tracked in
-[`nextjs-adapter-platform-contract.md`](./nextjs-adapter-platform-contract.md).
+Canonical platform decisions are tracked in the deployment repository:
+
+- [`Framework Adapter Platform`](../../deployment/docs/rfc/framework-adapter-platform/INDEX.md)
+- [`Platform Capabilities`](../../deployment/docs/rfc/framework-adapter-platform/platform-capabilities.md)
+- [`Next.js Mapping`](../../deployment/docs/rfc/framework-adapter-platform/nextjs-mapping.md)
+
+[`nextjs-adapter-platform-contract.md`](./nextjs-adapter-platform-contract.md) is kept only as a
+compatibility pointer for older links.
 
 ## Version Boundary
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| Next.js Adapter API | Supported for installed `next >= 16.2.0` | `nrz deploy` writes a bundled adapter and sets `NEXT_ADAPTER_PATH` automatically. The installed `node_modules/next/package.json` version is the source of truth when available; declared dependency ranges are a conservative fallback. Validated on Next.js 16.2.9. |
+| Next.js Adapter API | Supported for installed `next >= 16.2.0` | `nrz deploy` writes a bundled adapter and sets `NEXT_ADAPTER_PATH` automatically. The installed `node_modules/next/package.json` version is the source of truth when available; declared dependency ranges are a conservative fallback. Build conformance validated on Next.js 16.2.10. |
 | Older Next.js versions | Legacy fallback | `nrz deploy` keeps the `NEXT_PRIVATE_STANDALONE=1` standalone path. Validated on Next.js 14, 15, and 16.1.6 without user `output: 'standalone'` config. |
 | User install step | Not required | The adapter is bundled in `nrz-cli`; users do not install a package. |
 
@@ -20,6 +26,7 @@ Detailed platform contract work is tracked in
 | Next.js feature/output | ONREZA primitive | Current status | Limitations |
 | --- | --- | --- | --- |
 | Standalone Node server | Compute | Supported | This remains the correctness fallback for framework runtime behavior. |
+| Static export | Generic STATIC deployment | Supported | Next.js 16.2.10 emits an adapter descriptor for `output: 'export'`, but no standalone server; `nrz` therefore follows the generic static build path and does not publish adapter Compute compatibility metadata. |
 | `.next/static` files | STATIC + Compute fallthrough | Supported | With middleware/proxy, only matcher-disjoint assets are split into STATIC. |
 | `public/` assets | STATIC + Compute fallthrough | Supported | With middleware/proxy, only matcher-disjoint assets are split into STATIC. |
 | Fully static prerenders | STATIC + Compute fallthrough | Supported | Requires static HTML fallback, `initialRevalidate=false`, safe pathname, no matching middleware, and no exact Next redirect on the same pathname. Exact redirect conflicts stay in Compute to preserve Next routing semantics. |
@@ -27,10 +34,10 @@ Detailed platform contract work is tracked in
 | PPR prerenders | Compute fallback, classified | Classification supported | Resume/rendering, partial shell upgrade, and PPR cache semantics stay in the Next.js Compute runtime. |
 | `basePath` | Adapter config + STATIC/Compute routing | Supported | Validated with App Router static, dynamic, metadata, public assets, and generated Edge Rules under `/docs`. |
 | `trailingSlash` | Edge Rules + Compute fallback | Supported | Canonical redirect rules are generated. Static prerenders that would shadow an exact slash redirect are kept in Compute. |
-| `i18n` | Pages Router + STATIC/Compute routing | Supported | Validated with locale prerenders and `pages/api` fallback on Next.js 16.2.9. |
+| `i18n` | Pages Router + STATIC/Compute routing | Supported | Build-validated with locale prerenders and `pages/api` fallback on Next.js 16.2.10; the last stage runtime smoke used 16.2.9. |
 | Image optimizer | ONREZA image optimizer or Compute fallback | Partial native support | For Next.js Adapter API builds with default local-image config, the adapter installs a generated custom loader that emits `/_onreza/image?...` URLs. Custom loaders/paths, `unoptimized`, remote images, `localPatterns`, non-WebP format negotiation, SVG policy overrides, and `assetPrefix` stay on the Next Compute fallback or user-configured path. |
 | Metadata routes | STATIC public copy + Compute fallback | Supported | Static App Router metadata `.body` outputs such as `robots.txt` and `sitemap.xml` are copied into `public/`; dynamic metadata routes stay in Compute. |
-| Redirects, rewrites, headers | Edge Rules + Compute fallback | Partial support | Supports safe `source` exact/glob routes, exact `sourceRegex`, Next static cache headers, and literal `has`/`missing` for header/query/cookie/host. Generic regex and unsupported conditions remain Compute fallback. |
+| Redirects, rewrites, headers | Edge Rules + Compute fallback | Phase-safe native subset | Lowers equivalent `beforeMiddleware` redirects/headers, `beforeFiles` rules only without middleware using `ifNoFile=false`, and immutable Next static cache headers. `afterFiles`, `dynamicRoutes`, `fallback`, invalid targets, generic regex, and unsupported conditions remain in Compute; affected STATIC outputs are withheld so they cannot shadow framework routing. |
 | Generated adapter Edge Rules | Server-owned Edge Rule contributions | Supported in deploy contract | Adapter rules are published as a generated contribution keyed by producer; they are not merged into `onreza.rules.toml`. |
 | Middleware/proxy | Compute fallback | Classified | Matchers are used for safe STATIC splitting, but arbitrary middleware code is not lowered into Edge Rules or Functions. |
 | `pages/api` handlers | Compute fallback, classified | Classification supported | Next emits framework artifacts with traced assets/runtime protocol; ONREZA Functions v1 only accepts self-contained source files. |
@@ -53,20 +60,22 @@ Compute.
 
 ## Validated Matrix
 
-Last validated: 2026-06-24.
+Last local Next.js 16.2.10 validation: 2026-07-16. Last legacy full matrix and stage runtime
+validation: 2026-06-24.
 
 Automated local conformance (`NRZ_NEXTJS_CONFORMANCE=1 cargo test --test
 nextjs_adapter_conformance_test`) covers:
 
-- Next.js 16.2.9 Adapter API with App Router `basePath`, `trailingSlash`,
+- Next.js 16.2.10 Adapter API with App Router `basePath`, `trailingSlash`,
   redirects, rewrites, headers, metadata routes, ONREZA image optimizer, ISR route
   classification, middleware matcher classification, and route handlers.
-- Next.js 16.2.9 Pages Router `i18n`, locale static prerenders, and
+- Next.js 16.2.10 Pages Router `i18n`, locale static prerenders, and
   `pages/api` Compute fallback.
-- Legacy fallback for Next.js 14, 15, and 16.1.6 through
+- Next.js 16.2.10 static export through the generic STATIC deployment path.
+- The last full legacy conformance run covered Next.js 14, 15, and 16.1.6 through
   `NEXT_PRIVATE_STANDALONE=1`, with no adapter descriptor emitted.
 
-Stage smoke coverage on 2026-06-24 verified:
+Historical stage smoke coverage on 2026-06-24 verified:
 
 - `basePath` `/docs`, canonical `/docs -> /docs/` redirect, dynamic redirect,
   header rule, header-gated rewrite, metadata `robots.txt`/`sitemap.xml`,
@@ -78,9 +87,9 @@ Stage smoke coverage on 2026-06-24 verified:
 - Legacy Next.js 14, 15, and 16.1.6 deploy/runtime paths using the standalone
   fallback.
 
-Stage deploys still emitted a non-fatal detection-sync warning from the API
-(`500 INTERNAL_ERROR`) on some projects. The deployments and runtime smoke were
-live and valid; this warning is outside the adapter runtime path.
+Some stage deploys in that historical run emitted a non-fatal detection-sync warning from the
+API (`500 INTERNAL_ERROR`). The package-manager enum mapping was fixed after the run; the full
+stage matrix has not been refreshed since then.
 
 ## Compatibility Report
 
@@ -107,13 +116,14 @@ Important JSON fields:
 
 ## Next Work
 
-1. Promote `platform.nextCache` from report-only coverage into the ISR
-   cache/regeneration contract from `nextjs-adapter-platform-contract.md` while
-   keeping Next Compute as the renderer.
-2. Add PPR support only after ISR cache ownership is reliable; PPR requires
-   resume/rendering semantics and stricter header handling.
-3. Keep generated Edge Rules server-owned and producer-keyed; do not merge them
-   into `onreza.rules.toml`.
-4. Revisit route-handler-to-Functions only after ONREZA Functions supports a
-   framework bundle artifact with assets/wasm and an explicit invocation
-   protocol.
+1. Add typed routing lifecycle checkpoints before expanding native lowering to `afterFiles`,
+   `dynamicRoutes`, or `fallback`.
+2. Map the platform deployment identity into Next.js `deploymentId` and add the official Next.js
+   deploy/log/cleanup conformance harness.
+3. Promote `platform.nextCache` from report-only coverage into the generic durable runtime cache
+   contract while keeping Next Compute as the renderer.
+4. Add PPR only after runtime cache ownership and request lifetime extension are reliable.
+5. Keep generated Edge Rules server-owned and producer-keyed; do not merge them into
+   `onreza.rules.toml`.
+6. Revisit route-handler/middleware native execution only after the platform supports a
+   multi-file executable bundle artifact with assets/WASM and an explicit invocation protocol.

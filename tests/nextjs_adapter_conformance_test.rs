@@ -102,7 +102,7 @@ fn read_descriptor(project: &Path) -> serde_json::Value {
 }
 
 fn next16_version() -> String {
-    std::env::var("NRZ_NEXTJS_CONFORMANCE_NEXT_VERSION").unwrap_or_else(|_| "16.2.9".into())
+    std::env::var("NRZ_NEXTJS_CONFORMANCE_NEXT_VERSION").unwrap_or_else(|_| "16.2.10".into())
 }
 
 fn write_next16_package(project: &Path, next_version: &str, esm: bool) {
@@ -222,7 +222,10 @@ const nextConfig = {
           destination: '/rewritten/:slug',
         },
       ],
-      afterFiles: [{ source: '/legacy/:path*', destination: '/modern/:path*' }],
+      afterFiles: [
+        { source: '/legacy/:path*', destination: '/modern/:path*' },
+        { source: '/plain-http/:path*', destination: 'http://127.0.0.1:3001/:path*' },
+      ],
       fallback: [],
     }
   },
@@ -381,6 +384,11 @@ export const config = {
         "afterFiles",
         "/docs/legacy/:path*"
     ));
+    assert!(has_route_with_source(
+        &descriptor["routing"],
+        "afterFiles",
+        "/docs/plain-http/:path*"
+    ));
     assert!(
         descriptor["outputs"]["appPages"]
             .as_array()
@@ -439,7 +447,13 @@ export const config = {
     assert!(
         output["compatibility"]["platform"]["prerenders"]["staticLayerCount"]
             .as_u64()
-            .is_some_and(|count| count > 0)
+            .is_some_and(|count| count > 0),
+        "prerender report: {}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "report": output["compatibility"]["platform"]["prerenders"],
+            "routing": descriptor["routing"],
+        }))
+        .unwrap()
     );
     assert!(contains_file_named(
         &project.path().join(".next/standalone"),
@@ -449,6 +463,58 @@ export const config = {
         &project.path().join(".next/standalone"),
         "sitemap.xml"
     ));
+}
+
+#[test]
+fn nextjs_16_2_static_export_uses_generic_static_build_path() {
+    if !conformance_enabled() {
+        eprintln!("skipping Next.js conformance test; set NRZ_NEXTJS_CONFORMANCE=1 to run it");
+        return;
+    }
+
+    let project = tempfile::tempdir().unwrap();
+    let next_version = next16_version();
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let adapter_path = manifest_dir.join("assets/next-adapter/onreza-next-adapter.cjs");
+
+    write_next16_package(project.path(), &next_version, true);
+    write(
+        &project.path().join("next.config.mjs"),
+        "export default { output: 'export' }\n",
+    );
+    write(
+        &project.path().join("app/layout.js"),
+        r#"
+export default function RootLayout({ children }) {
+  return <html><body>{children}</body></html>
+}
+"#,
+    );
+    write(
+        &project.path().join("app/page.js"),
+        r#"
+export default function Page() {
+  return <main>static export</main>
+}
+"#,
+    );
+
+    npm_install(project.path());
+    run_next_build_with_adapter(project.path(), &adapter_path);
+
+    assert!(project.path().join("out/index.html").is_file());
+    let descriptor = read_descriptor(project.path());
+    assert_eq!(descriptor["config"]["output"], "export");
+    assert!(descriptor["outputs"]["staticFiles"].is_array());
+
+    let output = run_nrz_build_json(project.path());
+    assert_eq!(output["framework"], "nextjs");
+    assert!(output.get("compatibility").is_none());
+    assert!(
+        output["layers"]
+            .as_array()
+            .is_some_and(|layers| layers.iter().all(|layer| layer["target"] == "STATIC"))
+    );
 }
 
 #[test]
@@ -552,7 +618,9 @@ export default function handler(req, res) {
     assert!(
         output["compatibility"]["platform"]["prerenders"]["staticLayerCount"]
             .as_u64()
-            .is_some_and(|count| count >= 3)
+            .is_some_and(|count| count >= 3),
+        "prerender report: {}",
+        serde_json::to_string_pretty(&output["compatibility"]["platform"]["prerenders"]).unwrap()
     );
 }
 

@@ -94,6 +94,10 @@ const SOURCE_REGISTRATION_RETRY_BUDGET: Duration = Duration::from_secs(10 * 60);
 const SOURCE_REGISTRATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(370);
 const SOURCE_REGISTRATION_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
 const SOURCE_REGISTRATION_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
+const PRE_SOURCE_FAILURE_RETRY_BUDGET: Duration = Duration::from_secs(10);
+const PRE_SOURCE_FAILURE_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const PRE_SOURCE_FAILURE_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(250);
+const PRE_SOURCE_FAILURE_MAX_RETRY_DELAY: Duration = Duration::from_secs(2);
 const MAX_UPLOAD_FAILURE_LOG_LENGTH: usize = 4096;
 const REDACTED_URL_COMPONENT: &str = "REDACTED";
 const SOURCE_UPLOAD_PUT_FAILED: &str = "SOURCE_UPLOAD_PUT_FAILED";
@@ -181,6 +185,16 @@ struct PreSourceFailureBody {
     protocol_version: &'static str,
     attempt: u32,
     error_code: PreSourceFailureCode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diagnostic: Option<PreSourceFailureDiagnostic>,
+}
+
+#[derive(Debug, Serialize)]
+struct PreSourceFailureDiagnostic {
+    code: String,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -448,7 +462,8 @@ fn build_functions_payload(
     edge_rules_force: bool,
 ) -> anyhow::Result<Option<crate::functions::FunctionPublishPayload>> {
     let collected = crate::functions::collect(project_dir)?;
-    let user_edge_rules = crate::functions::load_edge_rules(project_dir)?;
+    let user_edge_rules = crate::functions::load_edge_rules(project_dir)
+        .map_err(|error| output::with_default_code(error, "INVALID_CONFIG"))?;
     let generated_edge_rule_sets = generated_nextjs_edge_rule_sets(project_dir, json)?;
     let edge_rule_count = user_edge_rules
         .as_ref()
@@ -526,6 +541,11 @@ fn generated_nextjs_edge_rule_sets(
             "rules": [],
         })
     });
+    crate::functions::validate_edge_rules_value(
+        "Next.js adapter generated Edge Rules",
+        &edge_rules,
+    )
+    .context("Next.js adapter produced an invalid Edge Rules payload")?;
     let rule_count = crate::functions::edge_rule_count(&edge_rules);
     output::status(
         json,
@@ -709,6 +729,8 @@ pub async fn run(
                     &runner.deployment.id,
                     runner.deployment.attempt,
                     PreSourceFailureCode::MaterializationFailed,
+                    Some(&error),
+                    None,
                     json,
                 )
                 .await;
@@ -785,6 +807,8 @@ pub async fn run(
                     &admitted.deployment.id,
                     admitted.deployment.attempt,
                     PreSourceFailureCode::MaterializationFailed,
+                    Some(&error),
+                    None,
                     json,
                 )
                 .await;
@@ -805,6 +829,8 @@ pub async fn run(
             &deployment.id,
             deployment.attempt,
             PreSourceFailureCode::ConfigInvalid,
+            Some(&error),
+            None,
             json,
         )
         .await;
@@ -819,6 +845,8 @@ pub async fn run(
             &deployment.id,
             deployment.attempt,
             PreSourceFailureCode::ConfigInvalid,
+            Some(&error),
+            None,
             json,
         )
         .await;
@@ -836,6 +864,8 @@ pub async fn run(
             &deployment.id,
             deployment.attempt,
             PreSourceFailureCode::ConfigInvalid,
+            Some(&error),
+            None,
             json,
         )
         .await;
@@ -849,6 +879,8 @@ pub async fn run(
             &deployment.id,
             deployment.attempt,
             PreSourceFailureCode::ConfigInvalid,
+            Some(&error),
+            None,
             json,
         )
         .await;
@@ -860,13 +892,31 @@ pub async fn run(
     execution_env.sort_by(|left, right| left.0.cmp(&right.0));
     let mut build_log_secret_values = crate::execution_context::secret_values(&materialized);
     build_log_secret_values.push(tok.clone());
+    let pre_source_failure_redactor =
+        match ExactValueRedactor::from_materialized_values(&build_log_secret_values) {
+            Ok(redactor) => redactor,
+            Err(error) => {
+                let error = error.context("failed to initialize deployment output redaction");
+                report_pre_source_failure(
+                    &client,
+                    &deployment.id,
+                    deployment.attempt,
+                    PreSourceFailureCode::BuildFailed,
+                    Some(&error),
+                    None,
+                    json,
+                )
+                .await;
+                return Err(error);
+            }
+        };
     let mut build_log_session = BuildLogSession::start(build_logs::StartBuildLogSession {
         client: &client,
         project_id: &project_id,
         deployment_id: &deployment.id,
         workspace_id: &execution_context.workspace_id,
         project_dir: &command_context.project_dir,
-        secret_values: &build_log_secret_values,
+        redactor: pre_source_failure_redactor.clone(),
         config: BuildLogUploadConfig::from_args(&args, deployment.attempt),
         json,
     })
@@ -900,6 +950,7 @@ pub async fn run(
             deployment.attempt,
             deploy_plan.manifest_raw.clone(),
             conform_functions_to_wire_contract(deploy_plan.functions)?,
+            json,
         )
         .await?;
         source_registered = true;
@@ -1077,12 +1128,16 @@ pub async fn run(
     }
     .await;
 
-    if deploy_result.is_err() && !source_registered {
+    if let Err(error) = &deploy_result
+        && !source_registered
+    {
         report_pre_source_failure(
             &client,
             &admitted_deployment_id,
             deployment.attempt,
             PreSourceFailureCode::BuildFailed,
+            Some(error),
+            Some(&pre_source_failure_redactor),
             json,
         )
         .await;
@@ -1098,25 +1153,136 @@ async fn report_pre_source_failure(
     deployment_id: &str,
     attempt: u32,
     error_code: PreSourceFailureCode,
+    error: Option<&anyhow::Error>,
+    redactor: Option<&ExactValueRedactor>,
     json: bool,
 ) {
-    let result: anyhow::Result<PreSourceFailureResponse> = client
-        .post(
-            &format!("/v1/deployments/{deployment_id}/execution-context/fail-before-source"),
-            &PreSourceFailureBody {
-                protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
-                attempt,
-                error_code,
-            },
+    let path = format!("/v1/deployments/{deployment_id}/execution-context/fail-before-source");
+    let body = PreSourceFailureBody {
+        protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
+        attempt,
+        error_code,
+        diagnostic: error.and_then(|error| pre_source_failure_diagnostic(error, redactor)),
+    };
+    let started = Instant::now();
+    let mut delay = PRE_SOURCE_FAILURE_INITIAL_RETRY_DELAY;
+    let mut last_error = None;
+    loop {
+        let remaining = PRE_SOURCE_FAILURE_RETRY_BUDGET.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(
+            PRE_SOURCE_FAILURE_REQUEST_TIMEOUT.min(remaining),
+            client.post::<_, PreSourceFailureResponse>(&path, &body),
         )
-        .await;
-    if let Err(error) = result {
-        output::warn(
-            json,
-            format!("Could not mark admitted deployment failed: {error}"),
-            output::Phase::Deploy,
-        );
+        .await
+        {
+            Ok(Ok(_)) => return,
+            Ok(Err(error)) => {
+                let Some(retry) = classify_api_retry(&error) else {
+                    output::warn(
+                        json,
+                        format!("Could not mark admitted deployment failed: {error}"),
+                        output::Phase::Deploy,
+                    );
+                    return;
+                };
+                last_error = Some(error.to_string());
+                let remaining = PRE_SOURCE_FAILURE_RETRY_BUDGET.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    break;
+                }
+                tokio::time::sleep(retry.retry_after.unwrap_or(delay).min(remaining)).await;
+            }
+            Err(_) => {
+                last_error = Some("request timed out".to_string());
+                let remaining = PRE_SOURCE_FAILURE_RETRY_BUDGET.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    break;
+                }
+                tokio::time::sleep(delay.min(remaining)).await;
+            }
+        }
+        delay = (delay * 2).min(PRE_SOURCE_FAILURE_MAX_RETRY_DELAY);
     }
+    output::warn(
+        json,
+        format!(
+            "Could not mark admitted deployment failed after retries: {}",
+            last_error.as_deref().unwrap_or("retry budget exhausted")
+        ),
+        output::Phase::Deploy,
+    );
+}
+
+fn pre_source_failure_diagnostic(
+    error: &anyhow::Error,
+    redactor: Option<&ExactValueRedactor>,
+) -> Option<PreSourceFailureDiagnostic> {
+    if let Some(diagnostic) = output::reported_terminal_diagnostic(error) {
+        return Some(PreSourceFailureDiagnostic {
+            code: diagnostic.code.clone(),
+            message: sanitize_pre_source_failure_message(&diagnostic.message, redactor),
+            details: sanitize_pre_source_failure_details(diagnostic.details.as_ref(), redactor),
+        });
+    }
+    if let Some(error) = crate::errors::find_cli_error(error) {
+        return Some(PreSourceFailureDiagnostic {
+            code: error.code.clone(),
+            message: sanitize_pre_source_failure_message(&error.to_string(), redactor),
+            details: sanitize_pre_source_failure_details(error.details.as_ref(), redactor),
+        });
+    }
+    if let Some(error) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<output::CodedError>())
+    {
+        return Some(PreSourceFailureDiagnostic {
+            code: error.code.clone(),
+            message: sanitize_pre_source_failure_message(&error.message, redactor),
+            details: None,
+        });
+    }
+    if let Some(error) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<crate::api::StructuredApiError>())
+    {
+        return Some(PreSourceFailureDiagnostic {
+            code: error.code.clone(),
+            message: sanitize_pre_source_failure_message(&error.message, redactor),
+            details: sanitize_pre_source_failure_details(error.details.as_ref(), redactor),
+        });
+    }
+    Some(PreSourceFailureDiagnostic {
+        code: "INTERNAL_ERROR".to_string(),
+        message: sanitize_pre_source_failure_message(&format!("{error:#}"), redactor),
+        details: None,
+    })
+}
+
+fn sanitize_pre_source_failure_details(
+    details: Option<&serde_json::Value>,
+    redactor: Option<&ExactValueRedactor>,
+) -> Option<serde_json::Value> {
+    details.map(|details| {
+        redactor.map_or_else(
+            || details.clone(),
+            |redactor| redactor.sanitize_json(details),
+        )
+    })
+}
+
+fn sanitize_pre_source_failure_message(
+    message: &str,
+    redactor: Option<&ExactValueRedactor>,
+) -> String {
+    let fallback_redactor = ExactValueRedactor::from_values(std::iter::empty())
+        .expect("empty build-log redactor must compile");
+    truncate_utf8(
+        sanitize_message(message, redactor.unwrap_or(&fallback_redactor)),
+        MAX_UPLOAD_FAILURE_LOG_LENGTH,
+    )
 }
 
 fn emit_deploy_plan_explain(json: bool, explain: &plan::DeployPlanExplain) -> anyhow::Result<()> {
@@ -1179,6 +1345,7 @@ async fn register_deployment_source(
     attempt: u32,
     manifest: serde_json::Value,
     functions: Option<serde_json::Value>,
+    json: bool,
 ) -> anyhow::Result<()> {
     let path = format!("/v1/deployments/{deployment_id}/source");
     let namespace = Uuid::parse_str(deployment_id).context("deployment ID is not a valid UUID")?;
@@ -1219,14 +1386,22 @@ async fn register_deployment_source(
             }
             Ok(Err(error)) => {
                 let Some(retry) = classify_api_retry(&error) else {
-                    return Err(error.context("failed to register admitted deployment source"));
+                    return Err(map_source_registration_error(
+                        error,
+                        json,
+                        "failed to register admitted deployment source",
+                    ));
                 };
                 let remaining = SOURCE_REGISTRATION_RETRY_BUDGET.saturating_sub(started.elapsed());
                 if remaining.is_zero() {
-                    return Err(error.context(format!(
-                        "failed to register admitted deployment source after waiting {:?}",
-                        SOURCE_REGISTRATION_RETRY_BUDGET
-                    )));
+                    return Err(map_source_registration_error(
+                        error,
+                        json,
+                        &format!(
+                            "failed to register admitted deployment source after waiting {:?}",
+                            SOURCE_REGISTRATION_RETRY_BUDGET
+                        ),
+                    ));
                 }
                 tokio::time::sleep(retry.retry_after.unwrap_or(delay).min(remaining)).await;
             }
@@ -1242,6 +1417,48 @@ async fn register_deployment_source(
             }
         }
         delay = (delay * 2).min(SOURCE_REGISTRATION_MAX_RETRY_DELAY);
+    }
+}
+
+fn map_source_registration_error(error: anyhow::Error, json: bool, context: &str) -> anyhow::Error {
+    let Some(api_error) = error.downcast_ref::<crate::api::StructuredApiError>() else {
+        return error.context(context.to_string());
+    };
+    let message = format_structured_api_failure(context, api_error);
+    if json {
+        return output::report_terminal_error(
+            "deploy",
+            &message,
+            &api_error.code,
+            api_error.details.as_ref(),
+        );
+    }
+    let mut error =
+        crate::errors::CliError::new(&api_error.code, message).phase(output::Phase::Deploy);
+    if let Some(details) = api_error.details.clone() {
+        error = error.details(details);
+    }
+    error.into_anyhow()
+}
+
+fn format_structured_api_failure(context: &str, error: &crate::api::StructuredApiError) -> String {
+    let fields = error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("fields"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|field| {
+            let field_name = field.get("field")?.as_str()?;
+            let message = field.get("message")?.as_str()?;
+            Some(format!("{field_name}: {message}"))
+        })
+        .collect::<Vec<_>>();
+    if fields.is_empty() {
+        format!("{context}: {}", error.message)
+    } else {
+        format!("{context}: {}", fields.join("; "))
     }
 }
 

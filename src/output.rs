@@ -292,19 +292,44 @@ pub fn coded_error(code: impl Into<String>, message: impl Into<String>) -> anyho
     anyhow::Error::new(CodedError::new(code, message))
 }
 
+#[derive(Debug, Clone)]
+pub struct TerminalDiagnostic {
+    pub code: String,
+    pub message: String,
+    pub details: Option<serde_json::Value>,
+}
+
 #[derive(Debug)]
-pub struct AlreadyReportedError;
+pub struct AlreadyReportedError {
+    diagnostic: Option<TerminalDiagnostic>,
+}
+
+impl AlreadyReportedError {
+    pub fn diagnostic(&self) -> Option<&TerminalDiagnostic> {
+        self.diagnostic.as_ref()
+    }
+}
 
 impl std::fmt::Display for AlreadyReportedError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("command output already reported")
+        match &self.diagnostic {
+            Some(diagnostic) => f.write_str(&diagnostic.message),
+            None => f.write_str("command output already reported"),
+        }
     }
 }
 
 impl std::error::Error for AlreadyReportedError {}
 
 pub fn already_reported_error() -> anyhow::Error {
-    anyhow::Error::new(AlreadyReportedError)
+    anyhow::Error::new(AlreadyReportedError { diagnostic: None })
+}
+
+pub fn reported_terminal_diagnostic(error: &anyhow::Error) -> Option<&TerminalDiagnostic> {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<AlreadyReportedError>())
+        .and_then(AlreadyReportedError::diagnostic)
 }
 
 /// Fully emit a terminal coded error on BOTH channels and return an
@@ -320,7 +345,13 @@ pub fn report_terminal_error(
 ) -> anyhow::Error {
     log_error_structured(phase, message, code, details);
     terminal_error(message, Some(code));
-    already_reported_error()
+    anyhow::Error::new(AlreadyReportedError {
+        diagnostic: Some(TerminalDiagnostic {
+            code: code.to_string(),
+            message: message.to_string(),
+            details: details.cloned(),
+        }),
+    })
 }
 
 /// Attach a default `CodedError(code)` to an error only if the chain doesn't

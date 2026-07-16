@@ -1,7 +1,8 @@
 use std::time::Duration;
 
 use super::build_logs::{
-    ExactValueRedactor, collect_upload_batch, parse_env_toggle, sanitize_message, truncate_utf8,
+    ExactValueRedactor, collect_upload_batch, error_code, error_details, parse_env_toggle,
+    sanitize_message, truncate_utf8,
 };
 
 #[test]
@@ -44,6 +45,44 @@ fn masks_exact_environment_values_only_in_sanitized_copy() {
 
     assert_eq!(raw, "build printed tiny and api-secret-value");
     assert_eq!(sanitized, "build printed [REDACTED] and [REDACTED]");
+}
+
+#[test]
+fn masks_exact_environment_values_inside_structured_details() {
+    let redactor =
+        ExactValueRedactor::from_values(["materialized-secret-value".to_string()]).unwrap();
+    let details = serde_json::json!({
+        "fields": [{
+            "field": "functions.edgeRules",
+            "message": "failed with materialized-secret-value"
+        }]
+    });
+
+    assert_eq!(
+        redactor.sanitize_json(&details),
+        serde_json::json!({
+            "fields": [{
+                "field": "functions.edgeRules",
+                "message": "failed with [REDACTED]"
+            }]
+        })
+    );
+}
+
+#[test]
+fn terminal_diagnostic_is_available_to_build_log_finalization() {
+    let details = serde_json::json!({
+        "fields": [{"field": "functions.edgeRules", "message": "invalid generated rules"}]
+    });
+    let error = crate::output::report_terminal_error(
+        "deploy",
+        "source registration failed",
+        "VALIDATION_ERROR",
+        Some(&details),
+    );
+
+    assert_eq!(error_code(&error).as_deref(), Some("VALIDATION_ERROR"));
+    assert_eq!(error_details(&error).as_ref(), Some(&details));
 }
 
 #[test]

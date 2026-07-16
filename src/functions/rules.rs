@@ -11,6 +11,11 @@ const RATE_LIMIT_MAX_REQUESTS: u64 = 100_000;
 const RATE_LIMIT_MIN_WINDOW_SECONDS: u64 = 10;
 const RATE_LIMIT_MAX_WINDOW_SECONDS: u64 = 600;
 const REDIRECT_STATUS_CODES: [u64; 4] = [301, 302, 307, 308];
+const REDIRECT_TARGET_MESSAGE: &str =
+    "redirect target must be a relative path or an absolute http(s) URL";
+const INTERNAL_REWRITE_TARGET_MESSAGE: &str = "internal rewrite target must be a relative path";
+const EXTERNAL_REWRITE_TARGET_MESSAGE: &str =
+    "external rewrite target must be an absolute https URL";
 
 /// Load `onreza.rules.toml` (sibling of `onreza.toml`) as a JSON value.
 ///
@@ -104,6 +109,10 @@ fn validate_edge_rules_authoring_value(path: &Path, value: &Value) -> anyhow::Re
     Ok(())
 }
 
+pub(crate) fn validate_edge_rules_value(label: &str, value: &Value) -> anyhow::Result<()> {
+    validate_edge_rules_authoring_value(Path::new(label), value)
+}
+
 fn is_fallback_position_error(error: &serde_json::Error) -> bool {
     let message = error.to_string();
     message.contains("unknown field `position`") || message.contains("unknown field \"position\"")
@@ -161,6 +170,7 @@ fn validate_edge_rules_refinements(path: &Path, value: &Value) -> anyhow::Result
         if action_type == Some("redirect") {
             validate_redirect_status(path, rule_id, action)?;
         }
+        validate_action_target(path, rule_id, action)?;
         if action_type == Some("pipeline") {
             validate_pipeline_action(path, rule_id, action)?;
         }
@@ -241,6 +251,98 @@ fn validate_redirect_status(
         ));
     }
     Ok(())
+}
+
+fn validate_action_target(
+    path: &Path,
+    rule_id: &str,
+    action: &Map<String, Value>,
+) -> anyhow::Result<()> {
+    let Some(action_type) = action.get("type").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let Some(target) = action.get("target").and_then(Value::as_str) else {
+        return Ok(());
+    };
+
+    let error = match action_type {
+        "redirect" if !valid_redirect_target(target) => Some(REDIRECT_TARGET_MESSAGE),
+        "rewrite"
+            if action.get("external").and_then(Value::as_bool) == Some(true)
+                && !valid_absolute_url_target(target, &["https"]) =>
+        {
+            Some(EXTERNAL_REWRITE_TARGET_MESSAGE)
+        }
+        "rewrite"
+            if action.get("external").and_then(Value::as_bool) != Some(true)
+                && !valid_internal_rewrite_target(target) =>
+        {
+            Some(INTERNAL_REWRITE_TARGET_MESSAGE)
+        }
+        _ => None,
+    };
+    if let Some(error) = error {
+        return Err(anyhow::anyhow!(
+            "{} rule '{rule_id}' {error}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn valid_redirect_target(target: &str) -> bool {
+    let target = target.trim();
+    if target.is_empty() || target.chars().any(char::is_whitespace) {
+        return false;
+    }
+    valid_absolute_url_target(target, &["http", "https"])
+        || (!has_unsafe_relative_target_prefix(target))
+}
+
+fn valid_internal_rewrite_target(target: &str) -> bool {
+    let target = target.trim();
+    !target.is_empty()
+        && !target.chars().any(char::is_whitespace)
+        && !has_unsafe_relative_target_prefix(target)
+        && !target.contains('#')
+}
+
+fn has_unsafe_relative_target_prefix(target: &str) -> bool {
+    target.starts_with("//") || target.contains("://") || has_url_scheme_like_prefix(target)
+}
+
+fn has_url_scheme_like_prefix(target: &str) -> bool {
+    let Some((scheme, _)) = target.split_once(':') else {
+        return false;
+    };
+    let mut chars = scheme.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+        && chars.all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.')
+        })
+}
+
+fn valid_absolute_url_target(target: &str, protocols: &[&str]) -> bool {
+    let target = target.trim();
+    if target.is_empty() || target.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let lower = target.to_ascii_lowercase();
+    if !protocols
+        .iter()
+        .any(|protocol| lower.starts_with(&format!("{protocol}://")))
+    {
+        return false;
+    }
+    let Ok(url) = url::Url::parse(target) else {
+        return false;
+    };
+    protocols.contains(&url.scheme())
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.host_str().is_some_and(|host| !host.is_empty())
 }
 
 fn validate_pipeline_action(

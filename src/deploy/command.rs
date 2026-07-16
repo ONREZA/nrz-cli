@@ -23,6 +23,48 @@ pub(super) fn resolve_build_command(
     Some(format!("{pm} run build"))
 }
 
+pub(super) fn is_recursive_deploy_command(command: &str) -> bool {
+    command.split([';', '&', '|']).any(|segment| {
+        let mut tokens = segment.split_whitespace();
+        let Some(first) = tokens
+            .find(|token| !is_shell_assignment(token))
+            .map(command_token_basename)
+        else {
+            return false;
+        };
+        if first == "nrz" || first.starts_with("nrz@") {
+            return tokens.next().is_some_and(|token| token == "deploy");
+        }
+        if first != "npx" && first != "bunx" {
+            return false;
+        }
+        let remaining = tokens.map(command_token_basename).collect::<Vec<_>>();
+        remaining
+            .windows(2)
+            .any(|pair| (pair[0] == "nrz" || pair[0].starts_with("nrz@")) && pair[1] == "deploy")
+    })
+}
+
+fn is_shell_assignment(token: &str) -> bool {
+    let Some((name, _)) = token.split_once('=') else {
+        return false;
+    };
+    let mut characters = name.chars();
+    characters
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
+fn command_token_basename(token: &str) -> String {
+    token
+        .trim_matches(['\'', '"'])
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(token)
+        .to_ascii_lowercase()
+}
+
 /// Run a shell command while preserving terminal output and optionally shipping it.
 ///
 /// In JSON mode: pipes stdout/stderr, wraps each line via `output::log_line()` on stderr.
@@ -312,6 +354,12 @@ pub(super) fn run_install_step(
     let Some(cmd) = resolve_install_command(project_dir, effective) else {
         return Ok(());
     };
+    if is_recursive_deploy_command(&cmd) {
+        return Err(output::coded_error(
+            "INVALID_CONFIG",
+            "`nrz deploy` cannot be used as an install command because the platform build runner already executes `nrz deploy`; use the package-manager install command, for example `npm ci`",
+        ));
+    }
     let (cmd, install_env) = prepare_install_command(&cmd, project_dir, json);
     let install_env = merge_command_environment(execution_env, &install_env);
 
@@ -715,6 +763,12 @@ pub(super) fn run_build_step(
         return Err(output::coded_error(
             "INVALID_CONFIG",
             "empty build command".to_string(),
+        ));
+    }
+    if is_recursive_deploy_command(cmd) {
+        return Err(output::coded_error(
+            "INVALID_CONFIG",
+            "`nrz deploy` cannot be used as a build command because the platform build runner already executes `nrz deploy`; use the application build script, for example `npm run build`",
         ));
     }
 
