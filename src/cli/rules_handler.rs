@@ -373,18 +373,74 @@ pub(crate) fn write_rules_file(path: &Path, content: &[u8]) -> anyhow::Result<()
         drop(file);
 
         #[cfg(windows)]
-        if std::fs::symlink_metadata(path).is_ok() {
-            std::fs::remove_file(path)
-                .with_context(|| format!("failed to replace {}", path.display()))?;
+        {
+            replace_file_with_rollback(&temp_path, path)
         }
 
-        std::fs::rename(&temp_path, path)
-            .with_context(|| format!("failed to replace {}", path.display()))
+        #[cfg(not(windows))]
+        {
+            std::fs::rename(&temp_path, path)
+                .with_context(|| format!("failed to replace {}", path.display()))
+        }
     })();
     if write_result.is_err() {
         let _ = std::fs::remove_file(&temp_path);
     }
     write_result
+}
+
+#[cfg(any(windows, test))]
+pub(crate) fn replace_file_with_rollback(temp_path: &Path, path: &Path) -> anyhow::Result<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => Some(metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
+        }
+    };
+    let Some(metadata) = metadata else {
+        return std::fs::rename(temp_path, path)
+            .with_context(|| format!("failed to install {}", path.display()));
+    };
+    if !metadata.is_file() && !metadata.file_type().is_symlink() {
+        anyhow::bail!("rules target is not a file: {}", path.display());
+    }
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("rules path has no parent: {}", path.display()))?;
+    let backup_path = parent.join(format!(
+        ".{RULES_FILENAME}.backup-{}",
+        uuid::Uuid::now_v7().simple()
+    ));
+    std::fs::rename(path, &backup_path)
+        .with_context(|| format!("failed to preserve {}", path.display()))?;
+
+    if let Err(install_error) = std::fs::rename(temp_path, path) {
+        if let Err(restore_error) = std::fs::rename(&backup_path, path) {
+            anyhow::bail!(
+                "failed to install {} ({install_error}) and failed to restore it \
+                 ({restore_error}); previous file remains at {}",
+                path.display(),
+                backup_path.display()
+            );
+        }
+        return Err(install_error).with_context(|| {
+            format!(
+                "failed to install {}; previous file was restored",
+                path.display()
+            )
+        });
+    }
+
+    if let Err(error) = std::fs::remove_file(&backup_path) {
+        tracing::warn!(
+            path = %backup_path.display(),
+            error = %error,
+            "failed to remove replaced rules backup"
+        );
+    }
+    Ok(())
 }
 
 fn report_check_human(report: &functions::EdgeRulesCheckReport) {
