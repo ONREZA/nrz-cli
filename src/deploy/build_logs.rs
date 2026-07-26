@@ -262,11 +262,15 @@ impl ExactValueRedactor {
         Ok(Self { pattern })
     }
 
-    fn redact(&self, value: &str) -> String {
+    fn redact_with(&self, value: &str, replacement: &str) -> String {
         self.pattern.as_ref().map_or_else(
             || value.to_string(),
-            |pattern| pattern.replace_all(value, REDACTED).into_owned(),
+            |pattern| pattern.replace_all(value, replacement).into_owned(),
         )
+    }
+
+    fn redact(&self, value: &str) -> String {
+        self.redact_with(value, REDACTED)
     }
 
     pub(super) fn sanitize_json(&self, value: &serde_json::Value) -> serde_json::Value {
@@ -828,8 +832,18 @@ pub(super) fn sanitize_message(message: &str, redactor: &ExactValueRedactor) -> 
     });
     let url = URL.get_or_init(|| Regex::new(r#"https?://[^\s\"'<>]+"#).unwrap());
 
-    let value = output::terminal_text(message);
-    let value = redactor.redact(&value);
+    let mut placeholder = "\u{e000}NRZ_REDACTED\u{e001}".to_string();
+    while message.contains(&placeholder) {
+        placeholder.push('\u{e001}');
+    }
+    let value = redactor.redact_with(message, &placeholder);
+    let value = output::terminal_text(&value);
+    let value = value
+        .split(&placeholder)
+        .map(|part| redactor.redact(part))
+        .collect::<Vec<_>>()
+        .join(&placeholder)
+        .replace(&placeholder, REDACTED);
     let value = bearer.replace_all(&value, "Bearer [REDACTED]");
     let value = assignment.replace_all(&value, "$1=[REDACTED]");
     let value = url.replace_all(&value, |captures: &Captures<'_>| sanitize_url(&captures[0]));

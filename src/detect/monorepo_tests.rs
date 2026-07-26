@@ -187,6 +187,52 @@ fn recursive_workspace_glob_respects_unanchored_test_negation() {
 }
 
 #[test]
+fn workspace_glob_matching_work_is_bounded() {
+    let value = "a".repeat(1024);
+    let pattern = vec!['*'; 4096];
+    let mut budget = WorkspaceExpansionBudget::default();
+
+    assert!(!workspace_segment_matches(&value, &pattern, &mut budget));
+}
+
+#[test]
+fn workspace_glob_matching_uses_a_shared_budget() {
+    let value = "a".repeat(1000);
+    let pattern = vec!['*'; 3000];
+    let mut budget = WorkspaceExpansionBudget::default();
+
+    assert!(workspace_segment_matches(&value, &pattern, &mut budget));
+    assert!(!workspace_segment_matches(&value, &pattern, &mut budget));
+}
+
+#[test]
+fn exhausted_workspace_expansion_budget_fails_closed() {
+    let directory = "a".repeat(1000);
+    let pattern = "*".repeat(3000);
+    let root_package = serde_json::json!({
+        "name": "root",
+        "workspaces": [pattern.clone(), pattern]
+    })
+    .to_string();
+    let mut files = serde_json::Map::new();
+    files.insert("package.json".to_string(), root_package.into());
+    files.insert(
+        format!("{directory}/package.json"),
+        r#"{"name":"workspace-package"}"#.into(),
+    );
+    let manifest = serde_json::json!({
+        "tree": [format!("{directory}/")],
+        "files": files
+    });
+    let fs = vfs(&manifest.to_string());
+    let pkg = PackageJson::load_from_fs(&fs);
+
+    let info = detect_monorepo(&fs, pkg.as_ref(), None).unwrap();
+
+    assert!(info.packages.is_empty());
+}
+
+#[test]
 fn detect_npm_workspaces_monorepo() {
     let fs = vfs(r#"{
         "tree": ["packages/", "packages/core/"],

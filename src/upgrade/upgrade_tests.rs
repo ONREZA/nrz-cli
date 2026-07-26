@@ -194,3 +194,42 @@ fn binary_replacement_does_not_follow_legacy_temp_symlink() {
             .all(|entry| !entry.file_name().to_string_lossy().contains(".update-"))
     );
 }
+
+#[test]
+fn cleanup_removes_only_stale_owned_uuid_update_candidates() {
+    let dir = tempfile::tempdir().unwrap();
+    let current = dir.path().join("nrz");
+    let candidate = dir
+        .path()
+        .join(".nrz.update-019fa73f4cc87c70bcd49d050b4b0380.tmp");
+    let fresh_candidate = dir
+        .path()
+        .join(".nrz.update-019fa73f4cc87c70bcd49d050b4b0382.tmp");
+    let unrelated = dir.path().join(".nrz.update-not-a-uuid.tmp");
+    let candidate_directory = dir
+        .path()
+        .join(".nrz.update-019fa73f4cc87c70bcd49d050b4b0381.tmp");
+    std::fs::write(&current, b"current").unwrap();
+    std::fs::write(&candidate, b"partial").unwrap();
+    std::fs::write(&fresh_candidate, b"active").unwrap();
+    std::fs::write(&unrelated, b"keep").unwrap();
+    std::fs::create_dir(&candidate_directory).unwrap();
+    let candidate_file = std::fs::File::options()
+        .write(true)
+        .open(&candidate)
+        .unwrap();
+    candidate_file
+        .set_times(std::fs::FileTimes::new().set_modified(
+            std::time::SystemTime::now()
+                - UPDATE_DEBRIS_STALE_AFTER
+                - std::time::Duration::from_secs(1),
+        ))
+        .unwrap();
+
+    cleanup_old_files_at(&current);
+
+    assert!(!candidate.exists());
+    assert_eq!(std::fs::read(&fresh_candidate).unwrap(), b"active");
+    assert_eq!(std::fs::read(&unrelated).unwrap(), b"keep");
+    assert!(candidate_directory.is_dir());
+}
