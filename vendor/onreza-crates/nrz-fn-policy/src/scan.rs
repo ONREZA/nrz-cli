@@ -4,12 +4,14 @@ use std::collections::HashSet;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     AssignmentExpression, AssignmentOperator, AssignmentTarget, AssignmentTargetProperty,
-    BindingPattern, CallExpression, ComputedMemberExpression, ExportAllDeclaration,
-    ExportNamedDeclaration, Expression, IdentifierReference, ImportDeclaration, ImportExpression,
-    NewExpression, PropertyKey, StaticMemberExpression, VariableDeclarator,
+    AssignmentTargetWithDefault, BindingPattern, CallExpression, ComputedMemberExpression,
+    ExportAllDeclaration, ExportNamedDeclaration, Expression, IdentifierReference,
+    ImportDeclaration, ImportExpression, NewExpression, PropertyKey, StaticMemberExpression,
+    VariableDeclarator,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
+use oxc_semantic::{IsGlobalReference, Scoping, SemanticBuilder, SymbolId};
 use oxc_span::SourceType;
 
 /// A denied runtime capability detected statically in a single module.
@@ -51,9 +53,15 @@ pub(crate) fn scan_module(
         };
     }
 
-    let mut alias_collector = GlobalAliasCollector::default();
+    let semantic = SemanticBuilder::new().build(&parsed.program).semantic;
+    let scoping = semantic.scoping();
+    let mut alias_collector = GlobalAliasCollector::new(scoping);
     alias_collector.visit_program(&parsed.program);
-    let mut visitor = Visitor::new(allowed_bun_properties, alias_collector.into_aliases());
+    let mut visitor = Visitor::new(
+        allowed_bun_properties,
+        scoping,
+        alias_collector.into_aliases(),
+    );
     visitor.visit_program(&parsed.program);
     ModuleScan {
         imports: visitor.imports,
@@ -63,41 +71,78 @@ pub(crate) fn scan_module(
     }
 }
 
-#[derive(Default)]
-struct GlobalAliasCollector {
-    edges: Vec<(String, String)>,
+#[derive(Clone, Copy)]
+enum GlobalAliasSource {
+    IntrinsicGlobal,
+    Symbol(SymbolId),
 }
 
-impl<'a> Visit<'a> for GlobalAliasCollector {
+struct GlobalAliasCollector<'s> {
+    scoping: &'s Scoping,
+    edges: Vec<(SymbolId, GlobalAliasSource)>,
+}
+
+impl<'s> GlobalAliasCollector<'s> {
+    fn new(scoping: &'s Scoping) -> Self {
+        Self {
+            scoping,
+            edges: Vec::new(),
+        }
+    }
+
+    fn record_binding_alias(&mut self, target: Option<SymbolId>, source: &Expression<'_>) {
+        if let (Some(target), Some(source)) = (target, global_alias_source(source, self.scoping)) {
+            self.edges.push((target, source));
+        }
+    }
+}
+
+impl<'a> Visit<'a> for GlobalAliasCollector<'_> {
     fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
-        if let (BindingPattern::BindingIdentifier(target), Some(source)) = (&it.id, &it.init)
-            && let Some(source) = expression_identifier_name(source)
-        {
-            self.edges
-                .push((target.name.to_string(), source.to_string()));
+        if let (BindingPattern::BindingIdentifier(target), Some(source)) = (&it.id, &it.init) {
+            self.record_binding_alias(target.symbol_id.get(), source);
         }
         walk::walk_variable_declarator(self, it);
     }
 
-    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
-        if it.operator == AssignmentOperator::Assign
-            && let Some(target) = assignment_target_binding_name(&it.left)
-            && let Some(source) = expression_identifier_name(&it.right)
+    fn visit_binding_pattern(&mut self, it: &BindingPattern<'a>) {
+        if let BindingPattern::AssignmentPattern(pattern) = it
+            && let BindingPattern::BindingIdentifier(target) = &pattern.left
         {
-            self.edges.push((target.to_string(), source.to_string()));
+            self.record_binding_alias(target.symbol_id.get(), &pattern.right);
+        }
+        walk::walk_binding_pattern(self, it);
+    }
+
+    fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
+        if it.operator == AssignmentOperator::Assign {
+            self.record_binding_alias(
+                assignment_target_symbol_id(&it.left, self.scoping),
+                &it.right,
+            );
         }
         walk::walk_assignment_expression(self, it);
     }
+
+    fn visit_assignment_target_with_default(&mut self, it: &AssignmentTargetWithDefault<'a>) {
+        self.record_binding_alias(
+            assignment_target_symbol_id(&it.binding, self.scoping),
+            &it.init,
+        );
+        walk::walk_assignment_target_with_default(self, it);
+    }
 }
 
-impl GlobalAliasCollector {
-    fn into_aliases(self) -> HashSet<String> {
+impl GlobalAliasCollector<'_> {
+    fn into_aliases(self) -> HashSet<SymbolId> {
         let mut aliases = HashSet::new();
         loop {
             let before = aliases.len();
             for (target, source) in &self.edges {
-                if is_intrinsic_global_name(source) || aliases.contains(source) {
-                    aliases.insert(target.clone());
+                if matches!(source, GlobalAliasSource::IntrinsicGlobal)
+                    || matches!(source, GlobalAliasSource::Symbol(source) if aliases.contains(source))
+                {
+                    aliases.insert(*target);
                 }
             }
             if aliases.len() == before {
@@ -107,9 +152,14 @@ impl GlobalAliasCollector {
     }
 }
 
-struct Visitor<'p> {
+struct GlobalBindings<'s> {
+    scoping: &'s Scoping,
+    aliases: HashSet<SymbolId>,
+}
+
+struct Visitor<'p, 's> {
     allowed_bun_properties: &'p [String],
-    global_aliases: HashSet<String>,
+    globals: GlobalBindings<'s>,
     suppressed_global_references: usize,
     suppressed_bun_references: usize,
     suppressed_process_references: usize,
@@ -118,11 +168,15 @@ struct Visitor<'p> {
     capabilities: CapabilitySet,
 }
 
-impl<'p> Visitor<'p> {
-    fn new(allowed_bun_properties: &'p [String], global_aliases: HashSet<String>) -> Self {
+impl<'p, 's> Visitor<'p, 's> {
+    fn new(
+        allowed_bun_properties: &'p [String],
+        scoping: &'s Scoping,
+        aliases: HashSet<SymbolId>,
+    ) -> Self {
         Self {
             allowed_bun_properties,
-            global_aliases,
+            globals: GlobalBindings { scoping, aliases },
             suppressed_global_references: 0,
             suppressed_bun_references: 0,
             suppressed_process_references: 0,
@@ -133,7 +187,7 @@ impl<'p> Visitor<'p> {
     }
 }
 
-impl<'a> Visit<'a> for Visitor<'_> {
+impl<'a> Visit<'a> for Visitor<'_, '_> {
     fn visit_import_declaration(&mut self, it: &ImportDeclaration<'a>) {
         self.imports.push(it.source.value.to_string());
         walk::walk_import_declaration(self, it);
@@ -162,11 +216,18 @@ impl<'a> Visit<'a> for Visitor<'_> {
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
         if let Expression::Identifier(callee) = &it.callee {
             match callee.name.as_str() {
-                "require" => self.capabilities.insert(ScanCapability::CommonJsRequire),
-                "Worker" => self.capabilities.insert(ScanCapability::Worker),
-                "postMessage" => self
-                    .capabilities
-                    .insert(ScanCapability::ParentMessageChannel),
+                "require" if is_global_reference_name(callee, "require", self.globals.scoping) => {
+                    self.capabilities.insert(ScanCapability::CommonJsRequire);
+                }
+                "Worker" if is_global_reference_name(callee, "Worker", self.globals.scoping) => {
+                    self.capabilities.insert(ScanCapability::Worker);
+                }
+                "postMessage"
+                    if is_global_reference_name(callee, "postMessage", self.globals.scoping) =>
+                {
+                    self.capabilities
+                        .insert(ScanCapability::ParentMessageChannel);
+                }
                 _ => {}
             }
         }
@@ -175,7 +236,7 @@ impl<'a> Visit<'a> for Visitor<'_> {
 
     fn visit_new_expression(&mut self, it: &NewExpression<'a>) {
         if let Expression::Identifier(callee) = &it.callee
-            && callee.name == "Worker"
+            && is_global_reference_name(callee, "Worker", self.globals.scoping)
         {
             self.capabilities.insert(ScanCapability::Worker);
         }
@@ -184,25 +245,40 @@ impl<'a> Visit<'a> for Visitor<'_> {
 
     fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
         if self.suppressed_global_references == 0
-            && (is_intrinsic_global_name(it.name.as_str())
-                || self.global_aliases.contains(it.name.as_str()))
+            && (is_intrinsic_global_reference(it, self.globals.scoping)
+                || is_global_alias_reference(it, &self.globals))
         {
             self.record_unknown_global_property_reference();
             return;
         }
         match it.name.as_str() {
-            "Bun" if self.suppressed_bun_references == 0 => {
+            "Bun"
+                if self.suppressed_bun_references == 0
+                    && is_global_reference_name(it, "Bun", self.globals.scoping) =>
+            {
                 self.capabilities.insert(ScanCapability::BunAmbient);
             }
-            "process" if self.suppressed_process_references == 0 => {
+            "process"
+                if self.suppressed_process_references == 0
+                    && is_global_reference_name(it, "process", self.globals.scoping) =>
+            {
                 self.capabilities.insert(ScanCapability::ProcessControl);
             }
-            "Worker" => self.capabilities.insert(ScanCapability::Worker),
-            "postMessage" => self
-                .capabilities
-                .insert(ScanCapability::ParentMessageChannel),
-            "require" => self.capabilities.insert(ScanCapability::CommonJsRequire),
-            "module" | "exports" => self.capabilities.insert(ScanCapability::CommonJsExports),
+            "Worker" if is_global_reference_name(it, "Worker", self.globals.scoping) => {
+                self.capabilities.insert(ScanCapability::Worker);
+            }
+            "postMessage" if is_global_reference_name(it, "postMessage", self.globals.scoping) => {
+                self.capabilities
+                    .insert(ScanCapability::ParentMessageChannel);
+            }
+            "require" if is_global_reference_name(it, "require", self.globals.scoping) => {
+                self.capabilities.insert(ScanCapability::CommonJsRequire);
+            }
+            "module" | "exports"
+                if is_global_reference_name(it, it.name.as_str(), self.globals.scoping) =>
+            {
+                self.capabilities.insert(ScanCapability::CommonJsExports);
+            }
             _ => {}
         }
     }
@@ -211,7 +287,7 @@ impl<'a> Visit<'a> for Visitor<'_> {
         let global_object = it
             .init
             .as_ref()
-            .is_some_and(|init| is_global_object(init, &self.global_aliases));
+            .is_some_and(|init| is_global_object(init, &self.globals));
         let mut suppress_bun = false;
         let mut suppress_process = false;
         if let Some(init) = &it.init {
@@ -219,7 +295,7 @@ impl<'a> Visit<'a> for Visitor<'_> {
                 self.record_global_binding_pattern(&it.id);
             }
 
-            if is_bun_ambient(init, &self.global_aliases) {
+            if is_bun_ambient(init, &self.globals) {
                 if binding_pattern_exposes_denied_bun_property(&it.id, self.allowed_bun_properties)
                 {
                     self.capabilities.insert(ScanCapability::BunAmbient);
@@ -228,7 +304,7 @@ impl<'a> Visit<'a> for Visitor<'_> {
                 }
             }
 
-            if is_process_ambient(init, &self.global_aliases) {
+            if is_process_ambient(init, &self.globals) {
                 if binding_pattern_exposes_process_control(&it.id) {
                     self.capabilities.insert(ScanCapability::ProcessControl);
                 } else {
@@ -236,7 +312,7 @@ impl<'a> Visit<'a> for Visitor<'_> {
                 }
             }
 
-            if is_parent_message_reference(init, &self.global_aliases) {
+            if is_parent_message_reference(init, &self.globals) {
                 self.capabilities
                     .insert(ScanCapability::ParentMessageChannel);
             }
@@ -252,15 +328,15 @@ impl<'a> Visit<'a> for Visitor<'_> {
     }
 
     fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
-        let global_object = it.operator == AssignmentOperator::Assign
-            && is_global_object(&it.right, &self.global_aliases);
+        let global_object =
+            it.operator == AssignmentOperator::Assign && is_global_object(&it.right, &self.globals);
         let mut suppress_bun = false;
         let mut suppress_process = false;
         if global_object {
             self.record_global_assignment_target(&it.left);
         }
 
-        if is_bun_ambient(&it.right, &self.global_aliases) {
+        if is_bun_ambient(&it.right, &self.globals) {
             if assignment_target_exposes_denied_bun_property(&it.left, self.allowed_bun_properties)
             {
                 self.capabilities.insert(ScanCapability::BunAmbient);
@@ -269,30 +345,38 @@ impl<'a> Visit<'a> for Visitor<'_> {
             }
         }
 
-        if is_process_ambient(&it.right, &self.global_aliases) {
+        if is_process_ambient(&it.right, &self.globals) {
             if assignment_target_exposes_process_control(&it.left) {
                 self.capabilities.insert(ScanCapability::ProcessControl);
             } else {
                 suppress_process = true;
             }
         }
-        if is_parent_message_reference(&it.right, &self.global_aliases) {
+        if is_parent_message_reference(&it.right, &self.globals) {
             self.capabilities
                 .insert(ScanCapability::ParentMessageChannel);
         }
 
-        self.visit_assignment_target(&it.left);
+        if it.operator != AssignmentOperator::Assign
+            || assignment_target_identifier(&it.left).is_none()
+        {
+            self.visit_assignment_target(&it.left);
+        } else if let Some(identifier) = assignment_target_identifier(&it.left)
+            && is_runtime_global_reference(identifier, self.globals.scoping)
+        {
+            self.visit_identifier_reference(identifier);
+        }
         self.visit_binding_source(&it.right, global_object, suppress_bun, suppress_process);
     }
 
     fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
-        if static_member_is_parent_message_channel(it, &self.global_aliases) {
+        if static_member_is_parent_message_channel(it, &self.globals) {
             self.capabilities
                 .insert(ScanCapability::ParentMessageChannel);
         }
 
         let property = it.property.name.as_str();
-        let bun_object = is_bun_ambient(&it.object, &self.global_aliases);
+        let bun_object = is_bun_ambient(&it.object, &self.globals);
         if bun_object {
             if is_denied_bun_property(property, self.allowed_bun_properties) {
                 self.capabilities.insert(ScanCapability::BunAmbient);
@@ -301,7 +385,7 @@ impl<'a> Visit<'a> for Visitor<'_> {
             }
         }
 
-        let process_object = is_process_ambient(&it.object, &self.global_aliases);
+        let process_object = is_process_ambient(&it.object, &self.globals);
         if process_object {
             if is_process_control_property(property) {
                 self.capabilities.insert(ScanCapability::ProcessControl);
@@ -310,7 +394,7 @@ impl<'a> Visit<'a> for Visitor<'_> {
             }
         }
 
-        let global_object = is_global_object(&it.object, &self.global_aliases);
+        let global_object = is_global_object(&it.object, &self.globals);
         if global_object {
             self.record_global_property_reference(property);
             self.suppressed_global_references += 1;
@@ -318,10 +402,13 @@ impl<'a> Visit<'a> for Visitor<'_> {
 
         if let Expression::Identifier(object) = &it.object {
             match object.name.as_str() {
-                "module" if property == "exports" => {
+                "module"
+                    if property == "exports"
+                        && is_global_reference_name(object, "module", self.globals.scoping) =>
+                {
                     self.capabilities.insert(ScanCapability::CommonJsExports);
                 }
-                "exports" => {
+                "exports" if is_global_reference_name(object, "exports", self.globals.scoping) => {
                     self.capabilities.insert(ScanCapability::CommonJsExports);
                 }
                 _ => {}
@@ -340,13 +427,13 @@ impl<'a> Visit<'a> for Visitor<'_> {
     }
 
     fn visit_computed_member_expression(&mut self, it: &ComputedMemberExpression<'a>) {
-        if computed_member_is_parent_message_channel(it, &self.global_aliases) {
+        if computed_member_is_parent_message_channel(it, &self.globals) {
             self.capabilities
                 .insert(ScanCapability::ParentMessageChannel);
         }
 
         let static_property = static_expression_name(&it.expression);
-        let bun_object = is_bun_ambient(&it.object, &self.global_aliases);
+        let bun_object = is_bun_ambient(&it.object, &self.globals);
         if bun_object {
             if computed_bun_property_may_be_denied(&it.expression, self.allowed_bun_properties) {
                 self.capabilities.insert(ScanCapability::BunAmbient);
@@ -355,7 +442,7 @@ impl<'a> Visit<'a> for Visitor<'_> {
             }
         }
 
-        let process_object = is_process_ambient(&it.object, &self.global_aliases);
+        let process_object = is_process_ambient(&it.object, &self.globals);
         if process_object {
             if computed_process_property_may_be_control(&it.expression) {
                 self.capabilities.insert(ScanCapability::ProcessControl);
@@ -364,7 +451,7 @@ impl<'a> Visit<'a> for Visitor<'_> {
             }
         }
 
-        let global_object = is_global_object(&it.object, &self.global_aliases);
+        let global_object = is_global_object(&it.object, &self.globals);
         if global_object {
             if let Some(property) = static_property.as_deref() {
                 self.record_global_property_reference(property);
@@ -394,7 +481,7 @@ impl<'a> Visit<'a> for Visitor<'_> {
     }
 }
 
-impl Visitor<'_> {
+impl Visitor<'_, '_> {
     fn visit_binding_source(
         &mut self,
         source: &Expression<'_>,
@@ -413,7 +500,9 @@ impl Visitor<'_> {
 
     fn record_global_binding_pattern(&mut self, pattern: &BindingPattern<'_>) {
         if let BindingPattern::BindingIdentifier(identifier) = pattern {
-            self.global_aliases.insert(identifier.name.to_string());
+            if let Some(symbol_id) = identifier.symbol_id.get() {
+                self.globals.aliases.insert(symbol_id);
+            }
             return;
         }
         for (property, capability) in denied_global_properties() {
@@ -424,8 +513,8 @@ impl Visitor<'_> {
     }
 
     fn record_global_assignment_target(&mut self, target: &AssignmentTarget<'_>) {
-        if let Some(identifier) = assignment_target_binding_name(target) {
-            self.global_aliases.insert(identifier.to_string());
+        if let Some(symbol_id) = assignment_target_symbol_id(target, self.globals.scoping) {
+            self.globals.aliases.insert(symbol_id);
             return;
         }
         for (property, capability) in denied_global_properties() {
@@ -476,91 +565,149 @@ fn denied_global_properties() -> [(&'static str, ScanCapability); 7] {
     ]
 }
 
-fn assignment_target_binding_name<'a>(target: &'a AssignmentTarget<'a>) -> Option<&'a str> {
+fn assignment_target_identifier<'a>(
+    target: &'a AssignmentTarget<'a>,
+) -> Option<&'a IdentifierReference<'a>> {
     match target {
-        AssignmentTarget::AssignmentTargetIdentifier(identifier) => Some(identifier.name.as_str()),
+        AssignmentTarget::AssignmentTargetIdentifier(identifier) => Some(identifier),
         AssignmentTarget::TSAsExpression(expression) => {
-            expression_identifier_name(&expression.expression)
+            expression_identifier_reference(&expression.expression)
         }
         AssignmentTarget::TSSatisfiesExpression(expression) => {
-            expression_identifier_name(&expression.expression)
+            expression_identifier_reference(&expression.expression)
         }
         AssignmentTarget::TSTypeAssertion(expression) => {
-            expression_identifier_name(&expression.expression)
+            expression_identifier_reference(&expression.expression)
         }
         AssignmentTarget::TSNonNullExpression(expression) => {
-            expression_identifier_name(&expression.expression)
+            expression_identifier_reference(&expression.expression)
         }
         _ => None,
     }
 }
 
-fn expression_identifier_name<'a>(expression: &'a Expression<'a>) -> Option<&'a str> {
+fn assignment_target_symbol_id(
+    target: &AssignmentTarget<'_>,
+    scoping: &Scoping,
+) -> Option<SymbolId> {
+    assignment_target_identifier(target)
+        .and_then(|identifier| identifier_symbol_id(identifier, scoping))
+}
+
+fn expression_identifier_reference<'a>(
+    expression: &'a Expression<'a>,
+) -> Option<&'a IdentifierReference<'a>> {
     match expression {
-        Expression::Identifier(identifier) => Some(identifier.name.as_str()),
+        Expression::Identifier(identifier) => Some(identifier),
         Expression::ParenthesizedExpression(expression) => {
-            expression_identifier_name(&expression.expression)
+            expression_identifier_reference(&expression.expression)
         }
         Expression::TSAsExpression(expression) => {
-            expression_identifier_name(&expression.expression)
+            expression_identifier_reference(&expression.expression)
         }
         Expression::TSSatisfiesExpression(expression) => {
-            expression_identifier_name(&expression.expression)
+            expression_identifier_reference(&expression.expression)
         }
         Expression::TSTypeAssertion(expression) => {
-            expression_identifier_name(&expression.expression)
+            expression_identifier_reference(&expression.expression)
         }
         Expression::TSNonNullExpression(expression) => {
-            expression_identifier_name(&expression.expression)
+            expression_identifier_reference(&expression.expression)
         }
         _ => None,
     }
+}
+
+fn identifier_symbol_id(
+    identifier: &IdentifierReference<'_>,
+    scoping: &Scoping,
+) -> Option<SymbolId> {
+    identifier
+        .reference_id
+        .get()
+        .and_then(|reference_id| scoping.get_reference(reference_id).symbol_id())
+}
+
+fn global_alias_source(
+    expression: &Expression<'_>,
+    scoping: &Scoping,
+) -> Option<GlobalAliasSource> {
+    let identifier = expression_identifier_reference(expression)?;
+    if is_intrinsic_global_reference(identifier, scoping) {
+        return Some(GlobalAliasSource::IntrinsicGlobal);
+    }
+    identifier_symbol_id(identifier, scoping).map(GlobalAliasSource::Symbol)
+}
+
+fn is_global_reference_name(
+    identifier: &IdentifierReference<'_>,
+    expected: &str,
+    scoping: &Scoping,
+) -> bool {
+    identifier.name == expected && is_runtime_global_reference(identifier, scoping)
+}
+
+fn is_runtime_global_reference(identifier: &IdentifierReference<'_>, scoping: &Scoping) -> bool {
+    identifier.is_global_reference(scoping)
+        || identifier_symbol_id(identifier, scoping)
+            .is_some_and(|symbol_id| scoping.symbol_flags(symbol_id).is_ambient())
+}
+
+fn is_intrinsic_global_reference(identifier: &IdentifierReference<'_>, scoping: &Scoping) -> bool {
+    is_intrinsic_global_name(identifier.name.as_str())
+        && is_runtime_global_reference(identifier, scoping)
+}
+
+fn is_global_alias_reference(
+    identifier: &IdentifierReference<'_>,
+    globals: &GlobalBindings<'_>,
+) -> bool {
+    identifier_symbol_id(identifier, globals.scoping)
+        .is_some_and(|symbol_id| globals.aliases.contains(&symbol_id))
 }
 
 fn static_member_is_parent_message_channel(
     expression: &StaticMemberExpression<'_>,
-    global_aliases: &HashSet<String>,
+    globals: &GlobalBindings<'_>,
 ) -> bool {
-    expression.property.name == "postMessage"
-        && is_global_object(&expression.object, global_aliases)
+    expression.property.name == "postMessage" && is_global_object(&expression.object, globals)
 }
 
 fn computed_member_is_parent_message_channel(
     expression: &ComputedMemberExpression<'_>,
-    global_aliases: &HashSet<String>,
+    globals: &GlobalBindings<'_>,
 ) -> bool {
-    is_global_object(&expression.object, global_aliases)
+    is_global_object(&expression.object, globals)
         && static_expression_name(&expression.expression)
             .map(|property| property == "postMessage")
             .unwrap_or(false)
 }
 
-fn is_parent_message_reference(
-    expression: &Expression<'_>,
-    global_aliases: &HashSet<String>,
-) -> bool {
+fn is_parent_message_reference(expression: &Expression<'_>, globals: &GlobalBindings<'_>) -> bool {
     match expression {
-        Expression::Identifier(identifier) => identifier.name == "postMessage",
+        Expression::Identifier(identifier) => {
+            is_global_reference_name(identifier, "postMessage", globals.scoping)
+        }
         Expression::StaticMemberExpression(expression) => {
-            static_member_is_parent_message_channel(expression, global_aliases)
+            static_member_is_parent_message_channel(expression, globals)
         }
         Expression::ComputedMemberExpression(expression) => {
-            computed_member_is_parent_message_channel(expression, global_aliases)
+            computed_member_is_parent_message_channel(expression, globals)
         }
         Expression::ParenthesizedExpression(expression) => {
-            is_parent_message_reference(&expression.expression, global_aliases)
+            is_parent_message_reference(&expression.expression, globals)
         }
         Expression::TSAsExpression(expression) => {
-            is_parent_message_reference(&expression.expression, global_aliases)
+            is_parent_message_reference(&expression.expression, globals)
         }
         Expression::TSSatisfiesExpression(expression) => {
-            is_parent_message_reference(&expression.expression, global_aliases)
+            is_parent_message_reference(&expression.expression, globals)
         }
         Expression::TSTypeAssertion(expression) => {
-            is_parent_message_reference(&expression.expression, global_aliases)
+            is_parent_message_reference(&expression.expression, globals)
         }
         Expression::TSNonNullExpression(expression) => {
-            is_parent_message_reference(&expression.expression, global_aliases)
+            is_parent_message_reference(&expression.expression, globals)
         }
         _ => false,
     }
@@ -576,90 +723,86 @@ fn is_denied_bun_property(property: &str, allowed_bun_properties: &[String]) -> 
     !is_allowed_bun_property(property, allowed_bun_properties)
 }
 
-fn is_bun_ambient(expression: &Expression<'_>, global_aliases: &HashSet<String>) -> bool {
+fn is_bun_ambient(expression: &Expression<'_>, globals: &GlobalBindings<'_>) -> bool {
     match expression {
-        Expression::Identifier(identifier) => identifier.name == "Bun",
+        Expression::Identifier(identifier) => {
+            is_global_reference_name(identifier, "Bun", globals.scoping)
+        }
         Expression::StaticMemberExpression(expression) => {
-            is_global_object(&expression.object, global_aliases)
-                && expression.property.name == "Bun"
+            is_global_object(&expression.object, globals) && expression.property.name == "Bun"
         }
         Expression::ComputedMemberExpression(expression) => {
-            is_global_object(&expression.object, global_aliases)
+            is_global_object(&expression.object, globals)
                 && static_expression_name(&expression.expression)
                     .map(|property| property == "Bun")
                     .unwrap_or(false)
         }
         Expression::ParenthesizedExpression(expression) => {
-            is_bun_ambient(&expression.expression, global_aliases)
+            is_bun_ambient(&expression.expression, globals)
         }
-        Expression::TSAsExpression(expression) => {
-            is_bun_ambient(&expression.expression, global_aliases)
-        }
+        Expression::TSAsExpression(expression) => is_bun_ambient(&expression.expression, globals),
         Expression::TSSatisfiesExpression(expression) => {
-            is_bun_ambient(&expression.expression, global_aliases)
+            is_bun_ambient(&expression.expression, globals)
         }
-        Expression::TSTypeAssertion(expression) => {
-            is_bun_ambient(&expression.expression, global_aliases)
-        }
+        Expression::TSTypeAssertion(expression) => is_bun_ambient(&expression.expression, globals),
         Expression::TSNonNullExpression(expression) => {
-            is_bun_ambient(&expression.expression, global_aliases)
+            is_bun_ambient(&expression.expression, globals)
         }
         _ => false,
     }
 }
 
-fn is_process_ambient(expression: &Expression<'_>, global_aliases: &HashSet<String>) -> bool {
+fn is_process_ambient(expression: &Expression<'_>, globals: &GlobalBindings<'_>) -> bool {
     match expression {
-        Expression::Identifier(identifier) => identifier.name == "process",
+        Expression::Identifier(identifier) => {
+            is_global_reference_name(identifier, "process", globals.scoping)
+        }
         Expression::StaticMemberExpression(expression) => {
-            is_global_object(&expression.object, global_aliases)
-                && expression.property.name == "process"
+            is_global_object(&expression.object, globals) && expression.property.name == "process"
         }
         Expression::ComputedMemberExpression(expression) => {
-            is_global_object(&expression.object, global_aliases)
+            is_global_object(&expression.object, globals)
                 && static_expression_name(&expression.expression)
                     .map(|property| property == "process")
                     .unwrap_or(false)
         }
         Expression::ParenthesizedExpression(expression) => {
-            is_process_ambient(&expression.expression, global_aliases)
+            is_process_ambient(&expression.expression, globals)
         }
         Expression::TSAsExpression(expression) => {
-            is_process_ambient(&expression.expression, global_aliases)
+            is_process_ambient(&expression.expression, globals)
         }
         Expression::TSSatisfiesExpression(expression) => {
-            is_process_ambient(&expression.expression, global_aliases)
+            is_process_ambient(&expression.expression, globals)
         }
         Expression::TSTypeAssertion(expression) => {
-            is_process_ambient(&expression.expression, global_aliases)
+            is_process_ambient(&expression.expression, globals)
         }
         Expression::TSNonNullExpression(expression) => {
-            is_process_ambient(&expression.expression, global_aliases)
+            is_process_ambient(&expression.expression, globals)
         }
         _ => false,
     }
 }
 
-fn is_global_object(expression: &Expression<'_>, global_aliases: &HashSet<String>) -> bool {
+fn is_global_object(expression: &Expression<'_>, globals: &GlobalBindings<'_>) -> bool {
     match expression {
         Expression::Identifier(identifier) => {
-            is_intrinsic_global_name(identifier.name.as_str())
-                || global_aliases.contains(identifier.name.as_str())
+            is_intrinsic_global_reference(identifier, globals.scoping)
+                || is_global_alias_reference(identifier, globals)
         }
         Expression::ParenthesizedExpression(expression) => {
-            is_global_object(&expression.expression, global_aliases)
+            is_global_object(&expression.expression, globals)
         }
-        Expression::TSAsExpression(expression) => {
-            is_global_object(&expression.expression, global_aliases)
-        }
+        Expression::TSAsExpression(expression) => is_global_object(&expression.expression, globals),
         Expression::TSSatisfiesExpression(expression) => {
-            is_global_object(&expression.expression, global_aliases)
+            is_global_object(&expression.expression, globals)
         }
         Expression::TSTypeAssertion(expression) => {
-            is_global_object(&expression.expression, global_aliases)
+            is_global_object(&expression.expression, globals)
         }
         Expression::TSNonNullExpression(expression) => {
-            is_global_object(&expression.expression, global_aliases)
+            is_global_object(&expression.expression, globals)
         }
         _ => false,
     }
