@@ -1012,6 +1012,50 @@ fn vite_with_dev_only_express_mock_stays_static() {
 }
 
 #[test]
+fn vite_with_dev_only_server_frameworks_stays_static() {
+    let cases = [
+        ("hono", r#"import { Hono } from "hono";"#, None),
+        ("elysia", r#"import { Elysia } from "elysia";"#, None),
+        (
+            "@nestjs/core",
+            r#"import { NestFactory } from "@nestjs/core";"#,
+            None,
+        ),
+        ("fastify", r#"import fastify from "fastify";"#, None),
+        ("@adonisjs/core", "export default {};", Some("adonisrc.ts")),
+        ("express", r#"import express from "express";"#, None),
+        ("koa", r#"import Koa from "koa";"#, None),
+        ("h3", r#"import { createApp } from "h3";"#, None),
+    ];
+
+    for (package, source, source_path) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            format!(
+                r#"{{
+                    "scripts": {{"build": "vite build"}},
+                    "dependencies": {{"react": "19.0.0"}},
+                    "devDependencies": {{"vite": "7.0.0", "{package}": "1.0.0"}}
+                }}"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("vite.config.js"), "export default {}").unwrap();
+        write_detection_file(dir.path(), source_path.unwrap_or("server.js"), source);
+
+        let result = detect(dir.path());
+
+        assert_eq!(result.framework, "vite", "package: {package}");
+        assert_eq!(
+            result.suggested_compute,
+            ComputeType::Static,
+            "package: {package}"
+        );
+    }
+}
+
+#[test]
 fn detect_fastify_is_process() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(

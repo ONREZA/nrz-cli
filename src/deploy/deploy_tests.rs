@@ -1344,10 +1344,10 @@ fn node_process_runtime_artifact_includes_workspace_hoisted_deps_with_app_node_m
 fn node_process_runtime_artifact_includes_workspace_package_symlink_targets() {
     let workspace = tempdir().unwrap();
     let app = workspace.path().join("apps/api");
-    let shared = workspace.path().join("packages/shared");
+    let shared = workspace.path().join("packages/group/shared");
     fs::write(
         workspace.path().join("package.json"),
-        r#"{"private":true,"workspaces":["apps/*","packages/*"]}"#,
+        r#"{"private":true,"workspaces":["apps/*","packages/**"]}"#,
     )
     .unwrap();
     fs::create_dir_all(app.join("dist/src")).unwrap();
@@ -1378,7 +1378,7 @@ fn node_process_runtime_artifact_includes_workspace_package_symlink_targets() {
     .unwrap();
     fs::create_dir_all(workspace.path().join("node_modules/@scope")).unwrap();
     std::os::unix::fs::symlink(
-        "../../packages/shared",
+        "../../packages/group/shared",
         workspace.path().join("node_modules/@scope/shared"),
     )
     .unwrap();
@@ -1404,7 +1404,7 @@ fn node_process_runtime_artifact_includes_workspace_package_symlink_targets() {
         .map(|file| file.path.as_str())
         .collect::<Vec<_>>();
     assert!(paths.contains(&"node_modules/@scope/shared"));
-    assert!(paths.contains(&"packages/shared/index.js"));
+    assert!(paths.contains(&"packages/group/shared/index.js"));
 
     let deployable = prepare_deploy_files(&artifact.manifest, scanned, &detection, true).unwrap();
     let plan = source_bundle_v1::build_source_bundle_plan(
@@ -1417,7 +1417,7 @@ fn node_process_runtime_artifact_includes_workspace_package_symlink_targets() {
         .logical_manifest
         .files
         .iter()
-        .find(|file| file.path == "packages/shared/index.js")
+        .find(|file| file.path == "packages/group/shared/index.js")
         .unwrap();
     assert_eq!(
         shared_runtime.role,

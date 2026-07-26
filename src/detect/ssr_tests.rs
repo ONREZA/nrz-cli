@@ -1528,6 +1528,39 @@ fn nuxt_env_fallback_ssr_false() {
 }
 
 #[test]
+fn nuxt_grouped_env_fallback_ssr_false() {
+    for expression in [
+        "(process.env.NUXT_SSR ?? false)",
+        "((process.env.NUXT_SSR ?? false))",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("nuxt.config.ts"),
+            format!("export default defineNuxtConfig({{ ssr: {expression} }})"),
+        )
+        .unwrap();
+
+        let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
+
+        assert!(result.is_static_compatible, "expression: {expression}");
+    }
+}
+
+#[test]
+fn nuxt_grouped_nested_operator_is_not_a_direct_fallback() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("nuxt.config.ts"),
+        "export default defineNuxtConfig({ ssr: (process.env.NUXT_SSR ?? (featureFlag || false)), featureFlag: true })",
+    )
+    .unwrap();
+
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
+
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
 fn nuxt_unrelated_false_property_is_not_ssr_fallback() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(

@@ -710,10 +710,58 @@ fn match_value_token(after: &str, value: &str) -> bool {
 /// Find the fallback value after `||` or `??` operators.
 /// Returns the trimmed text after the operator.
 fn find_fallback_value(text: &str) -> Option<&str> {
-    let expression = property_expression(text);
+    let expression = strip_balanced_outer_parentheses(property_expression(text));
     let idx = top_level_fallback_index(expression)? + 2;
     let after = expression[idx..].trim();
     if after.is_empty() { None } else { Some(after) }
+}
+
+fn strip_balanced_outer_parentheses(mut text: &str) -> &str {
+    loop {
+        let expression = text.trim();
+        let bytes = expression.as_bytes();
+        if bytes.first() != Some(&b'(') {
+            return expression;
+        }
+
+        let mut quote = None;
+        let mut depth = 0usize;
+        let mut closing = None;
+        let mut index = 0usize;
+        while index < bytes.len() {
+            let byte = bytes[index];
+            if let Some(active_quote) = quote {
+                if byte == b'\\' {
+                    index = index.saturating_add(2);
+                    continue;
+                }
+                if byte == active_quote {
+                    quote = None;
+                }
+            } else {
+                match byte {
+                    b'\'' | b'"' | b'`' => quote = Some(byte),
+                    b'(' => depth += 1,
+                    b')' if depth > 0 => {
+                        depth -= 1;
+                        if depth == 0 {
+                            closing = Some(index);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            index += 1;
+        }
+
+        match closing {
+            Some(index) if index + 1 == bytes.len() => {
+                text = &expression[1..index];
+            }
+            _ => return expression,
+        }
+    }
 }
 
 fn top_level_fallback_index(text: &str) -> Option<usize> {

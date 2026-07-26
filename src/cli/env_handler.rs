@@ -3,7 +3,7 @@ use std::io::{IsTerminal, Read, Write};
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 use crate::auth;
 use crate::output;
 use nrz::config;
@@ -220,7 +220,7 @@ async fn list(
     json: bool,
 ) -> anyhow::Result<()> {
     let mut resp: EnvListResponse = client
-        .get(&format!("/v1/projects/{project_id}/env"))
+        .get(&format!("/v1/projects/{}/env", path_segment(project_id)))
         .await
         .context("failed to fetch environment variables")?;
     if let Some(environment_id) = environment_id {
@@ -248,10 +248,11 @@ async fn list(
             let display_val = if v.is_secret {
                 "*****".to_string()
             } else {
-                v.value.as_deref().unwrap_or("-").to_string()
+                output::terminal_line(v.value.as_deref().unwrap_or("-"))
             };
-            let scope = format_scope(v);
-            eprintln!("  {:<30} {:<30} {}", v.key, display_val, scope);
+            let key = output::terminal_line(&v.key);
+            let scope = output::terminal_line(&format_scope(v));
+            eprintln!("  {key:<30} {display_val:<30} {scope}");
         }
         eprintln!();
     }
@@ -309,7 +310,10 @@ async fn set(client: &ApiClient, request: SetEnvRequest<'_>) -> anyhow::Result<(
     };
 
     let resp: SetEnvResponse = client
-        .post(&format!("/v1/projects/{}/env", request.project_id), &body)
+        .post(
+            &format!("/v1/projects/{}/env", path_segment(request.project_id)),
+            &body,
+        )
         .await
         .context("failed to set environment variable")?;
 
@@ -336,7 +340,9 @@ async fn delete(
 ) -> anyhow::Result<()> {
     let resp: DeleteEnvResponse = client
         .delete(&format!(
-            "/v1/projects/{project_id}/env/{key}?all=true&confirmed={confirmed}"
+            "/v1/projects/{}/env/{}?all=true&confirmed={confirmed}",
+            path_segment(project_id),
+            path_segment(key)
         ))
         .await
         .context("failed to delete environment variable")?;
@@ -469,7 +475,7 @@ fn confirm_safety(required: bool, yes: bool, stdin_used: bool, prompt: &str) -> 
     if stdin_used || !std::io::stdin().is_terminal() {
         bail!("confirmation required; rerun with --yes");
     }
-    eprint!("  {prompt} [y/N] ");
+    eprint!("  {} [y/N] ", output::terminal_line(prompt));
     std::io::stderr().flush()?;
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;
@@ -576,7 +582,12 @@ fn validate(
                 } else {
                     ""
                 };
-                eprintln!("    {} {}{}", console::style("-").red(), key, tag);
+                eprintln!(
+                    "    {} {}{}",
+                    console::style("-").red(),
+                    output::terminal_line(key),
+                    tag
+                );
             }
             eprintln!();
             eprintln!("  Set them with:");
@@ -586,7 +597,10 @@ fn validate(
                 } else {
                     format!("nrz env set {key} --plain --value <value>")
                 };
-                eprintln!("    {}", console::style(command).dim());
+                eprintln!(
+                    "    {}",
+                    console::style(output::terminal_line(&command)).dim()
+                );
             }
         }
         eprintln!();

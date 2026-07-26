@@ -8,6 +8,7 @@ fn phase_as_str_all_variants() {
     assert_eq!(Phase::Auth.as_str(), "auth");
     assert_eq!(Phase::Build.as_str(), "build");
     assert_eq!(Phase::Db.as_str(), "db");
+    assert_eq!(Phase::Dev.as_str(), "dev");
     assert_eq!(Phase::Deploy.as_str(), "deploy");
     assert_eq!(Phase::Detect.as_str(), "detect");
     assert_eq!(Phase::Domains.as_str(), "domains");
@@ -26,6 +27,7 @@ fn phase_display_matches_as_str() {
         Phase::Auth,
         Phase::Build,
         Phase::Db,
+        Phase::Dev,
         Phase::Deploy,
         Phase::Detect,
         Phase::Domains,

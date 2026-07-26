@@ -78,6 +78,27 @@ async fn emulator_rejects_requests_without_session_token() {
 }
 
 #[tokio::test]
+async fn emulator_rejects_unexpected_host_and_browser_origin() {
+    let (base_url, _kv, _, client) = start_test_server().await;
+
+    let wrong_host = client
+        .get(format!("{base_url}/__nrz/health"))
+        .header(reqwest::header::HOST, "attacker.example")
+        .send()
+        .await
+        .unwrap();
+    let browser_origin = client
+        .get(format!("{base_url}/__nrz/health"))
+        .header(reqwest::header::ORIGIN, "https://attacker.example")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(wrong_host.status(), reqwest::StatusCode::UNAUTHORIZED);
+    assert_eq!(browser_origin.status(), reqwest::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn kv_set_and_get() {
     let (base_url, _kv, _, client) = start_test_server().await;
 

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::api::{ApiClient, classify_api_retry};
+use crate::api::{ApiClient, classify_api_retry, path_segment};
 use crate::cli::DeployArgs;
 use crate::output;
 
@@ -617,7 +617,7 @@ impl BuildLogSession {
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
             }),
         };
-        let path = format!("/v1/build-log-sessions/{}/finish", self.id);
+        let path = format!("/v1/build-log-sessions/{}/finish", path_segment(&self.id));
         if finish_session(&self.client, &path, &request).await.is_err() {
             output::warn(
                 self.json,
@@ -719,7 +719,7 @@ async fn upload_batch(
     let started = Instant::now();
     let mut delay = UPLOAD_RETRY_INITIAL_DELAY;
     let expected_next_seq = events.last().map_or(0, |event| event.seq + 1);
-    let path = format!("/v1/build-log-sessions/{session_id}/events");
+    let path = format!("/v1/build-log-sessions/{}/events", path_segment(session_id));
     loop {
         let response = tokio::time::timeout(
             UPLOAD_REQUEST_TIMEOUT,

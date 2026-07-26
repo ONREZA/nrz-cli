@@ -1,7 +1,7 @@
 use anyhow::Context;
 use nrz::config::ProjectBuildSettings;
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 
 pub(crate) enum ProjectSettingsFetch {
     Applied(ProjectBuildSettings),
@@ -13,7 +13,7 @@ pub(crate) async fn fetch(
     project_id: &str,
 ) -> anyhow::Result<ProjectBuildSettings> {
     client
-        .get(&format!("/v1/projects/{project_id}"))
+        .get(&format!("/v1/projects/{}", path_segment(project_id)))
         .await
         .context("failed to fetch project settings")
 }

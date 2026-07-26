@@ -3,7 +3,7 @@
 use crate::detect::types::{ComputeType, DetectionResult, PackageManagerType};
 use serde::Serialize;
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,7 +38,7 @@ pub async fn sync_detection_to_api(client: &ApiClient, project_id: &str, result:
         source: "cli",
     };
 
-    let path = format!("/v1/projects/{project_id}/detection");
+    let path = format!("/v1/projects/{}/detection", path_segment(project_id));
     // Best-effort: log warning on failure, don't fail the overall command
     let resp: Result<serde_json::Value, _> = client.post(&path, &body).await;
     if let Err(e) = resp {

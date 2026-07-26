@@ -1,4 +1,4 @@
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 use crate::auth;
 use crate::cli::preview::{PreviewArgs, PreviewCommand};
 use crate::output;
@@ -142,7 +142,7 @@ pub(crate) async fn create_preview_access(
 ) -> anyhow::Result<PreviewAccessOutput> {
     let resp: CreatePreviewAccessResponse = client
         .post(
-            &format!("/v1/preview-access/{project_id}"),
+            &format!("/v1/preview-access/{}", path_segment(project_id)),
             &CreatePreviewAccessBody { note, ttl_seconds },
         )
         .await
@@ -165,7 +165,7 @@ async fn revoke(
         eprintln!(
             "  {} Revoked preview access secret {}",
             console::style("✓").green().bold(),
-            console::style(secret_id).bold(),
+            console::style(output::terminal_line(secret_id)).bold(),
         );
     }
 
@@ -178,7 +178,11 @@ pub(crate) async fn revoke_preview_access(
     secret_id: &str,
 ) -> anyhow::Result<()> {
     client
-        .delete_empty(&format!("/v1/preview-access/{project_id}/{secret_id}"))
+        .delete_empty(&format!(
+            "/v1/preview-access/{}/{}",
+            path_segment(project_id),
+            path_segment(secret_id)
+        ))
         .await
         .context("failed to revoke preview access")
 }
@@ -232,7 +236,10 @@ pub(crate) fn print_preview_access_hint(project_id: &str, url: Option<&str>) {
         "  {} Protected preview URL. For agents/curl access (default {DEFAULT_TTL_DISPLAY}):",
         console::style("i").cyan().bold(),
     );
-    eprintln!("    {}", preview_access_hint(project_id, url));
+    eprintln!(
+        "    {}",
+        output::terminal_line(&preview_access_hint(project_id, url))
+    );
     eprintln!();
 }
 
@@ -268,35 +275,43 @@ fn report_access_human(output: &PreviewAccessOutput) {
     eprintln!(
         "  {} {}",
         console::style("Project:").dim(),
-        output.project_id
+        output::terminal_line(&output.project_id)
     );
     eprintln!(
         "  {} {}",
         console::style("Secret ID:").dim(),
-        output.secret_id
+        output::terminal_line(&output.secret_id)
     );
     eprintln!(
         "  {} {}",
         console::style("Expires:").dim(),
-        output.expires_at
+        output::terminal_line(&output.expires_at)
     );
     eprintln!();
     eprintln!("  Header:");
-    eprintln!("    {}: {}", output.header_name, output.header_value);
+    eprintln!(
+        "    {}: {}",
+        output::terminal_line(&output.header_name),
+        output::terminal_line(&output.header_value)
+    );
     eprintln!();
     eprintln!("  Browser query:");
-    eprintln!("    {}={}", output.query_name, output.query_value);
+    eprintln!(
+        "    {}={}",
+        output::terminal_line(&output.query_name),
+        output::terminal_line(&output.query_value)
+    );
     eprintln!();
     eprintln!("  Curl:");
-    eprintln!("    {}", output.curl_command);
+    eprintln!("    {}", output::terminal_line(&output.curl_command));
     if let Some(browser_url) = &output.browser_url {
         eprintln!();
         eprintln!("  Browser URL (contains the secret):");
-        eprintln!("    {browser_url}");
+        eprintln!("    {}", output::terminal_line(browser_url));
     }
     eprintln!();
     eprintln!("  Revoke:");
-    eprintln!("    {}", output.revoke_command);
+    eprintln!("    {}", output::terminal_line(&output.revoke_command));
 }
 
 fn parse_ttl_seconds(value: &str) -> anyhow::Result<u64> {

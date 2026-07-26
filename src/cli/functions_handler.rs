@@ -6,7 +6,7 @@ use nrz_fn_policy::{PolicyReport, PolicyStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 use crate::auth;
 use crate::cli::functions::{
     FunctionsArgs, FunctionsCheckArgs, FunctionsCommand, FunctionsInvokeArgs,
@@ -195,8 +195,11 @@ async fn invoke(
     let result_value: Value = client
         .post(
             &format!(
-                "/v1/projects/{project_id}/function-activations/environments/{environment_id}/functions/{}/revisions/{revision_id}/test-invoke",
-                function.id
+                "/v1/projects/{}/function-activations/environments/{}/functions/{}/revisions/{}/test-invoke",
+                path_segment(&project_id),
+                path_segment(&environment_id),
+                path_segment(&function.id),
+                path_segment(&revision_id)
             ),
             &request,
         )
@@ -229,7 +232,9 @@ async fn list_remote_functions(
 ) -> anyhow::Result<RemoteFunctionsResponse> {
     client
         .get(&format!(
-            "/v1/projects/{project_id}/function-activations/environments/{environment_id}/functions"
+            "/v1/projects/{}/function-activations/environments/{}/functions",
+            path_segment(project_id),
+            path_segment(environment_id)
         ))
         .await
         .context("failed to list ONREZA Functions")
@@ -522,13 +527,13 @@ fn report_invoke_human(output: &FunctionInvokeOutput) {
     if let Some(body) = invocation.response.as_ref().and_then(render_response_body) {
         eprintln!();
         eprintln!("Body:");
-        eprintln!("{body}");
+        eprintln!("{}", output::terminal_text(&body));
     }
     if !invocation.logs.is_empty() {
         eprintln!();
         eprintln!("Logs:");
         for log in &invocation.logs {
-            eprintln!("  {}", render_log_line(log));
+            eprintln!("  {}", output::terminal_text(&render_log_line(log)));
         }
     }
     if !invocation.ok
@@ -536,7 +541,7 @@ fn report_invoke_human(output: &FunctionInvokeOutput) {
     {
         eprintln!();
         eprintln!("Error:");
-        eprintln!("{error}");
+        eprintln!("{}", output::terminal_text(&error.to_string()));
     }
 }
 

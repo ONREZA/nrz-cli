@@ -1,7 +1,7 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 use crate::auth;
 use crate::cli::RollbackArgs;
 use crate::deployments::{Deployment, DeploymentStatus, truncate_id};
@@ -44,7 +44,10 @@ pub async fn run(
     };
 
     let resp: RollbackResponse = client
-        .post_empty(&format!("/v1/deployments/{}/rollback", deployment_id))
+        .post_empty(&format!(
+            "/v1/deployments/{}/rollback",
+            path_segment(&deployment_id)
+        ))
         .await
         .context("failed to rollback deployment")?;
 
@@ -57,11 +60,13 @@ pub async fn run(
         output::success(false, msg, output::Phase::Rollback);
 
         if let (Some(from), Some(to)) = (&resp.rollback_from, &resp.rollback_to) {
+            let from = output::terminal_line(from);
+            let to = output::terminal_line(to);
             eprintln!(
                 "  {} {} → {}",
                 console::style("Rollback:").dim(),
-                truncate_id(from, 8),
-                truncate_id(to, 8),
+                truncate_id(&from, 8),
+                truncate_id(&to, 8),
             );
         }
     }
@@ -71,7 +76,10 @@ pub async fn run(
 
 async fn find_live_deployment(client: &ApiClient, project_id: &str) -> anyhow::Result<String> {
     let resp: DeploymentsResponse = client
-        .get(&format!("/v1/deployments/project/{}?limit=10", project_id))
+        .get(&format!(
+            "/v1/deployments/project/{}?limit=10",
+            path_segment(project_id)
+        ))
         .await
         .context("failed to fetch deployments")?;
 

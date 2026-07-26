@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 use crate::auth;
 use crate::cli::execution_context::{ContextArgs, ContextCommand};
 use crate::output;
@@ -218,7 +218,10 @@ pub async fn resolve(
 ) -> anyhow::Result<ExecutionContext> {
     let response: ResolveResponse = client
         .post(
-            &format!("/v1/projects/{project_id}/execution-context/resolve"),
+            &format!(
+                "/v1/projects/{}/execution-context/resolve",
+                path_segment(project_id)
+            ),
             &ResolveBody {
                 environment: selector,
                 source_ref,
@@ -241,7 +244,7 @@ pub async fn materialize_desired(
         .post(
             &format!(
                 "/v1/projects/{}/execution-context/materialize",
-                context.project_id
+                path_segment(&context.project_id)
             ),
             &MaterializeBody {
                 environment_id: &context.environment_id,
@@ -269,7 +272,10 @@ pub async fn materialize_deployment(
 ) -> anyhow::Result<MaterializedExecutionContext> {
     let response: MaterializedExecutionContext = client
         .post(
-            &format!("/v1/deployments/{deployment_id}/execution-context/materialize"),
+            &format!(
+                "/v1/deployments/{}/execution-context/materialize",
+                path_segment(deployment_id)
+            ),
             &DeploymentMaterializeBody { purpose },
         )
         .await
@@ -478,17 +484,24 @@ fn save(project_dir: &Path, context: &ExecutionContext) -> anyhow::Result<()> {
 fn report_context_human(context: &ExecutionContext) {
     eprintln!(
         "  Workspace:   {} ({})",
-        context.workspace_slug, context.workspace_id
+        output::terminal_line(&context.workspace_slug),
+        output::terminal_line(&context.workspace_id)
     );
     eprintln!(
         "  Project:     {} ({})",
-        context.project_name, context.project_id
+        output::terminal_line(&context.project_name),
+        output::terminal_line(&context.project_id)
     );
     eprintln!(
         "  Environment: {} ({}, {})",
-        context.environment_name, context.environment_id, context.environment_type
+        output::terminal_line(&context.environment_name),
+        output::terminal_line(&context.environment_id),
+        output::terminal_line(&context.environment_type)
     );
-    eprintln!("  Source:      {}", context.selection_source);
+    eprintln!(
+        "  Source:      {}",
+        output::terminal_line(&context.selection_source)
+    );
 }
 
 #[cfg(test)]

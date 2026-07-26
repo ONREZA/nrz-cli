@@ -1,10 +1,9 @@
 use std::io::{BufRead, IsTerminal, Write};
 
 use anyhow::{Context, bail};
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 use crate::auth;
 use crate::output;
 use nrz::config;
@@ -206,10 +205,10 @@ async fn list(client: &ApiClient, limit: u32, json: bool) -> anyhow::Result<()> 
         eprintln!("  {}", "-".repeat(60));
 
         for p in &resp.projects {
-            let framework = p.framework_preset.as_deref().unwrap_or("-");
-            let updated = p.updated_at.as_deref().unwrap_or("-");
-            let display_name = p.display_name.as_deref().unwrap_or(&p.name);
-            eprintln!("  {:<30} {:<15} {}", display_name, framework, updated);
+            let framework = output::terminal_line(p.framework_preset.as_deref().unwrap_or("-"));
+            let updated = output::terminal_line(p.updated_at.as_deref().unwrap_or("-"));
+            let display_name = output::terminal_line(p.display_name.as_deref().unwrap_or(&p.name));
+            eprintln!("  {display_name:<30} {framework:<15} {updated}");
         }
 
         eprintln!();
@@ -304,34 +303,74 @@ async fn info(client: &ApiClient, id: &str, json: bool) -> anyhow::Result<()> {
         output::json_output(&resp);
     } else {
         eprintln!();
-        let display = resp.display_name.as_deref().unwrap_or(&resp.name);
+        let display = output::terminal_line(resp.display_name.as_deref().unwrap_or(&resp.name));
         eprintln!("  {}", console::style(display).bold());
         eprintln!("  {}", "-".repeat(40));
-        eprintln!("  {:<20} {}", console::style("ID").dim(), resp.id);
-        eprintln!("  {:<20} {}", console::style("Name").dim(), resp.name);
+        eprintln!(
+            "  {:<20} {}",
+            console::style("ID").dim(),
+            output::terminal_line(&resp.id)
+        );
+        eprintln!(
+            "  {:<20} {}",
+            console::style("Name").dim(),
+            output::terminal_line(&resp.name)
+        );
         if let Some(ref st) = resp.source_type {
-            eprintln!("  {:<20} {}", console::style("Source").dim(), st);
+            eprintln!(
+                "  {:<20} {}",
+                console::style("Source").dim(),
+                output::terminal_line(st)
+            );
         }
         if let Some(ref url) = resp.git_url {
-            eprintln!("  {:<20} {}", console::style("Git URL").dim(), url);
+            eprintln!(
+                "  {:<20} {}",
+                console::style("Git URL").dim(),
+                output::terminal_line(url)
+            );
         }
         if let Some(ref b) = resp.branch {
-            eprintln!("  {:<20} {}", console::style("Branch").dim(), b);
+            eprintln!(
+                "  {:<20} {}",
+                console::style("Branch").dim(),
+                output::terminal_line(b)
+            );
         }
         if let Some(ref f) = resp.framework_preset {
-            eprintln!("  {:<20} {}", console::style("Framework").dim(), f);
+            eprintln!(
+                "  {:<20} {}",
+                console::style("Framework").dim(),
+                output::terminal_line(f)
+            );
         }
         if let Some(ref nv) = resp.node_version {
-            eprintln!("  {:<20} {}", console::style("Node").dim(), nv);
+            eprintln!(
+                "  {:<20} {}",
+                console::style("Node").dim(),
+                output::terminal_line(nv)
+            );
         }
         if let Some(ref pm) = resp.package_manager {
-            eprintln!("  {:<20} {}", console::style("Pkg Manager").dim(), pm);
+            eprintln!(
+                "  {:<20} {}",
+                console::style("Pkg Manager").dim(),
+                output::terminal_line(pm)
+            );
         }
         if let Some(ref c) = resp.created_at {
-            eprintln!("  {:<20} {}", console::style("Created").dim(), c);
+            eprintln!(
+                "  {:<20} {}",
+                console::style("Created").dim(),
+                output::terminal_line(c)
+            );
         }
         if let Some(ref u) = resp.updated_at {
-            eprintln!("  {:<20} {}", console::style("Updated").dim(), u);
+            eprintln!(
+                "  {:<20} {}",
+                console::style("Updated").dim(),
+                output::terminal_line(u)
+            );
         }
         eprintln!();
     }
@@ -406,7 +445,11 @@ async fn delete(client: &ApiClient, id: &str, force: bool, json: bool) -> anyhow
 
         eprint!(
             "  {} ",
-            console::style(format!("Type project ID ({id}) to confirm deletion:")).bold(),
+            console::style(format!(
+                "Type project ID ({}) to confirm deletion:",
+                output::terminal_line(id)
+            ))
+            .bold(),
         );
         std::io::stderr().flush()?;
 
@@ -437,5 +480,5 @@ async fn delete(client: &ApiClient, id: &str, force: bool, json: bool) -> anyhow
 }
 
 pub(crate) fn project_api_path(id: &str) -> String {
-    format!("/v1/projects/{}", utf8_percent_encode(id, NON_ALPHANUMERIC))
+    format!("/v1/projects/{}", path_segment(id))
 }

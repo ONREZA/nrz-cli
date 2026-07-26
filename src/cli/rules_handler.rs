@@ -5,7 +5,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 use crate::auth;
 use crate::cli::rules::{
     RulesArgs, RulesCheckArgs, RulesCommand, RulesPublishArgs, RulesPullArgs, RulesStatusArgs,
@@ -145,7 +145,8 @@ async fn publish(
         .post(
             &format!(
                 "/v1/projects/{}/function-activations/environments/{}/functions/publish",
-                ctx.project_id, ctx.environment_id
+                path_segment(&ctx.project_id),
+                path_segment(&ctx.environment_id)
             ),
             &body,
         )
@@ -274,7 +275,9 @@ async fn get_active_rule_set(
 ) -> anyhow::Result<ActiveEdgeRuleSet> {
     let response: ActiveEdgeRuleSetResponse = client
         .get(&format!(
-            "/v1/projects/{project_id}/function-activations/environments/{environment_id}/edge-rules"
+            "/v1/projects/{}/function-activations/environments/{}/edge-rules",
+            path_segment(project_id),
+            path_segment(environment_id)
         ))
         .await
         .context("failed to fetch active Edge Rules")?;
@@ -295,7 +298,9 @@ async fn get_edge_rules_status(
     client
         .post(
             &format!(
-                "/v1/projects/{project_id}/function-activations/environments/{environment_id}/edge-rules/status"
+                "/v1/projects/{}/function-activations/environments/{}/edge-rules/status",
+                path_segment(project_id),
+                path_segment(environment_id)
             ),
             request,
         )
@@ -339,7 +344,10 @@ fn confirm_overwrite(path: &Path, force: bool, json: bool) -> anyhow::Result<()>
         ));
     }
 
-    eprint!("  Overwrite {}? [y/N]: ", path.display());
+    eprint!(
+        "  Overwrite {}? [y/N]: ",
+        output::terminal_line(&path.display().to_string())
+    );
     std::io::stderr().flush()?;
     let mut line = String::new();
     let bytes = std::io::stdin().lock().read_line(&mut line)?;
@@ -356,6 +364,15 @@ pub(crate) fn write_rules_file(path: &Path, content: &[u8]) -> anyhow::Result<()
     let parent = path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("rules path has no parent: {}", path.display()))?;
+    #[cfg(unix)]
+    let existing_permissions = match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => Some(metadata.permissions()),
+        Ok(_) => None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
+        }
+    };
     let temp_path = parent.join(format!(
         ".{RULES_FILENAME}.tmp-{}",
         uuid::Uuid::now_v7().simple()
@@ -368,6 +385,12 @@ pub(crate) fn write_rules_file(path: &Path, content: &[u8]) -> anyhow::Result<()
             .with_context(|| format!("failed to create {}", temp_path.display()))?;
         file.write_all(content)
             .with_context(|| format!("failed to write {}", temp_path.display()))?;
+        #[cfg(unix)]
+        if let Some(permissions) = existing_permissions {
+            file.set_permissions(permissions).with_context(|| {
+                format!("failed to preserve permissions for {}", path.display())
+            })?;
+        }
         file.sync_all()
             .with_context(|| format!("failed to sync {}", temp_path.display()))?;
         drop(file);
@@ -453,8 +476,8 @@ fn report_check_human(report: &functions::EdgeRulesCheckReport) {
     for rule in &report.rules {
         eprintln!(
             "    {:<24} {:<14} {}",
-            rule.id,
-            rule.action,
+            output::terminal_line(&rule.id),
+            output::terminal_line(&rule.action),
             if rule.enabled { "enabled" } else { "disabled" }
         );
     }
@@ -782,11 +805,23 @@ impl LocalRulesFileStatus {
 }
 
 fn report_status_human(output: &RulesStatusOutput) {
-    eprintln!("  Environment: {}", output.environment_id);
-    eprintln!("  Status: {}", output.status);
-    eprintln!("  Active: {}", format_status_side(&output.active, true));
-    eprintln!("  Local: {}", format_status_side(&output.local, false));
-    eprintln!("  Local file: {}", output.local_file.summary());
+    eprintln!(
+        "  Environment: {}",
+        output::terminal_line(&output.environment_id)
+    );
+    eprintln!("  Status: {}", output::terminal_line(&output.status));
+    eprintln!(
+        "  Active: {}",
+        output::terminal_line(&format_status_side(&output.active, true))
+    );
+    eprintln!(
+        "  Local: {}",
+        output::terminal_line(&format_status_side(&output.local, false))
+    );
+    eprintln!(
+        "  Local file: {}",
+        output::terminal_line(&output.local_file.summary())
+    );
 }
 
 fn format_status_side(value: &Value, active: bool) -> String {

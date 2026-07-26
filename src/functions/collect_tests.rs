@@ -219,6 +219,11 @@ fn preview_flags_ambient_bun_alias_and_global_access() {
     for source in [
         "export const config = {};\nconst B = Bun;\nexport default { fetch() { return B.sql`select 1`; } };\n",
         "export const config = {};\nexport default { fetch() { return globalThis.Bun.sql`select 1`; } };\n",
+        "export const config = {};\nexport default { fetch() { return global.Bun.sql`select 1`; } };\n",
+        "export const config = {};\nconst root = globalThis;\nexport default { fetch() { return root.Bun.sql`select 1`; } };\n",
+        "export const config = {};\nlet root;\nfunction fetch() { return root.Bun.sql`select 1`; }\nroot = globalThis;\nexport default { fetch };\n",
+        "export const config = {};\nconst identity = value => value;\nexport default identity(Bun);\n",
+        "export const config = {};\nconst key = new URL('https://example.test').hash;\nexport default globalThis[key];\n",
     ] {
         let tmp = tempfile::tempdir().unwrap();
         write(tmp.path(), "functions/api.nrz-fn.ts", source);
@@ -240,6 +245,9 @@ fn preview_flags_process_control_alias_and_global_access() {
     for source in [
         "export const config = {};\nconst p = process;\nexport default { fetch() { p.exit(1); } };\n",
         "export const config = {};\nexport default { fetch() { globalThis.process['exit'](1); } };\n",
+        "export const config = {};\nexport default { fetch() { global.process.exit(1); } };\n",
+        "export const config = {};\nconst root = globalThis;\nexport default { fetch() { root.process.exit(1); } };\n",
+        "export const config = {};\nfunction expose() { return process; }\nexport default expose;\n",
     ] {
         let tmp = tempfile::tempdir().unwrap();
         write(tmp.path(), "functions/api.nrz-fn.ts", source);

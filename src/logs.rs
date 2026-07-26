@@ -1,8 +1,7 @@
 use anyhow::Context;
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment, query_value};
 use crate::auth;
 use crate::cli::LogsArgs;
 use crate::output;
@@ -40,22 +39,17 @@ pub async fn run(
 
     let mut query = format!("limit={}", args.limit);
     if let Some(search) = &args.search {
-        query.push_str(&format!(
-            "&search={}",
-            utf8_percent_encode(search, NON_ALPHANUMERIC)
-        ));
+        query.push_str(&format!("&search={}", query_value(search)));
     }
     if let Some(did) = &args.deployment_id {
-        query.push_str(&format!(
-            "&deploymentId={}",
-            utf8_percent_encode(did, NON_ALPHANUMERIC)
-        ));
+        query.push_str(&format!("&deploymentId={}", query_value(did)));
     }
 
     let resp: LogsResponse = client
         .get(&format!(
             "/v1/projects/{}/runtime-logs?{}",
-            project_id, query
+            path_segment(&project_id),
+            query
         ))
         .await
         .context("failed to fetch logs")?;
@@ -79,25 +73,26 @@ pub async fn run(
 pub(crate) fn format_log_entry(entry: &serde_json::Value) -> String {
     let ts = string_field(entry, "timestamp").unwrap_or("-");
 
-    if let Some(message) = string_field(entry, "message") {
+    let rendered = if let Some(message) = string_field(entry, "message") {
         let level = string_field(entry, "functionLogLevel")
             .or_else(|| string_field(entry, "level"))
             .or_else(|| string_field(entry, "source"))
             .unwrap_or("info");
-        return format!("[{ts}] [{level}] {message}");
-    }
+        format!("[{ts}] [{level}] {message}")
+    } else {
+        let method = string_field(entry, "method").unwrap_or("-");
+        let path = string_field(entry, "path").unwrap_or("-");
+        let status = number_field(entry, "status")
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let duration = duration_field(entry).unwrap_or_default();
+        let function = string_field(entry, "functionName")
+            .map(|value| format!(" function={value}"))
+            .unwrap_or_default();
 
-    let method = string_field(entry, "method").unwrap_or("-");
-    let path = string_field(entry, "path").unwrap_or("-");
-    let status = number_field(entry, "status")
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "-".to_string());
-    let duration = duration_field(entry).unwrap_or_default();
-    let function = string_field(entry, "functionName")
-        .map(|value| format!(" function={value}"))
-        .unwrap_or_default();
-
-    format!("[{ts}] [{status}] {method} {path}{duration}{function}")
+        format!("[{ts}] [{status}] {method} {path}{duration}{function}")
+    };
+    output::terminal_line(&rendered)
 }
 
 fn string_field<'a>(entry: &'a serde_json::Value, key: &str) -> Option<&'a str> {

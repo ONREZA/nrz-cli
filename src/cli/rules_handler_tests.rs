@@ -74,6 +74,25 @@ fn rules_pull_write_replaces_link_instead_of_following_it() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn rules_pull_write_preserves_existing_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = tempfile::tempdir().unwrap();
+    let rules_path = project.path().join("onreza.rules.toml");
+    std::fs::write(&rules_path, "previous").unwrap();
+    std::fs::set_permissions(&rules_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+    write_rules_file(&rules_path, b"replacement").unwrap();
+
+    assert_eq!(std::fs::read_to_string(&rules_path).unwrap(), "replacement");
+    assert_eq!(
+        std::fs::metadata(&rules_path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+}
+
 #[test]
 fn rules_replacement_restores_previous_file_when_install_fails() {
     let project = tempfile::tempdir().unwrap();

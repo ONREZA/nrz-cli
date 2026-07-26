@@ -1322,3 +1322,46 @@ fn broken_onreza_toml_emits_invalid_config_code() {
         "structured error frame with code=INVALID_CONFIG must be on stderr for the Builder, got: {stderr}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn dev_json_reserves_stdout_for_one_terminal_object() {
+    let temp = tempfile::tempdir().unwrap();
+    let command = "printf 'child stdout\\n'; printf 'child stderr\\n' >&2";
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let output = nrz()
+        .current_dir(&temp)
+        .args([
+            "dev",
+            "--local",
+            "--command",
+            command,
+            "--port",
+            &port.to_string(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1, "expected one JSON object, got: {stdout}");
+    let result: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(result["status"], "exited");
+    assert_eq!(result["projectDir"], temp.path().to_string_lossy().as_ref());
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("child stdout"));
+    assert!(stderr.contains("child stderr"));
+    assert!(stderr.contains("\"p\":\"dev\""));
+    assert!(
+        fs::read_dir(temp.path().join(".onreza/data"))
+            .unwrap()
+            .next()
+            .is_none(),
+        "session bootstrap must not be written inside the project"
+    );
+}
