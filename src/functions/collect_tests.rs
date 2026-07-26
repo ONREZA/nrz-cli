@@ -213,6 +213,23 @@ fn preview_allows_destructured_ambient_properties() {
 }
 
 #[test]
+fn preview_allows_lexically_shadowed_global_aliases() {
+    let tmp = tempfile::tempdir().unwrap();
+    write(
+        tmp.path(),
+        "functions/api.nrz-fn.ts",
+        "export const config = {};\nfunction capture() { const runtime = globalThis; return 1; }\nfunction echo(runtime) { return runtime; }\nexport default { capture, echo };\n",
+    );
+    let collected = collect(tmp.path()).unwrap();
+    let function = &collected.functions[0];
+
+    let report = run_policy_preview(&function.entrypoint, &function.sources).unwrap();
+
+    assert_eq!(report.status, PolicyStatus::Passed);
+    assert!(report.violations.is_empty());
+}
+
+#[test]
 fn preview_flags_denied_capability() {
     let tmp = tempfile::tempdir().unwrap();
     write(
