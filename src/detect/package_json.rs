@@ -18,6 +18,9 @@ pub struct PackageJson {
     pub dependencies: HashMap<String, String>,
 
     #[serde(default)]
+    pub optional_dependencies: HashMap<String, String>,
+
+    #[serde(default)]
     pub dev_dependencies: HashMap<String, String>,
 
     #[serde(default)]
@@ -115,15 +118,18 @@ impl PackageJson {
         Ok(Some(pkg))
     }
 
-    /// Check if a package exists in dependencies or devDependencies.
+    /// Check if a package exists in runtime, optional, or development dependencies.
     pub fn has_dependency(&self, name: &str) -> bool {
-        self.dependencies.contains_key(name) || self.dev_dependencies.contains_key(name)
+        self.dependencies.contains_key(name)
+            || self.optional_dependencies.contains_key(name)
+            || self.dev_dependencies.contains_key(name)
     }
 
-    /// Get the version of a dependency (from deps or devDeps).
+    /// Get the version of a dependency.
     pub fn dependency_version(&self, name: &str) -> Option<&str> {
         self.dependencies
             .get(name)
+            .or_else(|| self.optional_dependencies.get(name))
             .or_else(|| self.dev_dependencies.get(name))
             .map(|s| s.as_str())
     }

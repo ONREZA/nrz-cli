@@ -380,6 +380,10 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         match entry {
             Some(entry) => {
                 let auto = build_manifest::generate_compute_manifest(&entry);
+                build_manifest::validate(&auto)
+                    .map_err(|error| output::with_default_code(error, "INVALID_MANIFEST"))?;
+                build_manifest::verify_files(&build_artifact.output_dir, &auto)
+                    .map_err(|error| output::with_default_code(error, "MISSING_BUILD_OUTPUT"))?;
                 output::status(
                     json,
                     "~",

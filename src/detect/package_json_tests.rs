@@ -6,6 +6,7 @@ fn parse_minimal_package_json() {
     let pkg: PackageJson = serde_json::from_str(json).unwrap();
     assert_eq!(pkg.name.as_deref(), Some("my-app"));
     assert!(pkg.dependencies.is_empty());
+    assert!(pkg.optional_dependencies.is_empty());
     assert!(pkg.dev_dependencies.is_empty());
 }
 
@@ -27,10 +28,12 @@ fn parse_with_dependencies() {
 fn dependency_version_lookup() {
     let json = r#"{
         "dependencies": {"next": "^14.0.0"},
+        "optionalDependencies": {"sharp": "^0.33.0"},
         "devDependencies": {"eslint": "^8.0.0"}
     }"#;
     let pkg: PackageJson = serde_json::from_str(json).unwrap();
     assert_eq!(pkg.dependency_version("next"), Some("^14.0.0"));
+    assert_eq!(pkg.dependency_version("sharp"), Some("^0.33.0"));
     assert_eq!(pkg.dependency_version("eslint"), Some("^8.0.0"));
     assert_eq!(pkg.dependency_version("missing"), None);
 }

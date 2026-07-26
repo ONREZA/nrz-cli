@@ -531,6 +531,41 @@ fn source_bundle_plan_rejects_symlink_to_empty_directory() {
 }
 
 #[cfg(unix)]
+#[test]
+fn source_bundle_plan_rejects_recursive_directory_symlink() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("nested")).unwrap();
+    fs::write(dir.path().join("nested/file.txt"), b"file").unwrap();
+    std::os::unix::fs::symlink(".", dir.path().join("nested/loop")).unwrap();
+    let manifest = static_manifest();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let error = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap_err();
+
+    assert!(error.to_string().contains("recursive symlink"), "{error}");
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_archive_is_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("secret.txt"), b"secret").unwrap();
+    let manifest = static_manifest();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+    let mode = fs::metadata(plan.source_path_for_test())
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+
+    assert_eq!(mode, 0o600);
+}
+
+#[cfg(unix)]
 #[tokio::test]
 async fn source_bundle_plan_accepts_symlink_to_directory_with_symlink_only_descendants() {
     let dir = tempdir().unwrap();

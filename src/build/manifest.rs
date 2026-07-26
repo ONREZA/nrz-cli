@@ -204,6 +204,19 @@ fn has_path_traversal(s: &str) -> bool {
     s.replace('\\', "/").split('/').any(|seg| seg == "..")
 }
 
+fn has_absolute_path(s: &str) -> bool {
+    let normalized = s.replace('\\', "/");
+    let bytes = normalized.as_bytes();
+    normalized.starts_with('/')
+        || normalized.starts_with("//")
+        || bytes.get(1) == Some(&b':')
+        || Path::new(&normalized).is_absolute()
+}
+
+fn has_unsafe_manifest_path(s: &str) -> bool {
+    has_absolute_path(s) || has_path_traversal(s)
+}
+
 static JS_ONLY_REGEX: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
 
 /// Returns `true` if `pattern` contains JS-only regex features
@@ -275,7 +288,7 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                 MAX_DIRECTORY_LEN
             );
         }
-        if layer.directory.starts_with('/') || has_path_traversal(&layer.directory) {
+        if has_unsafe_manifest_path(&layer.directory) {
             anyhow::bail!(
                 "path traversal in layer '{}' directory: '{}'",
                 layer.name,
@@ -313,7 +326,7 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                         MAX_ENTRY_LEN
                     );
                 }
-                if entry.starts_with('/') || has_path_traversal(entry) {
+                if has_unsafe_manifest_path(entry) {
                     anyhow::bail!(
                         "path traversal in layer '{}' entry: '{}'",
                         layer.name,
@@ -507,7 +520,7 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
             if !page_key.starts_with('/') {
                 anyhow::bail!("prerender page key must start with '/': '{}'", page_key);
             }
-            if page.html.starts_with('/') || has_path_traversal(&page.html) {
+            if has_unsafe_manifest_path(&page.html) {
                 anyhow::bail!(
                     "path traversal in prerender page '{}' html: '{}'",
                     page_key,
@@ -515,7 +528,7 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
                 );
             }
             if let Some(ref data) = page.data
-                && (data.starts_with('/') || has_path_traversal(data))
+                && has_unsafe_manifest_path(data)
             {
                 anyhow::bail!(
                     "path traversal in prerender page '{}' data: '{}'",
@@ -1020,6 +1033,10 @@ pub fn generate_astro_ssr_manifest(has_client: bool) -> Manifest {
 }
 
 pub fn verify_files(output_dir: &Path, manifest: &Manifest) -> anyhow::Result<()> {
+    let canonical_output = output_dir
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {}", output_dir.display()))?;
+
     for layer in &manifest.layers {
         let layer_dir = output_dir.join(&layer.directory);
         if !layer_dir.is_dir() {
@@ -1029,6 +1046,7 @@ pub fn verify_files(output_dir: &Path, manifest: &Manifest) -> anyhow::Result<()
                 layer.name
             );
         }
+        ensure_path_inside_output(&canonical_output, &layer_dir)?;
         if let Some(entry) = &layer.entry {
             let entry_path = layer_dir.join(entry);
             if !entry_path.is_file() {
@@ -1039,6 +1057,7 @@ pub fn verify_files(output_dir: &Path, manifest: &Manifest) -> anyhow::Result<()
                     layer.name
                 );
             }
+            ensure_path_inside_output(&canonical_output, &entry_path)?;
         }
     }
 
@@ -1062,6 +1081,7 @@ pub fn verify_files(output_dir: &Path, manifest: &Manifest) -> anyhow::Result<()
                     prerender.layer
                 );
             }
+            ensure_path_inside_output(&canonical_output, &html_file)?;
             if let Some(ref data) = page.data {
                 let data_file = prerender_dir.join(data);
                 if !data_file.is_file() {
@@ -1073,9 +1093,23 @@ pub fn verify_files(output_dir: &Path, manifest: &Manifest) -> anyhow::Result<()
                         prerender.layer
                     );
                 }
+                ensure_path_inside_output(&canonical_output, &data_file)?;
             }
         }
     }
 
+    Ok(())
+}
+
+fn ensure_path_inside_output(canonical_output: &Path, path: &Path) -> anyhow::Result<()> {
+    let canonical = path
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {}", path.display()))?;
+    if !canonical.starts_with(canonical_output) {
+        anyhow::bail!(
+            "manifest path resolves outside build output: '{}'",
+            path.display()
+        );
+    }
     Ok(())
 }

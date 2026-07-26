@@ -2,7 +2,7 @@ use serde_json::json;
 
 use super::rules_handler::{
     ActiveEdgeRuleSet, active_rule_set_to_authoring_value, build_edge_rules_status_request,
-    edge_rule_set_authoring_to_toml, map_publish_error,
+    edge_rule_set_authoring_to_toml, map_publish_error, write_rules_file,
 };
 
 #[test]
@@ -49,6 +49,28 @@ fn active_rule_set_pull_conversion_drops_position_and_writes_rules_tables() {
         .unwrap();
     assert_eq!(parsed["rules"][0]["id"], "first");
     assert!(parsed["rules"][0].get("position").is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn rules_pull_write_replaces_link_instead_of_following_it() {
+    let project = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let outside_file = outside.path().join("victim.toml");
+    std::fs::write(&outside_file, "outside").unwrap();
+    let rules_path = project.path().join("onreza.rules.toml");
+    std::os::unix::fs::symlink(&outside_file, &rules_path).unwrap();
+
+    write_rules_file(&rules_path, b"local").unwrap();
+
+    assert_eq!(std::fs::read_to_string(&outside_file).unwrap(), "outside");
+    assert_eq!(std::fs::read_to_string(&rules_path).unwrap(), "local");
+    assert!(
+        !std::fs::symlink_metadata(&rules_path)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
 }
 
 #[test]

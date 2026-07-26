@@ -68,6 +68,15 @@ pub(crate) fn resolve(
             root_dir.display()
         )
     })?;
+    if !project_dir.starts_with(&root_dir) {
+        return Err(output::coded_error(
+            "MONOREPO_APP_NOT_FOUND",
+            format!(
+                "resolved app directory escapes the monorepo root: {}",
+                project_dir.display()
+            ),
+        ));
+    }
     let app_config = nrz::config::load(&project_dir)?;
     let config = root_config.merge_child_for_selected_app(app_config, app_name);
 

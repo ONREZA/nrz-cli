@@ -133,6 +133,33 @@ pub(crate) fn cap_message(msg: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
+pub(crate) fn terminal_text(value: &str) -> String {
+    static ANSI: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let ansi = ANSI.get_or_init(|| {
+        regex::Regex::new(r"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))")
+            .expect("terminal escape regex must compile")
+    });
+    ansi.replace_all(value, "")
+        .chars()
+        .filter_map(|character| match character {
+            '\r' => Some(' '),
+            '\n' | '\t' => Some(character),
+            _ if character.is_control() || matches!(character as u32, 0x7f..=0x9f) => None,
+            _ => Some(character),
+        })
+        .collect()
+}
+
+pub(crate) fn terminal_line(value: &str) -> String {
+    terminal_text(value)
+        .chars()
+        .map(|character| match character {
+            '\n' | '\t' => ' ',
+            _ => character,
+        })
+        .collect()
+}
+
 /// Render a frame to its exact wire bytes: `<sentinel><json>\n`. Pure — the IO
 /// side ([`emit_frame`]) writes the result in a single `write_all`.
 pub(crate) fn render_frame(obj: &serde_json::Value) -> String {
@@ -174,28 +201,43 @@ pub fn log_line(stream: &str, level: &str, phase: &str, msg: &str) {
 
 /// Print status message to stderr, or structured JSON log in JSON mode.
 pub fn status(json: bool, icon: &str, msg: impl std::fmt::Display, phase: Phase) {
+    let msg = msg.to_string();
     if json {
-        log_line("user", "info", phase.as_str(), &msg.to_string());
+        log_line("user", "info", phase.as_str(), &msg);
     } else {
-        eprintln!("  {} {msg}", console::style(icon).cyan().bold());
+        eprintln!(
+            "  {} {}",
+            console::style(icon).cyan().bold(),
+            terminal_text(&msg)
+        );
     }
 }
 
 /// Print success message to stderr, or structured JSON log in JSON mode.
 pub fn success(json: bool, msg: impl std::fmt::Display, phase: Phase) {
+    let msg = msg.to_string();
     if json {
-        log_line("user", "info", phase.as_str(), &msg.to_string());
+        log_line("user", "info", phase.as_str(), &msg);
     } else {
-        eprintln!("  {} {msg}", console::style("✓").green().bold());
+        eprintln!(
+            "  {} {}",
+            console::style("✓").green().bold(),
+            terminal_text(&msg)
+        );
     }
 }
 
 /// Print warning message to stderr, or structured JSON log in JSON mode.
 pub fn warn(json: bool, msg: impl std::fmt::Display, phase: Phase) {
+    let msg = msg.to_string();
     if json {
-        log_line("user", "warn", phase.as_str(), &msg.to_string());
+        log_line("user", "warn", phase.as_str(), &msg);
     } else {
-        eprintln!("  {} {msg}", console::style("!").yellow().bold());
+        eprintln!(
+            "  {} {}",
+            console::style("!").yellow().bold(),
+            terminal_text(&msg)
+        );
     }
 }
 

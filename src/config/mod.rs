@@ -1105,16 +1105,18 @@ pub fn resolve_project_id(
     explicit: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<String> {
-    if let Some(id) = explicit
-        && !id.is_empty()
-    {
+    if let Some(id) = explicit {
+        let id = id.trim();
+        if id.is_empty() {
+            anyhow::bail!("--project-id requires a non-empty project ID");
+        }
         return Ok(id.to_string());
     }
 
     if let Some(id) = &config.project.id
-        && !id.is_empty()
+        && !id.trim().is_empty()
     {
-        return Ok(id.clone());
+        return Ok(id.trim().to_string());
     }
 
     anyhow::bail!(

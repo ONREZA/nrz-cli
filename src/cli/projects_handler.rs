@@ -1,6 +1,7 @@
 use std::io::{BufRead, IsTerminal, Write};
 
 use anyhow::{Context, bail};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::{Deserialize, Serialize};
 
 use crate::api::ApiClient;
@@ -295,7 +296,7 @@ async fn create(
 
 async fn info(client: &ApiClient, id: &str, json: bool) -> anyhow::Result<()> {
     let resp: ProjectDetailResponse = client
-        .get(&format!("/v1/projects/{id}"))
+        .get(&project_api_path(id))
         .await
         .with_context(|| format!("failed to fetch project {id}"))?;
 
@@ -380,7 +381,7 @@ async fn update(
     let body = serde_json::Value::Object(body);
 
     let resp: UpdateProjectResponse = client
-        .patch(&format!("/v1/projects/{id}"), &body)
+        .patch(&project_api_path(id), &body)
         .await
         .with_context(|| format!("failed to update project {id}"))?;
 
@@ -418,7 +419,7 @@ async fn delete(client: &ApiClient, id: &str, force: bool, json: bool) -> anyhow
     }
 
     let resp: DeleteProjectResponse = client
-        .delete(&format!("/v1/projects/{id}"))
+        .delete(&project_api_path(id))
         .await
         .with_context(|| format!("failed to delete project {id}"))?;
 
@@ -433,4 +434,8 @@ async fn delete(client: &ApiClient, id: &str, force: bool, json: bool) -> anyhow
     }
 
     Ok(())
+}
+
+pub(crate) fn project_api_path(id: &str) -> String {
+    format!("/v1/projects/{}", utf8_percent_encode(id, NON_ALPHANUMERIC))
 }

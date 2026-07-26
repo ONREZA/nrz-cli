@@ -1,4 +1,4 @@
-use super::projects_handler::CreateProjectBody;
+use super::projects_handler::{CreateProjectBody, project_api_path};
 
 #[test]
 fn create_project_body_marks_user_supplied_build_settings() {
@@ -20,4 +20,12 @@ fn create_project_body_marks_user_supplied_build_settings() {
     assert_eq!(value["installCommandSource"], "USER");
     assert_eq!(value["buildCommandSource"], "USER");
     assert_eq!(value["outputDirectorySource"], "USER");
+}
+
+#[test]
+fn project_id_is_encoded_as_one_api_path_segment() {
+    assert_eq!(
+        project_api_path("project/../victim?force=true"),
+        "/v1/projects/project%2F%2E%2E%2Fvictim%3Fforce%3Dtrue"
+    );
 }

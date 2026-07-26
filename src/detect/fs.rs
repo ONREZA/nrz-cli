@@ -4,9 +4,18 @@
 //! tree built from a JSON manifest (used by `nrz detect --stdin`).
 
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+
+pub const MAX_DETECTION_MANIFEST_BYTES: usize = 4 * 1024 * 1024;
+const MAX_DETECTION_TREE_ENTRIES: usize = 100_000;
+const MAX_DETECTION_CONTENT_FILES: usize = 256;
+const MAX_DETECTION_PATH_BYTES: usize = 1024;
+pub(super) const MAX_DETECTION_PATH_DEPTH: usize = 64;
+pub(super) const MAX_DETECTION_FILE_CONTENT_BYTES: usize = 512 * 1024;
+const MAX_DETECTION_TOTAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 
 /// Abstract filesystem for detection logic.
 pub trait Fs {
@@ -19,46 +28,69 @@ pub trait Fs {
 /// Local filesystem rooted at `root`.
 pub struct LocalFs {
     root: PathBuf,
+    canonical_root: PathBuf,
 }
 
 impl LocalFs {
     pub fn new(root: &Path) -> Self {
+        let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         Self {
             root: root.to_path_buf(),
+            canonical_root,
         }
+    }
+
+    fn resolve_existing(&self, path: &str) -> Option<PathBuf> {
+        let normalized = path.replace('\\', "/");
+        let relative = Path::new(&normalized);
+        let bytes = normalized.as_bytes();
+        if bytes.get(1) == Some(&b':')
+            || normalized.starts_with("//")
+            || relative.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir
+                        | std::path::Component::RootDir
+                        | std::path::Component::Prefix(_)
+                )
+            })
+        {
+            return None;
+        }
+        let canonical = self.root.join(relative).canonicalize().ok()?;
+        canonical
+            .starts_with(&self.canonical_root)
+            .then_some(canonical)
     }
 }
 
 impl Fs for LocalFs {
     fn exists(&self, path: &str) -> bool {
-        self.root.join(path).exists()
+        self.resolve_existing(path).is_some()
     }
 
     fn is_dir(&self, path: &str) -> bool {
-        self.root.join(path).is_dir()
+        self.resolve_existing(path)
+            .is_some_and(|path| path.is_dir())
     }
 
     fn read_file(&self, path: &str) -> Option<String> {
-        let full = self.root.join(path);
-        match std::fs::read_to_string(&full) {
-            Ok(content) => Some(content),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-            Err(err) => {
-                tracing::warn!(
-                    path = %full.display(),
-                    error = %err,
-                    "failed to read detection file"
-                );
-                None
-            }
+        let full = self.resolve_existing(path)?;
+        let metadata = std::fs::metadata(&full).ok()?;
+        if !metadata.is_file() || metadata.len() > MAX_DETECTION_FILE_CONTENT_BYTES as u64 {
+            return None;
         }
+        let mut content = String::new();
+        let mut file = std::fs::File::open(&full)
+            .ok()?
+            .take(MAX_DETECTION_FILE_CONTENT_BYTES as u64 + 1);
+        file.read_to_string(&mut content).ok()?;
+        (content.len() <= MAX_DETECTION_FILE_CONTENT_BYTES).then_some(content)
     }
 
     fn list_dir(&self, path: &str) -> Vec<String> {
-        let dir = if path.is_empty() {
-            self.root.clone()
-        } else {
-            self.root.join(path)
+        let Some(dir) = self.resolve_existing(path) else {
+            return Vec::new();
         };
         let entries = match std::fs::read_dir(&dir) {
             Ok(e) => e,
@@ -82,6 +114,7 @@ impl Fs for LocalFs {
 }
 
 /// In-memory filesystem from a JSON manifest.
+#[derive(Debug)]
 pub struct VirtualFs {
     tree: HashSet<String>,
     dirs: HashSet<String>,
@@ -90,15 +123,51 @@ pub struct VirtualFs {
 
 impl VirtualFs {
     pub fn from_json(json: &str) -> anyhow::Result<Self> {
+        if json.len() > MAX_DETECTION_MANIFEST_BYTES {
+            anyhow::bail!(
+                "detection manifest exceeds {} bytes",
+                MAX_DETECTION_MANIFEST_BYTES
+            );
+        }
         let manifest: VirtualFsManifest = serde_json::from_str(json)?;
+        if manifest.tree.len() > MAX_DETECTION_TREE_ENTRIES {
+            anyhow::bail!(
+                "detection manifest contains too many tree entries (max {})",
+                MAX_DETECTION_TREE_ENTRIES
+            );
+        }
+        if manifest.files.len() > MAX_DETECTION_CONTENT_FILES {
+            anyhow::bail!(
+                "detection manifest contains too many file contents (max {})",
+                MAX_DETECTION_CONTENT_FILES
+            );
+        }
+        let total_content_bytes = manifest.files.values().try_fold(0usize, |total, content| {
+            if content.len() > MAX_DETECTION_FILE_CONTENT_BYTES {
+                anyhow::bail!(
+                    "detection file content exceeds {} bytes",
+                    MAX_DETECTION_FILE_CONTENT_BYTES
+                );
+            }
+            total
+                .checked_add(content.len())
+                .ok_or_else(|| anyhow::anyhow!("detection file content size overflow"))
+        })?;
+        if total_content_bytes > MAX_DETECTION_TOTAL_CONTENT_BYTES {
+            anyhow::bail!(
+                "detection file contents exceed {} bytes in total",
+                MAX_DETECTION_TOTAL_CONTENT_BYTES
+            );
+        }
         let mut tree = HashSet::new();
         let mut dirs = HashSet::new();
 
         // Root is always a directory
         dirs.insert(String::new());
 
-        for entry in &manifest.tree {
-            let normalized = normalize_path(entry);
+        for entry in manifest.tree {
+            validate_virtual_path(&entry)?;
+            let normalized = normalize_path(&entry);
             if entry.ends_with('/') {
                 dirs.insert(normalized.clone());
             }
@@ -107,15 +176,53 @@ impl VirtualFs {
         }
 
         let mut files = HashMap::new();
-        for (path, content) in &manifest.files {
-            let normalized = normalize_path(path);
-            files.insert(normalized.clone(), content.clone());
+        for (path, content) in manifest.files {
+            validate_virtual_path(&path)?;
+            let normalized = normalize_path(&path);
+            files.insert(normalized.clone(), content);
             tree.insert(normalized.clone());
             register_parent_dirs(&normalized, &mut dirs);
         }
 
         Ok(Self { tree, dirs, files })
     }
+}
+
+fn validate_virtual_path(path: &str) -> anyhow::Result<()> {
+    if path.len() > MAX_DETECTION_PATH_BYTES {
+        anyhow::bail!(
+            "detection manifest path exceeds {} bytes",
+            MAX_DETECTION_PATH_BYTES
+        );
+    }
+    let normalized = path.replace('\\', "/");
+    let relative = Path::new(&normalized);
+    let bytes = normalized.as_bytes();
+    if normalized.contains('\0')
+        || bytes.get(1) == Some(&b':')
+        || normalized.starts_with("//")
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        anyhow::bail!("detection manifest path must be relative and must not contain '..'");
+    }
+    let depth = normalized
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .count();
+    if depth > MAX_DETECTION_PATH_DEPTH {
+        anyhow::bail!(
+            "detection manifest path exceeds {} components",
+            MAX_DETECTION_PATH_DEPTH
+        );
+    }
+    Ok(())
 }
 
 impl Fs for VirtualFs {

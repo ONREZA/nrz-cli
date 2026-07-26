@@ -4,7 +4,7 @@ use super::types::{
     FrameworkDetectionRule, FrameworkDetector, FrameworkPreset, PresetCategory, RuntimeType,
 };
 
-use FrameworkDetector::{Content, ContentAny, Package, Path, RuntimeSignal};
+use FrameworkDetector::{Content, ContentAny, Package, Path, RuntimePackage, RuntimeSignal};
 
 pub const PACKAGE_STATIC_OUTPUT_DIRS: &[&str] = &[
     "dist",
@@ -740,7 +740,7 @@ pub static DETECTION_RULES: &[FrameworkDetectionRule] = &[
     },
     FrameworkDetectionRule {
         slug: "express",
-        every: &[Package("express")],
+        every: &[RuntimePackage("express")],
         some: &[
             ContentAny {
                 paths: SERVER_ENTRY_FILES,
@@ -752,7 +752,7 @@ pub static DETECTION_RULES: &[FrameworkDetectionRule] = &[
     },
     FrameworkDetectionRule {
         slug: "koa",
-        every: &[Package("koa")],
+        every: &[RuntimePackage("koa")],
         some: &[
             ContentAny {
                 paths: SERVER_ENTRY_FILES,

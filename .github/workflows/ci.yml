@@ -18,13 +18,7 @@ jobs:
       - uses: actions/checkout@v6.0.2
 
       - name: Install Dagger CLI
-        run: |
-          DAGGER_VERSION="$(jq -r '.engineVersion | sub("^v"; "")' dagger.json)"
-          DAGGER_BIN_DIR="$RUNNER_TEMP/dagger"
-          mkdir -p "$DAGGER_BIN_DIR"
-          curl -fsSL https://dl.dagger.io/dagger/install.sh | BIN_DIR="$DAGGER_BIN_DIR" DAGGER_VERSION="$DAGGER_VERSION" sh
-          echo "$DAGGER_BIN_DIR" >> "$GITHUB_PATH"
-          "$DAGGER_BIN_DIR/dagger" version
+        run: sh .github/scripts/install-dagger.sh
 
       - name: Run Dagger CI
         run: dagger call ci --source=.

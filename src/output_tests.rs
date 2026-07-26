@@ -1,6 +1,6 @@
 use super::output::{
     FRAME_SENTINEL, Phase, cap_message, render_frame, report_terminal_error,
-    reported_terminal_diagnostic,
+    reported_terminal_diagnostic, terminal_line, terminal_text,
 };
 
 #[test]
@@ -69,6 +69,14 @@ fn cap_message_leaves_short_messages_untouched() {
     let s = "a short build log line";
     assert!(matches!(cap_message(s), std::borrow::Cow::Borrowed(_)));
     assert_eq!(cap_message(s), s);
+}
+
+#[test]
+fn terminal_text_removes_escape_sequences_and_control_bytes() {
+    let value = "safe\u{1b}[2J\u{1b}]0;owned\u{7} title\rnext\u{8}\nline";
+
+    assert_eq!(terminal_text(value), "safe title next\nline");
+    assert_eq!(terminal_line(value), "safe title next line");
 }
 
 // Frame must stay under the container-runtime log-line split (~16 KiB), proven

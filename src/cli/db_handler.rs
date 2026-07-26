@@ -333,14 +333,20 @@ async fn resolve_db(
     config: &ProjectConfig,
 ) -> anyhow::Result<String> {
     // 1. Explicit argument
-    if let Some(val) = explicit
-        && !val.is_empty()
-    {
+    if let Some(val) = explicit {
+        let val = val.trim();
+        if val.is_empty() {
+            anyhow::bail!("--database requires a non-empty database ID or name");
+        }
         return resolve_db_by_id_or_name(client, base, project_id, val).await;
     }
 
     // 2. Config: [db] database
-    if let Some(val) = config.db_database() {
+    if let Some(val) = config
+        .db_database()
+        .map(str::trim)
+        .filter(|val| !val.is_empty())
+    {
         return resolve_db_by_id_or_name(client, base, project_id, val).await;
     }
 
@@ -368,25 +374,22 @@ async fn resolve_db_by_id_or_name(
     project_id: &str,
     val: &str,
 ) -> anyhow::Result<String> {
-    // If it looks like an ID (UUIDv7 hex or with hyphens), use directly
-    if looks_like_id(val) {
-        return Ok(val.to_string());
-    }
-
-    // Resolve name → id via list
     let list: ListResponse = client.get(base).await.context("failed to list databases")?;
 
-    list.data
+    find_attached_database(&list.data, project_id, val)
+        .map(|database| database.id.clone())
+        .ok_or_else(|| anyhow::anyhow!("database \"{val}\" not found in project"))
+}
+
+fn find_attached_database<'a>(
+    databases: &'a [ManagedDatabase],
+    project_id: &str,
+    value: &str,
+) -> Option<&'a ManagedDatabase> {
+    databases
         .iter()
         .filter(|db| db.is_attached_to_project(project_id))
-        .find(|d| d.id == val || d.db_name.as_deref() == Some(val))
-        .or_else(|| {
-            list.data
-                .iter()
-                .find(|d| d.id == val || d.db_name.as_deref() == Some(val))
-        })
-        .map(|d| d.id.clone())
-        .ok_or_else(|| anyhow::anyhow!("database \"{val}\" not found"))
+        .find(|database| database.id == value || database.db_name.as_deref() == Some(value))
 }
 
 fn resolve_sql(sql: Option<&str>, file: Option<&str>) -> anyhow::Result<String> {

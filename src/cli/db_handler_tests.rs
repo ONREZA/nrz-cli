@@ -1,4 +1,42 @@
 use super::*;
+
+fn database(id: &str, name: &str, projects: &[&str]) -> ManagedDatabase {
+    ManagedDatabase {
+        id: id.to_string(),
+        db_name: Some(name.to_string()),
+        status: None,
+        cu_size: None,
+        pg_version: None,
+        auto_inject_db_url: None,
+        env_var_name: None,
+        auto_create_preview_branch: None,
+        kaiki_status: None,
+        project_attachments: projects
+            .iter()
+            .map(|project_id| ProjectAttachment {
+                project_id: (*project_id).to_string(),
+                auto_inject_db_url: None,
+                env_var_name: None,
+                auto_create_preview_branch: None,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn explicit_database_id_must_be_attached_to_project() {
+    let databases = vec![
+        database("db-current", "current", &["project-current"]),
+        database("db-other", "other", &["project-other"]),
+    ];
+
+    assert!(find_attached_database(&databases, "project-current", "db-other").is_none());
+    assert_eq!(
+        find_attached_database(&databases, "project-current", "db-current")
+            .map(|db| db.id.as_str()),
+        Some("db-current")
+    );
+}
 use tokio_postgres::config::{Host, SslMode};
 
 #[test]

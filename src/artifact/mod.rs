@@ -46,16 +46,23 @@ pub(crate) struct RuntimeArtifact {
 #[derive(Debug, Clone)]
 pub(crate) enum RuntimeArtifactScan {
     All,
-    Selected { roots: Vec<String> },
+    Selected {
+        roots: Vec<String>,
+        symlink_roots: Vec<String>,
+    },
 }
 
 impl RuntimeArtifactScan {
     pub(crate) fn explain(&self) -> serde_json::Value {
         match self {
             Self::All => serde_json::json!({ "mode": "all" }),
-            Self::Selected { roots } => serde_json::json!({
+            Self::Selected {
+                roots,
+                symlink_roots,
+            } => serde_json::json!({
                 "mode": "selected",
                 "roots": roots,
+                "symlinkRoots": symlink_roots,
             }),
         }
     }

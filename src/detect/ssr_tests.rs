@@ -1526,3 +1526,45 @@ fn nuxt_env_fallback_ssr_false() {
     let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
     assert!(result.is_static_compatible);
 }
+
+#[test]
+fn nuxt_unrelated_false_property_is_not_ssr_fallback() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("nuxt.config.ts"),
+        "export default defineNuxtConfig({ ssr: process.env.NUXT_SSR, featureFlag: false })",
+    )
+    .unwrap();
+
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
+
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
+fn nuxt_nested_fallback_does_not_consume_the_next_property() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("nuxt.config.ts"),
+        "export default defineNuxtConfig({ ssr: process.env.NUXT_SSR ?? Boolean({ enabled: true }.enabled), featureFlag: false })",
+    )
+    .unwrap();
+
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
+
+    assert!(!result.is_static_compatible);
+}
+
+#[test]
+fn nuxt_nested_operator_is_not_treated_as_direct_fallback() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("nuxt.config.ts"),
+        "export default defineNuxtConfig({ ssr: process.env.NUXT_SSR ?? (featureFlag || false), featureFlag: true })",
+    )
+    .unwrap();
+
+    let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
+
+    assert!(!result.is_static_compatible);
+}

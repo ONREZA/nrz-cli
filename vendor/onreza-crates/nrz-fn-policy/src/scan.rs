@@ -128,20 +128,29 @@ impl<'a> Visit<'a> for Visitor<'_> {
     }
 
     fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
-        if let Some(init) = &it.init
-            && is_bun_identifier(init)
-            && binding_pattern_uses_denied_bun_property(&it.id, self.allowed_bun_properties)
-        {
-            self.capabilities.insert(ScanCapability::BunAmbient);
+        if let Some(init) = &it.init {
+            if is_bun_ambient(init)
+                && binding_pattern_exposes_denied_bun_property(&it.id, self.allowed_bun_properties)
+            {
+                self.capabilities.insert(ScanCapability::BunAmbient);
+            }
+
+            if is_process_ambient(init) && binding_pattern_exposes_process_control(&it.id) {
+                self.capabilities.insert(ScanCapability::ProcessControl);
+            }
         }
         walk::walk_variable_declarator(self, it);
     }
 
     fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
-        if is_bun_identifier(&it.right)
-            && assignment_target_uses_denied_bun_property(&it.left, self.allowed_bun_properties)
+        if is_bun_ambient(&it.right)
+            && assignment_target_exposes_denied_bun_property(&it.left, self.allowed_bun_properties)
         {
             self.capabilities.insert(ScanCapability::BunAmbient);
+        }
+
+        if is_process_ambient(&it.right) && assignment_target_exposes_process_control(&it.left) {
+            self.capabilities.insert(ScanCapability::ProcessControl);
         }
         walk::walk_assignment_expression(self, it);
     }
@@ -152,15 +161,19 @@ impl<'a> Visit<'a> for Visitor<'_> {
                 .insert(ScanCapability::ParentMessageChannel);
         }
 
+        let property = it.property.name.as_str();
+        if is_bun_ambient(&it.object)
+            && is_denied_bun_property(property, self.allowed_bun_properties)
+        {
+            self.capabilities.insert(ScanCapability::BunAmbient);
+        }
+
+        if is_process_ambient(&it.object) && is_process_control_property(property) {
+            self.capabilities.insert(ScanCapability::ProcessControl);
+        }
+
         if let Expression::Identifier(object) = &it.object {
-            let property = it.property.name.as_str();
             match object.name.as_str() {
-                "Bun" if is_denied_bun_property(property, self.allowed_bun_properties) => {
-                    self.capabilities.insert(ScanCapability::BunAmbient);
-                }
-                "process" if property == "exit" || property == "kill" => {
-                    self.capabilities.insert(ScanCapability::ProcessControl);
-                }
                 "module" if property == "exports" => {
                     self.capabilities.insert(ScanCapability::CommonJsExports);
                 }
@@ -179,11 +192,16 @@ impl<'a> Visit<'a> for Visitor<'_> {
                 .insert(ScanCapability::ParentMessageChannel);
         }
 
-        if let Expression::Identifier(object) = &it.object
-            && object.name == "Bun"
+        if is_bun_ambient(&it.object)
             && computed_bun_property_may_be_denied(&it.expression, self.allowed_bun_properties)
         {
             self.capabilities.insert(ScanCapability::BunAmbient);
+        }
+
+        if is_process_ambient(&it.object)
+            && computed_process_property_may_be_control(&it.expression)
+        {
+            self.capabilities.insert(ScanCapability::ProcessControl);
         }
         walk::walk_computed_member_expression(self, it);
     }
@@ -230,16 +248,60 @@ fn is_denied_bun_property(property: &str, allowed_bun_properties: &[String]) -> 
     !is_allowed_bun_property(property, allowed_bun_properties)
 }
 
-fn is_bun_identifier(expression: &Expression<'_>) -> bool {
+fn is_bun_ambient(expression: &Expression<'_>) -> bool {
     match expression {
         Expression::Identifier(identifier) => identifier.name == "Bun",
-        Expression::ParenthesizedExpression(expression) => {
-            is_bun_identifier(&expression.expression)
+        Expression::StaticMemberExpression(expression) => {
+            is_global_object(&expression.object) && expression.property.name == "Bun"
         }
-        Expression::TSAsExpression(expression) => is_bun_identifier(&expression.expression),
-        Expression::TSSatisfiesExpression(expression) => is_bun_identifier(&expression.expression),
-        Expression::TSTypeAssertion(expression) => is_bun_identifier(&expression.expression),
-        Expression::TSNonNullExpression(expression) => is_bun_identifier(&expression.expression),
+        Expression::ComputedMemberExpression(expression) => {
+            is_global_object(&expression.object)
+                && static_expression_name(&expression.expression)
+                    .map(|property| property == "Bun")
+                    .unwrap_or(false)
+        }
+        Expression::ParenthesizedExpression(expression) => is_bun_ambient(&expression.expression),
+        Expression::TSAsExpression(expression) => is_bun_ambient(&expression.expression),
+        Expression::TSSatisfiesExpression(expression) => is_bun_ambient(&expression.expression),
+        Expression::TSTypeAssertion(expression) => is_bun_ambient(&expression.expression),
+        Expression::TSNonNullExpression(expression) => is_bun_ambient(&expression.expression),
+        _ => false,
+    }
+}
+
+fn is_process_ambient(expression: &Expression<'_>) -> bool {
+    match expression {
+        Expression::Identifier(identifier) => identifier.name == "process",
+        Expression::StaticMemberExpression(expression) => {
+            is_global_object(&expression.object) && expression.property.name == "process"
+        }
+        Expression::ComputedMemberExpression(expression) => {
+            is_global_object(&expression.object)
+                && static_expression_name(&expression.expression)
+                    .map(|property| property == "process")
+                    .unwrap_or(false)
+        }
+        Expression::ParenthesizedExpression(expression) => {
+            is_process_ambient(&expression.expression)
+        }
+        Expression::TSAsExpression(expression) => is_process_ambient(&expression.expression),
+        Expression::TSSatisfiesExpression(expression) => is_process_ambient(&expression.expression),
+        Expression::TSTypeAssertion(expression) => is_process_ambient(&expression.expression),
+        Expression::TSNonNullExpression(expression) => is_process_ambient(&expression.expression),
+        _ => false,
+    }
+}
+
+fn is_global_object(expression: &Expression<'_>) -> bool {
+    match expression {
+        Expression::Identifier(identifier) => {
+            matches!(identifier.name.as_str(), "globalThis" | "self")
+        }
+        Expression::ParenthesizedExpression(expression) => is_global_object(&expression.expression),
+        Expression::TSAsExpression(expression) => is_global_object(&expression.expression),
+        Expression::TSSatisfiesExpression(expression) => is_global_object(&expression.expression),
+        Expression::TSTypeAssertion(expression) => is_global_object(&expression.expression),
+        Expression::TSNonNullExpression(expression) => is_global_object(&expression.expression),
         _ => false,
     }
 }
@@ -251,6 +313,16 @@ fn computed_bun_property_may_be_denied(
     static_expression_name(expression)
         .map(|property| is_denied_bun_property(property.as_ref(), allowed_bun_properties))
         .unwrap_or(true)
+}
+
+fn computed_process_property_may_be_control(expression: &Expression<'_>) -> bool {
+    static_expression_name(expression)
+        .map(|property| is_process_control_property(property.as_ref()))
+        .unwrap_or(true)
+}
+
+fn is_process_control_property(property: &str) -> bool {
+    property == "exit" || property == "kill"
 }
 
 fn static_expression_name<'a>(expression: &Expression<'a>) -> Option<Cow<'a, str>> {
@@ -274,7 +346,7 @@ fn static_expression_name<'a>(expression: &Expression<'a>) -> Option<Cow<'a, str
     }
 }
 
-fn binding_pattern_uses_denied_bun_property(
+fn binding_pattern_exposes_denied_bun_property(
     pattern: &BindingPattern<'_>,
     allowed_bun_properties: &[String],
 ) -> bool {
@@ -288,13 +360,32 @@ fn binding_pattern_uses_denied_bun_property(
                 })
         }
         BindingPattern::AssignmentPattern(pattern) => {
-            binding_pattern_uses_denied_bun_property(&pattern.left, allowed_bun_properties)
+            binding_pattern_exposes_denied_bun_property(&pattern.left, allowed_bun_properties)
         }
-        BindingPattern::ArrayPattern(_) | BindingPattern::BindingIdentifier(_) => false,
+        BindingPattern::ArrayPattern(_) => false,
+        BindingPattern::BindingIdentifier(_) => true,
     }
 }
 
-fn assignment_target_uses_denied_bun_property(
+fn binding_pattern_exposes_process_control(pattern: &BindingPattern<'_>) -> bool {
+    match pattern {
+        BindingPattern::ObjectPattern(pattern) => {
+            pattern.rest.is_some()
+                || pattern.properties.iter().any(|property| {
+                    property_key_name(&property.key)
+                        .map(|name| is_process_control_property(name.as_ref()))
+                        .unwrap_or(true)
+                })
+        }
+        BindingPattern::AssignmentPattern(pattern) => {
+            binding_pattern_exposes_process_control(&pattern.left)
+        }
+        BindingPattern::ArrayPattern(_) => false,
+        BindingPattern::BindingIdentifier(_) => true,
+    }
+}
+
+fn assignment_target_exposes_denied_bun_property(
     target: &AssignmentTarget<'_>,
     allowed_bun_properties: &[String],
 ) -> bool {
@@ -307,7 +398,23 @@ fn assignment_target_uses_denied_bun_property(
                         .unwrap_or(true)
                 })
         }
-        _ => false,
+        AssignmentTarget::ArrayAssignmentTarget(_) => false,
+        _ => true,
+    }
+}
+
+fn assignment_target_exposes_process_control(target: &AssignmentTarget<'_>) -> bool {
+    match target {
+        AssignmentTarget::ObjectAssignmentTarget(target) => {
+            target.rest.is_some()
+                || target.properties.iter().any(|property| {
+                    assignment_target_property_name(property)
+                        .map(|name| is_process_control_property(name.as_ref()))
+                        .unwrap_or(true)
+                })
+        }
+        AssignmentTarget::ArrayAssignmentTarget(_) => false,
+        _ => true,
     }
 }
 

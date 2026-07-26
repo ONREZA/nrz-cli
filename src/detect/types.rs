@@ -80,6 +80,8 @@ pub struct FrameworkPreset {
 pub enum FrameworkDetector {
     /// Match a dependency or devDependency in package.json.
     Package(&'static str),
+    /// Match a package required at runtime (dependencies only).
+    RuntimePackage(&'static str),
     /// Match a file or directory path.
     Path(&'static str),
     /// Match a regex against one file.

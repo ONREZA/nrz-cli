@@ -47,6 +47,7 @@ pub(super) fn resolve_runtime_artifact(
         &plan.project_prefix,
         &plan.build_output_prefix,
     );
+    let symlink_roots = workspace_package_runtime_roots(&plan.runtime_root);
 
     output::status(
         json,
@@ -61,7 +62,10 @@ pub(super) fn resolve_runtime_artifact(
     Ok(RuntimeArtifact {
         root_dir: plan.runtime_root,
         manifest,
-        scan: RuntimeArtifactScan::Selected { roots },
+        scan: RuntimeArtifactScan::Selected {
+            roots,
+            symlink_roots,
+        },
     })
 }
 
@@ -282,6 +286,26 @@ pub(super) fn node_project_runtime_scan_roots(
     }
 
     roots
+}
+
+fn workspace_package_runtime_roots(runtime_root: &Path) -> Vec<String> {
+    let local_fs = crate::detect::fs::LocalFs::new(runtime_root);
+    let package_json = crate::detect::package_json::PackageJson::load_from_fs(&local_fs);
+    let package_manager =
+        crate::detect::package_manager::detect_package_manager(&local_fs, package_json.as_ref());
+    let Some(monorepo) = crate::detect::monorepo::detect_monorepo(
+        &local_fs,
+        package_json.as_ref(),
+        package_manager.as_ref(),
+    ) else {
+        return Vec::new();
+    };
+
+    monorepo
+        .packages
+        .into_iter()
+        .filter_map(|package| normalize_runtime_artifact_path(&package.path).ok())
+        .collect()
 }
 
 pub(super) fn push_existing_runtime_scan_root(

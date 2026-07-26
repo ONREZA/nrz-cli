@@ -1,7 +1,7 @@
 use super::{
     BuildSettingSource, OutputDirectoryHint, collect_body_files, copy_dir_recursive,
     copy_missing_prisma_packages, detect_output_dir, detect_output_dir_for_framework,
-    prepare_nextjs_standalone, run_with_hint, try_generate_ssr_manifest,
+    prepare_copy_destination, prepare_nextjs_standalone, run_with_hint, try_generate_ssr_manifest,
 };
 use crate::cli::BuildArgs;
 use crate::frameworks::compute_aware_output_dirs;
@@ -40,6 +40,50 @@ fn build_output_serializes_nextjs_compatibility_report() {
 fn write_manifest(output_dir: &std::path::Path) {
     std::fs::create_dir_all(output_dir.join(".onreza")).unwrap();
     std::fs::write(output_dir.join(".onreza/manifest.json"), "{}").unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_destination_rejects_symlinked_parent() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("nested")).unwrap();
+
+    let error =
+        prepare_copy_destination(root.path(), std::path::Path::new("nested/file.js")).unwrap_err();
+
+    assert!(error.to_string().contains("must not be a symbolic link"));
+    assert!(!outside.path().join("file.js").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_destination_rejects_symlinked_root() {
+    let parent = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let root = parent.path().join("_static");
+    std::os::unix::fs::symlink(outside.path(), &root).unwrap();
+
+    let error = prepare_copy_destination(&root, std::path::Path::new("file.js")).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("root must not be a symbolic link")
+    );
+    assert!(!outside.path().join("file.js").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn copy_destination_rejects_final_symlink() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("file.js")).unwrap();
+
+    let error = prepare_copy_destination(root.path(), std::path::Path::new("file.js")).unwrap_err();
+
+    assert!(error.to_string().contains("must not be a symbolic link"));
 }
 
 #[test]
@@ -260,6 +304,55 @@ fn user_output_dir_does_not_refine_to_nested_framework_output() {
 
     assert!(found.ends_with("build"));
     assert!(!has_manifest);
+}
+
+#[test]
+fn user_output_dir_must_stay_inside_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+
+    let absolute = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &[],
+        Some(output_hint(
+            outside.path().to_str().unwrap(),
+            BuildSettingSource::User,
+        )),
+    )
+    .unwrap_err();
+    assert!(
+        absolute
+            .to_string()
+            .contains("must stay inside the project")
+    );
+
+    let parent = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &[],
+        Some(output_hint("../outside", BuildSettingSource::User)),
+    )
+    .unwrap_err();
+    assert!(parent.to_string().contains("must stay inside the project"));
+}
+
+#[cfg(unix)]
+#[test]
+fn user_output_dir_rejects_symlink() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("dist")).unwrap();
+
+    let error = detect_output_dir(
+        dir.path(),
+        &["dist"],
+        &[],
+        Some(output_hint("dist", BuildSettingSource::User)),
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("must not be a symbolic link"));
 }
 
 #[test]
@@ -1045,6 +1138,52 @@ fn nextjs_standalone_prunes_broken_pnpm_hoist_symlinks() {
     assert!(pnpm_hoist.join("left-pad").exists());
     assert!(!pnpm_hoist.join("@scope/pkg").exists());
     assert!(pnpm_hoist.join("@scope/valid").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn nextjs_standalone_does_not_prune_symlinked_pnpm_hoist_directory() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+    std::os::unix::fs::symlink("missing", outside.path().join("victim")).unwrap();
+    std::fs::create_dir_all(output.path().join("node_modules/.pnpm")).unwrap();
+    std::os::unix::fs::symlink(
+        outside.path(),
+        output.path().join("node_modules/.pnpm/node_modules"),
+    )
+    .unwrap();
+
+    prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
+
+    assert!(std::fs::symlink_metadata(outside.path().join("victim")).is_ok());
+}
+
+#[cfg(unix)]
+#[test]
+fn nextjs_metadata_copy_rejects_symlinked_public_directory() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+    std::fs::create_dir_all(output.path().join(".next/server/app")).unwrap();
+    std::fs::write(
+        output.path().join(".next/server/app/favicon.ico.body"),
+        "icon",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(outside.path(), output.path().join("public")).unwrap();
+
+    let error = prepare_nextjs_standalone(project.path(), output.path(), true).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("destination directory must not be a symbolic link"),
+        "{error}"
+    );
+    assert!(!outside.path().join("favicon.ico").exists());
 }
 
 #[tokio::test]
@@ -2852,7 +2991,7 @@ fn prisma_standalone_integration_via_prepare() {
 
 #[cfg(unix)]
 #[test]
-fn prisma_copies_through_symlink() {
+fn prisma_skips_symlink_outside_project() {
     let project = tempfile::tempdir().unwrap();
     let output = tempfile::tempdir().unwrap();
 
@@ -2869,11 +3008,7 @@ fn prisma_copies_through_symlink() {
     copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
 
     let dst = output.path().join("node_modules/@prisma/client-sym123");
-    assert!(dst.is_dir());
-    assert_eq!(
-        std::fs::read_to_string(dst.join("index.js")).unwrap(),
-        "// from store"
-    );
+    assert!(!dst.exists());
 }
 
 #[cfg(unix)]
@@ -2896,4 +3031,28 @@ fn prisma_skips_dangling_symlink() {
             .join("node_modules/@prisma/client-dangling")
             .exists()
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn prisma_copy_rejects_symlinked_destination_parent() {
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+
+    let src = project.path().join("node_modules/@prisma/client-deadbeef");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("index.js"), "// prisma").unwrap();
+    std::fs::create_dir_all(output.path().join("node_modules")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), output.path().join("node_modules/@prisma")).unwrap();
+
+    let error = copy_missing_prisma_packages(project.path(), output.path(), true).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("destination directory must not be a symbolic link"),
+        "{error}"
+    );
+    assert!(!outside.path().join("client-deadbeef").exists());
 }

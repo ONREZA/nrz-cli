@@ -15,12 +15,28 @@ struct ApiError {
     #[serde(default)]
     message: Option<String>,
     #[serde(default)]
-    code: Option<String>,
+    code: Option<ApiErrorCode>,
     #[serde(default)]
     #[serde(alias = "retryAfterSeconds")]
     retry_after_seconds: Option<u64>,
     #[serde(default)]
     details: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ApiErrorCode {
+    String(String),
+    Number(serde_json::Number),
+}
+
+impl ApiErrorCode {
+    fn into_string(self) -> String {
+        match self {
+            Self::String(value) => value,
+            Self::Number(value) => value.to_string(),
+        }
+    }
 }
 
 /// Structured API error preserving code and details for downstream consumers.
@@ -974,7 +990,7 @@ pub(super) fn extract_api_error(
         if let Some(code) = api_err.code {
             return StructuredApiError {
                 status,
-                code,
+                code: code.into_string(),
                 message: msg,
                 retry_after_seconds: api_err.retry_after_seconds.or(retry_after_seconds),
                 details: api_err.details,

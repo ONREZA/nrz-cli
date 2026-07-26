@@ -2,7 +2,7 @@ use std::fs;
 
 use tempfile::tempdir;
 
-use super::health_check::{detect_health_path, extract_path_from_pattern};
+use super::health_check::{detect_health_path, extract_path_from_pattern, read_if_small};
 
 #[test]
 fn nextjs_app_router_health() {
@@ -237,4 +237,26 @@ app.listen(3000);
     let det = result.unwrap();
     assert_eq!(det.path, "/ping");
     assert_eq!(det.source_description, "server.js");
+}
+
+#[cfg(unix)]
+#[test]
+fn health_scan_skips_symlinks_and_special_files() {
+    let dir = tempdir().unwrap();
+    let regular = dir.path().join("regular.ts");
+    fs::write(&regular, "app.get('/health', handler)").unwrap();
+    std::os::unix::fs::symlink(&regular, dir.path().join("linked.ts")).unwrap();
+
+    assert!(read_if_small(&regular).is_some());
+    assert!(read_if_small(&dir.path().join("linked.ts")).is_none());
+    assert!(read_if_small(std::path::Path::new("/dev/zero")).is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn health_scan_skips_symlinked_package_manifest() {
+    let dir = tempdir().unwrap();
+    std::os::unix::fs::symlink("/dev/zero", dir.path().join("package.json")).unwrap();
+
+    assert!(detect_health_path(dir.path(), "other", dir.path()).is_none());
 }
