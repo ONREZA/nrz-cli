@@ -15,6 +15,7 @@ const CHECKSUMS_ASSET_NAME: &str = "checksums-sha256.txt";
 const MAX_RELEASE_ASSET_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_RELEASE_CHECKSUMS_BYTES: u64 = 1024 * 1024;
 const MAX_RELEASE_BINARY_BYTES: u64 = 256 * 1024 * 1024;
+const UPDATE_DEBRIS_STALE_AFTER: Duration = Duration::from_secs(60 * 60);
 
 /// Upgrade nrz to the latest version
 #[derive(Parser)]
@@ -608,6 +609,10 @@ fn cleanup_old_files() {
     let Ok(current_exe) = std::env::current_exe() else {
         return;
     };
+    cleanup_old_files_at(&current_exe);
+}
+
+fn cleanup_old_files_at(current_exe: &std::path::Path) {
     let Some(exe_dir) = current_exe.parent() else {
         return;
     };
@@ -616,23 +621,66 @@ fn cleanup_old_files() {
     };
     let exe_name = exe_name.to_string_lossy();
 
-    // Cleanup patterns: .old.exe, .new.exe, .tmp
-    let patterns: Vec<Box<dyn Fn() -> std::path::PathBuf>> = vec![
-        #[cfg(windows)]
-        Box::new(|| exe_dir.join(format!("{}.old.exe", exe_name))),
-        #[cfg(windows)]
-        Box::new(|| exe_dir.join(format!("{}.new.exe", exe_name))),
-        #[cfg(not(windows))]
-        Box::new(|| exe_dir.join(format!("{}.tmp", exe_name))),
-    ];
+    let mut paths = Vec::new();
+    #[cfg(windows)]
+    {
+        paths.push((exe_dir.join(format!("{}.old.exe", exe_name)), false));
+        paths.push((exe_dir.join(format!("{}.new.exe", exe_name)), false));
+    }
+    #[cfg(not(windows))]
+    paths.push((exe_dir.join(format!("{}.tmp", exe_name)), false));
 
-    for path_fn in patterns {
-        let path = path_fn();
-        if path.exists() {
-            tracing::debug!("Cleaning up old file: {}", path.display());
-            let _ = std::fs::remove_file(&path);
+    if let Some(file_name) = current_exe.file_name() {
+        let candidate_prefix = format!(".{}.update-", file_name.to_string_lossy());
+        if let Ok(entries) = std::fs::read_dir(exe_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let Some(name) = name.to_str() else {
+                    continue;
+                };
+                let Some(candidate_id) = name
+                    .strip_prefix(&candidate_prefix)
+                    .and_then(|name| name.strip_suffix(".tmp"))
+                else {
+                    continue;
+                };
+                if candidate_id.len() != 32
+                    || !candidate_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+                {
+                    continue;
+                }
+                let Ok(file_type) = entry.file_type() else {
+                    continue;
+                };
+                if file_type.is_file() || file_type.is_symlink() {
+                    paths.push((entry.path(), true));
+                }
+            }
         }
     }
+
+    for (path, stale_only) in paths {
+        if stale_only && !is_stale_update_candidate(&path) {
+            continue;
+        }
+        tracing::debug!("Cleaning up old file: {}", path.display());
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+fn is_stale_update_candidate(path: &std::path::Path) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    let file_type = metadata.file_type();
+    if !file_type.is_file() && !file_type.is_symlink() {
+        return false;
+    }
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| std::time::SystemTime::now().duration_since(modified).ok())
+        .is_some_and(|age| age >= UPDATE_DEBRIS_STALE_AFTER)
 }
 
 #[cfg(test)]

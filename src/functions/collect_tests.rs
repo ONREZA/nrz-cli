@@ -195,6 +195,24 @@ fn preview_passes_for_clean_entry() {
 }
 
 #[test]
+fn preview_allows_destructured_ambient_properties() {
+    for source in [
+        "export const config = {};\nconst { SHA256 } = Bun;\nexport default { fetch() { return new Response(String(SHA256)); } };\n",
+        "export const config = {};\nconst { env } = process;\nexport default { fetch() { return new Response(env.MODE ?? ''); } };\n",
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "functions/api.nrz-fn.ts", source);
+        let collected = collect(tmp.path()).unwrap();
+        let function = &collected.functions[0];
+
+        let report = run_policy_preview(&function.entrypoint, &function.sources).unwrap();
+
+        assert_eq!(report.status, PolicyStatus::Passed, "{source}");
+        assert!(report.violations.is_empty(), "{source}");
+    }
+}
+
+#[test]
 fn preview_flags_denied_capability() {
     let tmp = tempfile::tempdir().unwrap();
     write(

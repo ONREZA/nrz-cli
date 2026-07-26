@@ -12,6 +12,43 @@ use super::types::{
 };
 
 const MAX_WORKSPACE_EXPANSION_STATES: usize = 100_000;
+const MAX_WORKSPACE_GLOB_MATCH_STEPS: usize = 4 * 1024 * 1024;
+
+pub(super) struct WorkspaceExpansionBudget {
+    states_remaining: usize,
+    match_steps_remaining: usize,
+    exhausted: bool,
+}
+
+impl Default for WorkspaceExpansionBudget {
+    fn default() -> Self {
+        Self {
+            states_remaining: MAX_WORKSPACE_EXPANSION_STATES,
+            match_steps_remaining: MAX_WORKSPACE_GLOB_MATCH_STEPS,
+            exhausted: false,
+        }
+    }
+}
+
+impl WorkspaceExpansionBudget {
+    fn consume_state(&mut self) -> bool {
+        let Some(remaining) = self.states_remaining.checked_sub(1) else {
+            self.exhausted = true;
+            return false;
+        };
+        self.states_remaining = remaining;
+        true
+    }
+
+    fn consume_match_steps(&mut self, steps: usize) -> bool {
+        let Some(remaining) = self.match_steps_remaining.checked_sub(steps) else {
+            self.exhausted = true;
+            return false;
+        };
+        self.match_steps_remaining = remaining;
+        true
+    }
+}
 
 /// Detect monorepo setup from filesystem and package.json.
 ///
@@ -168,9 +205,13 @@ pub fn parse_pnpm_workspace(content: &str) -> Vec<String> {
 fn resolve_packages(fs: &dyn Fs, patterns: &[String]) -> Vec<MonorepoPackage> {
     let mut packages = Vec::new();
     let mut seen = HashSet::new();
+    let mut budget = WorkspaceExpansionBudget::default();
 
     for pattern in patterns {
-        expand_pattern(fs, pattern, &mut packages, &mut seen);
+        expand_pattern(fs, pattern, &mut packages, &mut seen, &mut budget);
+        if budget.exhausted {
+            return Vec::new();
+        }
     }
 
     let mut excluded = HashSet::new();
@@ -180,7 +221,16 @@ fn resolve_packages(fs: &dyn Fs, patterns: &[String]) -> Vec<MonorepoPackage> {
     {
         let mut excluded_packages = Vec::new();
         let mut excluded_seen = HashSet::new();
-        expand_pattern(fs, pattern, &mut excluded_packages, &mut excluded_seen);
+        expand_pattern(
+            fs,
+            pattern,
+            &mut excluded_packages,
+            &mut excluded_seen,
+            &mut budget,
+        );
+        if budget.exhausted {
+            return Vec::new();
+        }
         excluded.extend(excluded_packages.into_iter().map(|package| package.path));
     }
     packages.retain(|package| !excluded.contains(&package.path));
@@ -195,6 +245,7 @@ fn expand_pattern(
     pattern: &str,
     packages: &mut Vec<MonorepoPackage>,
     seen: &mut HashSet<String>,
+    budget: &mut WorkspaceExpansionBudget,
 ) {
     if pattern.starts_with('!') {
         return;
@@ -202,38 +253,57 @@ fn expand_pattern(
     let Some(pattern) = normalize_workspace_pattern(pattern) else {
         return;
     };
-    let segments = pattern.split('/').collect::<Vec<_>>();
+    let segments = pattern
+        .split('/')
+        .map(|segment| segment.chars().collect::<Vec<_>>())
+        .collect::<Vec<_>>();
     let mut visited = HashSet::new();
-    expand_pattern_segments(fs, &segments, 0, "", packages, seen, &mut visited);
+    let mut expansion = WorkspaceExpansion {
+        packages,
+        seen,
+        visited: &mut visited,
+        budget,
+    };
+    expand_pattern_segments(fs, &segments, 0, "", &mut expansion);
+}
+
+struct WorkspaceExpansion<'a> {
+    packages: &'a mut Vec<MonorepoPackage>,
+    seen: &'a mut HashSet<String>,
+    visited: &'a mut HashSet<(String, usize)>,
+    budget: &'a mut WorkspaceExpansionBudget,
 }
 
 fn expand_pattern_segments(
     fs: &dyn Fs,
-    segments: &[&str],
+    segments: &[Vec<char>],
     segment_index: usize,
     current: &str,
-    packages: &mut Vec<MonorepoPackage>,
-    seen: &mut HashSet<String>,
-    visited: &mut HashSet<(String, usize)>,
+    expansion: &mut WorkspaceExpansion<'_>,
 ) {
-    if visited.len() >= MAX_WORKSPACE_EXPANSION_STATES
+    if expansion.budget.exhausted
         || current
             .split('/')
             .filter(|segment| !segment.is_empty())
             .count()
             > MAX_DETECTION_PATH_DEPTH
-        || !visited.insert((current.to_string(), segment_index))
+        || !expansion
+            .visited
+            .insert((current.to_string(), segment_index))
     {
+        return;
+    }
+    if !expansion.budget.consume_state() {
         return;
     }
 
     if segment_index == segments.len() {
         if !current.is_empty()
-            && seen.insert(current.to_string())
+            && expansion.seen.insert(current.to_string())
             && fs.is_dir(current)
             && fs.exists(&format!("{current}/package.json"))
         {
-            packages.push(MonorepoPackage {
+            expansion.packages.push(MonorepoPackage {
                 name: read_package_name(fs, current),
                 path: current.to_string(),
             });
@@ -241,52 +311,34 @@ fn expand_pattern_segments(
         return;
     }
 
-    let segment = segments[segment_index];
-    if segment == "**" {
-        expand_pattern_segments(
-            fs,
-            segments,
-            segment_index + 1,
-            current,
-            packages,
-            seen,
-            visited,
-        );
+    let segment = &segments[segment_index];
+    if segment.as_slice() == ['*', '*'] {
+        expand_pattern_segments(fs, segments, segment_index + 1, current, expansion);
         for entry in fs.list_dir(current) {
+            if expansion.budget.exhausted {
+                break;
+            }
             if is_ignored_workspace_directory(&entry) {
                 continue;
             }
             let path = join_workspace_path(current, &entry);
             if fs.is_dir(&path) {
-                expand_pattern_segments(
-                    fs,
-                    segments,
-                    segment_index,
-                    &path,
-                    packages,
-                    seen,
-                    visited,
-                );
+                expand_pattern_segments(fs, segments, segment_index, &path, expansion);
             }
         }
         return;
     }
 
     for entry in fs.list_dir(current) {
-        if !workspace_segment_matches(&entry, segment) {
+        if expansion.budget.exhausted {
+            break;
+        }
+        if !workspace_segment_matches(&entry, segment, expansion.budget) {
             continue;
         }
         let path = join_workspace_path(current, &entry);
         if fs.is_dir(&path) {
-            expand_pattern_segments(
-                fs,
-                segments,
-                segment_index + 1,
-                &path,
-                packages,
-                seen,
-                visited,
-            );
+            expand_pattern_segments(fs, segments, segment_index + 1, &path, expansion);
         }
     }
 }
@@ -310,33 +362,46 @@ fn normalize_workspace_pattern(pattern: &str) -> Option<String> {
     Some(normalized)
 }
 
-fn workspace_segment_matches(value: &str, pattern: &str) -> bool {
+pub(super) fn workspace_segment_matches(
+    value: &str,
+    pattern: &[char],
+    budget: &mut WorkspaceExpansionBudget,
+) -> bool {
+    let value_len = value.chars().count();
+    let Some(match_steps) = value_len.checked_add(1).and_then(|value_len| {
+        pattern
+            .len()
+            .checked_add(1)
+            .and_then(|pattern_len| value_len.checked_mul(pattern_len))
+    }) else {
+        return false;
+    };
+    if !budget.consume_match_steps(match_steps) {
+        return false;
+    }
+
     let value = value.chars().collect::<Vec<_>>();
-    let pattern = pattern.chars().collect::<Vec<_>>();
-    let mut matches = vec![vec![false; pattern.len() + 1]; value.len() + 1];
-    matches[0][0] = true;
+    let mut previous = vec![false; pattern.len() + 1];
+    previous[0] = true;
     for pattern_index in 0..pattern.len() {
         if pattern[pattern_index] == '*' {
-            matches[0][pattern_index + 1] = matches[0][pattern_index];
+            previous[pattern_index + 1] = previous[pattern_index];
         }
     }
-    for value_index in 0..=value.len() {
+
+    let mut current = vec![false; pattern.len() + 1];
+    for value_index in 1..=value.len() {
+        current.fill(false);
         for pattern_index in 0..pattern.len() {
-            matches[value_index][pattern_index + 1] = match pattern[pattern_index] {
-                '*' => {
-                    matches[value_index][pattern_index]
-                        || (value_index > 0 && matches[value_index - 1][pattern_index + 1])
-                }
-                '?' => value_index > 0 && matches[value_index - 1][pattern_index],
-                literal => {
-                    value_index > 0
-                        && value[value_index - 1] == literal
-                        && matches[value_index - 1][pattern_index]
-                }
+            current[pattern_index + 1] = match pattern[pattern_index] {
+                '*' => current[pattern_index] || previous[pattern_index + 1],
+                '?' => previous[pattern_index],
+                literal => value[value_index - 1] == literal && previous[pattern_index],
             };
         }
+        std::mem::swap(&mut previous, &mut current);
     }
-    matches[value.len()][pattern.len()]
+    previous[pattern.len()]
 }
 
 fn join_workspace_path(parent: &str, child: &str) -> String {

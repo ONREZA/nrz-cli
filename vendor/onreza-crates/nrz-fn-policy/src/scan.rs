@@ -212,21 +212,28 @@ impl<'a> Visit<'a> for Visitor<'_> {
             .init
             .as_ref()
             .is_some_and(|init| is_global_object(init, &self.global_aliases));
+        let mut suppress_bun = false;
+        let mut suppress_process = false;
         if let Some(init) = &it.init {
             if global_object {
                 self.record_global_binding_pattern(&it.id);
             }
 
-            if is_bun_ambient(init, &self.global_aliases)
-                && binding_pattern_exposes_denied_bun_property(&it.id, self.allowed_bun_properties)
-            {
-                self.capabilities.insert(ScanCapability::BunAmbient);
+            if is_bun_ambient(init, &self.global_aliases) {
+                if binding_pattern_exposes_denied_bun_property(&it.id, self.allowed_bun_properties)
+                {
+                    self.capabilities.insert(ScanCapability::BunAmbient);
+                } else {
+                    suppress_bun = true;
+                }
             }
 
-            if is_process_ambient(init, &self.global_aliases)
-                && binding_pattern_exposes_process_control(&it.id)
-            {
-                self.capabilities.insert(ScanCapability::ProcessControl);
+            if is_process_ambient(init, &self.global_aliases) {
+                if binding_pattern_exposes_process_control(&it.id) {
+                    self.capabilities.insert(ScanCapability::ProcessControl);
+                } else {
+                    suppress_process = true;
+                }
             }
 
             if is_parent_message_reference(init, &self.global_aliases) {
@@ -234,44 +241,48 @@ impl<'a> Visit<'a> for Visitor<'_> {
                     .insert(ScanCapability::ParentMessageChannel);
             }
         }
-        if global_object {
-            self.suppressed_global_references += 1;
+
+        self.visit_binding_pattern(&it.id);
+        if let Some(type_annotation) = &it.type_annotation {
+            self.visit_ts_type_annotation(type_annotation);
         }
-        walk::walk_variable_declarator(self, it);
-        if global_object {
-            self.suppressed_global_references -= 1;
+        if let Some(init) = &it.init {
+            self.visit_binding_source(init, global_object, suppress_bun, suppress_process);
         }
     }
 
     fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
         let global_object = it.operator == AssignmentOperator::Assign
             && is_global_object(&it.right, &self.global_aliases);
+        let mut suppress_bun = false;
+        let mut suppress_process = false;
         if global_object {
             self.record_global_assignment_target(&it.left);
         }
 
-        if is_bun_ambient(&it.right, &self.global_aliases)
-            && assignment_target_exposes_denied_bun_property(&it.left, self.allowed_bun_properties)
-        {
-            self.capabilities.insert(ScanCapability::BunAmbient);
+        if is_bun_ambient(&it.right, &self.global_aliases) {
+            if assignment_target_exposes_denied_bun_property(&it.left, self.allowed_bun_properties)
+            {
+                self.capabilities.insert(ScanCapability::BunAmbient);
+            } else {
+                suppress_bun = true;
+            }
         }
 
-        if is_process_ambient(&it.right, &self.global_aliases)
-            && assignment_target_exposes_process_control(&it.left)
-        {
-            self.capabilities.insert(ScanCapability::ProcessControl);
+        if is_process_ambient(&it.right, &self.global_aliases) {
+            if assignment_target_exposes_process_control(&it.left) {
+                self.capabilities.insert(ScanCapability::ProcessControl);
+            } else {
+                suppress_process = true;
+            }
         }
         if is_parent_message_reference(&it.right, &self.global_aliases) {
             self.capabilities
                 .insert(ScanCapability::ParentMessageChannel);
         }
-        if global_object {
-            self.suppressed_global_references += 1;
-        }
-        walk::walk_assignment_expression(self, it);
-        if global_object {
-            self.suppressed_global_references -= 1;
-        }
+
+        self.visit_assignment_target(&it.left);
+        self.visit_binding_source(&it.right, global_object, suppress_bun, suppress_process);
     }
 
     fn visit_static_member_expression(&mut self, it: &StaticMemberExpression<'a>) {
@@ -384,6 +395,22 @@ impl<'a> Visit<'a> for Visitor<'_> {
 }
 
 impl Visitor<'_> {
+    fn visit_binding_source(
+        &mut self,
+        source: &Expression<'_>,
+        suppress_global: bool,
+        suppress_bun: bool,
+        suppress_process: bool,
+    ) {
+        self.suppressed_global_references += usize::from(suppress_global);
+        self.suppressed_bun_references += usize::from(suppress_bun);
+        self.suppressed_process_references += usize::from(suppress_process);
+        self.visit_expression(source);
+        self.suppressed_process_references -= usize::from(suppress_process);
+        self.suppressed_bun_references -= usize::from(suppress_bun);
+        self.suppressed_global_references -= usize::from(suppress_global);
+    }
+
     fn record_global_binding_pattern(&mut self, pattern: &BindingPattern<'_>) {
         if let BindingPattern::BindingIdentifier(identifier) = pattern {
             self.global_aliases.insert(identifier.name.to_string());

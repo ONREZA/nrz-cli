@@ -48,6 +48,34 @@ fn masks_exact_environment_values_only_in_sanitized_copy() {
 }
 
 #[test]
+fn masks_control_bearing_environment_values_before_normalization() {
+    let secret = "control\rsecret";
+    let redactor = ExactValueRedactor::from_values([secret.to_string()]).unwrap();
+
+    let sanitized = sanitize_message(&format!("value={secret}"), &redactor);
+
+    assert_eq!(sanitized, "value=[REDACTED]");
+}
+
+#[test]
+fn masks_environment_values_reconstructed_by_terminal_normalization() {
+    let redactor = ExactValueRedactor::from_values(["exact-secret-value".to_string()]).unwrap();
+
+    let sanitized = sanitize_message("value=exact-\u{1b}[31msecret-value", &redactor);
+
+    assert_eq!(sanitized, "value=[REDACTED]");
+}
+
+#[test]
+fn repeated_redaction_does_not_rewrite_its_own_marker() {
+    let redactor = ExactValueRedactor::from_values(["R".to_string()]).unwrap();
+
+    let sanitized = sanitize_message("R", &redactor);
+
+    assert_eq!(sanitized, "[REDACTED]");
+}
+
+#[test]
 fn masks_exact_environment_values_inside_structured_details() {
     let redactor =
         ExactValueRedactor::from_values(["materialized-secret-value".to_string()]).unwrap();
