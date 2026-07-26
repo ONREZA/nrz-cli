@@ -129,8 +129,12 @@ test("postinstall fails when no binary exists for the host platform", () => {
   assert.match(script, /SHA-256 mismatch/);
   assert.match(script, /createHash\("sha256"\)/);
   assert.match(script, /Archive did not contain/);
-  assert.match(script, /rmSync\(targetPath, \{ force: true \}\)/);
-  assert.match(script, /process\.exit\(1\);/);
+  assert.match(script, /mkdtempSync\(join\(binDir, "\.nrz-install-"\)\)/);
+  assert.match(script, /tar\.extract\(\{ cwd: stagingDir, strip: 1 \}\)/);
+  assert.match(script, /replaceInstalledBinary\(sourcePath, targetPath, backupPath\)/);
+  assert.match(script, /previous binary was restored/);
+  assert.match(script, /process\.exitCode = 1/);
+  assert.match(script, /rmSync\(stagingDir, \{ recursive: true, force: true \}\)/);
   assert.doesNotThrow(() => new Bun.Transpiler({ loader: "js" }).transformSync(script));
 });
 

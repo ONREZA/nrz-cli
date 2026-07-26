@@ -83,8 +83,8 @@ export function createPostinstall({ assets, checksums, version }: PostinstallOpt
   return `#!/usr/bin/env node
 import { platform, arch } from "node:process";
 import https from "node:https";
-import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, renameSync, existsSync, rmSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { createGunzip } from "node:zlib";
 import { fileURLToPath } from "node:url";
@@ -107,11 +107,48 @@ if (!downloadUrl || !expectedSha256) {
 
 const binDir = join(__dirname, "..", "bin");
 mkdirSync(binDir, { recursive: true });
+const stagingDir = mkdtempSync(join(binDir, ".nrz-install-"));
 const sourceName = MANIFEST.sourceBinName || MANIFEST.binName;
 const ext = platform === "win32" ? ".exe" : "";
-const sourcePath = join(binDir, sourceName + ext);
+const sourcePath = join(stagingDir, sourceName + ext);
 const targetPath = join(binDir, MANIFEST.binName + ext);
-rmSync(targetPath, { force: true });
+const backupPath = join(binDir, \`.\${MANIFEST.binName}\${ext}.old-\${randomUUID()}\`);
+
+function replaceInstalledBinary(candidatePath, targetPath, backupPath) {
+  if (platform !== "win32" || !existsSync(targetPath)) {
+    renameSync(candidatePath, targetPath);
+    return;
+  }
+
+  const targetStat = lstatSync(targetPath);
+  if (!targetStat.isFile() && !targetStat.isSymbolicLink()) {
+    throw new Error(\`Refusing to replace non-file binary path: \${targetPath}\`);
+  }
+
+  renameSync(targetPath, backupPath);
+  try {
+    renameSync(candidatePath, targetPath);
+  } catch (installError) {
+    try {
+      renameSync(backupPath, targetPath);
+    } catch (restoreError) {
+      throw new Error(
+        \`Failed to install replacement (\${installError.message}) and restore previous binary (\${restoreError.message}); previous binary remains at \${backupPath}\`,
+      );
+    }
+    throw new Error(
+      \`Failed to install replacement; previous binary was restored: \${installError.message}\`,
+    );
+  }
+
+  try {
+    rmSync(backupPath, { force: true });
+  } catch (cleanupError) {
+    console.warn(
+      \`Installed new binary but could not remove backup \${backupPath}: \${cleanupError.message}\`,
+    );
+  }
+}
 
 function download(url, expectedSha256, redirectCount = 0) {
   if (redirectCount > 5) {
@@ -171,7 +208,7 @@ function download(url, expectedSha256, redirectCount = 0) {
           return;
         }
         const gunzip = createGunzip();
-        const extract = tar.extract({ cwd: binDir, strip: 1 });
+        const extract = tar.extract({ cwd: stagingDir, strip: 1 });
         gunzip.on("error", reject);
         extract.on("error", reject);
         extract.on("finish", resolve);
@@ -193,25 +230,32 @@ console.log(\`Installing \${MANIFEST.binName} for \${platformKey}...\`);
 
 download(downloadUrl, expectedSha256)
   .then(() => {
-    if (sourceName !== MANIFEST.binName && existsSync(sourcePath)) {
-      renameSync(sourcePath, targetPath);
-    }
-    if (!existsSync(targetPath)) {
+    if (!existsSync(sourcePath)) {
       throw new Error(\`Archive did not contain \${MANIFEST.binName}\${ext}\`);
     }
 
     if (platform !== "win32") {
       try {
-        chmodSync(targetPath, 0o755);
+        chmodSync(sourcePath, 0o755);
       } catch {
       }
     }
+    replaceInstalledBinary(sourcePath, targetPath, backupPath);
     console.log(\`Installed \${MANIFEST.binName} v\${MANIFEST.version}\`);
   })
   .catch((err) => {
     console.error(\`Failed to install binary: \${err.message}\`);
     console.error(\`URL: \${downloadUrl}\`);
-    process.exit(1);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    try {
+      rmSync(stagingDir, { recursive: true, force: true });
+    } catch (cleanupError) {
+      console.warn(
+        \`Could not remove staging directory \${stagingDir}: \${cleanupError.message}\`,
+      );
+    }
   });
 `;
 }
