@@ -1069,6 +1069,23 @@ fn detect_stdin_hono_uses_entry_content_signal() {
 }
 
 #[test]
+fn detect_stdin_validation_error_has_machine_readable_code() {
+    let mut cmd = nrz();
+    cmd.args(["detect", "--stdin", "--json"])
+        .write_stdin(r#"{"tree":["../outside"],"files":{}}"#);
+
+    let output = cmd.output().unwrap();
+    assert!(!output.status.success());
+    let value = stdout_json(&output);
+    assert_eq!(value["code"], "DETECTION_INPUT_INVALID");
+    assert!(
+        value["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("path must be relative"))
+    );
+}
+
+#[test]
 fn detect_needed_files_includes_server_entry_candidates() {
     let mut cmd = nrz();
     cmd.args(["detect", "--needed-files", "--json"]);

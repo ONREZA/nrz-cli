@@ -3,8 +3,11 @@
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
+
+use crate::output;
 
 const REPO: &str = "onreza/nrz-cli";
 const GITHUB_RELEASES_PER_PAGE: usize = 100;
@@ -58,17 +61,29 @@ struct Asset {
     name: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpgradeResult<'a> {
+    current_version: &'a str,
+    target_version: &'a str,
+    release: &'a str,
+    platform: &'a str,
+    channel: Option<&'a str>,
+    updated: bool,
+    asset: Option<&'a str>,
+}
+
 /// Run the upgrade process
-pub async fn run(args: UpgradeArgs) -> anyhow::Result<()> {
+pub async fn run(args: UpgradeArgs, json: bool) -> anyhow::Result<()> {
     // Cleanup old update debris first
     cleanup_old_files();
 
     let current_version = env!("CARGO_PKG_VERSION");
-    eprintln!("Current version: {}", current_version);
+    progress(json, format!("Current version: {current_version}"));
 
     // Detect platform
     let platform = detect_platform();
-    eprintln!("Platform: {}", platform);
+    progress(json, format!("Platform: {platform}"));
 
     let release = if let Some(target_version) = args.version.as_deref() {
         let target_tag = normalize_tag(target_version);
@@ -78,14 +93,33 @@ pub async fn run(args: UpgradeArgs) -> anyhow::Result<()> {
     };
 
     let target_version = release.tag_name.trim_start_matches('v');
-    eprintln!(
-        "Target version: {} ({})",
-        target_version,
-        args.channel.as_str()
-    );
+    if args.version.is_some() {
+        progress(json, format!("Target version: {target_version}"));
+    } else {
+        progress(
+            json,
+            format!(
+                "Target version: {} ({})",
+                target_version,
+                args.channel.as_str()
+            ),
+        );
+    }
 
     if !args.force && target_version == current_version {
-        eprintln!("✅ Already on the requested version!");
+        let message = "✅ Already on the requested version!";
+        progress(json, message);
+        if json {
+            output::json_output(&UpgradeResult {
+                current_version,
+                target_version,
+                release: &release.tag_name,
+                platform,
+                channel: args.version.is_none().then(|| args.channel.as_str()),
+                updated: false,
+                asset: None,
+            });
+        }
         return Ok(());
     }
 
@@ -104,22 +138,60 @@ pub async fn run(args: UpgradeArgs) -> anyhow::Result<()> {
 
     let archive_url = release_asset_url(&release.tag_name, &asset.name);
     let checksums_url = release_asset_url(&release.tag_name, CHECKSUMS_ASSET_NAME);
-    eprintln!("Downloading {}...", archive_url);
+    progress(
+        json,
+        format!("Downloading {} ({})...", asset.name, release.tag_name),
+    );
 
     // Download and extract binary from tar.gz
     let client = release_http_client()?;
     let archive_data =
-        download_release_asset(&client, &archive_url, MAX_RELEASE_ASSET_BYTES).await?;
-    let checksums =
-        download_release_asset(&client, &checksums_url, MAX_RELEASE_CHECKSUMS_BYTES).await?;
+        download_release_asset(&client, &archive_url, &asset.name, MAX_RELEASE_ASSET_BYTES).await?;
+    let checksums = download_release_asset(
+        &client,
+        &checksums_url,
+        CHECKSUMS_ASSET_NAME,
+        MAX_RELEASE_CHECKSUMS_BYTES,
+    )
+    .await?;
     verify_release_checksum(&asset.name, &archive_data, &checksums)?;
+    progress(json, "✅ Checksum verified");
     let new_binary = extract_binary_from_tar_gz(&archive_data)?;
 
     // Replace current binary
     replace_binary(&new_binary).await?;
 
-    eprintln!("✅ Successfully upgraded to {}!", release.tag_name);
+    #[cfg(windows)]
+    progress(
+        json,
+        "⚠️  Please restart your terminal to use the new version",
+    );
+
+    progress(
+        json,
+        format!("✅ Successfully upgraded to {}!", release.tag_name),
+    );
+    if json {
+        output::json_output(&UpgradeResult {
+            current_version,
+            target_version,
+            release: &release.tag_name,
+            platform,
+            channel: args.version.is_none().then(|| args.channel.as_str()),
+            updated: true,
+            asset: Some(&asset.name),
+        });
+    }
     Ok(())
+}
+
+fn progress(json: bool, message: impl std::fmt::Display) {
+    let message = message.to_string();
+    if json {
+        output::log_line("user", "info", "upgrade", &message);
+    } else {
+        eprintln!("{message}");
+    }
 }
 
 fn normalize_tag(version: &str) -> String {
@@ -392,6 +464,7 @@ fn release_http_client() -> anyhow::Result<reqwest::Client> {
 async fn download_release_asset(
     client: &reqwest::Client,
     url: &str,
+    asset_name: &str,
     max_bytes: u64,
 ) -> anyhow::Result<Vec<u8>> {
     let mut response = client
@@ -401,13 +474,16 @@ async fn download_release_asset(
         .await?;
 
     if !response.status().is_success() {
-        anyhow::bail!("Failed to download binary: {}", response.status());
+        anyhow::bail!(
+            "Failed to download release asset {asset_name}: {}",
+            response.status()
+        );
     }
     if response
         .content_length()
         .is_some_and(|length| length > max_bytes)
     {
-        anyhow::bail!("Release asset exceeds the download limit");
+        anyhow::bail!("Release asset {asset_name} exceeds the download limit");
     }
 
     let capacity = response.content_length().unwrap_or_default().min(max_bytes) as usize;
@@ -415,14 +491,14 @@ async fn download_release_asset(
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|error| anyhow::anyhow!("Failed to read release asset: {error}"))?
+        .map_err(|error| anyhow::anyhow!("Failed to read release asset {asset_name}: {error}"))?
     {
         let next_len = bytes
             .len()
             .checked_add(chunk.len())
             .ok_or_else(|| anyhow::anyhow!("Release asset size overflow"))?;
         if next_len as u64 > max_bytes {
-            anyhow::bail!("Release asset exceeds the download limit");
+            anyhow::bail!("Release asset {asset_name} exceeds the download limit");
         }
         bytes.extend_from_slice(&chunk);
     }
@@ -499,8 +575,6 @@ fn replace_binary_at(current_exe: &std::path::Path, new_binary: &[u8]) -> anyhow
 
         // Try to delete old (may fail if running, will be cleaned up on next run)
         let _ = std::fs::remove_file(&old_exe);
-
-        eprintln!("⚠️  Please restart your terminal to use the new version");
     }
 
     #[cfg(not(windows))]

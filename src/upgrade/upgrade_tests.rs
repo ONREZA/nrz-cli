@@ -110,6 +110,32 @@ fn normalize_tag_accepts_plain_or_prefixed_versions() {
 }
 
 #[test]
+fn upgrade_result_uses_machine_readable_field_names() {
+    let result = UpgradeResult {
+        current_version: "0.36.2",
+        target_version: "0.37.0",
+        release: "v0.37.0",
+        platform: "linux-x64",
+        channel: Some("stable"),
+        updated: true,
+        asset: Some("nrz-linux-x64.tar.gz"),
+    };
+
+    assert_eq!(
+        serde_json::to_value(result).unwrap(),
+        serde_json::json!({
+            "currentVersion": "0.36.2",
+            "targetVersion": "0.37.0",
+            "release": "v0.37.0",
+            "platform": "linux-x64",
+            "channel": "stable",
+            "updated": true,
+            "asset": "nrz-linux-x64.tar.gz"
+        })
+    );
+}
+
+#[test]
 fn release_selection_requires_checksum_manifest() {
     let releases = vec![release(
         "v0.33.0",

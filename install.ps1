@@ -84,6 +84,7 @@ Write-Host "💻 Platform: $Platform" -ForegroundColor Gray
 $TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "nrz-$([guid]::NewGuid())"
 New-Item -ItemType Directory -Path $TmpDir | Out-Null
 
+try {
 # Download archive and release checksums
 $AssetName = "nrz-$Platform.tar.gz"
 $Url = "https://github.com/$Repo/releases/download/$Version/$AssetName"
@@ -159,9 +160,12 @@ catch {
     Write-Host "❌ Installation failed (try running as Administrator): $_" -ForegroundColor Red
     exit 1
 }
-
-# Cleanup
-Remove-Item $TmpDir -Recurse -Force
+}
+finally {
+    if (Test-Path -LiteralPath $TmpDir) {
+        Remove-Item -LiteralPath $TmpDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 
 # Check if in PATH
 $PathDirs = $env:PATH -split ";"

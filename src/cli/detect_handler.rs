@@ -45,8 +45,12 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
             ));
         }
 
-        let vfs =
-            detect::fs::VirtualFs::from_json(&input).context("failed to parse stdin manifest")?;
+        let vfs = detect::fs::VirtualFs::from_json(&input).map_err(|error| {
+            output::coded_error(
+                "DETECTION_INPUT_INVALID",
+                format!("invalid stdin detection manifest: {error:#}"),
+            )
+        })?;
 
         let result = detect::detect_with_fs(&vfs);
         return output_result(&result, &args, json);
