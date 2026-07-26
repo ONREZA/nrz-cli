@@ -109,7 +109,7 @@ pub async fn run(
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
     let effective = EffectiveProjectConfig::from_project_config(project_dir, config.clone());
-    run_with_effective_config(args, json, &effective, None, true).await
+    run_with_effective_config(args, json, &effective, None, true, effective.project_dir()).await
 }
 
 #[cfg(test)]
@@ -133,7 +133,15 @@ pub async fn run_with_hint(
         effective.apply_server_settings(Some(&settings));
     }
 
-    run_with_effective_config(args, json, &effective, detection, true).await
+    run_with_effective_config(
+        args,
+        json,
+        &effective,
+        detection,
+        true,
+        effective.project_dir(),
+    )
+    .await
 }
 
 pub(crate) async fn run_with_effective_config(
@@ -142,6 +150,7 @@ pub(crate) async fn run_with_effective_config(
     effective: &EffectiveProjectConfig,
     detection: Option<&crate::detect::types::DetectionResult>,
     emit_json_result: bool,
+    workspace_root: &Path,
 ) -> anyhow::Result<BuildResult> {
     let project_dir = effective.project_dir();
 
@@ -246,9 +255,13 @@ pub(crate) async fn run_with_effective_config(
         }
         emit_nextjs_adapter_compatibility_status(json, &manifest, output::Phase::Build);
         (Some(manifest), BuildManifestSource::File)
-    } else if let Some(auto) =
-        try_generate_nextjs_adapter_manifest(project_dir, &output_dir, detection, json)?
-    {
+    } else if let Some(auto) = try_generate_nextjs_adapter_manifest(
+        workspace_root,
+        project_dir,
+        &output_dir,
+        detection,
+        json,
+    )? {
         if !args.skip_validation {
             manifest::verify_files(&output_dir, &auto)
                 .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
@@ -276,6 +289,7 @@ pub(crate) async fn run_with_effective_config(
         };
 
         prepare_nextjs_standalone_for_server(
+            workspace_root,
             project_dir,
             &output_dir,
             &standalone.server_dir,
@@ -428,6 +442,7 @@ fn emit_nextjs_adapter_compatibility_status(
 }
 
 fn try_generate_nextjs_adapter_manifest(
+    workspace_root: &Path,
     project_dir: &Path,
     output_dir: &Path,
     detection: &crate::detect::types::DetectionResult,
@@ -459,6 +474,7 @@ fn try_generate_nextjs_adapter_manifest(
     };
 
     prepare_nextjs_standalone_for_server(
+        workspace_root,
         project_dir,
         output_dir,
         &standalone.server_dir,
@@ -1323,10 +1339,18 @@ fn prepare_nextjs_standalone(
     output_dir: &Path,
     json: bool,
 ) -> anyhow::Result<()> {
-    prepare_nextjs_standalone_for_server(project_dir, output_dir, output_dir, true, json)
+    prepare_nextjs_standalone_for_server(
+        project_dir,
+        project_dir,
+        output_dir,
+        output_dir,
+        true,
+        json,
+    )
 }
 
 fn prepare_nextjs_standalone_for_server(
+    workspace_root: &Path,
     project_dir: &Path,
     bundle_root: &Path,
     server_dir: &Path,
@@ -1417,7 +1441,7 @@ fn prepare_nextjs_standalone_for_server(
     // packages, causing runtime "Cannot find module" errors. We detect any `@prisma/client-*`
     // directories in the project's node_modules that are absent from the standalone output
     // and copy them over.
-    copy_missing_prisma_packages(project_dir, bundle_root, json)?;
+    copy_missing_prisma_packages(project_dir, workspace_root, bundle_root, json)?;
 
     prune_broken_pnpm_hoist_symlinks(bundle_root, json)?;
 
@@ -1673,6 +1697,7 @@ fn prepare_copy_destination(root: &Path, relative: &Path) -> anyhow::Result<Path
 /// absent from the standalone output's `node_modules/@prisma/`.
 fn copy_missing_prisma_packages(
     project_dir: &Path,
+    workspace_root: &Path,
     output_dir: &Path,
     json: bool,
 ) -> anyhow::Result<()> {
@@ -1686,6 +1711,37 @@ fn copy_missing_prisma_packages(
     let canonical_project = project_dir
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", project_dir.display()))?;
+    let canonical_workspace = workspace_root
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {}", workspace_root.display()))?;
+    if !canonical_project.starts_with(&canonical_workspace) {
+        anyhow::bail!(
+            "project directory {} is outside workspace root {}",
+            canonical_project.display(),
+            canonical_workspace.display()
+        );
+    }
+    let prisma_metadata = std::fs::symlink_metadata(&src_prisma_dir)
+        .with_context(|| format!("failed to inspect {}", src_prisma_dir.display()))?;
+    if prisma_metadata.file_type().is_symlink() {
+        tracing::warn!(
+            path = %src_prisma_dir.display(),
+            "Prisma package directory is a symlink, skipping"
+        );
+        return Ok(());
+    }
+    let canonical_prisma_dir = src_prisma_dir
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {}", src_prisma_dir.display()))?;
+    if !canonical_prisma_dir.starts_with(&canonical_workspace) {
+        tracing::warn!(
+            path = %src_prisma_dir.display(),
+            target = %canonical_prisma_dir.display(),
+            "Prisma package directory resolves outside the workspace, skipping"
+        );
+        return Ok(());
+    }
+    let pnpm_store_roots = canonical_pnpm_store_roots(&canonical_project, &canonical_workspace)?;
     let mut copied = 0usize;
 
     let entries = std::fs::read_dir(&src_prisma_dir)
@@ -1741,11 +1797,15 @@ fn copy_missing_prisma_packages(
         let canonical_source = src_resolved
             .canonicalize()
             .with_context(|| format!("failed to canonicalize {}", src_resolved.display()))?;
-        if !canonical_source.starts_with(&canonical_project) {
+        let source_is_allowed = canonical_source.starts_with(&canonical_prisma_dir)
+            || pnpm_store_roots
+                .iter()
+                .any(|root| canonical_source.starts_with(root));
+        if !source_is_allowed {
             tracing::warn!(
                 path = %src_pkg.display(),
                 target = %canonical_source.display(),
-                "Prisma package symlink resolves outside the project, skipping"
+                "Prisma package symlink resolves outside allowed package roots, skipping"
             );
             continue;
         }
@@ -1764,6 +1824,43 @@ fn copy_missing_prisma_packages(
     }
 
     Ok(())
+}
+
+fn canonical_pnpm_store_roots(
+    project_dir: &Path,
+    workspace_root: &Path,
+) -> anyhow::Result<Vec<PathBuf>> {
+    let mut roots = Vec::new();
+    let mut current = Some(project_dir);
+
+    while let Some(directory) = current {
+        if !directory.starts_with(workspace_root) {
+            break;
+        }
+        let candidate = directory.join("node_modules/.pnpm");
+        match std::fs::symlink_metadata(&candidate) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {}
+            Ok(_) => {
+                let canonical = candidate
+                    .canonicalize()
+                    .with_context(|| format!("failed to canonicalize {}", candidate.display()))?;
+                if canonical.starts_with(workspace_root) {
+                    roots.push(canonical);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to inspect {}", candidate.display()));
+            }
+        }
+        if directory == workspace_root {
+            break;
+        }
+        current = directory.parent();
+    }
+
+    Ok(roots)
 }
 
 /// Recursively copy a directory tree. Skips symlinks (consistent with deploy/bundle.rs).
