@@ -189,6 +189,19 @@ fn directory_absolute_path_is_error() {
 }
 
 #[test]
+fn directory_windows_absolute_path_is_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let json = r#"{
+        "version": 1,
+        "layers": [{ "name": "x", "target": "STATIC", "directory": "C:\\secret" }],
+        "routes": [{ "pattern": "^/.*$", "layer": "x" }]
+    }"#;
+    let path = write_manifest(dir.path(), json);
+    let err = load_and_validate(&path).unwrap_err();
+    assert!(err.to_string().contains("path traversal"), "{err}");
+}
+
+#[test]
 fn directory_path_traversal_url_encoded_dots() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
@@ -586,6 +599,23 @@ fn verify_files_missing_entry() {
         err.to_string()
             .contains("entry not found: 'server/entry.mjs'"),
         "{err}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn verify_files_rejects_layer_symlink_outside_output() {
+    let output = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("server.js"), "export {}").unwrap();
+    std::os::unix::fs::symlink(outside.path(), output.path().join("server")).unwrap();
+    let manifest = generate_compute_manifest("server/server.js");
+
+    let error = verify_files(output.path(), &manifest).unwrap_err();
+
+    assert!(
+        error.to_string().contains("resolves outside build output"),
+        "{error}"
     );
 }
 

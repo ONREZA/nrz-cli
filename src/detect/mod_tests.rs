@@ -967,6 +967,51 @@ fn detect_express_no_start_script_still_process() {
 }
 
 #[test]
+fn detect_optional_express_dependency_is_process() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"optionalDependencies": {"express": "4.18.0"}}"#,
+    )
+    .unwrap();
+    write_detection_file(
+        dir.path(),
+        "server.js",
+        r#"const express = require("express");"#,
+    );
+
+    let result = detect(dir.path());
+
+    assert_eq!(result.framework, "express");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn vite_with_dev_only_express_mock_stays_static() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{
+            "scripts": {"build": "vite build"},
+            "dependencies": {"react": "19.0.0"},
+            "devDependencies": {"vite": "7.0.0", "express": "5.0.0"}
+        }"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("vite.config.js"), "export default {}").unwrap();
+    write_detection_file(
+        dir.path(),
+        "server.js",
+        r#"const express = require("express"); module.exports = express();"#,
+    );
+
+    let result = detect(dir.path());
+
+    assert_eq!(result.framework, "vite");
+    assert_eq!(result.suggested_compute, ComputeType::Static);
+}
+
+#[test]
 fn detect_fastify_is_process() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(

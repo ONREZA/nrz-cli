@@ -7,10 +7,10 @@
 use std::time::Duration;
 
 use nrz::emulator::kv::KvStore;
-use nrz::emulator::server::EmulatorServer;
+use nrz::emulator::server::{EMULATOR_TOKEN_HEADER, EmulatorServer};
 
 /// Start test server and return base URL
-async fn start_test_server() -> (String, KvStore, u16) {
+async fn start_test_server() -> (String, KvStore, u16, reqwest::Client) {
     let kv = KvStore::new();
 
     // Find a free port
@@ -19,6 +19,16 @@ async fn start_test_server() -> (String, KvStore, u16) {
     drop(listener);
 
     let server = EmulatorServer::new(kv.clone(), port, "127.0.0.1").unwrap();
+    let token = server.token().to_string();
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        EMULATOR_TOKEN_HEADER,
+        reqwest::header::HeaderValue::from_str(&token).unwrap(),
+    );
+    let client = reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .unwrap();
 
     tokio::spawn(async move {
         server.start().await.unwrap();
@@ -28,20 +38,22 @@ async fn start_test_server() -> (String, KvStore, u16) {
 
     // Wait for server to be ready
     for _ in 0..50 {
-        match reqwest::get(format!("{base_url}/__nrz/health")).await {
+        match client.get(format!("{base_url}/__nrz/health")).send().await {
             Ok(resp) if resp.status().is_success() => break,
             _ => tokio::time::sleep(Duration::from_millis(50)).await,
         }
     }
 
-    (base_url, kv, port)
+    (base_url, kv, port, client)
 }
 
 #[tokio::test]
 async fn health_endpoint_returns_ok() {
-    let (base_url, _kv, _) = start_test_server().await;
+    let (base_url, _kv, _, client) = start_test_server().await;
 
-    let resp = reqwest::get(format!("{base_url}/__nrz/health"))
+    let resp = client
+        .get(format!("{base_url}/__nrz/health"))
+        .send()
         .await
         .unwrap();
 
@@ -52,9 +64,22 @@ async fn health_endpoint_returns_ok() {
 }
 
 #[tokio::test]
+async fn emulator_rejects_requests_without_session_token() {
+    let (base_url, _kv, _, _) = start_test_server().await;
+
+    let response = reqwest::Client::new()
+        .post(format!("{base_url}/__nrz/kv/get"))
+        .json(&serde_json::json!({ "args": ["key"] }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn kv_set_and_get() {
-    let (base_url, _kv, _) = start_test_server().await;
-    let client = reqwest::Client::new();
+    let (base_url, _kv, _, client) = start_test_server().await;
 
     // Set a key
     let set_resp = client
@@ -87,8 +112,7 @@ async fn kv_set_and_get() {
 
 #[tokio::test]
 async fn kv_get_nonexistent_key_returns_null() {
-    let (base_url, _kv, _) = start_test_server().await;
-    let client = reqwest::Client::new();
+    let (base_url, _kv, _, client) = start_test_server().await;
 
     let resp = client
         .post(format!("{base_url}/__nrz/kv/get"))
@@ -106,8 +130,7 @@ async fn kv_get_nonexistent_key_returns_null() {
 
 #[tokio::test]
 async fn kv_get_many_returns_values() {
-    let (base_url, _kv, _) = start_test_server().await;
-    let client = reqwest::Client::new();
+    let (base_url, _kv, _, client) = start_test_server().await;
 
     // Set multiple keys
     for (k, v) in [("m1", "val1"), ("m2", "val2"), ("m3", "val3")] {
@@ -139,8 +162,7 @@ async fn kv_get_many_returns_values() {
 
 #[tokio::test]
 async fn kv_get_with_metadata_returns_value_and_metadata() {
-    let (base_url, _kv, _) = start_test_server().await;
-    let client = reqwest::Client::new();
+    let (base_url, _kv, _, client) = start_test_server().await;
 
     // Set key with metadata (args: [key, value, ttl, metadata])
     client
@@ -186,8 +208,7 @@ async fn kv_get_with_metadata_returns_value_and_metadata() {
 
 #[tokio::test]
 async fn kv_get_with_metadata_nonexistent_returns_nulls() {
-    let (base_url, _kv, _) = start_test_server().await;
-    let client = reqwest::Client::new();
+    let (base_url, _kv, _, client) = start_test_server().await;
 
     let resp = client
         .post(format!("{base_url}/__nrz/kv/getWithMetadata"))

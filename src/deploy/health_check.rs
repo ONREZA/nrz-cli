@@ -2,6 +2,7 @@
 //!
 //! Performs static analysis only — never starts the application.
 
+use std::io::Read;
 use std::path::Path;
 
 use nrz::config::{HealthCheckPathConfig, ProjectConfig};
@@ -299,7 +300,7 @@ pub(crate) fn extract_path_from_pattern(pattern: &str) -> Option<String> {
 
 fn detect_nestjs(project_dir: &Path) -> Option<HealthCheckDetection> {
     let pkg_path = project_dir.join("package.json");
-    let content = std::fs::read_to_string(pkg_path).ok()?;
+    let content = read_if_small(&pkg_path)?;
 
     if !content.contains("@nestjs/core") {
         return None;
@@ -367,10 +368,13 @@ fn grep_nestjs_decorators(dir: &Path, project_dir: &Path) -> Option<HealthCheckD
 }
 
 /// Read a file only if it exists and is smaller than `MAX_SCAN_FILE_SIZE`.
-fn read_if_small(path: &Path) -> Option<String> {
-    let meta = std::fs::metadata(path).ok()?;
-    if meta.len() > MAX_SCAN_FILE_SIZE {
+pub(super) fn read_if_small(path: &Path) -> Option<String> {
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    if !meta.file_type().is_file() || meta.len() > MAX_SCAN_FILE_SIZE {
         return None;
     }
-    std::fs::read_to_string(path).ok()
+    let mut content = String::new();
+    let mut file = std::fs::File::open(path).ok()?.take(MAX_SCAN_FILE_SIZE + 1);
+    file.read_to_string(&mut content).ok()?;
+    (content.len() as u64 <= MAX_SCAN_FILE_SIZE).then_some(content)
 }

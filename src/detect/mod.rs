@@ -355,6 +355,17 @@ fn match_detector(
                 version: Some(version.to_string()),
             })
         }
+        FrameworkDetector::RuntimePackage(name) => {
+            let pkg = pkg?;
+            let version = pkg
+                .dependencies
+                .get(name)
+                .or_else(|| pkg.optional_dependencies.get(name))?;
+            Some(DetectorEvidence {
+                reason: format!("runtime-package:{name}"),
+                version: Some(version.to_string()),
+            })
+        }
         FrameworkDetector::Path(path) => fs.exists(path).then(|| DetectorEvidence {
             reason: format!("path:{path}"),
             version: None,

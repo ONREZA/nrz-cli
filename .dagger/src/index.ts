@@ -283,12 +283,14 @@ export class NrzCli {
       ],
     })
     source: Directory,
+    artifacts: Directory,
     version: string,
     tag: string,
     channel = "stable",
   ): Directory {
     requireChannel(channel);
     return bunContainer(source)
+      .withDirectory("/dist", artifacts)
       .withEnvVariable("NRZ_RELEASE_VERSION", version)
       .withEnvVariable("NRZ_RELEASE_TAG", tag)
       .withEnvVariable("NRZ_RELEASE_CHANNEL", channel)

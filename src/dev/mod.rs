@@ -4,6 +4,8 @@ mod process;
 #[cfg(test)]
 mod inject_tests;
 
+use std::io::Write;
+
 use anyhow::Context;
 
 use crate::api::ApiClient;
@@ -59,11 +61,9 @@ pub async fn run(
 
     // 3. Generate bootstrap script
     let port = args.port.unwrap_or(config.dev_port());
-    let emulator_port = port + 1;
-    let bootstrap = inject::generate_bootstrap(&data_dir, emulator_port)?;
-    let bootstrap_path = data_dir.join("bootstrap.mjs");
-    std::fs::write(&bootstrap_path, &bootstrap)
-        .with_context(|| format!("failed to write bootstrap: {}", bootstrap_path.display()))?;
+    let emulator_port = port
+        .checked_add(1)
+        .context("dev port 65535 leaves no port available for the local emulator")?;
 
     // 4. Resolve one platform execution context unless explicitly local-only.
     let extra_env = if args.local {
@@ -94,10 +94,13 @@ pub async fn run(
         crate::execution_context::execution_environment(&materialized)
     };
 
-    // 5. Create KV store + emulator server
+    // 5. Create the authenticated bootstrap immediately before starting the emulator.
     let kv = KvStore::new();
     let host = config.dev_host();
     let server = EmulatorServer::new(kv, emulator_port, host)?;
+    let emulator_token = server.token().to_string();
+    let bootstrap = inject::generate_bootstrap(&data_dir, emulator_port, &emulator_token)?;
+    let bootstrap_path = write_bootstrap(&data_dir, &bootstrap)?;
 
     // 6. Start emulator server in background
     let server_handle = tokio::spawn(async move {
@@ -107,7 +110,11 @@ pub async fn run(
     });
 
     // 7. Wait for emulator to be ready
-    wait_for_emulator(emulator_port, host).await?;
+    if let Err(error) = wait_for_emulator(emulator_port, host, &emulator_token).await {
+        server_handle.abort();
+        let _ = std::fs::remove_file(&bootstrap_path);
+        return Err(error);
+    }
 
     eprintln!(
         "  {} emulator ready on port {emulator_port}",
@@ -145,10 +152,44 @@ pub async fn run(
     result
 }
 
-async fn wait_for_emulator(port: u16, host: &str) -> anyhow::Result<()> {
+fn write_bootstrap(
+    data_dir: &std::path::Path,
+    bootstrap: &str,
+) -> anyhow::Result<std::path::PathBuf> {
+    let path = data_dir.join(format!("bootstrap-{}.mjs", uuid::Uuid::now_v7().simple()));
+    let write_result = (|| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options
+            .open(&path)
+            .with_context(|| format!("failed to create bootstrap: {}", path.display()))?;
+        file.write_all(bootstrap.as_bytes())
+            .with_context(|| format!("failed to write bootstrap: {}", path.display()))?;
+        file.sync_all()
+            .with_context(|| format!("failed to sync bootstrap: {}", path.display()))
+    })();
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&path);
+    }
+    write_result?;
+    Ok(path)
+}
+
+async fn wait_for_emulator(port: u16, host: &str, token: &str) -> anyhow::Result<()> {
     let url = format!("http://{host}:{port}/__nrz/health");
+    let client = reqwest::Client::new();
     for _ in 0..50 {
-        match reqwest::get(&url).await {
+        match client
+            .get(&url)
+            .header(nrz::emulator::server::EMULATOR_TOKEN_HEADER, token)
+            .send()
+            .await
+        {
             Ok(resp) if resp.status().is_success() => return Ok(()),
             _ => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
         }

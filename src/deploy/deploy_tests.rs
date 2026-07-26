@@ -755,158 +755,13 @@ fn install_command_user_source_used_without_package_json() {
 }
 
 #[test]
-fn pnpm_sandbox_build_script_compat_preserves_user_environment() {
+fn pnpm_install_preserves_project_build_script_policy() {
     let dir = tempdir().unwrap();
 
-    let (cmd, env) = prepare_install_command_with_sandbox("pnpm install", dir.path(), true, true);
-
-    assert_eq!(cmd, "pnpm install");
-    assert!(env.contains(&(
-        "npm_config_dangerously_allow_all_builds".to_string(),
-        "true".to_string()
-    )));
-    assert!(env.contains(&(
-        "pnpm_config_dangerously_allow_all_builds".to_string(),
-        "true".to_string()
-    )));
-    assert!(
-        env.iter()
-            .all(|(key, _)| !matches!(key.as_str(), "HOME" | "XDG_CONFIG_HOME")),
-        "compat env must not hide user-level npm/pnpm config: {env:?}"
-    );
-}
-
-#[test]
-fn pnpm_sandbox_build_script_compat_uses_existing_builder_marker() {
-    let platform_marker = |key: &str| match key {
-        "ONREZA" => Some("1".to_string()),
-        "CI" => Some("true".to_string()),
-        _ => None,
-    };
-    assert!(running_in_onreza_build_sandbox_from_env(platform_marker));
-
-    let explicit_marker = |key: &str| match key {
-        "NRZ_BUILD_SANDBOX" => Some("true".to_string()),
-        _ => None,
-    };
-    assert!(running_in_onreza_build_sandbox_from_env(explicit_marker));
-
-    let onreza_without_ci = |key: &str| match key {
-        "ONREZA" => Some("1".to_string()),
-        _ => None,
-    };
-    assert!(!running_in_onreza_build_sandbox_from_env(onreza_without_ci));
-}
-
-#[test]
-fn pnpm_sandbox_build_script_compat_respects_project_policy() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("pnpm-workspace.yaml"),
-        "dangerouslyAllowAllBuilds: false\n",
-    )
-    .unwrap();
-
-    let (cmd, env) = prepare_install_command_with_sandbox("pnpm install", dir.path(), true, true);
+    let (cmd, env) = prepare_install_command("pnpm install", dir.path(), true);
 
     assert_eq!(cmd, "pnpm install");
     assert!(env.is_empty());
-}
-
-#[test]
-fn pnpm_sandbox_build_script_compat_does_not_treat_false_ignore_scripts_as_policy() {
-    let cases = [
-        (".npmrc", "ignore-scripts=false\n"),
-        (".pnpmrc", "pnpm.ignoreScripts=false\n"),
-        ("pnpm-workspace.yaml", "ignoreDepScripts: false\n"),
-        ("package.json", r#"{"pnpm":{"ignoreScripts":false}}"#),
-    ];
-
-    for (file, contents) in cases {
-        let dir = tempdir().unwrap();
-        fs::write(dir.path().join(file), contents).unwrap();
-
-        let (_, env) = prepare_install_command_with_sandbox("pnpm install", dir.path(), true, true);
-
-        assert!(
-            !env.is_empty(),
-            "{file}={contents:?} should not disable sandbox pnpm build-script compat"
-        );
-    }
-}
-
-#[test]
-fn pnpm_sandbox_build_script_compat_respects_true_ignore_scripts_policy() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join(".npmrc"), "ignore-scripts=true\n").unwrap();
-
-    let (_, env) = prepare_install_command_with_sandbox("pnpm install", dir.path(), true, true);
-
-    assert!(env.is_empty());
-}
-
-#[test]
-fn pnpm_install_command_parser_handles_workspace_forms() {
-    for cmd in [
-        "pnpm install",
-        "pnpm i",
-        "pnpm -C app install",
-        "pnpm --filter web install",
-        "pnpm --filter=web install",
-        "pnpm@11.1.2 install",
-        "corepack pnpm install",
-        "cd app && pnpm install",
-        r#""pnpm" install"#,
-    ] {
-        assert!(
-            is_pnpm_install_command(cmd),
-            "{cmd:?} should be treated as pnpm install"
-        );
-    }
-}
-
-#[test]
-fn pnpm_install_command_parser_rejects_non_install_commands() {
-    for cmd in [
-        "pnpm build",
-        "pnpm run install",
-        "npm install",
-        "corepack yarn install",
-        "pnpm --filter web build",
-    ] {
-        assert!(
-            !is_pnpm_install_command(cmd),
-            "{cmd:?} should not be treated as pnpm install"
-        );
-    }
-}
-
-#[test]
-fn pnpm_build_policy_detection_recognizes_explicit_allowlists() {
-    let cases = [
-        ("pnpm-workspace.yaml", "onlyBuiltDependencies:\n  - sharp\n"),
-        (
-            "pnpm-workspace.yml",
-            "ignoredBuiltDependencies:\n  - esbuild\n",
-        ),
-        (".pnpmrc", "only-built-dependencies[]=sharp\n"),
-        (
-            "package.json",
-            r#"{"pnpm":{"onlyBuiltDependencies":["sharp"]}}"#,
-        ),
-    ];
-
-    for (file, contents) in cases {
-        let dir = tempdir().unwrap();
-        fs::write(dir.path().join(file), contents).unwrap();
-
-        let (_, env) = prepare_install_command_with_sandbox("pnpm install", dir.path(), true, true);
-
-        assert!(
-            env.is_empty(),
-            "{file}={contents:?} should disable sandbox pnpm compat"
-        );
-    }
 }
 
 #[test]
@@ -1490,6 +1345,11 @@ fn node_process_runtime_artifact_includes_workspace_package_symlink_targets() {
     let workspace = tempdir().unwrap();
     let app = workspace.path().join("apps/api");
     let shared = workspace.path().join("packages/shared");
+    fs::write(
+        workspace.path().join("package.json"),
+        r#"{"private":true,"workspaces":["apps/*","packages/*"]}"#,
+    )
+    .unwrap();
     fs::create_dir_all(app.join("dist/src")).unwrap();
     fs::create_dir_all(&shared).unwrap();
     fs::write(
@@ -1562,6 +1422,102 @@ fn node_process_runtime_artifact_includes_workspace_package_symlink_targets() {
     assert_eq!(
         shared_runtime.role,
         source_bundle_v1::SourceLogicalManifestFileRole::Compute
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn node_process_runtime_artifact_rejects_unlisted_symlink_target() {
+    let project = tempdir().unwrap();
+    fs::write(
+        project.path().join("package.json"),
+        r#"{"dependencies":{"express":"1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::create_dir_all(project.path().join("dist")).unwrap();
+    fs::write(project.path().join("dist/server.js"), "require('express')").unwrap();
+    fs::create_dir_all(project.path().join("node_modules/express")).unwrap();
+    fs::write(
+        project.path().join("node_modules/express/index.js"),
+        "module.exports = {}",
+    )
+    .unwrap();
+    fs::write(project.path().join(".env"), "SECRET=value").unwrap();
+    std::os::unix::fs::symlink(
+        "../../.env",
+        project.path().join("node_modules/express/leak"),
+    )
+    .unwrap();
+
+    let detection = crate::detect::detect_with_framework_override(project.path(), None);
+    let manifest = build_manifest::generate_compute_manifest("server.js");
+    let artifact = resolve_runtime_artifact(
+        project.path(),
+        project.path(),
+        project.path().join("dist"),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+
+    let error = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("does not resolve to a declared workspace package root"),
+        "{error}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn node_process_runtime_artifact_rejects_workspace_package_file_symlink_target() {
+    let workspace = tempdir().unwrap();
+    let app = workspace.path().join("apps/api");
+    fs::write(
+        workspace.path().join("package.json"),
+        r#"{"private":true,"workspaces":["apps/*"]}"#,
+    )
+    .unwrap();
+    fs::create_dir_all(app.join("dist")).unwrap();
+    fs::write(
+        app.join("package.json"),
+        r#"{"dependencies":{"express":"1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(app.join("dist/server.js"), "require('express')").unwrap();
+    fs::write(app.join(".env"), "SECRET=value").unwrap();
+    fs::create_dir_all(workspace.path().join("node_modules/express")).unwrap();
+    fs::write(
+        workspace.path().join("node_modules/express/index.js"),
+        "module.exports = {}",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        "../../apps/api/.env",
+        workspace.path().join("node_modules/express/leak"),
+    )
+    .unwrap();
+
+    let detection = crate::detect::detect_with_framework_override(&app, None);
+    let manifest = build_manifest::generate_compute_manifest("server.js");
+    let artifact = resolve_runtime_artifact(
+        workspace.path(),
+        &app,
+        app.join("dist"),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+
+    let error = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("does not resolve to a declared workspace package root"),
+        "{error}"
     );
 }
 

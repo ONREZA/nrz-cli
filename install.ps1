@@ -1,5 +1,5 @@
 # Installation script for nrz CLI (Windows)
-# Usage: iwr -useb https://raw.githubusercontent.com/onreza/nrz-cli/main/install.ps1 | iex
+# Usage: download this script, review it if desired, then run it with pwsh -File.
 
 $ErrorActionPreference = "Stop"
 
@@ -33,6 +33,39 @@ function Get-LatestVersion {
     }
 }
 
+function Get-ExpectedSha256 {
+    param(
+        [Parameter(Mandatory = $true)][string]$ChecksumPath,
+        [Parameter(Mandatory = $true)][string]$AssetName
+    )
+
+    $digests = @()
+    foreach ($line in Get-Content $ChecksumPath) {
+        if ($line -match '^([A-Fa-f0-9]{64})\s+\*?(.+)$') {
+            $name = Split-Path -Leaf $Matches[2]
+            if ($name -eq $AssetName) {
+                $digests += $Matches[1].ToLowerInvariant()
+            }
+        }
+    }
+    if ($digests.Count -ne 1) {
+        throw "Expected one valid checksum for $AssetName"
+    }
+    return $digests[0]
+}
+
+function Assert-FileSha256 {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$ExpectedSha256
+    )
+
+    $actualSha256 = (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
+    if ($actualSha256 -ne $ExpectedSha256) {
+        throw "Checksum verification failed for $(Split-Path -Leaf $Path): expected $ExpectedSha256, got $actualSha256"
+    }
+}
+
 Write-Host "🔧 Installing $BinaryName..." -ForegroundColor Cyan
 
 $Platform = Detect-Platform
@@ -40,24 +73,39 @@ $Version = if ($env:NRZ_VERSION) { $env:NRZ_VERSION } else { Get-LatestVersion }
 if (!$Version.StartsWith("v")) {
     $Version = "v$Version"
 }
+if ($Version -notmatch '^v[0-9A-Za-z][0-9A-Za-z._+-]*$') {
+    throw "Invalid release version: $Version"
+}
 
 Write-Host "📦 Version: $Version" -ForegroundColor Gray
 Write-Host "💻 Platform: $Platform" -ForegroundColor Gray
 
 # Create temp directory
-$TmpDir = New-TemporaryFile | ForEach-Object { Remove-Item $_; New-Item -ItemType Directory -Path $_ }
+$TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "nrz-$([guid]::NewGuid())"
+New-Item -ItemType Directory -Path $TmpDir | Out-Null
 
-# Download archive
+# Download archive and release checksums
 $AssetName = "nrz-$Platform.tar.gz"
 $Url = "https://github.com/$Repo/releases/download/$Version/$AssetName"
+$ChecksumsName = "checksums-sha256.txt"
+$ChecksumsUrl = "https://github.com/$Repo/releases/download/$Version/$ChecksumsName"
 $ArchivePath = Join-Path $TmpDir $AssetName
+$ChecksumsPath = Join-Path $TmpDir $ChecksumsName
 
 try {
     Write-Host "⬇️  Downloading from $Url..." -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $Url -OutFile $ArchivePath -UseBasicParsing
+    Invoke-WebRequest -Uri $Url -OutFile $ArchivePath -UseBasicParsing -TimeoutSec 300
+    Invoke-WebRequest -Uri $ChecksumsUrl -OutFile $ChecksumsPath -UseBasicParsing -TimeoutSec 60
+    if ((Get-Item $ArchivePath).Length -gt 268435456 -or
+        (Get-Item $ChecksumsPath).Length -gt 1048576) {
+        throw "Downloaded release data exceeds the size limit"
+    }
+    $ExpectedSha256 = Get-ExpectedSha256 -ChecksumPath $ChecksumsPath -AssetName $AssetName
+    Assert-FileSha256 -Path $ArchivePath -ExpectedSha256 $ExpectedSha256
+    Write-Host "✅ Checksum verified" -ForegroundColor Green
 }
 catch {
-    Write-Host "❌ Download failed: $_" -ForegroundColor Red
+    Write-Host "❌ Download or verification failed: $_" -ForegroundColor Red
     exit 1
 }
 
@@ -73,13 +121,13 @@ catch {
 
 # Find extracted binary
 $BinaryPath = Join-Path $TmpDir $BinaryName
-if (!(Test-Path $BinaryPath)) {
+if (!(Test-Path $BinaryPath -PathType Leaf)) {
     $FoundBinary = Get-ChildItem -Path $TmpDir -Recurse -File -Filter $BinaryName | Select-Object -First 1
     if ($FoundBinary) {
         $BinaryPath = $FoundBinary.FullName
     }
 }
-if (!(Test-Path $BinaryPath)) {
+if (!(Test-Path $BinaryPath -PathType Leaf)) {
     Write-Host "❌ Binary not found in archive" -ForegroundColor Red
     exit 1
 }
@@ -124,13 +172,10 @@ if ($InstallDir -notin $PathDirs) {
     Write-Host ""
 }
 
-# Verify installation
-if (Get-Command $BinaryName -ErrorAction SilentlyContinue) {
-    Write-Host "✅ $BinaryName installed successfully!" -ForegroundColor Green
-    Write-Host ""
-    & $BinaryName --version
-}
-else {
-    Write-Host "✅ Installed to $InstallPath" -ForegroundColor Green
+# Verify installation using the exact installed path
+Write-Host "✅ Installed to $InstallPath" -ForegroundColor Green
+Write-Host ""
+& $InstallPath --version
+if (!(Get-Command $BinaryName -ErrorAction SilentlyContinue)) {
     Write-Host "⚠️  Restart your terminal or add $InstallDir to PATH" -ForegroundColor Yellow
 }

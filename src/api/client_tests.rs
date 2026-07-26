@@ -278,6 +278,21 @@ fn structured_api_error_accepts_camel_case_retry_after_body_hint() {
     assert_eq!(structured.retry_after_seconds, Some(3));
 }
 
+#[test]
+fn structured_api_error_accepts_numeric_code() {
+    let error = extract_api_error(
+        StatusCode::BAD_REQUEST,
+        r#"{"code":1234,"message":"invalid project"}"#,
+        None,
+    );
+    let structured = error
+        .downcast_ref::<super::client::StructuredApiError>()
+        .expect("structured API error");
+
+    assert_eq!(structured.code, "1234");
+    assert_eq!(structured.message, "invalid project");
+}
+
 #[tokio::test]
 async fn succeeds_on_first_attempt() {
     let attempts = Arc::new(AtomicU32::new(0));

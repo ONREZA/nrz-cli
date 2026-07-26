@@ -236,7 +236,7 @@ pub(crate) async fn run_with_effective_config(
                 "  {} {} layer(s): {}",
                 console::style("✓").green().bold(),
                 manifest.layers.len(),
-                layers_display.join(", "),
+                output::terminal_line(&layers_display.join(", ")),
             );
             eprintln!(
                 "  {} {} route(s)",
@@ -401,7 +401,7 @@ fn emit_build_output(
             "  {} {} layer(s): {}",
             console::style("✓").green().bold(),
             manifest.layers.len(),
-            layers_display.join(", "),
+            output::terminal_line(&layers_display.join(", ")),
         );
         eprintln!(
             "  {} {} route(s)",
@@ -542,11 +542,7 @@ fn copy_nextjs_adapter_static_files(
 
     let static_root = output_dir.join("_static");
     for mapping in &mappings {
-        let target = static_root.join(&mapping.target);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
+        let target = prepare_copy_destination(&static_root, Path::new(&mapping.target))?;
         std::fs::copy(&mapping.source, &target).with_context(|| {
             format!(
                 "failed to copy Next.js static file {} -> {}",
@@ -572,11 +568,7 @@ fn copy_nextjs_adapter_prerenders(
     let prerender_root = output_dir.join("_prerender");
     let mut pages = Vec::with_capacity(mappings.len());
     for mapping in &mappings {
-        let target = prerender_root.join(&mapping.target);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
+        let target = prepare_copy_destination(&prerender_root, Path::new(&mapping.target))?;
         std::fs::copy(&mapping.source, &target).with_context(|| {
             format!(
                 "failed to copy Next.js prerender file {} -> {}",
@@ -806,12 +798,11 @@ fn resolve_output_directory(
             hint.path,
             framework_dirs,
             user_output_refinement,
-        ) {
+        )? {
             return Ok(refined);
         }
 
-        let candidate = project_dir.join(hint.path);
-        if candidate.is_dir() {
+        if let Some(candidate) = resolve_existing_project_directory(project_dir, hint.path)? {
             return Ok(ResolvedOutputDirectory {
                 has_manifest: has_manifest_file(&candidate),
                 path: candidate,
@@ -831,7 +822,7 @@ fn resolve_output_directory(
 
     // Log when a non-explicit source-aware hint doesn't exist on disk.
     if let Some(hint) = output_directory_hint
-        && !project_dir.join(hint.path).is_dir()
+        && resolve_existing_project_directory(project_dir, hint.path)?.is_none()
     {
         tracing::debug!(
             output_directory_hint = hint.path,
@@ -898,7 +889,7 @@ fn resolve_output_directory(
     );
 
     for tier in &tiers {
-        if let Some(found) = select_output_dir_from_tier(project_dir, tier) {
+        if let Some(found) = select_output_dir_from_tier(project_dir, tier)? {
             return Ok(found);
         }
     }
@@ -919,7 +910,7 @@ fn resolve_user_framework_container_artifact(
     hint_path: &str,
     framework_dirs: &[&str],
     refinement: UserOutputRefinement,
-) -> Option<ResolvedOutputDirectory> {
+) -> anyhow::Result<Option<ResolvedOutputDirectory>> {
     // Some historic/server-side settings store the framework container as a
     // USER value. For Next.js, `.next` is that container; the deployable
     // artifact is mode-specific (`.next/standalone` for PROCESS or `out` for
@@ -929,33 +920,32 @@ fn resolve_user_framework_container_artifact(
     let is_project_root_hint = hint_path.is_empty() || hint_path == ".";
     let is_next_container_hint = hint_path == ".next";
     if is_project_root_hint && !refinement.allows_project_root() {
-        return None;
+        return Ok(None);
     }
     if is_project_root_hint && project_dir.join(".onreza/manifest.json").is_file() {
-        return None;
+        return Ok(None);
     }
     if !is_project_root_hint && !is_next_container_hint {
-        return None;
+        return Ok(None);
     }
 
-    framework_dirs
-        .iter()
-        .copied()
-        .filter(|candidate| {
-            if is_project_root_hint {
-                matches!(candidate.trim_matches('/'), ".next/standalone" | "out")
-            } else {
-                matches!(candidate.trim_matches('/'), ".next/standalone" | "out")
-                    && is_framework_refinement_of_detected_hint(".next", candidate)
-            }
-        })
-        .find_map(|candidate| {
-            let path = project_dir.join(candidate);
-            path.is_dir().then(|| ResolvedOutputDirectory {
+    for candidate in framework_dirs.iter().copied().filter(|candidate| {
+        if is_project_root_hint {
+            matches!(candidate.trim_matches('/'), ".next/standalone" | "out")
+        } else {
+            matches!(candidate.trim_matches('/'), ".next/standalone" | "out")
+                && is_framework_refinement_of_detected_hint(".next", candidate)
+        }
+    }) {
+        if let Some(path) = resolve_existing_project_directory(project_dir, candidate)? {
+            return Ok(Some(ResolvedOutputDirectory {
                 has_manifest: has_manifest_file(&path),
                 path,
-            })
-        })
+            }));
+        }
+    }
+
+    Ok(None)
 }
 
 fn push_output_candidate_tier<'a>(
@@ -989,30 +979,93 @@ fn push_output_candidate_tier<'a>(
 fn select_output_dir_from_tier(
     project_dir: &Path,
     tier: &OutputCandidateTier,
-) -> Option<ResolvedOutputDirectory> {
+) -> anyhow::Result<Option<ResolvedOutputDirectory>> {
     for candidate in &tier.candidates {
         debug_assert_eq!(candidate.role, tier.role);
-        let path = project_dir.join(&candidate.path);
-        if path.is_dir() && has_manifest_file(&path) {
-            return Some(ResolvedOutputDirectory {
+        if let Some(path) = resolve_existing_project_directory(project_dir, &candidate.path)?
+            && has_manifest_file(&path)
+        {
+            return Ok(Some(ResolvedOutputDirectory {
                 path,
                 has_manifest: true,
-            });
+            }));
         }
     }
 
     for candidate in &tier.candidates {
         debug_assert_eq!(candidate.role, tier.role);
-        let path = project_dir.join(&candidate.path);
-        if path.is_dir() {
-            return Some(ResolvedOutputDirectory {
+        if let Some(path) = resolve_existing_project_directory(project_dir, &candidate.path)? {
+            return Ok(Some(ResolvedOutputDirectory {
                 path,
                 has_manifest: false,
-            });
+            }));
         }
     }
 
-    None
+    Ok(None)
+}
+
+fn resolve_existing_project_directory(
+    project_dir: &Path,
+    candidate: &str,
+) -> anyhow::Result<Option<PathBuf>> {
+    let normalized = candidate.replace('\\', "/");
+    let path = Path::new(&normalized);
+    let bytes = normalized.as_bytes();
+    let has_windows_prefix = bytes.get(1) == Some(&b':') || normalized.starts_with("//");
+    let has_unsafe_component = path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    });
+    if normalized.is_empty() || has_windows_prefix || has_unsafe_component {
+        return Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!("output directory must stay inside the project: '{candidate}'"),
+        ));
+    }
+
+    let joined = project_dir.join(path);
+    let metadata = match std::fs::symlink_metadata(&joined) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", joined.display()));
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!(
+                "output directory must not be a symbolic link: {}",
+                joined.display()
+            ),
+        ));
+    }
+    if !metadata.is_dir() {
+        return Ok(None);
+    }
+
+    let canonical_project = project_dir
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {}", project_dir.display()))?;
+    let canonical_candidate = joined
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {}", joined.display()))?;
+    if !canonical_candidate.starts_with(&canonical_project) {
+        return Err(output::coded_error(
+            "INVALID_BUILD_OUTPUT",
+            format!(
+                "output directory resolves outside the project: {}",
+                joined.display()
+            ),
+        ));
+    }
+
+    Ok(Some(canonical_candidate))
 }
 
 fn has_manifest_file(path: &Path) -> bool {
@@ -1373,7 +1426,15 @@ fn prepare_nextjs_standalone_for_server(
 
 fn prune_broken_pnpm_hoist_symlinks(bundle_root: &Path, json: bool) -> anyhow::Result<()> {
     let pnpm_hoist_dir = bundle_root.join("node_modules/.pnpm/node_modules");
-    if !pnpm_hoist_dir.is_dir() {
+    let metadata = match std::fs::symlink_metadata(&pnpm_hoist_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to inspect {}", pnpm_hoist_dir.display()));
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Ok(());
     }
 
@@ -1440,6 +1501,7 @@ fn copy_metadata_routes(output_dir: &Path, json: bool) -> anyhow::Result<()> {
     }
 
     let public_dst = output_dir.join("public");
+    ensure_directory_tree_without_symlinks(output_dir, Path::new("public"))?;
     let mut copied = 0usize;
 
     collect_body_files(&app_server_dir, &app_server_dir, &public_dst, &mut copied)?;
@@ -1496,14 +1558,26 @@ fn collect_body_files(
 
             let dst = public_dst.join(&rel);
 
-            // Skip if already present (idempotent)
-            if dst.exists() {
-                continue;
+            match std::fs::symlink_metadata(&dst) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    anyhow::bail!(
+                        "refusing to copy metadata route through destination symlink: {}",
+                        dst.display()
+                    );
+                }
+                Ok(_) => continue,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("failed to inspect {}", dst.display()));
+                }
             }
 
             if let Some(parent) = dst.parent() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("failed to create {}", parent.display()))?;
+                let relative_parent = parent
+                    .strip_prefix(public_dst)
+                    .context("metadata route destination escaped public directory")?;
+                ensure_directory_tree_without_symlinks(public_dst, relative_parent)?;
             }
 
             std::fs::copy(&path, &dst).with_context(|| {
@@ -1514,6 +1588,81 @@ fn collect_body_files(
         }
     }
     Ok(())
+}
+
+fn ensure_directory_tree_without_symlinks(root: &Path, relative: &Path) -> anyhow::Result<()> {
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let std::path::Component::Normal(segment) = component else {
+            anyhow::bail!("unsafe destination directory: {}", relative.display());
+        };
+        current.push(segment);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                anyhow::bail!(
+                    "destination directory must not be a symbolic link: {}",
+                    current.display()
+                );
+            }
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => anyhow::bail!("destination is not a directory: {}", current.display()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(&current)
+                    .with_context(|| format!("failed to create {}", current.display()))?;
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to inspect {}", current.display()));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn prepare_copy_destination(root: &Path, relative: &Path) -> anyhow::Result<PathBuf> {
+    match std::fs::symlink_metadata(root) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            anyhow::bail!(
+                "copy destination root must not be a symbolic link: {}",
+                root.display()
+            );
+        }
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => anyhow::bail!(
+            "copy destination root is not a directory: {}",
+            root.display()
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(root)
+                .with_context(|| format!("failed to create {}", root.display()))?;
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", root.display()));
+        }
+    }
+
+    let file_name = relative
+        .file_name()
+        .context("copy destination must name a file")?;
+    let parent = relative.parent().unwrap_or_else(|| Path::new(""));
+    ensure_directory_tree_without_symlinks(root, parent)?;
+
+    let destination = root.join(parent).join(file_name);
+    match std::fs::symlink_metadata(&destination) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            anyhow::bail!(
+                "copy destination must not be a symbolic link: {}",
+                destination.display()
+            );
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to inspect {}", destination.display()));
+        }
+    }
+    Ok(destination)
 }
 
 /// Copy Prisma generated client packages missing from standalone output.
@@ -1533,6 +1682,10 @@ fn copy_missing_prisma_packages(
     }
 
     let dst_prisma_dir = output_dir.join("node_modules/@prisma");
+    ensure_directory_tree_without_symlinks(output_dir, Path::new("node_modules/@prisma"))?;
+    let canonical_project = project_dir
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {}", project_dir.display()))?;
     let mut copied = 0usize;
 
     let entries = std::fs::read_dir(&src_prisma_dir)
@@ -1549,8 +1702,19 @@ fn copy_missing_prisma_packages(
         }
 
         let dst_pkg = dst_prisma_dir.join(&name);
-        if dst_pkg.exists() {
-            continue;
+        match std::fs::symlink_metadata(&dst_pkg) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                anyhow::bail!(
+                    "Prisma package destination must not be a symbolic link: {}",
+                    dst_pkg.display()
+                );
+            }
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to inspect {}", dst_pkg.display()));
+            }
         }
 
         let src_pkg = entry.path();
@@ -1568,14 +1732,25 @@ fn copy_missing_prisma_packages(
                 }
             }
         } else {
-            src_pkg
+            src_pkg.clone()
         };
 
         if !src_resolved.is_dir() {
             continue;
         }
+        let canonical_source = src_resolved
+            .canonicalize()
+            .with_context(|| format!("failed to canonicalize {}", src_resolved.display()))?;
+        if !canonical_source.starts_with(&canonical_project) {
+            tracing::warn!(
+                path = %src_pkg.display(),
+                target = %canonical_source.display(),
+                "Prisma package symlink resolves outside the project, skipping"
+            );
+            continue;
+        }
 
-        copy_dir_recursive(&src_resolved, &dst_pkg)?;
+        copy_dir_recursive(&canonical_source, &dst_pkg)?;
         copied += 1;
     }
 

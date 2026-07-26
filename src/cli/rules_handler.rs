@@ -79,8 +79,7 @@ async fn pull(
     let path = project_dir.join(RULES_FILENAME);
 
     confirm_overwrite(&path, args.force, json)?;
-    std::fs::write(&path, content)
-        .with_context(|| format!("failed to write {}", path.display()))?;
+    write_rules_file(&path, content.as_bytes())?;
 
     let rule_count = authoring
         .get("rules")
@@ -311,7 +310,23 @@ fn canonical_project_dir(dir: &str) -> anyhow::Result<PathBuf> {
 }
 
 fn confirm_overwrite(path: &Path, force: bool, json: bool) -> anyhow::Result<()> {
-    if !path.exists() || force {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => Some(metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
+        }
+    };
+    if metadata
+        .as_ref()
+        .is_some_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return Err(output::coded_error(
+            "UNSAFE_FILE_TARGET",
+            format!("refusing to overwrite symbolic link {}", path.display()),
+        ));
+    }
+    if metadata.is_none() || force {
         return Ok(());
     }
     if json || !std::io::stdin().is_terminal() {
@@ -335,6 +350,41 @@ fn confirm_overwrite(path: &Path, force: bool, json: bool) -> anyhow::Result<()>
         ));
     }
     Ok(())
+}
+
+pub(crate) fn write_rules_file(path: &Path, content: &[u8]) -> anyhow::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("rules path has no parent: {}", path.display()))?;
+    let temp_path = parent.join(format!(
+        ".{RULES_FILENAME}.tmp-{}",
+        uuid::Uuid::now_v7().simple()
+    ));
+    let write_result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .with_context(|| format!("failed to create {}", temp_path.display()))?;
+        file.write_all(content)
+            .with_context(|| format!("failed to write {}", temp_path.display()))?;
+        file.sync_all()
+            .with_context(|| format!("failed to sync {}", temp_path.display()))?;
+        drop(file);
+
+        #[cfg(windows)]
+        if std::fs::symlink_metadata(path).is_ok() {
+            std::fs::remove_file(path)
+                .with_context(|| format!("failed to replace {}", path.display()))?;
+        }
+
+        std::fs::rename(&temp_path, path)
+            .with_context(|| format!("failed to replace {}", path.display()))
+    })();
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    write_result
 }
 
 fn report_check_human(report: &functions::EdgeRulesCheckReport) {

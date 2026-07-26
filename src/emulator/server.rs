@@ -1,8 +1,10 @@
 use std::net::SocketAddr;
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{Request, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::IntoResponse;
+use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -16,12 +18,16 @@ use super::kv::KvStore;
 pub struct EmulatorServer {
     pub kv: KvStore,
     pub addr: SocketAddr,
+    token: String,
 }
 
 #[derive(Clone)]
 struct AppState {
     kv: KvStore,
+    token: String,
 }
+
+pub const EMULATOR_TOKEN_HEADER: &str = "x-nrz-emulator-token";
 
 // --- Request types ---
 
@@ -45,13 +51,19 @@ impl EmulatorServer {
         Ok(Self {
             kv,
             addr: SocketAddr::new(ip, port),
+            token: uuid::Uuid::now_v7().to_string(),
         })
+    }
+
+    pub fn token(&self) -> &str {
+        &self.token
     }
 
     /// Start the emulator HTTP server.
     pub async fn start(&self) -> anyhow::Result<()> {
         let state = AppState {
             kv: self.kv.clone(),
+            token: self.token.clone(),
         };
 
         let app = Router::new()
@@ -63,6 +75,7 @@ impl EmulatorServer {
             .route("/__nrz/kv/list", post(kv_list))
             .route("/__nrz/kv/getMany", post(kv_get_many))
             .route("/__nrz/kv/getWithMetadata", post(kv_get_with_metadata))
+            .layer(middleware::from_fn_with_state(state.clone(), require_token))
             .with_state(state);
 
         let listener = tokio::net::TcpListener::bind(self.addr).await?;
@@ -71,6 +84,22 @@ impl EmulatorServer {
         axum::serve(listener, app).await?;
         Ok(())
     }
+}
+
+async fn require_token(
+    State(state): State<AppState>,
+    request: Request<axum::body::Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let authorized = request
+        .headers()
+        .get(EMULATOR_TOKEN_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == state.token);
+    if !authorized {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    Ok(next.run(request).await)
 }
 
 // --- Health ---

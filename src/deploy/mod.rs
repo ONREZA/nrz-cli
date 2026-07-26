@@ -104,11 +104,6 @@ const SOURCE_UPLOAD_PUT_FAILED: &str = "SOURCE_UPLOAD_PUT_FAILED";
 const SOURCE_UPLOAD_RECOVERY_CONDITIONAL_PRECONDITION_FAILED: &str =
     "conditional-precondition-failed";
 const NEXTJS_ADAPTER_EDGE_RULE_PRODUCER: &str = "nextjs-adapter";
-const PNPM_BUILD_SCRIPT_COMPAT_ENV: [(&str, &str); 2] = [
-    ("npm_config_dangerously_allow_all_builds", "true"),
-    ("pnpm_config_dangerously_allow_all_builds", "true"),
-];
-
 #[derive(Debug)]
 struct DeploySymlinkTarget {
     link_target: String,
@@ -584,19 +579,23 @@ pub async fn run(
     // Verify auth early to avoid wasting time on build if token is invalid
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
-    let resume_deployment_id = args.resume_deployment.as_deref().map(str::trim);
-    if let Some(deployment_id) = resume_deployment_id
-        && deployment_id.is_empty()
-    {
-        return Err(crate::errors::CliError::new(
-            "INVALID_ARGUMENT",
-            "--resume-deployment requires a non-empty deployment ID",
-        )
-        .phase(output::Phase::Deploy)
-        .details(serde_json::json!({ "argument": "--resume-deployment" }))
-        .hint("Pass a deployment ID or omit --resume-deployment.")
-        .into_anyhow());
-    }
+    let resume_deployment_id = args
+        .resume_deployment
+        .as_deref()
+        .map(str::trim)
+        .map(|deployment_id| {
+            Uuid::parse_str(deployment_id).map_err(|_| {
+                crate::errors::CliError::new(
+                    "INVALID_ARGUMENT",
+                    "--resume-deployment requires a valid deployment UUID",
+                )
+                .phase(output::Phase::Deploy)
+                .details(serde_json::json!({ "argument": "--resume-deployment" }))
+                .hint("Pass a deployment UUID or omit --resume-deployment.")
+                .into_anyhow()
+            })
+        })
+        .transpose()?;
 
     let runner_context = if let Some(deployment_id) = resume_deployment_id {
         let context: RunnerContextResponse = client

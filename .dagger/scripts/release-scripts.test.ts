@@ -116,11 +116,22 @@ test("GitHub release notes include the same checksum text as the uploaded checks
 test("postinstall fails when no binary exists for the host platform", () => {
   const script = createPostinstall({
     assets: releaseAssets("v0.33.0-beta.1"),
+    checksums: {
+      "linux-x64": "0".repeat(64),
+      "darwin-x64": "1".repeat(64),
+      "darwin-arm64": "2".repeat(64),
+      "win32-x64": "3".repeat(64),
+    },
     version: "0.33.0-beta.1",
   });
 
   assert.match(script, /No binary available for/);
+  assert.match(script, /SHA-256 mismatch/);
+  assert.match(script, /createHash\("sha256"\)/);
+  assert.match(script, /Archive did not contain/);
+  assert.match(script, /rmSync\(targetPath, \{ force: true \}\)/);
   assert.match(script, /process\.exit\(1\);/);
+  assert.doesNotThrow(() => new Bun.Transpiler({ loader: "js" }).transformSync(script));
 });
 
 test("release cargo manifest points nrz crates at sanitized vendor snapshot", () => {

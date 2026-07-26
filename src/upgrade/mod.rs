@@ -1,9 +1,17 @@
 //! Self-update functionality for nrz CLI
 
+use anyhow::Context;
 use clap::{Parser, ValueEnum};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+use sha2::{Digest, Sha256};
+use std::time::Duration;
 
 const REPO: &str = "onreza/nrz-cli";
 const GITHUB_RELEASES_PER_PAGE: usize = 100;
+const CHECKSUMS_ASSET_NAME: &str = "checksums-sha256.txt";
+const MAX_RELEASE_ASSET_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_RELEASE_CHECKSUMS_BYTES: u64 = 1024 * 1024;
+const MAX_RELEASE_BINARY_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Upgrade nrz to the latest version
 #[derive(Parser)]
@@ -48,7 +56,6 @@ struct ReleaseInfo {
 #[derive(Clone, Debug)]
 struct Asset {
     name: String,
-    browser_download_url: String,
 }
 
 /// Run the upgrade process
@@ -89,11 +96,23 @@ pub async fn run(args: UpgradeArgs) -> anyhow::Result<()> {
         .iter()
         .find(|a| a.name == asset_name)
         .ok_or_else(|| anyhow::anyhow!("No binary available for platform: {}", platform))?;
+    release
+        .assets
+        .iter()
+        .find(|a| a.name == CHECKSUMS_ASSET_NAME)
+        .ok_or_else(|| anyhow::anyhow!("Release {} has no checksum manifest", release.tag_name))?;
 
-    eprintln!("Downloading {}...", asset.browser_download_url);
+    let archive_url = release_asset_url(&release.tag_name, &asset.name);
+    let checksums_url = release_asset_url(&release.tag_name, CHECKSUMS_ASSET_NAME);
+    eprintln!("Downloading {}...", archive_url);
 
     // Download and extract binary from tar.gz
-    let archive_data = download_binary(&asset.browser_download_url).await?;
+    let client = release_http_client()?;
+    let archive_data =
+        download_release_asset(&client, &archive_url, MAX_RELEASE_ASSET_BYTES).await?;
+    let checksums =
+        download_release_asset(&client, &checksums_url, MAX_RELEASE_CHECKSUMS_BYTES).await?;
+    verify_release_checksum(&asset.name, &archive_data, &checksums)?;
     let new_binary = extract_binary_from_tar_gz(&archive_data)?;
 
     // Replace current binary
@@ -180,7 +199,6 @@ fn parse_release_info(json: &serde_json::Value) -> anyhow::Result<ReleaseInfo> {
         .filter_map(|a| {
             Some(Asset {
                 name: a["name"].as_str()?.to_string(),
-                browser_download_url: a["browser_download_url"].as_str()?.to_string(),
             })
         })
         .collect();
@@ -197,7 +215,7 @@ async fn fetch_release_for_channel(
     channel: UpgradeChannel,
     platform: &str,
 ) -> anyhow::Result<ReleaseInfo> {
-    let client = reqwest::Client::new();
+    let client = release_http_client()?;
     let mut page = 1;
 
     loop {
@@ -231,6 +249,10 @@ fn select_release_for_channel<'a>(
     releases.iter().find(|release| {
         release_matches_channel(release, channel)
             && release.assets.iter().any(|asset| asset.name == asset_name)
+            && release
+                .assets
+                .iter()
+                .any(|asset| asset.name == CHECKSUMS_ASSET_NAME)
     })
 }
 
@@ -254,8 +276,9 @@ fn release_prerelease_channel(tag: &str) -> Option<&str> {
 
 /// Fetch specific release by tag
 async fn fetch_release(tag: &str) -> anyhow::Result<ReleaseInfo> {
-    let url = format!("{}/{}/releases/tags/{}", GITHUB_API, REPO, tag);
-    let client = reqwest::Client::new();
+    let encoded_tag = utf8_percent_encode(tag, NON_ALPHANUMERIC);
+    let url = format!("{}/{}/releases/tags/{}", GITHUB_API, REPO, encoded_tag);
+    let client = release_http_client()?;
     let response = client
         .get(&url)
         .header("User-Agent", "nrz-cli")
@@ -270,6 +293,59 @@ async fn fetch_release(tag: &str) -> anyhow::Result<ReleaseInfo> {
     parse_release_info(&json)
 }
 
+fn release_asset_url(tag: &str, asset_name: &str) -> String {
+    let encoded_tag = utf8_percent_encode(tag, NON_ALPHANUMERIC);
+    let encoded_asset = utf8_percent_encode(asset_name, NON_ALPHANUMERIC);
+    format!("https://github.com/{REPO}/releases/download/{encoded_tag}/{encoded_asset}")
+}
+
+fn verify_release_checksum(
+    asset_name: &str,
+    archive_data: &[u8],
+    checksum_data: &[u8],
+) -> anyhow::Result<()> {
+    let checksums = std::str::from_utf8(checksum_data)
+        .map_err(|_| anyhow::anyhow!("Release checksum manifest is not valid UTF-8"))?;
+    let mut matches = checksums.lines().filter_map(|line| {
+        let mut fields = line.split_whitespace();
+        let digest = fields.next()?;
+        let name = fields.next()?.trim_start_matches('*');
+        if fields.next().is_some()
+            || name != asset_name
+            || digest.len() != 64
+            || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return None;
+        }
+        Some(digest)
+    });
+    let expected = matches
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Checksum for {asset_name} not found"))?;
+    if matches.next().is_some() {
+        anyhow::bail!("Checksum manifest contains duplicate entries for {asset_name}");
+    }
+
+    let actual = sha256_hex(archive_data);
+    if !actual.eq_ignore_ascii_case(expected) {
+        anyhow::bail!(
+            "Checksum verification failed for {asset_name}: expected {expected}, got {actual}"
+        );
+    }
+    Ok(())
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    use std::fmt::Write;
+
+    Sha256::digest(data)
+        .iter()
+        .fold(String::with_capacity(64), |mut encoded, byte| {
+            write!(encoded, "{byte:02x}").expect("writing to String cannot fail");
+            encoded
+        })
+}
+
 /// Extract binary from tar.gz archive
 fn extract_binary_from_tar_gz(data: &[u8]) -> anyhow::Result<Vec<u8>> {
     use flate2::read::GzDecoder;
@@ -281,11 +357,21 @@ fn extract_binary_from_tar_gz(data: &[u8]) -> anyhow::Result<Vec<u8>> {
     let binary_name = if cfg!(windows) { "nrz.exe" } else { "nrz" };
 
     for entry in archive.entries()? {
-        let mut entry = entry?;
+        let entry = entry?;
         let path = entry.path()?;
-        if path.file_name().and_then(|n| n.to_str()) == Some(binary_name) {
+        if path.file_name().and_then(|n| n.to_str()) == Some(binary_name)
+            && entry.header().entry_type().is_file()
+        {
+            if entry.size() > MAX_RELEASE_BINARY_BYTES {
+                anyhow::bail!("Binary in release archive exceeds the extraction limit");
+            }
             let mut buf = Vec::new();
-            entry.read_to_end(&mut buf)?;
+            entry
+                .take(MAX_RELEASE_BINARY_BYTES + 1)
+                .read_to_end(&mut buf)?;
+            if buf.len() as u64 > MAX_RELEASE_BINARY_BYTES {
+                anyhow::bail!("Binary in release archive exceeds the extraction limit");
+            }
             return Ok(buf);
         }
     }
@@ -293,10 +379,22 @@ fn extract_binary_from_tar_gz(data: &[u8]) -> anyhow::Result<Vec<u8>> {
     anyhow::bail!("Binary '{}' not found in archive", binary_name)
 }
 
-/// Download binary from URL
-async fn download_binary(url: &str) -> anyhow::Result<Vec<u8>> {
-    let client = reqwest::Client::new();
-    let response = client
+fn release_http_client() -> anyhow::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(Into::into)
+}
+
+async fn download_release_asset(
+    client: &reqwest::Client,
+    url: &str,
+    max_bytes: u64,
+) -> anyhow::Result<Vec<u8>> {
+    let mut response = client
         .get(url)
         .header("User-Agent", "nrz-cli")
         .send()
@@ -305,30 +403,99 @@ async fn download_binary(url: &str) -> anyhow::Result<Vec<u8>> {
     if !response.status().is_success() {
         anyhow::bail!("Failed to download binary: {}", response.status());
     }
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes)
+    {
+        anyhow::bail!("Release asset exceeds the download limit");
+    }
 
-    let bytes = response.bytes().await?;
-    Ok(bytes.to_vec())
+    let capacity = response.content_length().unwrap_or_default().min(max_bytes) as usize;
+    let mut bytes = Vec::with_capacity(capacity);
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| anyhow::anyhow!("Failed to read release asset: {error}"))?
+    {
+        let next_len = bytes
+            .len()
+            .checked_add(chunk.len())
+            .ok_or_else(|| anyhow::anyhow!("Release asset size overflow"))?;
+        if next_len as u64 > max_bytes {
+            anyhow::bail!("Release asset exceeds the download limit");
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 /// Replace current binary with new one
 async fn replace_binary(new_binary: &[u8]) -> anyhow::Result<()> {
     let current_exe = std::env::current_exe()?;
+    replace_binary_at(&current_exe, new_binary)
+}
+
+fn write_update_candidate(
+    current_exe: &std::path::Path,
+    new_binary: &[u8],
+) -> anyhow::Result<std::path::PathBuf> {
+    use std::io::Write;
+
+    let directory = current_exe
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("current executable has no parent directory"))?;
+    let file_name = current_exe
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("current executable has no file name"))?
+        .to_string_lossy();
+    let candidate = directory.join(format!(
+        ".{file_name}.update-{}.tmp",
+        uuid::Uuid::now_v7().simple()
+    ));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o700);
+    }
+    let mut file = options
+        .open(&candidate)
+        .with_context(|| format!("failed to create update candidate {}", candidate.display()))?;
+    if let Err(error) = file.write_all(new_binary).and_then(|_| file.sync_all()) {
+        drop(file);
+        let _ = std::fs::remove_file(&candidate);
+        return Err(error).context("failed to write update candidate");
+    }
+    Ok(candidate)
+}
+
+fn replace_binary_at(current_exe: &std::path::Path, new_binary: &[u8]) -> anyhow::Result<()> {
+    let candidate = write_update_candidate(current_exe, new_binary)?;
 
     #[cfg(windows)]
     {
         // On Windows, we can't replace a running executable
         // So we rename the old one, write the new one, and schedule deletion of old
         let old_exe = current_exe.with_extension("old.exe");
-        let new_exe = current_exe.with_extension("new.exe");
-
-        // Write new binary to temp location
-        std::fs::write(&new_exe, new_binary)?;
 
         // Rename current to .old
-        std::fs::rename(&current_exe, &old_exe)?;
+        if let Err(error) = std::fs::rename(current_exe, &old_exe) {
+            let _ = std::fs::remove_file(&candidate);
+            return Err(error).context("failed to move current executable aside");
+        }
 
         // Rename new to current
-        std::fs::rename(&new_exe, &current_exe)?;
+        if let Err(error) = std::fs::rename(&candidate, current_exe) {
+            let restore = std::fs::rename(&old_exe, current_exe);
+            let _ = std::fs::remove_file(&candidate);
+            if let Err(restore_error) = restore {
+                anyhow::bail!(
+                    "failed to install update ({error}) and failed to restore previous executable ({restore_error})"
+                );
+            }
+            return Err(error).context("failed to install update candidate");
+        }
 
         // Try to delete old (may fail if running, will be cleaned up on next run)
         let _ = std::fs::remove_file(&old_exe);
@@ -338,22 +505,20 @@ async fn replace_binary(new_binary: &[u8]) -> anyhow::Result<()> {
 
     #[cfg(not(windows))]
     {
-        // On Unix, we can replace the binary directly
-        // Write to temp file first
-        let temp_path = current_exe.with_extension("tmp");
-        std::fs::write(&temp_path, new_binary)?;
-
-        // Make executable
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&temp_path)?.permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&temp_path, perms)?;
+        let install_result = (|| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = std::fs::metadata(&candidate)?.permissions();
+                perms.set_mode(0o755);
+                std::fs::set_permissions(&candidate, perms)?;
+            }
+            std::fs::rename(&candidate, current_exe)
+        })();
+        if let Err(error) = install_result {
+            let _ = std::fs::remove_file(&candidate);
+            return Err(error).context("failed to install update candidate");
         }
-
-        // Atomic rename
-        std::fs::rename(&temp_path, &current_exe)?;
     }
 
     Ok(())

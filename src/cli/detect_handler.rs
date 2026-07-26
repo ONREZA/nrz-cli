@@ -32,8 +32,18 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
 
         let mut input = String::new();
         std::io::stdin()
+            .take(detect::fs::MAX_DETECTION_MANIFEST_BYTES as u64 + 1)
             .read_to_string(&mut input)
             .context("failed to read stdin")?;
+        if input.len() > detect::fs::MAX_DETECTION_MANIFEST_BYTES {
+            return Err(output::coded_error(
+                "DETECTION_INPUT_TOO_LARGE",
+                format!(
+                    "stdin detection manifest exceeds {} bytes",
+                    detect::fs::MAX_DETECTION_MANIFEST_BYTES
+                ),
+            ));
+        }
 
         let vfs =
             detect::fs::VirtualFs::from_json(&input).context("failed to parse stdin manifest")?;
@@ -79,7 +89,7 @@ fn output_result(
         if json {
             output::json_output(&serde_json::json!({ "framework": result.framework }));
         } else {
-            println!("{}", result.framework);
+            println!("{}", output::terminal_line(&result.framework));
         }
         return Ok(());
     }
@@ -94,16 +104,22 @@ fn output_result(
 }
 
 fn print_human(result: &detect::types::DetectionResult) {
+    let framework_name = output::terminal_line(&result.name);
+    let framework_slug = output::terminal_line(&result.framework);
     eprintln!();
     eprintln!(
         "  {} {} ({})",
         console::style("Framework:").bold(),
-        console::style(&result.name).cyan().bold(),
-        &result.framework,
+        console::style(framework_name).cyan().bold(),
+        framework_slug,
     );
 
     if let Some(ref ver) = result.version {
-        eprintln!("  {} {ver}", console::style("Version:").bold());
+        eprintln!(
+            "  {} {}",
+            console::style("Version:").bold(),
+            output::terminal_line(ver)
+        );
     }
 
     eprintln!(
@@ -122,7 +138,7 @@ fn print_human(result: &detect::types::DetectionResult) {
         let ver = pm
             .version
             .as_deref()
-            .map(|v| format!(" ({v})"))
+            .map(|v| format!(" ({})", output::terminal_line(v)))
             .unwrap_or_default();
         eprintln!(
             "  {} {}{}",
@@ -134,10 +150,18 @@ fn print_human(result: &detect::types::DetectionResult) {
 
     if let Some(ref build) = result.metadata.build_info {
         if let Some(ref cmd) = build.build_command {
-            eprintln!("  {} {cmd}", console::style("Build command:").bold());
+            eprintln!(
+                "  {} {}",
+                console::style("Build command:").bold(),
+                output::terminal_line(cmd)
+            );
         }
         if let Some(ref dir) = build.output_dir {
-            eprintln!("  {} {dir}", console::style("Output dir:").bold());
+            eprintln!(
+                "  {} {}",
+                console::style("Output dir:").bold(),
+                output::terminal_line(dir)
+            );
         }
     }
 
@@ -160,8 +184,14 @@ fn print_human(result: &detect::types::DetectionResult) {
                 let label = pkg
                     .name
                     .as_deref()
-                    .map(|n| format!("{n} ({p})", p = pkg.path))
-                    .unwrap_or_else(|| pkg.path.clone());
+                    .map(|n| {
+                        format!(
+                            "{} ({})",
+                            output::terminal_line(n),
+                            output::terminal_line(&pkg.path)
+                        )
+                    })
+                    .unwrap_or_else(|| output::terminal_line(&pkg.path));
                 eprintln!("    {} {label}", console::style("·").dim());
             }
         }
@@ -171,7 +201,7 @@ fn print_human(result: &detect::types::DetectionResult) {
         eprintln!(
             "  {} {}",
             console::style("Config files:").bold(),
-            result.metadata.config_files.join(", "),
+            output::terminal_line(&result.metadata.config_files.join(", ")),
         );
     }
 
@@ -181,7 +211,7 @@ fn print_human(result: &detect::types::DetectionResult) {
         eprintln!(
             "  {} {}",
             console::style("SSR features:").bold(),
-            ssr.ssr_features.join(", "),
+            output::terminal_line(&ssr.ssr_features.join(", ")),
         );
         if ssr.is_static_compatible {
             eprintln!(
@@ -200,17 +230,23 @@ fn print_human(result: &detect::types::DetectionResult) {
         eprintln!(
             "  {} {}",
             console::style("Structure:").bold(),
-            result
-                .metadata
-                .structure
-                .iter()
-                .map(|s| format!("{s}/"))
-                .collect::<Vec<_>>()
-                .join(", "),
+            output::terminal_line(
+                &result
+                    .metadata
+                    .structure
+                    .iter()
+                    .map(|s| format!("{s}/"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
         );
     }
 
     eprintln!();
-    eprintln!("  {} {}", console::style("Reason:").dim(), result.reason);
+    eprintln!(
+        "  {} {}",
+        console::style("Reason:").dim(),
+        output::terminal_line(&result.reason)
+    );
     eprintln!();
 }

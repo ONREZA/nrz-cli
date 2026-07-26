@@ -819,20 +819,16 @@ fn emit_upload_notice(
 }
 
 pub(super) fn sanitize_message(message: &str, redactor: &ExactValueRedactor) -> String {
-    static ANSI: OnceLock<Regex> = OnceLock::new();
     static BEARER: OnceLock<Regex> = OnceLock::new();
     static ASSIGNMENT: OnceLock<Regex> = OnceLock::new();
     static URL: OnceLock<Regex> = OnceLock::new();
-    let ansi = ANSI.get_or_init(|| {
-        Regex::new(r"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))").unwrap()
-    });
     let bearer = BEARER.get_or_init(|| Regex::new(r#"(?i)\bBearer\s+[^\s"']+"#).unwrap());
     let assignment = ASSIGNMENT.get_or_init(|| {
         Regex::new(r#"(?i)\b([a-z0-9_-]*(?:authorization|cookie|password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)[a-z0-9_-]*)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)"#).unwrap()
     });
     let url = URL.get_or_init(|| Regex::new(r#"https?://[^\s\"'<>]+"#).unwrap());
 
-    let value = ansi.replace_all(message, "");
+    let value = output::terminal_text(message);
     let value = redactor.redact(&value);
     let value = bearer.replace_all(&value, "Bearer [REDACTED]");
     let value = assignment.replace_all(&value, "$1=[REDACTED]");

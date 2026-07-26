@@ -493,14 +493,14 @@ fn generate_template_without_project_id() {
 fn resolve_project_id_explicit_wins() {
     let mut config = ProjectConfig::default();
     config.project.id = Some("from_config".into());
-    let result = resolve_project_id(Some("explicit_id"), &config).unwrap();
+    let result = resolve_project_id(Some("  explicit_id  "), &config).unwrap();
     assert_eq!(result, "explicit_id");
 }
 
 #[test]
 fn resolve_project_id_from_config() {
     let mut config = ProjectConfig::default();
-    config.project.id = Some("from_config".into());
+    config.project.id = Some("  from_config  ".into());
     let result = resolve_project_id(None, &config).unwrap();
     assert_eq!(result, "from_config");
 }
@@ -719,6 +719,11 @@ fn resolve_project_id_rejects_empty_string() {
     config_with_empty.project.id = Some(String::new());
     let result = resolve_project_id(None, &config_with_empty);
     assert!(result.is_err());
+
+    let mut linked_config = ProjectConfig::default();
+    linked_config.project.id = Some("linked-project".to_string());
+    let error = resolve_project_id(Some(""), &linked_config).unwrap_err();
+    assert!(error.to_string().contains("--project-id"));
 }
 
 #[test]

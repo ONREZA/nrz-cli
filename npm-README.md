@@ -33,13 +33,24 @@ nrz upgrade --channel beta
 
 **Linux/macOS:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/onreza/nrz-cli/main/install.sh | bash
+installer="$(mktemp)"
+curl -fsSL https://raw.githubusercontent.com/onreza/nrz-cli/main/install.sh -o "$installer"
+less "$installer"  # optional: review before running
+bash "$installer"
+rm -f "$installer"
 ```
 
 **Windows (PowerShell 7+):**
 ```powershell
-iwr -useb https://raw.githubusercontent.com/onreza/nrz-cli/main/install.ps1 | iex
+$installer = (New-TemporaryFile).FullName
+iwr -useb https://raw.githubusercontent.com/onreza/nrz-cli/main/install.ps1 -OutFile $installer
+Get-Content $installer  # optional: review before running
+pwsh -NoProfile -File $installer
+Remove-Item $installer
 ```
+
+Both installers verify the downloaded archive against the SHA-256 manifest
+published with the selected GitHub release.
 
 ## Documentation
 

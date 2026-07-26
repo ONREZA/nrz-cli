@@ -31,13 +31,17 @@ pub(super) fn scan_runtime_artifact(
 ) -> anyhow::Result<Vec<FileEntry>> {
     match scan {
         RuntimeArtifactScan::All => scan_dir(root_dir),
-        RuntimeArtifactScan::Selected { roots } => scan_selected_runtime_roots(root_dir, roots),
+        RuntimeArtifactScan::Selected {
+            roots,
+            symlink_roots,
+        } => scan_selected_runtime_roots(root_dir, roots, symlink_roots),
     }
 }
 
 pub(super) fn scan_selected_runtime_roots(
     root_dir: &Path,
     roots: &[String],
+    symlink_roots: &[String],
 ) -> anyhow::Result<Vec<FileEntry>> {
     let mut files = Vec::new();
     let canonical_base = std::fs::canonicalize(root_dir)
@@ -69,6 +73,14 @@ pub(super) fn scan_selected_runtime_roots(
         for target in symlink_targets {
             if runtime_scan_path_is_covered(&target, scheduled_roots.iter().map(String::as_str)) {
                 continue;
+            }
+            if !symlink_roots.iter().any(|root| root == &target) {
+                return Err(output::coded_error(
+                    "INVALID_BUILD_OUTPUT",
+                    format!(
+                        "runtime dependency symlink does not resolve to a declared workspace package root: {target}"
+                    ),
+                ));
             }
             scheduled_roots.insert(target.clone());
             queued_roots.push_back(target);

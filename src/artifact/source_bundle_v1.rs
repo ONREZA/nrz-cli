@@ -65,6 +65,11 @@ pub(crate) struct SourceBundlePlan {
 }
 
 impl SourceBundlePlan {
+    #[cfg(test)]
+    pub(crate) fn source_path_for_test(&self) -> &Path {
+        &self.source_path
+    }
+
     pub(crate) fn source_size_string(&self) -> String {
         self.source_size_bytes.to_string()
     }
@@ -771,6 +776,14 @@ fn read_source_symlink_target(
         )
     })?;
     let resolved_path = resolve_source_symlink_target(rel_path, target)?;
+    if rel_path == resolved_path || rel_path.starts_with(&format!("{resolved_path}/")) {
+        bail!(
+            "SOURCE_BUNDLE_V1 recursive symlink is not supported: {} -> {} resolved to {}",
+            rel_path,
+            target,
+            resolved_path
+        );
+    }
     match std::fs::canonicalize(path) {
         Ok(canonical) if canonical.starts_with(canonical_base) => Ok(SourceSymlinkTarget {
             link_target: target.to_string(),
@@ -857,9 +870,14 @@ fn write_source_bundle(
     logical_manifest_json: &[u8],
     entries: &[SourceBundleEntry],
 ) -> anyhow::Result<(String, u64)> {
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
         .open(source_path)
         .with_context(|| format!("failed to create {}", source_path.display()))?;
     let writer = HashingWriter::new(file);

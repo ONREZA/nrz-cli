@@ -28,6 +28,8 @@ mod output;
 mod output_tests;
 mod preview;
 mod project_context;
+#[cfg(test)]
+mod project_context_tests;
 mod project_settings;
 mod rollback;
 mod upgrade;
@@ -122,7 +124,7 @@ fn emit_terminal_error(json: bool, err: &anyhow::Error) {
         return;
     }
     if !json {
-        eprintln!("Error: {err:#}");
+        eprintln!("Error: {}", output::terminal_line(&format!("{err:#}")));
         return;
     }
     let message = format!("{err:#}");

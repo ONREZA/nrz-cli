@@ -213,3 +213,45 @@ fn preview_flags_denied_capability() {
             .any(|v| v.capability == "Bun ambient runtime API")
     );
 }
+
+#[test]
+fn preview_flags_ambient_bun_alias_and_global_access() {
+    for source in [
+        "export const config = {};\nconst B = Bun;\nexport default { fetch() { return B.sql`select 1`; } };\n",
+        "export const config = {};\nexport default { fetch() { return globalThis.Bun.sql`select 1`; } };\n",
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "functions/api.nrz-fn.ts", source);
+        let collected = collect(tmp.path()).unwrap();
+        let function = &collected.functions[0];
+        let report = run_policy_preview(&function.entrypoint, &function.sources).unwrap();
+        assert_eq!(report.status, PolicyStatus::Failed, "{source}");
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|v| v.capability == "Bun ambient runtime API")
+        );
+    }
+}
+
+#[test]
+fn preview_flags_process_control_alias_and_global_access() {
+    for source in [
+        "export const config = {};\nconst p = process;\nexport default { fetch() { p.exit(1); } };\n",
+        "export const config = {};\nexport default { fetch() { globalThis.process['exit'](1); } };\n",
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "functions/api.nrz-fn.ts", source);
+        let collected = collect(tmp.path()).unwrap();
+        let function = &collected.functions[0];
+        let report = run_policy_preview(&function.entrypoint, &function.sources).unwrap();
+        assert_eq!(report.status, PolicyStatus::Failed, "{source}");
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|v| v.capability == "process control")
+        );
+    }
+}

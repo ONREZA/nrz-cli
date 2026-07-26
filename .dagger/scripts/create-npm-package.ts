@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { chmodSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -15,6 +16,7 @@ interface NpmPackageOptions {
 
 interface PostinstallOptions {
   assets: Record<string, string>;
+  checksums: Record<string, string>;
   version: string;
 }
 
@@ -77,12 +79,12 @@ export function createPackageJson({ version, channel }: NpmPackageOptions): Rele
   };
 }
 
-export function createPostinstall({ assets, version }: PostinstallOptions): string {
+export function createPostinstall({ assets, checksums, version }: PostinstallOptions): string {
   return `#!/usr/bin/env node
 import { platform, arch } from "node:process";
 import https from "node:https";
-import http from "node:http";
-import { chmodSync, mkdirSync, renameSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, mkdirSync, renameSync, existsSync, rmSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { createGunzip } from "node:zlib";
 import { fileURLToPath } from "node:url";
@@ -91,12 +93,13 @@ import * as tar from "tar";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const MANIFEST = ${JSON.stringify({ assets, binName: "nrz", version }, null, 2)};
+const MANIFEST = ${JSON.stringify({ assets, checksums, binName: "nrz", version }, null, 2)};
 
 const platformKey = \`\${platform}-\${arch}\`;
 const downloadUrl = MANIFEST.assets[platformKey];
+const expectedSha256 = MANIFEST.checksums[platformKey];
 
-if (!downloadUrl) {
+if (!downloadUrl || !expectedSha256) {
   console.error(\`No binary available for \${platformKey}\`);
   console.error(\`Supported platforms: \${Object.keys(MANIFEST.assets).join(", ")}\`);
   process.exit(1);
@@ -104,36 +107,78 @@ if (!downloadUrl) {
 
 const binDir = join(__dirname, "..", "bin");
 mkdirSync(binDir, { recursive: true });
+const sourceName = MANIFEST.sourceBinName || MANIFEST.binName;
+const ext = platform === "win32" ? ".exe" : "";
+const sourcePath = join(binDir, sourceName + ext);
+const targetPath = join(binDir, MANIFEST.binName + ext);
+rmSync(targetPath, { force: true });
 
-function download(url, redirectCount = 0) {
+function download(url, expectedSha256, redirectCount = 0) {
   if (redirectCount > 5) {
     return Promise.reject(new Error("Too many redirects"));
   }
 
   return new Promise((resolve, reject) => {
-    const protocol = url.startsWith("https") ? https : http;
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") {
+      reject(new Error(\`Refusing non-HTTPS download URL: \${url}\`));
+      return;
+    }
 
-    const request = protocol.get(url, (res) => {
+    const request = https.get(url, (res) => {
       if ([301, 302, 307, 308].includes(res.statusCode)) {
         const location = res.headers.location;
         if (!location) {
           reject(new Error("Redirect without location header"));
           return;
         }
-        download(location, redirectCount + 1).then(resolve).catch(reject);
+        res.resume();
+        download(new URL(location, url).toString(), expectedSha256, redirectCount + 1)
+          .then(resolve)
+          .catch(reject);
         return;
       }
 
       if (res.statusCode !== 200) {
+        res.resume();
         reject(new Error(\`Download failed: HTTP \${res.statusCode}\`));
         return;
       }
+      const contentLength = Number(res.headers["content-length"]);
+      if (Number.isFinite(contentLength) && contentLength > 256 * 1024 * 1024) {
+        res.resume();
+        reject(new Error("Download exceeds 256 MiB"));
+        return;
+      }
 
-      res
-        .pipe(createGunzip())
-        .pipe(tar.extract({ cwd: binDir, strip: 1 }))
-        .on("finish", resolve)
-        .on("error", reject);
+      const chunks = [];
+      let received = 0;
+      res.on("data", (chunk) => {
+        received += chunk.length;
+        if (received > 256 * 1024 * 1024) {
+          request.destroy(new Error("Download exceeds 256 MiB"));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      res.on("end", () => {
+        const archive = Buffer.concat(chunks);
+        const actualSha256 = createHash("sha256").update(archive).digest("hex");
+        if (actualSha256 !== expectedSha256) {
+          reject(new Error(
+            \`SHA-256 mismatch: expected \${expectedSha256}, received \${actualSha256}\`,
+          ));
+          return;
+        }
+        const gunzip = createGunzip();
+        const extract = tar.extract({ cwd: binDir, strip: 1 });
+        gunzip.on("error", reject);
+        extract.on("error", reject);
+        extract.on("finish", resolve);
+        gunzip.pipe(extract);
+        gunzip.end(archive);
+      });
+      res.on("error", reject);
     });
 
     request.on("error", reject);
@@ -146,15 +191,13 @@ function download(url, redirectCount = 0) {
 
 console.log(\`Installing \${MANIFEST.binName} for \${platformKey}...\`);
 
-download(downloadUrl)
+download(downloadUrl, expectedSha256)
   .then(() => {
-    const sourceName = MANIFEST.sourceBinName || MANIFEST.binName;
-    const ext = platform === "win32" ? ".exe" : "";
-    const sourcePath = join(binDir, sourceName + ext);
-    const targetPath = join(binDir, MANIFEST.binName + ext);
-
     if (sourceName !== MANIFEST.binName && existsSync(sourcePath)) {
       renameSync(sourcePath, targetPath);
+    }
+    if (!existsSync(targetPath)) {
+      throw new Error(\`Archive did not contain \${MANIFEST.binName}\${ext}\`);
     }
 
     if (platform !== "win32") {
@@ -210,8 +253,17 @@ function main(): void {
   mkdirSync(scriptsDir, { recursive: true });
 
   const assets = releaseAssets(tag);
+  const checksums = Object.fromEntries(
+    platforms.map((platform) => {
+      const archive = readFileSync(join("/dist", `nrz-${platform}.tar.gz`));
+      return [platform, createHash("sha256").update(archive).digest("hex")];
+    }),
+  );
   writeFileSync(join(outDir, "package.json"), `${JSON.stringify(createPackageJson({ version, channel }), null, 2)}\n`);
-  writeFileSync(join(scriptsDir, "postinstall.js"), createPostinstall({ assets, version }));
+  writeFileSync(
+    join(scriptsDir, "postinstall.js"),
+    createPostinstall({ assets, checksums, version }),
+  );
   writeFileSync(join(binDir, "nrz.js"), createShim());
   chmodSync(join(scriptsDir, "postinstall.js"), 0o755);
   chmodSync(join(binDir, "nrz.js"), 0o755);

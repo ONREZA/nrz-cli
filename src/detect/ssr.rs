@@ -710,12 +710,69 @@ fn match_value_token(after: &str, value: &str) -> bool {
 /// Find the fallback value after `||` or `??` operators.
 /// Returns the trimmed text after the operator.
 fn find_fallback_value(text: &str) -> Option<&str> {
-    let idx = text
-        .find("||")
-        .map(|i| i + 2)
-        .or_else(|| text.find("??").map(|i| i + 2))?;
-    let after = text[idx..].trim();
+    let expression = property_expression(text);
+    let idx = top_level_fallback_index(expression)? + 2;
+    let after = expression[idx..].trim();
     if after.is_empty() { None } else { Some(after) }
+}
+
+fn top_level_fallback_index(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut quote = None;
+    let mut depth = 0usize;
+    let mut index = 0usize;
+    while index + 1 < bytes.len() {
+        let byte = bytes[index];
+        if let Some(active_quote) = quote {
+            if byte == b'\\' {
+                index = index.saturating_add(2);
+                continue;
+            }
+            if byte == active_quote {
+                quote = None;
+            }
+        } else {
+            match byte {
+                b'\'' | b'"' | b'`' => quote = Some(byte),
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' if depth > 0 => depth -= 1,
+                b'|' if depth == 0 && bytes[index + 1] == b'|' => return Some(index),
+                b'?' if depth == 0 && bytes[index + 1] == b'?' => return Some(index),
+                _ => {}
+            }
+        }
+        index += 1;
+    }
+    None
+}
+
+fn property_expression(text: &str) -> &str {
+    let bytes = text.as_bytes();
+    let mut quote = None;
+    let mut depth = 0usize;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if let Some(active_quote) = quote {
+            if byte == b'\\' {
+                index = index.saturating_add(2);
+                continue;
+            }
+            if byte == active_quote {
+                quote = None;
+            }
+        } else {
+            match byte {
+                b'\'' | b'"' | b'`' => quote = Some(byte),
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' if depth > 0 => depth -= 1,
+                b',' | b'}' if depth == 0 => return &text[..index],
+                _ => {}
+            }
+        }
+        index += 1;
+    }
+    text
 }
 
 /// Check if content contains any of the given patterns (non-comment lines only).
