@@ -2740,6 +2740,7 @@ async fn postbuild_detection_preserves_generated_root_static_html() {
         &effective,
         Some(&stale_detection),
         false,
+        dir.path(),
     )
     .await;
     assert!(
@@ -2760,6 +2761,7 @@ async fn postbuild_detection_preserves_generated_root_static_html() {
         &effective,
         Some(&postbuild_detection),
         false,
+        dir.path(),
     )
     .await
     .unwrap();

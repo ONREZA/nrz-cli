@@ -2859,7 +2859,7 @@ fn prisma_client_hash_packages_copied_to_standalone() {
     )
     .unwrap();
 
-    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+    copy_missing_prisma_packages(project.path(), project.path(), output.path(), true).unwrap();
 
     // Hash package should now exist in output
     let dst = output
@@ -2885,7 +2885,7 @@ fn prisma_packages_not_copied_when_already_present() {
     std::fs::create_dir_all(&dst).unwrap();
     std::fs::write(dst.join("index.js"), "// dst version").unwrap();
 
-    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+    copy_missing_prisma_packages(project.path(), project.path(), output.path(), true).unwrap();
 
     // Should NOT overwrite — dst version should remain
     let content = std::fs::read_to_string(dst.join("index.js")).unwrap();
@@ -2900,7 +2900,7 @@ fn prisma_noop_when_no_prisma_in_project() {
     // No node_modules/@prisma/ at all
     std::fs::create_dir_all(project.path().join("node_modules")).unwrap();
 
-    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+    copy_missing_prisma_packages(project.path(), project.path(), output.path(), true).unwrap();
 
     // Should not create anything in output
     assert!(!output.path().join("node_modules/@prisma").is_dir());
@@ -2929,7 +2929,7 @@ fn prisma_skips_non_client_hash_packages() {
 
     std::fs::create_dir_all(output.path().join("node_modules/@prisma")).unwrap();
 
-    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+    copy_missing_prisma_packages(project.path(), project.path(), output.path(), true).unwrap();
 
     // Neither engines nor client should be copied (only client-<hash> pattern)
     assert!(!output.path().join("node_modules/@prisma/engines").exists());
@@ -2947,7 +2947,7 @@ fn prisma_copies_multiple_hash_packages() {
         std::fs::write(src.join("index.js"), hash).unwrap();
     }
 
-    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+    copy_missing_prisma_packages(project.path(), project.path(), output.path(), true).unwrap();
 
     for hash in ["client-aaa111", "client-bbb222"] {
         let dst = output.path().join(format!("node_modules/@prisma/{hash}"));
@@ -3005,10 +3005,63 @@ fn prisma_skips_symlink_outside_project() {
     std::fs::create_dir_all(&prisma_dir).unwrap();
     std::os::unix::fs::symlink(&real_pkg, prisma_dir.join("client-sym123")).unwrap();
 
-    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+    copy_missing_prisma_packages(project.path(), project.path(), output.path(), true).unwrap();
 
     let dst = output.path().join("node_modules/@prisma/client-sym123");
     assert!(!dst.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn prisma_copies_symlink_from_workspace_pnpm_store() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("apps/web");
+    let output = tempfile::tempdir().unwrap();
+    let real_pkg = workspace
+        .path()
+        .join("node_modules/.pnpm/@prisma+client@6.0.0/node_modules/@prisma/client-workspace");
+    std::fs::create_dir_all(&real_pkg).unwrap();
+    std::fs::write(real_pkg.join("index.js"), "// workspace store").unwrap();
+
+    let prisma_dir = project.join("node_modules/@prisma");
+    std::fs::create_dir_all(&prisma_dir).unwrap();
+    std::os::unix::fs::symlink(&real_pkg, prisma_dir.join("client-workspace")).unwrap();
+
+    copy_missing_prisma_packages(&project, workspace.path(), output.path(), true).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(
+            output
+                .path()
+                .join("node_modules/@prisma/client-workspace/index.js")
+        )
+        .unwrap(),
+        "// workspace store"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn prisma_skips_symlink_to_non_store_workspace_directory() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("apps/web");
+    let output = tempfile::tempdir().unwrap();
+    let unrelated = workspace.path().join("packages/private");
+    std::fs::create_dir_all(&unrelated).unwrap();
+    std::fs::write(unrelated.join("secret.txt"), "secret").unwrap();
+
+    let prisma_dir = project.join("node_modules/@prisma");
+    std::fs::create_dir_all(&prisma_dir).unwrap();
+    std::os::unix::fs::symlink(&unrelated, prisma_dir.join("client-private")).unwrap();
+
+    copy_missing_prisma_packages(&project, workspace.path(), output.path(), true).unwrap();
+
+    assert!(
+        !output
+            .path()
+            .join("node_modules/@prisma/client-private")
+            .exists()
+    );
 }
 
 #[cfg(unix)]
@@ -3023,7 +3076,7 @@ fn prisma_skips_dangling_symlink() {
     std::os::unix::fs::symlink("/nonexistent/path", prisma_dir.join("client-dangling")).unwrap();
 
     // Should not panic or error — just skip with a warning
-    copy_missing_prisma_packages(project.path(), output.path(), true).unwrap();
+    copy_missing_prisma_packages(project.path(), project.path(), output.path(), true).unwrap();
 
     assert!(
         !output
@@ -3046,7 +3099,8 @@ fn prisma_copy_rejects_symlinked_destination_parent() {
     std::fs::create_dir_all(output.path().join("node_modules")).unwrap();
     std::os::unix::fs::symlink(outside.path(), output.path().join("node_modules/@prisma")).unwrap();
 
-    let error = copy_missing_prisma_packages(project.path(), output.path(), true).unwrap_err();
+    let error = copy_missing_prisma_packages(project.path(), project.path(), output.path(), true)
+        .unwrap_err();
 
     assert!(
         error

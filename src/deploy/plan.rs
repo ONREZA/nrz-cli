@@ -305,6 +305,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         effective,
         Some(&detection),
         false,
+        &command.root_dir,
     )
     .await?;
 
