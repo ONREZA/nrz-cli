@@ -2,7 +2,8 @@ use serde_json::json;
 
 use super::rules_handler::{
     ActiveEdgeRuleSet, active_rule_set_to_authoring_value, build_edge_rules_status_request,
-    edge_rule_set_authoring_to_toml, map_publish_error, write_rules_file,
+    edge_rule_set_authoring_to_toml, map_publish_error, replace_file_with_rollback,
+    write_rules_file,
 };
 
 #[test]
@@ -70,6 +71,47 @@ fn rules_pull_write_replaces_link_instead_of_following_it() {
             .unwrap()
             .file_type()
             .is_symlink()
+    );
+}
+
+#[test]
+fn rules_replacement_restores_previous_file_when_install_fails() {
+    let project = tempfile::tempdir().unwrap();
+    let rules_path = project.path().join("onreza.rules.toml");
+    let missing_candidate = project.path().join("missing-candidate.toml");
+    std::fs::write(&rules_path, "previous").unwrap();
+
+    let error = replace_file_with_rollback(&missing_candidate, &rules_path).unwrap_err();
+
+    assert!(
+        error.to_string().contains("previous file was restored"),
+        "{error:#}"
+    );
+    assert_eq!(std::fs::read_to_string(&rules_path).unwrap(), "previous");
+    assert!(
+        std::fs::read_dir(project.path())
+            .unwrap()
+            .flatten()
+            .all(|entry| !entry.file_name().to_string_lossy().contains(".backup-"))
+    );
+}
+
+#[test]
+fn rules_replacement_removes_backup_after_success() {
+    let project = tempfile::tempdir().unwrap();
+    let rules_path = project.path().join("onreza.rules.toml");
+    let candidate = project.path().join("candidate.toml");
+    std::fs::write(&rules_path, "previous").unwrap();
+    std::fs::write(&candidate, "replacement").unwrap();
+
+    replace_file_with_rollback(&candidate, &rules_path).unwrap();
+
+    assert_eq!(std::fs::read_to_string(&rules_path).unwrap(), "replacement");
+    assert!(
+        std::fs::read_dir(project.path())
+            .unwrap()
+            .flatten()
+            .all(|entry| !entry.file_name().to_string_lossy().contains(".backup-"))
     );
 }
 
