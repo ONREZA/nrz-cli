@@ -220,12 +220,24 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Download published checksums
+        if: inputs.publish_npm
+        run: |
+          mkdir -p ./dist/published
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern checksums-sha256.txt \
+            --dir ./dist/published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+
       - name: Generate npm package
         if: inputs.publish_npm
         run: |
           dagger call npm-package \
             --source=. \
-            --artifacts=./dist/release \
+            --checksum-manifest=./dist/published/checksums-sha256.txt \
             --version="$RELEASE_VERSION" \
             --tag="$RELEASE_TAG" \
             --channel="$RELEASE_CHANNEL" \

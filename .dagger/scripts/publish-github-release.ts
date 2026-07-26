@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
+import { RELEASE_REPOSITORY, REQUIRED_RELEASE_ASSETS } from "./release-assets";
+
 const token = process.env.GITHUB_TOKEN;
-const repository = process.env.GITHUB_REPOSITORY || "ONREZA/nrz-cli";
+const repository = process.env.GITHUB_REPOSITORY || RELEASE_REPOSITORY;
 const version = process.env.NRZ_RELEASE_VERSION;
 const tag = process.env.NRZ_RELEASE_TAG;
 const channel = process.env.NRZ_RELEASE_CHANNEL || "stable";
@@ -12,13 +14,6 @@ const prerelease = channel !== "stable";
 const apiBase = "https://api.github.com";
 const uploadBase = "https://uploads.github.com";
 const artifactRoot = "/dist";
-const requiredAssets = [
-  "nrz-linux-x64.tar.gz",
-  "nrz-darwin-x64.tar.gz",
-  "nrz-darwin-arm64.tar.gz",
-  "nrz-win32-x64.tar.gz",
-];
-
 interface GitHubAsset {
   id: number;
   name: string;
@@ -163,11 +158,11 @@ async function main(): Promise<void> {
     throw new Error("GITHUB_TOKEN, NRZ_RELEASE_VERSION, and NRZ_RELEASE_TAG are required");
   }
 
-  const assetPaths = requiredAssets.map((asset) => requireAsset(asset));
+  const assetPaths = REQUIRED_RELEASE_ASSETS.map((asset) => requireAsset(asset));
   const checksum = createChecksums(assetPaths);
   const releaseBody = releaseNotes(checksum.text);
   const allUploads = [...assetPaths, checksum.path];
-  const allNames = [...requiredAssets, "checksums-sha256.txt"];
+  const allNames = [...REQUIRED_RELEASE_ASSETS, "checksums-sha256.txt"];
 
   let release = await findReleaseByTag(repository, tag);
   if (release && !release.draft) {
