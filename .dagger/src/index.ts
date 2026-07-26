@@ -1,15 +1,21 @@
 import { argument, dag, type Directory, type File, func, object, type Secret } from "@dagger.io/dagger";
 
+import {
+  RELEASE_PLATFORMS,
+  type ReleasePlatform,
+  releaseAssetName,
+} from "../scripts/release-assets";
+
 const RUST_IMAGE = "rust:1.96-bookworm";
 const BUN_IMAGE = "oven/bun:1.3.14-debian";
 const ALPINE_IMAGE = "alpine:3.20";
 const RELEASE_GIT_METADATA_SCRIPT = ".dagger/scripts/capture-git-metadata.ts";
 const CLI_CRATES_VENDOR_DIR = "vendor/onreza-crates";
 
-const PLATFORMS = new Set(["linux-x64", "darwin-x64", "darwin-arm64", "win32-x64"]);
+const PLATFORMS = new Set<string>(RELEASE_PLATFORMS);
 const CHANNELS = new Set(["stable", "beta"]);
 
-function requirePlatform(platform: string): void {
+function requirePlatform(platform: string): asserts platform is ReleasePlatform {
   if (!PLATFORMS.has(platform)) {
     throw new Error(`Unsupported platform: ${platform}`);
   }
@@ -21,7 +27,7 @@ function requireChannel(channel: string): void {
   }
 }
 
-function binName(platform: string): string {
+function binName(platform: ReleasePlatform): string {
   return platform === "win32-x64" ? "nrz.exe" : "nrz";
 }
 
@@ -225,10 +231,10 @@ export class NrzCli {
           `mkdir -p /out/archive/${platform}`,
           `cp /input/${executable} /out/archive/${platform}/${executable}`,
           `chmod ${mode} /out/archive/${platform}/${executable}`,
-          `tar -czf /out/nrz-${platform}.tar.gz -C /out/archive ${platform}`,
+          `tar -czf /out/${releaseAssetName(platform)} -C /out/archive ${platform}`,
         ].join("\n"),
       ])
-      .file(`/out/nrz-${platform}.tar.gz`);
+      .file(`/out/${releaseAssetName(platform)}`);
   }
 
   /**
@@ -244,7 +250,7 @@ export class NrzCli {
         "sh",
         "-ceu",
         [
-          "for platform in linux-x64 darwin-x64 darwin-arm64 win32-x64; do",
+          `for platform in ${RELEASE_PLATFORMS.join(" ")}; do`,
           "  binary=nrz",
           "  mode=0755",
           "  if [ \"$platform\" = \"win32-x64\" ]; then binary=nrz.exe; mode=0644; fi",
@@ -283,14 +289,14 @@ export class NrzCli {
       ],
     })
     source: Directory,
-    artifacts: Directory,
+    checksumManifest: File,
     version: string,
     tag: string,
     channel = "stable",
   ): Directory {
     requireChannel(channel);
     return bunContainer(source)
-      .withDirectory("/dist", artifacts)
+      .withMountedFile("/release/checksums-sha256.txt", checksumManifest)
       .withEnvVariable("NRZ_RELEASE_VERSION", version)
       .withEnvVariable("NRZ_RELEASE_TAG", tag)
       .withEnvVariable("NRZ_RELEASE_CHANNEL", channel)

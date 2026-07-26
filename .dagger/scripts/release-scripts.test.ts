@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "bun:test";
 
-import { createPackageJson, createPostinstall, releaseAssets } from "./create-npm-package";
+import {
+  createPackageJson,
+  createPostinstall,
+  parseReleaseChecksums,
+  releaseAssets,
+} from "./create-npm-package";
+import { REQUIRED_RELEASE_ASSETS } from "./release-assets";
 import {
   appendChecksumsToReleaseNotes,
   createChecksums,
@@ -59,10 +65,35 @@ test("generated npm package declares ESM for generated .js scripts", () => {
 });
 
 test("release assets are tied to the selected GitHub release tag", () => {
+  const assets = releaseAssets("v0.33.0-beta.1");
+
+  assert.deepEqual(
+    Object.keys(assets).map((platform) => `nrz-${platform}.tar.gz`),
+    REQUIRED_RELEASE_ASSETS,
+  );
   assert.equal(
-    releaseAssets("v0.33.0-beta.1")["linux-x64"],
+    assets["linux-x64"],
     "https://github.com/ONREZA/nrz-cli/releases/download/v0.33.0-beta.1/nrz-linux-x64.tar.gz",
   );
+});
+
+test("npm package uses checksums from the published release manifest", () => {
+  const checksums = parseReleaseChecksums(
+    [
+      `${"0".repeat(64)}  nrz-linux-x64.tar.gz`,
+      `${"1".repeat(64)}  nrz-darwin-x64.tar.gz`,
+      `${"2".repeat(64)}  nrz-darwin-arm64.tar.gz`,
+      `${"3".repeat(64)}  nrz-win32-x64.tar.gz`,
+      "",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(checksums, {
+    "linux-x64": "0".repeat(64),
+    "darwin-x64": "1".repeat(64),
+    "darwin-arm64": "2".repeat(64),
+    "win32-x64": "3".repeat(64),
+  });
 });
 
 test("GitHub release lookup includes draft releases by tag", async () => {

@@ -1,13 +1,18 @@
 #!/usr/bin/env bun
-import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import {
+  RELEASE_PLATFORMS,
+  RELEASE_REPOSITORY,
+  releaseAssetName,
+} from "./release-assets";
+
 const outDir = "/out/npm";
 const binDir = join(outDir, "bin");
 const scriptsDir = join(outDir, "scripts");
-const platforms = ["linux-x64", "darwin-x64", "darwin-arm64", "win32-x64"];
+const checksumManifestPath = "/release/checksums-sha256.txt";
 
 interface NpmPackageOptions {
   version: string;
@@ -45,11 +50,42 @@ interface ReleasePackageJson {
 
 export function releaseAssets(tag: string): Record<string, string> {
   return Object.fromEntries(
-    platforms.map((platform) => [
+    RELEASE_PLATFORMS.map((platform) => [
       platform,
-      `https://github.com/ONREZA/nrz-cli/releases/download/${tag}/nrz-${platform}.tar.gz`,
+      `https://github.com/${RELEASE_REPOSITORY}/releases/download/${tag}/${releaseAssetName(platform)}`,
     ]),
   );
+}
+
+export function parseReleaseChecksums(text: string): Record<string, string> {
+  const checksums: Record<string, string> = {};
+  const assetToPlatform = new Map(
+    RELEASE_PLATFORMS.map((platform) => [releaseAssetName(platform), platform]),
+  );
+  const checksumPattern = /^([a-f0-9]{64})  ([^\s/]+)$/;
+
+  for (const line of text.trim().split("\n")) {
+    const match = checksumPattern.exec(line);
+    if (!match) {
+      throw new Error(`Invalid published checksum entry: ${line}`);
+    }
+    const [, digest, asset] = match;
+    const platform = assetToPlatform.get(asset);
+    if (!platform) {
+      throw new Error(`Unexpected published checksum asset: ${asset}`);
+    }
+    if (checksums[platform]) {
+      throw new Error(`Duplicate published checksum for ${platform}`);
+    }
+    checksums[platform] = digest;
+  }
+
+  for (const platform of RELEASE_PLATFORMS) {
+    if (!checksums[platform]) {
+      throw new Error(`Missing published checksum for ${platform}`);
+    }
+  }
+  return checksums;
 }
 
 export function createPackageJson({ version, channel }: NpmPackageOptions): ReleasePackageJson {
@@ -297,12 +333,7 @@ function main(): void {
   mkdirSync(scriptsDir, { recursive: true });
 
   const assets = releaseAssets(tag);
-  const checksums = Object.fromEntries(
-    platforms.map((platform) => {
-      const archive = readFileSync(join("/dist", `nrz-${platform}.tar.gz`));
-      return [platform, createHash("sha256").update(archive).digest("hex")];
-    }),
-  );
+  const checksums = parseReleaseChecksums(readFileSync(checksumManifestPath, "utf8"));
   writeFileSync(join(outDir, "package.json"), `${JSON.stringify(createPackageJson({ version, channel }), null, 2)}\n`);
   writeFileSync(
     join(scriptsDir, "postinstall.js"),
