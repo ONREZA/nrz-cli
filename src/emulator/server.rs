@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use axum::extract::State;
+use axum::http::header::{HOST, ORIGIN};
 use axum::http::{Request, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::IntoResponse;
@@ -25,6 +26,7 @@ pub struct EmulatorServer {
 struct AppState {
     kv: KvStore,
     token: String,
+    expected_host: String,
 }
 
 pub const EMULATOR_TOKEN_HEADER: &str = "x-nrz-emulator-token";
@@ -59,11 +61,26 @@ impl EmulatorServer {
         &self.token
     }
 
+    pub fn client_url(&self) -> String {
+        let ip = match self.addr.ip() {
+            std::net::IpAddr::V4(ip) if ip.is_unspecified() => std::net::Ipv4Addr::LOCALHOST.into(),
+            std::net::IpAddr::V6(ip) if ip.is_unspecified() => std::net::Ipv6Addr::LOCALHOST.into(),
+            ip => ip,
+        };
+        format!("http://{}", SocketAddr::new(ip, self.addr.port()))
+    }
+
     /// Start the emulator HTTP server.
     pub async fn start(&self) -> anyhow::Result<()> {
+        let expected_host = self
+            .client_url()
+            .strip_prefix("http://")
+            .expect("emulator client URL is HTTP")
+            .to_string();
         let state = AppState {
             kv: self.kv.clone(),
             token: self.token.clone(),
+            expected_host,
         };
 
         let app = Router::new()
@@ -91,12 +108,16 @@ async fn require_token(
     request: Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let authorized = request
-        .headers()
+    let headers = request.headers();
+    let authorized = headers
         .get(EMULATOR_TOKEN_HEADER)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value == state.token);
-    if !authorized {
+    let expected_host = headers
+        .get(HOST)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == state.expected_host);
+    if !authorized || !expected_host || headers.contains_key(ORIGIN) {
         return Err(StatusCode::UNAUTHORIZED);
     }
     Ok(next.run(request).await)

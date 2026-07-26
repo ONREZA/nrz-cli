@@ -16,7 +16,7 @@ use tokio_postgres_rustls::MakeRustlsConnect;
 use url::Url;
 
 use super::db::{BranchesCommand, ConfigArgs, DbArgs, DbCommand};
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 use crate::auth;
 use crate::output;
 use nrz::config::ProjectConfig;
@@ -435,7 +435,7 @@ async fn cmd_list(
     }
 
     if let Some(plan) = &list.plan {
-        eprintln!("  Plan: {plan}");
+        eprintln!("  Plan: {}", output::terminal_line(plan));
     }
     if let Some(sizes) = &list.allowed_cu_sizes {
         let s: Vec<String> = sizes.iter().map(|v| format!("{v}")).collect();
@@ -444,8 +444,9 @@ async fn cmd_list(
     eprintln!();
 
     for db in &list.data {
-        let name = db.db_name.as_deref().unwrap_or("(unnamed)");
-        let status = db.status.as_deref().unwrap_or("unknown");
+        let id = output::terminal_line(&db.id);
+        let name = output::terminal_line(db.db_name.as_deref().unwrap_or("(unnamed)"));
+        let status = output::terminal_line(db.status.as_deref().unwrap_or("unknown"));
         let cu = db.cu_size.map(|v| format!("{v}")).unwrap_or_default();
         let inject = if db.auto_inject_db_url_for_project(project_id) == Some(true) {
             " [auto-inject]"
@@ -454,10 +455,10 @@ async fn cmd_list(
         };
         eprintln!(
             "  {} {} ({}CU, {}){inject}",
-            console::style(&db.id).dim(),
+            console::style(id).dim(),
             console::style(name).bold(),
             cu,
-            format_status(status),
+            format_status(&status),
         );
     }
     Ok(())
@@ -503,7 +504,7 @@ async fn cmd_create(
             "Waiting for database to become active...",
             output::Phase::Db,
         );
-        let db_url = format!("{}/{}", base, created.id);
+        let db_url = format!("{}/{}", base, path_segment(&created.id));
         for _ in 0..120 {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             let info: serde_json::Value = client
@@ -560,7 +561,7 @@ async fn cmd_info(
     db_id: &str,
     json: bool,
 ) -> anyhow::Result<()> {
-    let url = format!("{}/{}", base, db_id);
+    let url = format!("{}/{}", base, path_segment(db_id));
     let info: DbInfoResponse = client
         .get(&url)
         .await
@@ -572,14 +573,14 @@ async fn cmd_info(
     }
 
     let db = &info.db;
-    let name = db.db_name.as_deref().unwrap_or("(unnamed)");
-    let status = db.status.as_deref().unwrap_or("unknown");
+    let name = output::terminal_line(db.db_name.as_deref().unwrap_or("(unnamed)"));
+    let status = output::terminal_line(db.status.as_deref().unwrap_or("unknown"));
     eprintln!(
         "  {} {}",
         console::style(name).bold(),
-        format_status(status),
+        format_status(&status),
     );
-    eprintln!("  ID:         {}", db.id);
+    eprintln!("  ID:         {}", output::terminal_line(&db.id));
     if let Some(cu) = db.cu_size {
         eprintln!("  CU size:    {cu}");
     }
@@ -590,13 +591,13 @@ async fn cmd_info(
         let var = db
             .env_var_name_for_project(project_id)
             .unwrap_or("DATABASE_URL");
-        eprintln!("  Auto-inject: {var}");
+        eprintln!("  Auto-inject: {}", output::terminal_line(var));
         if db.auto_create_preview_branch_for_project(project_id) == Some(true) {
             eprintln!("  Preview branches: enabled");
         }
     }
     if let Some(plan) = &info.plan {
-        eprintln!("  Plan:       {plan}");
+        eprintln!("  Plan:       {}", output::terminal_line(plan));
     }
     if let Some(sizes) = &info.allowed_cu_sizes {
         let s: Vec<String> = sizes.iter().map(|v| format!("{v}")).collect();
@@ -618,8 +619,9 @@ async fn cmd_delete(
             bail!("--force is required to delete database in non-interactive mode");
         }
         eprint!(
-            "  {} Delete database {db_id}? [y/N] ",
-            console::style("?").yellow().bold()
+            "  {} Delete database {}? [y/N] ",
+            console::style("?").yellow().bold(),
+            output::terminal_line(db_id)
         );
         std::io::stderr().flush()?;
         let mut line = String::new();
@@ -630,7 +632,7 @@ async fn cmd_delete(
         }
     }
 
-    let url = format!("{}/{}", base, db_id);
+    let url = format!("{}/{}", base, path_segment(db_id));
     client
         .delete_empty(&url)
         .await
@@ -655,7 +657,7 @@ async fn cmd_start_stop(
     json: bool,
     action: &str,
 ) -> anyhow::Result<()> {
-    let url = format!("{}/{}/{}", base, db_id, action);
+    let url = format!("{}/{}/{}", base, path_segment(db_id), path_segment(action));
     let resp: serde_json::Value = client
         .post_empty(&url)
         .await
@@ -714,12 +716,12 @@ async fn cmd_query(
 
     // Human-readable table output
     if !result.columns.is_empty() {
-        eprintln!("  {}", result.columns.join(" | "));
+        eprintln!("  {}", output::terminal_line(&result.columns.join(" | ")));
         eprintln!("  {}", "-".repeat(result.columns.len() * 12));
     }
     for row in &result.rows {
         let vals: Vec<String> = row.iter().map(format_cell).collect();
-        eprintln!("  {}", vals.join(" | "));
+        eprintln!("  {}", output::terminal_line(&vals.join(" | ")));
     }
     eprintln!();
     eprintln!("  ({} row(s))", result.row_count);
@@ -734,7 +736,7 @@ async fn cmd_branches_list(
     db_id: &str,
     json: bool,
 ) -> anyhow::Result<()> {
-    let url = format!("{}/{}/branches", base, db_id);
+    let url = format!("{}/{}/branches", base, path_segment(db_id));
     let list: BranchListResponse = client.get(&url).await.context("failed to list branches")?;
 
     if json {
@@ -748,7 +750,9 @@ async fn cmd_branches_list(
     }
 
     for b in &list.data {
-        let status = b.status.as_deref().unwrap_or("unknown");
+        let id = output::terminal_line(&b.id);
+        let name = output::terminal_line(&b.name);
+        let status = output::terminal_line(b.status.as_deref().unwrap_or("unknown"));
         let preview = if b.is_preview_branch == Some(true) {
             " (preview)"
         } else {
@@ -756,9 +760,9 @@ async fn cmd_branches_list(
         };
         eprintln!(
             "  {} {}{preview} ({})",
-            console::style(&b.id).dim(),
-            console::style(&b.name).bold(),
-            format_status(status),
+            console::style(id).dim(),
+            console::style(name).bold(),
+            format_status(&status),
         );
     }
     Ok(())
@@ -771,7 +775,7 @@ async fn cmd_branches_create(
     json: bool,
     name: &str,
 ) -> anyhow::Result<()> {
-    let url = format!("{}/{}/branches", base, db_id);
+    let url = format!("{}/{}/branches", base, path_segment(db_id));
     let body = CreateBranchBody {
         name: name.to_string(),
     };
@@ -800,7 +804,12 @@ async fn cmd_branches_delete(
     branch: &str,
 ) -> anyhow::Result<()> {
     let branch_id = resolve_branch(client, base, db_id, branch).await?;
-    let url = format!("{}/{}/branches/{}", base, db_id, branch_id);
+    let url = format!(
+        "{}/{}/branches/{}",
+        base,
+        path_segment(db_id),
+        path_segment(&branch_id)
+    );
     client
         .delete_empty(&url)
         .await
@@ -822,7 +831,12 @@ async fn cmd_branch_connection(
     branch: &str,
 ) -> anyhow::Result<()> {
     let branch_id = resolve_branch(client, base, db_id, branch).await?;
-    let url = format!("{}/{}/branches/{}/connection", base, db_id, branch_id);
+    let url = format!(
+        "{}/{}/branches/{}/connection",
+        base,
+        path_segment(db_id),
+        path_segment(&branch_id)
+    );
     let resp: ConnectionResponse = client
         .get(&url)
         .await
@@ -869,7 +883,7 @@ async fn cmd_config(
         }
     } else {
         // Show current settings
-        let url = format!("{}/{}", base, db_id);
+        let url = format!("{}/{}", base, path_segment(db_id));
         let info: DbInfoResponse = client
             .get(&url)
             .await
@@ -889,7 +903,7 @@ async fn cmd_config(
                 .unwrap_or("DATABASE_URL");
             let preview = info.db.auto_create_preview_branch_for_project(project_id) == Some(true);
             eprintln!("  Auto-inject:      {}", if enabled { "on" } else { "off" });
-            eprintln!("  Env variable:     {var}");
+            eprintln!("  Env variable:     {}", output::terminal_line(var));
             eprintln!("  Preview branches: {}", if preview { "on" } else { "off" });
         }
     }
@@ -962,10 +976,11 @@ async fn cmd_schema(
             return Ok(());
         }
         for table in &schema.tables {
+            let table_name = output::terminal_line(&table.name);
             eprintln!(
                 "  {} {}",
                 console::style("TABLE").dim(),
-                console::style(&table.name).bold()
+                console::style(table_name).bold()
             );
             for col in &table.columns {
                 let nullable = if col.nullable { "NULL" } else { "NOT NULL" };
@@ -974,10 +989,13 @@ async fn cmd_schema(
                     .as_ref()
                     .map(|d| format!(" DEFAULT {d}"))
                     .unwrap_or_default();
+                let name = output::terminal_line(&col.name);
+                let column_type = output::terminal_line(&col.col_type);
+                let default = output::terminal_line(&default);
                 eprintln!(
                     "    {} {} {}{default}",
-                    console::style(&col.name).cyan(),
-                    col.col_type,
+                    console::style(name).cyan(),
+                    column_type,
                     nullable,
                 );
             }
@@ -990,7 +1008,11 @@ async fn cmd_schema(
 // ── Helpers ─────────────────────────────────────────────────
 
 fn project_attachment_url(base: &str, db_id: &str, project_id: &str) -> String {
-    format!("{base}/{db_id}/attachments/{project_id}")
+    format!(
+        "{base}/{}/attachments/{}",
+        path_segment(db_id),
+        path_segment(project_id)
+    )
 }
 
 async fn fetch_connection_uri(
@@ -1001,7 +1023,12 @@ async fn fetch_connection_uri(
 ) -> anyhow::Result<String> {
     if let Some(branch_name) = branch {
         let branch_id = resolve_branch(client, base, db_id, branch_name).await?;
-        let url = format!("{}/{}/branches/{}/connection", base, db_id, branch_id);
+        let url = format!(
+            "{}/{}/branches/{}/connection",
+            base,
+            path_segment(db_id),
+            path_segment(&branch_id)
+        );
         let resp: ConnectionResponse = client
             .get(&url)
             .await
@@ -1009,7 +1036,7 @@ async fn fetch_connection_uri(
         return Ok(resp.connection_uri);
     }
 
-    let url = format!("{}/{}/connection", base, db_id);
+    let url = format!("{}/{}/connection", base, path_segment(db_id));
     let resp: ConnectionResponse = client.get(&url).await.context("failed to get connection")?;
     Ok(resp.connection_uri)
 }
@@ -1457,7 +1484,7 @@ async fn resolve_branch(
         return Ok(branch.to_string());
     }
 
-    let url = format!("{}/{}/branches", base, db_id);
+    let url = format!("{}/{}/branches", base, path_segment(db_id));
     let list: BranchListResponse = client.get(&url).await.context("failed to list branches")?;
 
     list.data

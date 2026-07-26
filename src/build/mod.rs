@@ -108,8 +108,9 @@ pub async fn run(
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
+    let workspace_root = crate::detect::monorepo::discover_workspace_root(&project_dir);
     let effective = EffectiveProjectConfig::from_project_config(project_dir, config.clone());
-    run_with_effective_config(args, json, &effective, None, true, effective.project_dir()).await
+    run_with_effective_config(args, json, &effective, None, true, &workspace_root).await
 }
 
 #[cfg(test)]
@@ -123,6 +124,7 @@ pub async fn run_with_hint(
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
+    let workspace_root = crate::detect::monorepo::discover_workspace_root(&project_dir);
     let mut effective = EffectiveProjectConfig::from_project_config(project_dir, config.clone());
     if let Some(hint) = output_directory_hint {
         let settings = nrz::config::ProjectBuildSettings {
@@ -133,15 +135,7 @@ pub async fn run_with_hint(
         effective.apply_server_settings(Some(&settings));
     }
 
-    run_with_effective_config(
-        args,
-        json,
-        &effective,
-        detection,
-        true,
-        effective.project_dir(),
-    )
-    .await
+    run_with_effective_config(args, json, &effective, detection, true, &workspace_root).await
 }
 
 pub(crate) async fn run_with_effective_config(

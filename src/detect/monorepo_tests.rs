@@ -85,6 +85,108 @@ fn detect_pnpm_monorepo() {
 }
 
 #[test]
+fn detect_recursive_workspace_glob() {
+    let fs = vfs(r#"{
+        "tree": [
+            "packages/",
+            "packages/direct/",
+            "packages/group/",
+            "packages/group/shared/"
+        ],
+        "files": {
+            "pnpm-workspace.yaml": "packages:\n  - 'packages/**'\n",
+            "package.json": "{\"name\": \"root\"}",
+            "packages/direct/package.json": "{\"name\": \"direct\"}",
+            "packages/group/shared/package.json": "{\"name\": \"shared\"}"
+        }
+    }"#);
+
+    let pkg = PackageJson::load_from_fs(&fs);
+    let info = detect_monorepo(&fs, pkg.as_ref(), None).unwrap();
+
+    assert_eq!(
+        info.packages
+            .iter()
+            .map(|package| package.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["packages/direct", "packages/group/shared"]
+    );
+}
+
+#[test]
+fn single_star_workspace_glob_does_not_cross_directories() {
+    let fs = vfs(r#"{
+        "tree": [
+            "packages/",
+            "packages/direct/",
+            "packages/group/",
+            "packages/group/nested/"
+        ],
+        "files": {
+            "package.json": "{\"name\": \"root\", \"workspaces\": [\"packages/*\"]}",
+            "packages/direct/package.json": "{\"name\": \"direct\"}",
+            "packages/group/nested/package.json": "{\"name\": \"nested\"}"
+        }
+    }"#);
+
+    let pkg = PackageJson::load_from_fs(&fs);
+    let info = detect_monorepo(&fs, pkg.as_ref(), None).unwrap();
+
+    assert_eq!(info.packages.len(), 1);
+    assert_eq!(info.packages[0].path, "packages/direct");
+}
+
+#[test]
+fn recursive_workspace_glob_respects_negations() {
+    let fs = vfs(r#"{
+        "tree": [
+            "packages/",
+            "packages/public/",
+            "packages/public/shared/",
+            "packages/internal/",
+            "packages/internal/private/"
+        ],
+        "files": {
+            "pnpm-workspace.yaml": "packages:\n  - 'packages/**'\n  - '!packages/internal/**'\n",
+            "package.json": "{\"name\": \"root\"}",
+            "packages/public/shared/package.json": "{\"name\": \"shared\"}",
+            "packages/internal/private/package.json": "{\"name\": \"private\"}"
+        }
+    }"#);
+
+    let pkg = PackageJson::load_from_fs(&fs);
+    let info = detect_monorepo(&fs, pkg.as_ref(), None).unwrap();
+
+    assert_eq!(info.packages.len(), 1);
+    assert_eq!(info.packages[0].path, "packages/public/shared");
+}
+
+#[test]
+fn recursive_workspace_glob_respects_unanchored_test_negation() {
+    let fs = vfs(r#"{
+        "tree": [
+            "components/",
+            "components/button/",
+            "components/group/",
+            "components/group/test/",
+            "components/group/test/fixture/"
+        ],
+        "files": {
+            "pnpm-workspace.yaml": "packages:\n  - 'components/**'\n  - '!**/test/**'\n",
+            "package.json": "{\"name\": \"root\"}",
+            "components/button/package.json": "{\"name\": \"button\"}",
+            "components/group/test/fixture/package.json": "{\"name\": \"fixture\"}"
+        }
+    }"#);
+
+    let pkg = PackageJson::load_from_fs(&fs);
+    let info = detect_monorepo(&fs, pkg.as_ref(), None).unwrap();
+
+    assert_eq!(info.packages.len(), 1);
+    assert_eq!(info.packages[0].path, "components/button");
+}
+
+#[test]
 fn detect_npm_workspaces_monorepo() {
     let fs = vfs(r#"{
         "tree": ["packages/", "packages/core/"],
@@ -287,8 +389,14 @@ fn resolve_app_by_name() {
         },
     ]);
 
-    assert_eq!(resolve_app(&info, "@my/web"), Some("apps/web".to_string()));
-    assert_eq!(resolve_app(&info, "@my/api"), Some("apps/api".to_string()));
+    assert_eq!(
+        resolve_app(&info, "@my/web").unwrap(),
+        Some("apps/web".to_string())
+    );
+    assert_eq!(
+        resolve_app(&info, "@my/api").unwrap(),
+        Some("apps/api".to_string())
+    );
 }
 
 #[test]
@@ -298,7 +406,10 @@ fn resolve_app_by_dirname() {
         path: "apps/web".to_string(),
     }]);
 
-    assert_eq!(resolve_app(&info, "web"), Some("apps/web".to_string()));
+    assert_eq!(
+        resolve_app(&info, "web").unwrap(),
+        Some("apps/web".to_string())
+    );
 }
 
 #[test]
@@ -308,7 +419,10 @@ fn resolve_app_by_path() {
         path: "apps/web".to_string(),
     }]);
 
-    assert_eq!(resolve_app(&info, "apps/web"), Some("apps/web".to_string()));
+    assert_eq!(
+        resolve_app(&info, "apps/web").unwrap(),
+        Some("apps/web".to_string())
+    );
 }
 
 #[test]
@@ -319,7 +433,10 @@ fn resolve_app_name_over_dirname() {
         path: "apps/frontend".to_string(),
     }]);
 
-    assert_eq!(resolve_app(&info, "web"), Some("apps/frontend".to_string()));
+    assert_eq!(
+        resolve_app(&info, "web").unwrap(),
+        Some("apps/frontend".to_string())
+    );
 }
 
 #[test]
@@ -329,7 +446,7 @@ fn resolve_app_not_found() {
         path: "apps/web".to_string(),
     }]);
 
-    assert_eq!(resolve_app(&info, "missing"), None);
+    assert_eq!(resolve_app(&info, "missing").unwrap(), None);
 }
 
 // ── exact path pattern ───────────────────────────────────────
@@ -350,6 +467,38 @@ fn detect_exact_path_workspace() {
     assert_eq!(info.packages.len(), 1);
     assert_eq!(info.packages[0].path, "packages/core");
     assert_eq!(info.packages[0].name.as_deref(), Some("@my/core"));
+}
+
+#[test]
+fn discover_workspace_root_for_nested_pnpm_app() {
+    let workspace = tempfile::tempdir().unwrap();
+    let app = workspace.path().join("apps/group/web");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(
+        workspace.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - 'apps/**'\n",
+    )
+    .unwrap();
+    std::fs::write(workspace.path().join("package.json"), r#"{"private":true}"#).unwrap();
+    std::fs::write(app.join("package.json"), r#"{"name":"web"}"#).unwrap();
+
+    assert_eq!(discover_workspace_root(&app), workspace.path());
+}
+
+#[test]
+fn discover_workspace_root_ignores_undeclared_ancestor() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("packages/web");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        workspace.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - 'apps/*'\n",
+    )
+    .unwrap();
+    std::fs::write(workspace.path().join("package.json"), r#"{"private":true}"#).unwrap();
+    std::fs::write(project.join("package.json"), r#"{"name":"web"}"#).unwrap();
+
+    assert_eq!(discover_workspace_root(&project), project);
 }
 
 // ── negation patterns ─────────────────────────────────────────
@@ -435,7 +584,26 @@ fn directory_without_package_json_skipped() {
 #[test]
 fn resolve_app_with_empty_packages() {
     let info = make_info(vec![]);
-    assert_eq!(resolve_app(&info, "anything"), None);
+    assert_eq!(resolve_app(&info, "anything").unwrap(), None);
+}
+
+#[test]
+fn resolve_app_rejects_ambiguous_directory_name() {
+    let info = make_info(vec![
+        MonorepoPackage {
+            name: Some("@site/web".to_string()),
+            path: "apps/web".to_string(),
+        },
+        MonorepoPackage {
+            name: Some("@example/web".to_string()),
+            path: "examples/web".to_string(),
+        },
+    ]);
+
+    assert_eq!(
+        resolve_app(&info, "web").unwrap_err(),
+        vec!["apps/web".to_string(), "examples/web".to_string()]
+    );
 }
 
 #[test]

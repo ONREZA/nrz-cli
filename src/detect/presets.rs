@@ -681,7 +681,7 @@ pub static DETECTION_RULES: &[FrameworkDetectionRule] = &[
     },
     FrameworkDetectionRule {
         slug: "hono",
-        every: &[Package("hono")],
+        every: &[RuntimePackage("hono")],
         some: &[
             ContentAny {
                 paths: SERVER_ENTRY_FILES,
@@ -693,7 +693,7 @@ pub static DETECTION_RULES: &[FrameworkDetectionRule] = &[
     },
     FrameworkDetectionRule {
         slug: "elysia",
-        every: &[Package("elysia")],
+        every: &[RuntimePackage("elysia")],
         some: &[
             ContentAny {
                 paths: SERVER_ENTRY_FILES,
@@ -705,7 +705,7 @@ pub static DETECTION_RULES: &[FrameworkDetectionRule] = &[
     },
     FrameworkDetectionRule {
         slug: "nestjs",
-        every: &[Package("@nestjs/core")],
+        every: &[RuntimePackage("@nestjs/core")],
         some: &[
             ContentAny {
                 paths: SERVER_ENTRY_FILES,
@@ -717,7 +717,7 @@ pub static DETECTION_RULES: &[FrameworkDetectionRule] = &[
     },
     FrameworkDetectionRule {
         slug: "fastify",
-        every: &[Package("fastify")],
+        every: &[RuntimePackage("fastify")],
         some: &[
             ContentAny {
                 paths: SERVER_ENTRY_FILES,
@@ -729,7 +729,7 @@ pub static DETECTION_RULES: &[FrameworkDetectionRule] = &[
     },
     FrameworkDetectionRule {
         slug: "adonis",
-        every: &[Package("@adonisjs/core")],
+        every: &[RuntimePackage("@adonisjs/core")],
         some: &[
             Path("adonisrc.ts"),
             Path("adonisrc.js"),
@@ -764,7 +764,7 @@ pub static DETECTION_RULES: &[FrameworkDetectionRule] = &[
     },
     FrameworkDetectionRule {
         slug: "h3",
-        every: &[Package("h3")],
+        every: &[RuntimePackage("h3")],
         some: &[
             ContentAny {
                 paths: SERVER_ENTRY_FILES,

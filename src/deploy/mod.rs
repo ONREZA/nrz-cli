@@ -48,7 +48,7 @@ use sha2::{Digest, Sha256};
 
 use crate::api::{
     ApiClient, ConditionalUploadConflict, PresignedHeadVerify, PresignedPutHeaders,
-    classify_api_retry,
+    classify_api_retry, path_segment,
 };
 use crate::artifact::source_bundle_v1::{
     self, CLI_PROTOCOL_VERSION, CompletedMultipartPart, PresignedSourceMultipartChunk,
@@ -778,7 +778,10 @@ pub async fn run(
         output::status(json, "~", "Admitting deployment...", output::Phase::Deploy);
         let admitted: AdmissionResponse = client
             .post(
-                &format!("/v1/projects/{project_id}/deployments/admit"),
+                &format!(
+                    "/v1/projects/{}/deployments/admit",
+                    path_segment(&project_id)
+                ),
                 &AdmitDeploymentBody {
                     protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
                     environment_id: &context.environment_id,
@@ -1049,7 +1052,10 @@ pub async fn run(
             }
 
             let status: DeploymentStatusResponse = client
-                .get(&format!("/v1/deployments/{}/status", deployment.id))
+                .get(&format!(
+                    "/v1/deployments/{}/status",
+                    path_segment(&deployment.id)
+                ))
                 .await
                 .context("failed to check deployment status")?;
 
@@ -1087,23 +1093,25 @@ pub async fn run(
                             verification,
                         });
                     } else {
+                        let url = output::terminal_line(url);
                         eprintln!();
                         eprintln!(
                             "  {} Deployed to {}",
                             console::style("✓").green().bold(),
-                            console::style(url).underlined().bold(),
+                            console::style(&url).underlined().bold(),
                         );
                         if let Some(verification) = &verification {
+                            let verified_url = output::terminal_line(&verification.url);
                             eprintln!(
                                 "  {} Verified {} ({})",
                                 console::style("✓").green().bold(),
-                                console::style(&verification.url).underlined(),
+                                console::style(verified_url).underlined(),
                                 verification.status_code
                             );
                         }
                         eprintln!();
                         if preview_protected {
-                            crate::preview::print_preview_access_hint(&project_id, Some(url));
+                            crate::preview::print_preview_access_hint(&project_id, Some(&url));
                         }
                     }
                     return Ok(());
@@ -1118,7 +1126,7 @@ pub async fn run(
                 }
                 other => {
                     if let Some(ref s) = spinner {
-                        s.set_message(format!("Status: {other}..."));
+                        s.set_message(format!("Status: {}...", output::terminal_line(other)));
                     }
                     continue;
                 }
@@ -1156,7 +1164,10 @@ async fn report_pre_source_failure(
     redactor: Option<&ExactValueRedactor>,
     json: bool,
 ) {
-    let path = format!("/v1/deployments/{deployment_id}/execution-context/fail-before-source");
+    let path = format!(
+        "/v1/deployments/{}/execution-context/fail-before-source",
+        path_segment(deployment_id)
+    );
     let body = PreSourceFailureBody {
         protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
         attempt,
@@ -1314,7 +1325,7 @@ async fn sync_compute_config(
         health_check_path: health_check.path.clone(),
     };
 
-    let path = format!("/v1/compute-config/{project_id}");
+    let path = format!("/v1/compute-config/{}", path_segment(project_id));
     let resp: Result<serde_json::Value, _> = client.put(&path, &body).await;
     if let Err(e) = resp {
         output::warn(
@@ -1346,8 +1357,8 @@ async fn register_deployment_source(
     functions: Option<serde_json::Value>,
     json: bool,
 ) -> anyhow::Result<()> {
-    let path = format!("/v1/deployments/{deployment_id}/source");
     let namespace = Uuid::parse_str(deployment_id).context("deployment ID is not a valid UUID")?;
+    let path = format!("/v1/deployments/{}/source", path_segment(deployment_id));
     let operation_id = Uuid::new_v5(
         &namespace,
         format!("onreza:deployment-source:{attempt}").as_bytes(),

@@ -82,7 +82,7 @@ pub async fn run(args: UpgradeArgs, json: bool) -> anyhow::Result<()> {
     progress(json, format!("Current version: {current_version}"));
 
     // Detect platform
-    let platform = detect_platform();
+    let platform = detect_platform()?;
     progress(json, format!("Platform: {platform}"));
 
     let release = if let Some(target_version) = args.version.as_deref() {
@@ -190,7 +190,7 @@ fn progress(json: bool, message: impl std::fmt::Display) {
     if json {
         output::log_line("user", "info", "upgrade", &message);
     } else {
-        eprintln!("{message}");
+        eprintln!("{}", output::terminal_text(&message));
     }
 }
 
@@ -203,23 +203,28 @@ fn normalize_tag(version: &str) -> String {
 }
 
 /// Detect current platform for binary selection
-fn detect_platform() -> &'static str {
+fn detect_platform() -> anyhow::Result<&'static str> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    return "linux-x64";
+    return Ok("linux-x64");
 
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    return "darwin-x64";
+    return Ok("darwin-x64");
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    return "darwin-arm64";
+    return Ok("darwin-arm64");
 
     #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    return "win32-x64";
+    return Ok("win32-x64");
 
     #[allow(unreachable_code)]
-    {
-        panic!("Unsupported platform")
-    }
+    Err(output::coded_error(
+        "UNSUPPORTED_PLATFORM",
+        format!(
+            "nrz upgrade has no release binary for {}/{}; install from source or use a supported platform",
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        ),
+    ))
 }
 
 /// Fetch one releases page from GitHub API.

@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 use crate::auth;
 use crate::cli::LinkArgs;
 use crate::output;
@@ -105,7 +105,7 @@ pub async fn find_project_by_id(
     project_id: &str,
 ) -> anyhow::Result<SelectedProject> {
     let project: Project = client
-        .get(&format!("/v1/projects/{project_id}"))
+        .get(&format!("/v1/projects/{}", path_segment(project_id)))
         .await
         .with_context(|| format!("failed to fetch project {project_id}"))?;
 
@@ -131,7 +131,7 @@ pub async fn select_project_interactive(client: &ApiClient) -> anyhow::Result<Se
         eprintln!(
             "  {} {}",
             console::style(format!("{}.", i + 1)).dim(),
-            project.display_name(),
+            output::terminal_line(project.display_name()),
         );
     }
     eprintln!();

@@ -124,7 +124,12 @@ fn emit_terminal_error(json: bool, err: &anyhow::Error) {
         return;
     }
     if !json {
-        eprintln!("Error: {}", output::terminal_line(&format!("{err:#}")));
+        let rendered = output::terminal_text(&format!("{err:#}"))
+            .lines()
+            .map(output::terminal_line)
+            .collect::<Vec<_>>()
+            .join("\n  ");
+        eprintln!("Error: {rendered}");
         return;
     }
     let message = format!("{err:#}");
@@ -161,7 +166,7 @@ async fn run_command(
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     match command {
-        Command::Dev(args) => dev::run(args, token, workspace, config).await,
+        Command::Dev(args) => dev::run(args, json, token, workspace, config).await,
         Command::Build(args) => build::run(args, json, config).await.map(|_| ()),
         Command::Deploy(args) => deploy::run(args, json, token, workspace, config).await,
         Command::Db(args) => cli::db_handler::run(args, json, token, workspace, config).await,

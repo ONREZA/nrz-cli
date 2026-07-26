@@ -40,3 +40,17 @@ fn logs_human_formatter_uses_message_entries() {
         "[2026-06-07T20:06:36.000Z] [warn] slow path"
     );
 }
+
+#[test]
+fn logs_human_formatter_emits_one_safe_terminal_line() {
+    let entry = serde_json::json!({
+        "timestamp": "2026-06-07T20:06:36.000Z",
+        "functionLogLevel": "warn",
+        "message": "\u{1b}]0;forged title\u{7}first\rsecond\nthird"
+    });
+
+    assert_eq!(
+        format_log_entry(&entry),
+        "[2026-06-07T20:06:36.000Z] [warn] first second third"
+    );
+}

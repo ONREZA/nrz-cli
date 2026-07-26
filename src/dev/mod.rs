@@ -5,12 +5,15 @@ mod process;
 mod inject_tests;
 
 use std::io::Write;
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::Context;
+use serde::Serialize;
 
 use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::DevArgs;
+use crate::output;
 use nrz::config::{self, ProjectConfig};
 use nrz::emulator::kv::KvStore;
 use nrz::emulator::server::EmulatorServer;
@@ -28,6 +31,7 @@ use nrz::emulator::server::EmulatorServer;
 /// 9. Cleanup on exit
 pub async fn run(
     args: DevArgs,
+    json: bool,
     token: Option<&str>,
     workspace: Option<&str>,
     config: &ProjectConfig,
@@ -55,9 +59,7 @@ pub async fn run(
     };
 
     // 2. Ensure data directory
-    let data_dir = config.data_dir_path(&project_dir);
-    std::fs::create_dir_all(&data_dir)
-        .with_context(|| format!("failed to create data directory: {}", data_dir.display()))?;
+    prepare_data_dir(&project_dir, config.data_dir_relative())?;
 
     // 3. Generate bootstrap script
     let port = args.port.unwrap_or(config.dev_port());
@@ -85,11 +87,14 @@ pub async fn run(
             crate::execution_context::materialize_desired(&client, &context, source_ref, "DEV")
                 .await?;
         crate::execution_context::warn_local_dotenv_drift(&project_dir, false)?;
-        eprintln!(
-            "  {} environment {} ({})",
-            console::style("~").cyan().bold(),
-            materialized.context.environment_name,
-            materialized.context.environment_id,
+        output::status(
+            json,
+            "~",
+            format!(
+                "environment {} ({})",
+                materialized.context.environment_name, materialized.context.environment_id,
+            ),
+            output::Phase::Dev,
         );
         crate::execution_context::execution_environment(&materialized)
     };
@@ -99,8 +104,9 @@ pub async fn run(
     let host = config.dev_host();
     let server = EmulatorServer::new(kv, emulator_port, host)?;
     let emulator_token = server.token().to_string();
-    let bootstrap = inject::generate_bootstrap(&data_dir, emulator_port, &emulator_token)?;
-    let bootstrap_path = write_bootstrap(&data_dir, &bootstrap)?;
+    let emulator_url = server.client_url();
+    let bootstrap = inject::generate_bootstrap(&emulator_url, &emulator_token)?;
+    let bootstrap_file = write_bootstrap(&bootstrap)?;
 
     // 6. Start emulator server in background
     let server_handle = tokio::spawn(async move {
@@ -110,15 +116,16 @@ pub async fn run(
     });
 
     // 7. Wait for emulator to be ready
-    if let Err(error) = wait_for_emulator(emulator_port, host, &emulator_token).await {
+    if let Err(error) = wait_for_emulator(&emulator_url, &emulator_token).await {
         server_handle.abort();
-        let _ = std::fs::remove_file(&bootstrap_path);
         return Err(error);
     }
 
-    eprintln!(
-        "  {} emulator ready on port {emulator_port}",
-        console::style("~").cyan().bold(),
+    output::status(
+        json,
+        "~",
+        format!("emulator ready on port {emulator_port}"),
+        output::Phase::Dev,
     );
 
     // 8. Build extra NODE_OPTIONS (--inspect / --inspect-brk)
@@ -130,33 +137,79 @@ pub async fn run(
         None
     };
 
-    eprintln!(
-        "  {} starting: {dev_command}",
-        console::style(">").green().bold(),
+    output::status(
+        json,
+        ">",
+        format!("starting: {dev_command}"),
+        output::Phase::Dev,
     );
 
     // 9. Spawn dev server (blocks until exit or Ctrl+C)
-    let result = process::spawn_dev_server(
+    let exit = process::spawn_dev_server(
         &project_dir,
         &dev_command,
-        &bootstrap_path,
+        bootstrap_file.path(),
         inspect_flag,
         &extra_env,
+        json,
     )
-    .await;
+    .await?;
 
     // 10. Cleanup
     server_handle.abort();
-    let _ = std::fs::remove_file(&bootstrap_path);
 
-    result
+    if json {
+        output::json_output(&DevResult {
+            status: exit.as_str(),
+            command: &dev_command,
+            project_dir: project_dir.to_string_lossy(),
+        });
+    }
+
+    Ok(())
 }
 
-fn write_bootstrap(
-    data_dir: &std::path::Path,
-    bootstrap: &str,
-) -> anyhow::Result<std::path::PathBuf> {
-    let path = data_dir.join(format!("bootstrap-{}.mjs", uuid::Uuid::now_v7().simple()));
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevResult<'a> {
+    status: &'static str,
+    command: &'a str,
+    project_dir: std::borrow::Cow<'a, str>,
+}
+
+struct BootstrapFile {
+    directory: PathBuf,
+    path: PathBuf,
+}
+
+impl BootstrapFile {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for BootstrapFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_dir(&self.directory);
+    }
+}
+
+fn write_bootstrap(bootstrap: &str) -> anyhow::Result<BootstrapFile> {
+    let directory = std::env::temp_dir().join(format!("nrz-dev-{}", uuid::Uuid::now_v7().simple()));
+    let mut directory_options = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        directory_options.mode(0o700);
+    }
+    directory_options.create(&directory).with_context(|| {
+        format!(
+            "failed to create bootstrap directory: {}",
+            directory.display()
+        )
+    })?;
+    let path = directory.join("bootstrap.mjs");
     let write_result = (|| {
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
@@ -175,13 +228,76 @@ fn write_bootstrap(
     })();
     if write_result.is_err() {
         let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&directory);
     }
     write_result?;
-    Ok(path)
+    Ok(BootstrapFile { directory, path })
 }
 
-async fn wait_for_emulator(port: u16, host: &str, token: &str) -> anyhow::Result<()> {
-    let url = format!("http://{host}:{port}/__nrz/health");
+fn prepare_data_dir(project_dir: &Path, configured: &str) -> anyhow::Result<PathBuf> {
+    let relative = Path::new(configured);
+    if configured.trim().is_empty() || relative.as_os_str() == "." {
+        anyhow::bail!("dev.data_dir must name a directory inside the project");
+    }
+
+    let mut target = project_dir.to_path_buf();
+    for component in relative.components() {
+        match component {
+            Component::Normal(part) => target.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                anyhow::bail!(
+                    "dev.data_dir must be a relative path inside the project: {configured}"
+                );
+            }
+        }
+
+        match std::fs::symlink_metadata(&target) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                anyhow::bail!(
+                    "dev.data_dir must not traverse symbolic links: {}",
+                    target.display()
+                );
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                anyhow::bail!(
+                    "dev.data_dir component is not a directory: {}",
+                    target.display()
+                );
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(&target).with_context(|| {
+                    format!("failed to create data directory: {}", target.display())
+                })?;
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("failed to inspect data directory: {}", target.display())
+                });
+            }
+        }
+    }
+
+    if target == project_dir {
+        anyhow::bail!("dev.data_dir must name a directory inside the project");
+    }
+
+    let canonical = target
+        .canonicalize()
+        .with_context(|| format!("failed to resolve data directory: {}", target.display()))?;
+    if !canonical.starts_with(project_dir) {
+        anyhow::bail!(
+            "dev.data_dir resolves outside the project: {}",
+            canonical.display()
+        );
+    }
+
+    Ok(canonical)
+}
+
+async fn wait_for_emulator(base_url: &str, token: &str) -> anyhow::Result<()> {
+    let url = format!("{base_url}/__nrz/health");
     let client = reqwest::Client::new();
     for _ in 0..50 {
         match client
@@ -194,5 +310,5 @@ async fn wait_for_emulator(port: u16, host: &str, token: &str) -> anyhow::Result
             _ => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
         }
     }
-    anyhow::bail!("emulator server failed to start on port {port}")
+    anyhow::bail!("emulator server failed to start at {base_url}")
 }

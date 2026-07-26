@@ -109,24 +109,37 @@ fn resolve_monorepo_app_path(root_dir: &Path, app_name: &str) -> anyhow::Result<
         ));
     };
 
-    let Some(app_path) = crate::detect::monorepo::resolve_app(&info, app_name) else {
-        let available: Vec<String> = info
-            .packages
-            .iter()
-            .map(|p| p.name.as_deref().unwrap_or(&p.path).to_string())
-            .collect();
-        return Err(output::coded_error(
-            "MONOREPO_APP_NOT_FOUND",
-            format!(
-                "app \"{app_name}\" not found in monorepo workspaces.\n\
-                 Available packages: {}",
-                if available.is_empty() {
-                    "(none resolved)".to_string()
-                } else {
-                    available.join(", ")
-                }
-            ),
-        ));
+    let app_path = match crate::detect::monorepo::resolve_app(&info, app_name) {
+        Ok(Some(path)) => path,
+        Err(paths) => {
+            return Err(output::coded_error(
+                "MONOREPO_APP_AMBIGUOUS",
+                format!(
+                    "app \"{app_name}\" matches multiple monorepo packages: {}. \
+                     Pass an exact package name or relative path.",
+                    paths.join(", ")
+                ),
+            ));
+        }
+        Ok(None) => {
+            let available: Vec<String> = info
+                .packages
+                .iter()
+                .map(|p| p.name.as_deref().unwrap_or(&p.path).to_string())
+                .collect();
+            return Err(output::coded_error(
+                "MONOREPO_APP_NOT_FOUND",
+                format!(
+                    "app \"{app_name}\" not found in monorepo workspaces.\n\
+                     Available packages: {}",
+                    if available.is_empty() {
+                        "(none resolved)".to_string()
+                    } else {
+                        available.join(", ")
+                    }
+                ),
+            ));
+        }
     };
 
     let resolved = root_dir.join(&app_path);

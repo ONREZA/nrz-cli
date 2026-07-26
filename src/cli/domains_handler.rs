@@ -1,7 +1,7 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment, query_value};
 use crate::auth;
 use crate::execution_context;
 use crate::output;
@@ -136,10 +136,11 @@ async fn list(client: &ApiClient, project_id: &str, json: bool) -> anyhow::Resul
         eprintln!("  {}", "-".repeat(75));
 
         for d in &resp.domains {
-            let dns = format_status(&d.dns_status);
-            let tls = format_status(&d.tls_status);
-            let env_name = &d.environment.name;
-            eprintln!("  {:<40} {:<12} {:<10} {}", d.domain, dns, tls, env_name);
+            let dns = format_status(&output::terminal_line(&d.dns_status));
+            let tls = format_status(&output::terminal_line(&d.tls_status));
+            let domain = output::terminal_line(&d.domain);
+            let env_name = output::terminal_line(&d.environment.name);
+            eprintln!("  {domain:<40} {dns:<12} {tls:<10} {env_name}");
         }
         eprintln!();
     }
@@ -152,7 +153,10 @@ async fn fetch_project_domains(
     project_id: &str,
 ) -> anyhow::Result<DomainsListResponse> {
     client
-        .get(&format!("/v1/workspace-domains?projectIds={}", project_id))
+        .get(&format!(
+            "/v1/workspace-domains?projectIds={}",
+            query_value(project_id)
+        ))
         .await
 }
 
@@ -301,13 +305,24 @@ async fn find_project_domain(
 }
 
 pub(crate) fn workspace_hostname_delete_url(zone_id: &str, binding_id: &str) -> String {
-    format!("/v1/workspace-domains/domains/{zone_id}/hostnames/{binding_id}")
+    format!(
+        "/v1/workspace-domains/domains/{}/hostnames/{}",
+        path_segment(zone_id),
+        path_segment(binding_id)
+    )
 }
 
 pub(crate) fn project_domain_delete_url(project_id: &str, domain_id: &str) -> String {
-    format!("/v1/domains/{project_id}/platform-subdomains/{domain_id}")
+    format!(
+        "/v1/domains/{}/platform-subdomains/{}",
+        path_segment(project_id),
+        path_segment(domain_id)
+    )
 }
 
 pub(crate) fn workspace_zone_verify_url(zone_id: &str) -> String {
-    format!("/v1/workspace-domains/domains/{zone_id}/verify")
+    format!(
+        "/v1/workspace-domains/domains/{}/verify",
+        path_segment(zone_id)
+    )
 }

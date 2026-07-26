@@ -229,10 +229,7 @@ impl ApiClient {
             HeaderValue::from_str(&format!("nrz-cli/{}", env!("CARGO_PKG_VERSION")))?,
         );
 
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .build()
-            .context("failed to create HTTP client")?;
+        let client = build_api_http_client(headers)?;
 
         let upload_client = build_upload_client()?;
 
@@ -255,10 +252,7 @@ impl ApiClient {
             HeaderValue::from_str(token).context("invalid token format")?,
         );
 
-        let client = reqwest::Client::builder()
-            .default_headers(headers)
-            .build()
-            .context("failed to create HTTP client")?;
+        let client = build_api_http_client(headers)?;
 
         let upload_client = build_upload_client()?;
 
@@ -952,10 +946,19 @@ fn build_upload_client() -> anyhow::Result<reqwest::Client> {
     // a hung connection gets cut and the retry loop can progress before the overall
     // budget expires. connect_timeout is separate so we fail fast on unreachable hosts.
     reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(120))
         .build()
         .context("failed to create upload HTTP client")
+}
+
+pub(super) fn build_api_http_client(headers: HeaderMap) -> anyhow::Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .context("failed to create HTTP client")
 }
 
 fn resolve_base_url() -> String {

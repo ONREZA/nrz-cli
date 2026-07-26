@@ -1,7 +1,8 @@
 use super::{
     BuildSettingSource, OutputDirectoryHint, collect_body_files, copy_dir_recursive,
     copy_missing_prisma_packages, detect_output_dir, detect_output_dir_for_framework,
-    prepare_copy_destination, prepare_nextjs_standalone, run_with_hint, try_generate_ssr_manifest,
+    prepare_copy_destination, prepare_nextjs_standalone, run, run_with_hint,
+    try_generate_ssr_manifest,
 };
 use crate::cli::BuildArgs;
 use crate::frameworks::compute_aware_output_dirs;
@@ -2986,6 +2987,53 @@ fn prisma_standalone_integration_via_prepare() {
             .path()
             .join("node_modules/@prisma/client-deadbeef/index.js")
             .is_file()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn direct_monorepo_build_copies_prisma_from_workspace_pnpm_store() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("apps/web");
+    let output = project.join(".next/standalone");
+    let real_pkg = workspace
+        .path()
+        .join("node_modules/.pnpm/@prisma+client@6.0.0/node_modules/@prisma/client-direct");
+
+    std::fs::create_dir_all(&output).unwrap();
+    std::fs::write(output.join("server.js"), "// server").unwrap();
+    std::fs::write(
+        workspace.path().join("pnpm-workspace.yaml"),
+        "packages:\n  - 'apps/*'\n",
+    )
+    .unwrap();
+    std::fs::write(workspace.path().join("package.json"), r#"{"private":true}"#).unwrap();
+    std::fs::write(
+        project.join("package.json"),
+        r#"{"dependencies":{"next":"15.0.0"}}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(&real_pkg).unwrap();
+    std::fs::write(real_pkg.join("index.js"), "// workspace prisma").unwrap();
+    let prisma_dir = project.join("node_modules/@prisma");
+    std::fs::create_dir_all(&prisma_dir).unwrap();
+    std::os::unix::fs::symlink(&real_pkg, prisma_dir.join("client-direct")).unwrap();
+
+    run(
+        BuildArgs {
+            dir: project.to_string_lossy().into_owned(),
+            skip_validation: true,
+        },
+        true,
+        &nrz::config::ProjectConfig::default(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(output.join("node_modules/@prisma/client-direct/index.js"))
+            .unwrap(),
+        "// workspace prisma"
     );
 }
 

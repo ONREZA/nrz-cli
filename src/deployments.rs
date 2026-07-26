@@ -1,7 +1,7 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 use crate::auth;
 use crate::cli::DeploymentsArgs;
 use crate::output;
@@ -118,7 +118,8 @@ pub async fn run(
     let resp: DeploymentsResponse = client
         .get(&format!(
             "/v1/deployments/project/{}?limit={}",
-            project_id, args.limit
+            path_segment(&project_id),
+            args.limit
         ))
         .await
         .context("failed to fetch deployments")?;
@@ -143,10 +144,11 @@ pub async fn run(
         eprintln!("  {}", "-".repeat(90));
 
         for d in &resp.deployments {
-            let short_id = truncate_id(&d.id, 8);
-            let branch = d.branch.as_deref().unwrap_or("-");
-            let url = d.url.as_deref().unwrap_or("-");
-            let created = d.created_at.as_deref().unwrap_or("-");
+            let id = output::terminal_line(&d.id);
+            let short_id = truncate_id(&id, 8);
+            let branch = output::terminal_line(d.branch.as_deref().unwrap_or("-"));
+            let url = output::terminal_line(d.url.as_deref().unwrap_or("-"));
+            let created = output::terminal_line(d.created_at.as_deref().unwrap_or("-"));
             eprintln!(
                 "  {:<12} {:<12} {:<15} {:<35} {}",
                 short_id, d.status, branch, url, created
