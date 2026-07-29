@@ -1424,6 +1424,9 @@ fn map_source_registration_error(error: anyhow::Error, json: bool, context: &str
     let Some(api_error) = error.downcast_ref::<crate::api::StructuredApiError>() else {
         return error.context(context.to_string());
     };
+    if let Some(mapped) = map_edge_rules_diverged_error(api_error, json, context) {
+        return mapped;
+    }
     let message = format_structured_api_failure(context, api_error);
     if json {
         return output::report_terminal_error(

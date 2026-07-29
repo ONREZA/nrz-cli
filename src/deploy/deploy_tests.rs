@@ -379,6 +379,41 @@ fn scan_files_rejects_symlink_parent_traversal_after_regular_file() {
 // ── resolve_build_command tests ──────────────────────────────
 
 #[test]
+fn missing_output_explains_absent_build_command() {
+    let error = output::coded_error(
+        "MISSING_BUILD_OUTPUT",
+        "no output directory found".to_string(),
+    );
+
+    let mapped = plan::contextualize_missing_build_output(error, None, false);
+    let coded = mapped
+        .downcast_ref::<output::CodedError>()
+        .expect("missing output must stay coded");
+
+    assert_eq!(coded.code, "MISSING_BUILD_OUTPUT");
+    assert!(coded.message.contains("No build command was configured"));
+    assert!(coded.message.contains("--build-command"));
+    assert!(coded.message.contains("[build].command"));
+}
+
+#[test]
+fn missing_prebuilt_output_explains_skipped_build() {
+    let error = output::coded_error(
+        "MISSING_BUILD_OUTPUT",
+        "no output directory found".to_string(),
+    );
+
+    let mapped = plan::contextualize_missing_build_output(error, Some("bun run build"), true);
+    let coded = mapped
+        .downcast_ref::<output::CodedError>()
+        .expect("missing output must stay coded");
+
+    assert_eq!(coded.code, "MISSING_BUILD_OUTPUT");
+    assert!(coded.message.contains("Build execution was skipped"));
+    assert!(coded.message.contains("--skip-build"));
+}
+
+#[test]
 fn build_command_explicit_wins_over_config_and_auto() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("package.json"), "{}").unwrap();
@@ -3888,6 +3923,33 @@ fn source_registration_validation_error_preserves_actionable_diagnostic() {
     assert_eq!(value["errorCode"], "BUILD_FAILED");
     assert_eq!(value["diagnostic"]["code"], "VALIDATION_ERROR");
     assert_eq!(value["diagnostic"]["details"], details);
+}
+
+#[test]
+fn source_registration_edge_rules_divergence_is_actionable() {
+    let error: anyhow::Error = crate::api::StructuredApiError {
+        status: StatusCode::CONFLICT,
+        code: "FUNCTION_PUBLISH_FAILED".to_string(),
+        message: "Ошибка валидации данных".to_string(),
+        retry_after_seconds: None,
+        details: Some(serde_json::json!({
+            "field": "edgeRules",
+            "errorCode": "EDGE_RULES_DIVERGED",
+            "message": "Edge Rules changed remotely. Run `nrz rules pull` or deploy with `--force-rules`."
+        })),
+    }
+    .into();
+
+    let mapped = map_source_registration_error(
+        error,
+        false,
+        "failed to register admitted deployment source",
+    );
+    let diagnostic = pre_source_failure_diagnostic(&mapped, None).expect("pre-source diagnostic");
+
+    assert_eq!(diagnostic.code, "EDGE_RULES_DIVERGED");
+    assert!(diagnostic.message.contains("nrz rules pull"));
+    assert!(diagnostic.message.contains("--force-rules"));
 }
 
 #[test]

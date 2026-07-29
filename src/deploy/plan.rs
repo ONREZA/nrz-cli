@@ -306,7 +306,10 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         Some(&detection),
         false,
     )
-    .await?;
+    .await
+    .map_err(|error| {
+        contextualize_missing_build_output(error, build_command.as_deref(), args.skip_build)
+    })?;
 
     let mut deployment_manifest_source = build_result.manifest_source;
     let build_artifact = BuildArtifact {
@@ -494,6 +497,32 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         health_check,
         warnings,
     })
+}
+
+pub(super) fn contextualize_missing_build_output(
+    error: anyhow::Error,
+    build_command: Option<&str>,
+    build_skipped: bool,
+) -> anyhow::Error {
+    let is_missing_output = error
+        .chain()
+        .filter_map(|cause| cause.downcast_ref::<output::CodedError>())
+        .any(|coded| coded.code == "MISSING_BUILD_OUTPUT");
+    if !is_missing_output {
+        return error;
+    }
+
+    let guidance = if build_skipped {
+        "Build execution was skipped, but no prebuilt deployment output was found. \
+         Run the build first or deploy again without `--skip-build`."
+    } else if build_command.is_none() {
+        "No build command was configured or detected, and no prebuilt deployment output was found. \
+         Add a package build script, pass `--build-command`, or set `[build].command` in onreza.toml."
+    } else {
+        return error;
+    };
+
+    output::coded_error("MISSING_BUILD_OUTPUT", format!("{guidance}\n\n{error}"))
 }
 
 fn artifact_root_scope(runtime_root: &Path, project_dir: &Path) -> ArtifactRootScope {
