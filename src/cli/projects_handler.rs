@@ -284,7 +284,7 @@ async fn create(
             format!(
                 "Created project {} ({})",
                 console::style(&name).bold(),
-                &resp.id,
+                resp.id,
             ),
             output::Phase::Projects,
         );
