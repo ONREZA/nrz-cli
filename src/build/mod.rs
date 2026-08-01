@@ -1794,7 +1794,7 @@ fn copy_missing_prisma_packages(
         let source_is_allowed = canonical_source.starts_with(&canonical_prisma_dir)
             || pnpm_store_roots
                 .iter()
-                .any(|root| canonical_source.starts_with(root));
+                .any(|root| is_pnpm_prisma_client_package(root, &canonical_source));
         if !source_is_allowed {
             tracing::warn!(
                 path = %src_pkg.display(),
@@ -1818,6 +1818,20 @@ fn copy_missing_prisma_packages(
     }
 
     Ok(())
+}
+
+fn is_pnpm_prisma_client_package(store_root: &Path, source: &Path) -> bool {
+    let Ok(relative_source) = source.strip_prefix(store_root) else {
+        return false;
+    };
+    let Some(package_name) = relative_source.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+
+    package_name.starts_with("client-")
+        && relative_source
+            .parent()
+            .is_some_and(|parent| parent.ends_with("node_modules/@prisma"))
 }
 
 fn canonical_pnpm_store_roots(
