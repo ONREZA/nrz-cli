@@ -250,6 +250,54 @@ fn preview_flags_denied_capability() {
 }
 
 #[test]
+fn preview_flags_denied_globals_shadowed_by_erased_typescript_bindings() {
+    for (source, capability) in [
+        (
+            "export const config = {};\nconst enum Bun { Placeholder }\nexport default { fetch() { return Bun.sql`select 1`; } };\n",
+            "Bun ambient runtime API",
+        ),
+        (
+            "export const config = {};\nconst enum process { Placeholder }\nexport default { fetch() { process.exit(1); } };\n",
+            "process control",
+        ),
+        (
+            "import type { Worker } from 'node:util';\nexport const config = {};\nexport default { fetch() { return new Worker('worker.ts'); } };\n",
+            "Worker",
+        ),
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "functions/api.nrz-fn.ts", source);
+        let collected = collect(tmp.path()).unwrap();
+        let function = &collected.functions[0];
+
+        let report = run_policy_preview(&function.entrypoint, &function.sources).unwrap();
+
+        assert_eq!(report.status, PolicyStatus::Failed, "{source}");
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|violation| violation.capability == capability),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn preview_allows_denied_names_with_runtime_value_bindings() {
+    let source = "export const config = {};\nconst Bun = { sql: () => 'local' };\nexport default { fetch() { return Bun.sql(); } };\n";
+    let tmp = tempfile::tempdir().unwrap();
+    write(tmp.path(), "functions/api.nrz-fn.ts", source);
+    let collected = collect(tmp.path()).unwrap();
+    let function = &collected.functions[0];
+
+    let report = run_policy_preview(&function.entrypoint, &function.sources).unwrap();
+
+    assert_eq!(report.status, PolicyStatus::Passed);
+    assert!(report.violations.is_empty());
+}
+
+#[test]
 fn preview_flags_ambient_bun_alias_and_global_access() {
     for source in [
         "export const config = {};\nconst B = Bun;\nexport default { fetch() { return B.sql`select 1`; } };\n",

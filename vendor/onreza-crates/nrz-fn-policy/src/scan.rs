@@ -649,8 +649,11 @@ fn is_global_reference_name(
 
 fn is_runtime_global_reference(identifier: &IdentifierReference<'_>, scoping: &Scoping) -> bool {
     identifier.is_global_reference(scoping)
-        || identifier_symbol_id(identifier, scoping)
-            .is_some_and(|symbol_id| scoping.symbol_flags(symbol_id).is_ambient())
+        || identifier_symbol_id(identifier, scoping).is_some_and(|symbol_id| {
+            let flags = scoping.symbol_flags(symbol_id);
+            // Type-only symbols and const enums are erased before the function runs.
+            flags.is_ambient() || !flags.is_value() || flags.is_const_enum()
+        })
 }
 
 fn is_intrinsic_global_reference(identifier: &IdentifierReference<'_>, scoping: &Scoping) -> bool {
