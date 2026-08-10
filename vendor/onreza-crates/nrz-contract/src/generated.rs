@@ -14554,8 +14554,8 @@ pub mod manifest {
     ///                  },
     ///                  "memoryMb": {
     ///                    "type": "integer",
-    ///                    "maximum": 9007199254740991.0,
-    ///                    "exclusiveMinimum": 0.0
+    ///                    "maximum": 8192.0,
+    ///                    "minimum": 32.0
     ///                  },
     ///                  "timeoutMs": {
     ///                    "type": "integer",
@@ -14818,8 +14818,8 @@ pub mod manifest {
     ///            },
     ///            "memoryMb": {
     ///              "type": "integer",
-    ///              "maximum": 9007199254740991.0,
-    ///              "exclusiveMinimum": 0.0
+    ///              "maximum": 8192.0,
+    ///              "minimum": 32.0
     ///            },
     ///            "timeoutMs": {
     ///              "type": "integer",
@@ -15087,8 +15087,8 @@ pub mod manifest {
     ///    },
     ///    "memoryMb": {
     ///      "type": "integer",
-    ///      "maximum": 9007199254740991.0,
-    ///      "exclusiveMinimum": 0.0
+    ///      "maximum": 8192.0,
+    ///      "minimum": 32.0
     ///    },
     ///    "timeoutMs": {
     ///      "type": "integer",
@@ -15112,7 +15112,7 @@ pub mod manifest {
             default,
             skip_serializing_if = "::std::option::Option::is_none"
         )]
-        pub memory_mb: ::std::option::Option<::std::num::NonZeroU64>,
+        pub memory_mb: ::std::option::Option<i64>,
         #[serde(
             rename = "timeoutMs",
             default,
