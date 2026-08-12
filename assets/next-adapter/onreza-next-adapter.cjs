@@ -7,6 +7,12 @@ const OUTPUT_RELATIVE_PATH =
 const ONREZA_IMAGE_OPTIMIZER_PATH = '/_onreza/image'
 const ONREZA_IMAGE_LOADER_RELATIVE_PATH =
   './.onreza/cache/next-adapter/onreza-image-loader.mjs'
+const MAX_REMOTE_IMAGE_SOURCES = 128
+const MAX_REMOTE_IMAGE_PATHNAME_LENGTH = 1024
+const MAX_REMOTE_IMAGE_SEARCH_LENGTH = 2048
+const REMOTE_IMAGE_DOMAIN_PATTERN =
+  /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+const installedImageSourcesByProject = new Map()
 
 function jsonReplacer(_key, value) {
   if (typeof value === 'function' || typeof value === 'symbol') {
@@ -71,6 +77,144 @@ function hasUserAssetPrefix(config) {
   return config.assetPrefix !== config.basePath
 }
 
+function normalizeRemoteHostname(value, allowWildcard) {
+  if (typeof value !== 'string' || value.length === 0) {
+    return null
+  }
+  const normalized = value.trim().toLowerCase()
+  const wildcard = allowWildcard
+    ? normalized.match(/^(?:\*\*|\*)\./)?.[0] || ''
+    : ''
+  const exact = normalized.slice(wildcard.length)
+  if (
+    exact.length === 0 ||
+    exact.endsWith('.') ||
+    exact.includes('*') ||
+    /[%\s/:@?#]/.test(exact)
+  ) {
+    return null
+  }
+  let hostname
+  try {
+    hostname = new URL(`https://${exact}/`).hostname
+  } catch (_error) {
+    return null
+  }
+  if (hostname.length > 253 || !REMOTE_IMAGE_DOMAIN_PATTERN.test(hostname)) {
+    return null
+  }
+  return `${wildcard}${hostname}`
+}
+
+function normalizeRemotePathname(value) {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > MAX_REMOTE_IMAGE_PATHNAME_LENGTH ||
+    !value.startsWith('/') ||
+    /[\s?#]/.test(value) ||
+    /%(?:2e|2f|5c|25)/i.test(value)
+  ) {
+    return null
+  }
+  const segments = value.split('/')
+  const supported = segments.every((segment, index) => {
+    if (!segment.includes('*')) {
+      return true
+    }
+    return segment === '*' || (segment === '**' && index === segments.length - 1)
+  })
+  return supported ? value : null
+}
+
+function normalizeRemoteSearch(value, exactByDefault) {
+  if (value == null) {
+    return exactByDefault ? '' : undefined
+  }
+  if (
+    typeof value !== 'string' ||
+    value.length > MAX_REMOTE_IMAGE_SEARCH_LENGTH ||
+    (value !== '' && (!value.startsWith('?') || value.length === 1)) ||
+    /[\s#]/.test(value)
+  ) {
+    return null
+  }
+  return value
+}
+
+function normalizeRemotePattern(pattern, index) {
+  if (!pattern || (typeof pattern !== 'object' && typeof pattern !== 'string')) {
+    return null
+  }
+  let value = pattern
+  let exactSearchByDefault = false
+  if (typeof pattern === 'string') {
+    try {
+      value = new URL(pattern)
+      exactSearchByDefault = true
+    } catch (_error) {
+      return null
+    }
+  }
+  const protocol = value.protocol
+  const port = value.port
+  const hostname = normalizeRemoteHostname(value.hostname, true)
+  const pathname = normalizeRemotePathname(value.pathname || '/**')
+  const search = normalizeRemoteSearch(value.search, exactSearchByDefault)
+  if (
+    (protocol !== 'https' && protocol !== 'https:') ||
+    port !== '' ||
+    hostname == null ||
+    pathname == null ||
+    search === null ||
+    value.username ||
+    value.password ||
+    value.hash
+  ) {
+    return null
+  }
+  const source = {
+    id: `next.images.remote-pattern.${index}`,
+    protocol: 'https',
+    hostname,
+    pathname,
+  }
+  if (search !== undefined) {
+    source.search = search
+  }
+  return source
+}
+
+function buildRemoteImageSources(images) {
+  if (images.domains != null && !Array.isArray(images.domains)) {
+    return null
+  }
+  if (images.remotePatterns != null && !Array.isArray(images.remotePatterns)) {
+    return null
+  }
+  const domains = images.domains || []
+  const remotePatterns = images.remotePatterns || []
+  // Next's deprecated domains contract matches hostname only, including HTTP and
+  // arbitrary ports. Lowering it into HTTPS:443 Edge Rules would silently narrow
+  // user behavior, so it remains on the correctness-preserving Compute path.
+  if (domains.length > 0) {
+    return null
+  }
+  if (domains.length + remotePatterns.length > MAX_REMOTE_IMAGE_SOURCES) {
+    return null
+  }
+
+  const sources = []
+  for (const [index, pattern] of remotePatterns.entries()) {
+    const source = normalizeRemotePattern(pattern, index)
+    if (source == null) {
+      return null
+    }
+    sources.push(source)
+  }
+  return sources
+}
+
 function imageOptimizerDecision(config) {
   const images =
     config.images && typeof config.images === 'object' ? config.images : {}
@@ -115,11 +259,12 @@ function imageOptimizerDecision(config) {
     }
   }
 
-  if (hasItems(images.domains) || hasItems(images.remotePatterns)) {
+  const remoteImageSources = buildRemoteImageSources(images)
+  if (remoteImageSources == null) {
     return {
       status: 'compute_fallback',
       primitive: 'COMPUTE layer',
-      reason: 'remote images require Next.js remote image validation/fetching',
+      reason: 'remote image config cannot be represented by ONREZA Edge Rules',
     }
   }
 
@@ -150,35 +295,46 @@ function imageOptimizerDecision(config) {
     }
   }
 
+  if (images.dangerouslyAllowLocalIP === true) {
+    return {
+      status: 'compute_fallback',
+      primitive: 'COMPUTE layer',
+      reason: 'local-IP image fetching is incompatible with ONREZA SSRF policy',
+    }
+  }
+
+  if (images.maximumRedirects != null && images.maximumRedirects !== 3) {
+    return {
+      status: 'compute_fallback',
+      primitive: 'COMPUTE layer',
+      reason: 'custom image redirect limits require Next.js fetch semantics',
+    }
+  }
+
   return {
     status: 'onreza_optimizer',
     mode: 'custom_loader',
     path: ONREZA_IMAGE_OPTIMIZER_PATH,
     primitive: 'ONREZA image optimizer',
     reason: null,
+    remoteImageSources,
   }
 }
 
-function isOnrezaImageOptimizerConfig(config) {
-  const images =
-    config.images && typeof config.images === 'object' ? config.images : {}
-  return (
-    images.loader === 'custom' &&
-    images.loaderFile === ONREZA_IMAGE_LOADER_RELATIVE_PATH
-  )
-}
-
-function buildImageOptimizerHint(config) {
-  if (isOnrezaImageOptimizerConfig(config)) {
+function buildImageOptimizerHint(config, installedRemoteImageSources) {
+  if (installedRemoteImageSources) {
     return {
       status: 'onreza_optimizer',
       mode: 'custom_loader',
       path: ONREZA_IMAGE_OPTIMIZER_PATH,
       primitive: 'ONREZA image optimizer',
       reason: null,
+      remoteImageSources: installedRemoteImageSources,
     }
   }
-  return imageOptimizerDecision(config)
+  const { remoteImageSources: _remoteImageSources, ...decision } =
+    imageOptimizerDecision(config)
+  return decision
 }
 
 function imageLoaderSource(config) {
@@ -202,6 +358,9 @@ function normalizeSource(src) {
 
 function sourceBundlePath(src) {
   const normalized = normalizeSource(src)
+  if (normalized.startsWith('https://')) {
+    return normalized
+  }
   if (normalized.startsWith('/_static/') || normalized.startsWith('/public/')) {
     return normalized
   }
@@ -304,8 +463,12 @@ function buildDeploymentHints(ctx) {
         .filter((pathname) => typeof pathname === 'string')
     : []
 
+  const projectKey = path.resolve(ctx.projectDir || process.cwd())
   return {
-    imageOptimizer: buildImageOptimizerHint(ctx.config),
+    imageOptimizer: buildImageOptimizerHint(
+      ctx.config,
+      installedImageSourcesByProject.get(projectKey),
+    ),
     middleware: {
       staticFiles: partitionPathnamesByMiddleware(middleware, staticPathnames),
       publicFiles: partitionPathnamesByMiddleware(
@@ -356,9 +519,15 @@ const adapter = {
       nextConfig.output = 'standalone'
     }
 
+    const projectKey = path.resolve(projectDir || process.cwd())
+    installedImageSourcesByProject.delete(projectKey)
     const imageDecision = imageOptimizerDecision(nextConfig)
     if (imageDecision.status === 'onreza_optimizer') {
-      writeImageLoader(projectDir || process.cwd(), nextConfig)
+      installedImageSourcesByProject.set(
+        projectKey,
+        imageDecision.remoteImageSources,
+      )
+      writeImageLoader(projectKey, nextConfig)
       nextConfig.images = {
         ...(nextConfig.images || {}),
         loader: 'custom',
@@ -376,3 +545,7 @@ const adapter = {
 }
 
 module.exports = adapter
+module.exports.__test = {
+  buildRemoteImageSources,
+  imageOptimizerDecision,
+}

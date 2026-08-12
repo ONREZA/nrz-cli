@@ -29,6 +29,13 @@ fn active_rule_set_pull_conversion_drops_position_and_writes_rules_tables() {
                 "action": { "type": "redirect", "target": "/new", "statusCode": 301 }
             }
         ]),
+        image_sources: vec![json!({
+            "id": "product-images",
+            "protocol": "https",
+            "hostname": "cdn.example.com",
+            "pathname": "/products/**",
+            "enabled": true
+        })],
         checksum: "abc".to_string(),
     };
 
@@ -37,6 +44,8 @@ fn active_rule_set_pull_conversion_drops_position_and_writes_rules_tables() {
 
     assert!(!toml.contains("source"));
     assert!(toml.contains("[[rules]]"));
+    assert!(toml.contains("[[imageSources]]"));
+    assert!(toml.contains("hostname = \"cdn.example.com\""));
     assert!(!toml.contains("position"));
     assert!(
         toml.find("id = \"first\"").unwrap() < toml.find("id = \"second\"").unwrap(),
@@ -49,6 +58,7 @@ fn active_rule_set_pull_conversion_drops_position_and_writes_rules_tables() {
         .unwrap()
         .unwrap();
     assert_eq!(parsed["rules"][0]["id"], "first");
+    assert_eq!(parsed["imageSources"][0]["id"], "product-images");
     assert!(parsed["rules"][0].get("position").is_none());
 }
 

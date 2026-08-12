@@ -35,7 +35,7 @@ compatibility pointer for older links.
 | `basePath` | Adapter config + STATIC/Compute routing | Supported | Validated with App Router static, dynamic, metadata, public assets, and generated Edge Rules under `/docs`. |
 | `trailingSlash` | Edge Rules + Compute fallback | Supported | Canonical redirect rules are generated. Static prerenders that would shadow an exact slash redirect are kept in Compute. |
 | `i18n` | Pages Router + STATIC/Compute routing | Supported | Build-validated with locale prerenders and `pages/api` fallback on Next.js 16.2.10; the last stage runtime smoke used 16.2.9. |
-| Image optimizer | ONREZA image optimizer or Compute fallback | Partial native support | For Next.js Adapter API builds with default local-image config, the adapter installs a generated custom loader that emits `/_onreza/image?...` URLs. Custom loaders/paths, `unoptimized`, remote images, `localPatterns`, non-WebP format negotiation, SVG policy overrides, and `assetPrefix` stay on the Next Compute fallback or user-configured path. |
+| Image optimizer | ONREZA image optimizer or Compute fallback | Partial native support | For Next.js Adapter API builds with default image config, the adapter installs a generated custom loader that emits `/_onreza/image?...` URLs. Representable HTTPS `images.remotePatterns` with exact default port (`port: ""`, including `URL` objects) are published as GENERATED Edge Rules `imageSources`; omitted `search` allows any query while an explicit value matches exactly. Deprecated `images.domains` cannot restrict protocol/port/path, so mapping it to HTTPS:443 would silently narrow behavior and remains on Compute. Custom loaders/paths, `unoptimized`, non-HTTPS or non-representable remote patterns, custom `localPatterns`, non-WebP format negotiation, SVG/local-IP policy overrides, custom redirect limits, and `assetPrefix` stay on the Next Compute fallback or user-configured path. |
 | Metadata routes | STATIC public copy + Compute fallback | Supported | Static App Router metadata `.body` outputs such as `robots.txt` and `sitemap.xml` are copied into `public/`; dynamic metadata routes stay in Compute. |
 | Redirects, rewrites, headers | Edge Rules + Compute fallback | Phase-safe native subset | Lowers equivalent `beforeMiddleware` redirects/headers, `beforeFiles` rules only without middleware using `ifNoFile=false`, and immutable Next static cache headers. `afterFiles`, `dynamicRoutes`, `fallback`, invalid targets, generic regex, and unsupported conditions remain in Compute; affected STATIC outputs are withheld so they cannot shadow framework routing. |
 | Generated adapter Edge Rules | Server-owned Edge Rule contributions | Supported in deploy contract | Adapter rules are published as a generated contribution keyed by producer; they are not merged into `onreza.rules.toml`. |
@@ -60,15 +60,16 @@ Compute.
 
 ## Validated Matrix
 
-Last local Next.js 16.2.10 validation: 2026-07-16. Last legacy full matrix and stage runtime
+Last local Next.js 16.2.10 validation: 2026-08-12. Last legacy full matrix and stage runtime
 validation: 2026-06-24.
 
 Automated local conformance (`NRZ_NEXTJS_CONFORMANCE=1 cargo test --test
 nextjs_adapter_conformance_test`) covers:
 
 - Next.js 16.2.10 Adapter API with App Router `basePath`, `trailingSlash`,
-  redirects, rewrites, headers, metadata routes, ONREZA image optimizer, ISR route
-  classification, middleware matcher classification, and route handlers.
+  redirects, rewrites, headers, metadata routes, local and HTTPS remote images through the
+  ONREZA image optimizer, generated remote-image Edge Rules, ISR route classification,
+  middleware matcher classification, and route handlers.
 - Next.js 16.2.10 Pages Router `i18n`, locale static prerenders, and
   `pages/api` Compute fallback.
 - Next.js 16.2.10 static export through the generic STATIC deployment path.

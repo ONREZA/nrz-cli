@@ -5512,6 +5512,13 @@ pub mod edge_rules {
     ///    "schemaVersion"
     ///  ],
     ///  "properties": {
+    ///    "imageSources": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "$ref": "#/definitions/RemoteImageSourceAuthoring"
+    ///      },
+    ///      "maxItems": 128
+    ///    },
     ///    "rules": {
     ///      "type": "array",
     ///      "items": {
@@ -5564,6 +5571,12 @@ pub mod edge_rules {
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaEdgeRuleSetV1 {
+        #[serde(
+            rename = "imageSources",
+            default,
+            skip_serializing_if = "::std::vec::Vec::is_empty"
+        )]
+        pub image_sources: ::std::vec::Vec<RemoteImageSourceAuthoring>,
         pub rules: ::std::vec::Vec<EdgeRuleAuthoring>,
         #[serde(rename = "schemaVersion")]
         pub schema_version: ::std::string::String,
@@ -5846,6 +5859,435 @@ pub mod edge_rules {
                 })
         }
     }
+    ///`RemoteImageSourceAuthoring`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "hostname",
+    ///    "id",
+    ///    "pathname",
+    ///    "protocol"
+    ///  ],
+    ///  "properties": {
+    ///    "enabled": {
+    ///      "type": "boolean"
+    ///    },
+    ///    "hostname": {
+    ///      "type": "string",
+    ///      "maxLength": 256,
+    ///      "minLength": 1
+    ///    },
+    ///    "id": {
+    ///      "type": "string",
+    ///      "maxLength": 128,
+    ///      "minLength": 1,
+    ///      "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
+    ///    },
+    ///    "name": {
+    ///      "type": "string",
+    ///      "maxLength": 255,
+    ///      "minLength": 1
+    ///    },
+    ///    "pathname": {
+    ///      "type": "string",
+    ///      "maxLength": 1024,
+    ///      "minLength": 1
+    ///    },
+    ///    "protocol": {
+    ///      "type": "string",
+    ///      "const": "https"
+    ///    },
+    ///    "search": {
+    ///      "type": "string",
+    ///      "maxLength": 2048
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct RemoteImageSourceAuthoring {
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub enabled: ::std::option::Option<bool>,
+        pub hostname: RemoteImageSourceAuthoringHostname,
+        pub id: RemoteImageSourceAuthoringId,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub name: ::std::option::Option<RemoteImageSourceAuthoringName>,
+        pub pathname: RemoteImageSourceAuthoringPathname,
+        pub protocol: ::std::string::String,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub search: ::std::option::Option<RemoteImageSourceAuthoringSearch>,
+    }
+    ///`RemoteImageSourceAuthoringHostname`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 256,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct RemoteImageSourceAuthoringHostname(::std::string::String);
+    impl ::std::ops::Deref for RemoteImageSourceAuthoringHostname {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<RemoteImageSourceAuthoringHostname> for ::std::string::String {
+        fn from(value: RemoteImageSourceAuthoringHostname) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for RemoteImageSourceAuthoringHostname {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 256usize {
+                return Err("longer than 256 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for RemoteImageSourceAuthoringHostname {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for RemoteImageSourceAuthoringHostname {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for RemoteImageSourceAuthoringHostname {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for RemoteImageSourceAuthoringHostname {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`RemoteImageSourceAuthoringId`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 128,
+    ///  "minLength": 1,
+    ///  "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct RemoteImageSourceAuthoringId(::std::string::String);
+    impl ::std::ops::Deref for RemoteImageSourceAuthoringId {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<RemoteImageSourceAuthoringId> for ::std::string::String {
+        fn from(value: RemoteImageSourceAuthoringId) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for RemoteImageSourceAuthoringId {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 128usize {
+                return Err("longer than 128 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| {
+                    ::regress::Regex::new("^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$").unwrap()
+                });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for RemoteImageSourceAuthoringId {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for RemoteImageSourceAuthoringId {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for RemoteImageSourceAuthoringId {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for RemoteImageSourceAuthoringId {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`RemoteImageSourceAuthoringName`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 255,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct RemoteImageSourceAuthoringName(::std::string::String);
+    impl ::std::ops::Deref for RemoteImageSourceAuthoringName {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<RemoteImageSourceAuthoringName> for ::std::string::String {
+        fn from(value: RemoteImageSourceAuthoringName) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for RemoteImageSourceAuthoringName {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 255usize {
+                return Err("longer than 255 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for RemoteImageSourceAuthoringName {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for RemoteImageSourceAuthoringName {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for RemoteImageSourceAuthoringName {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for RemoteImageSourceAuthoringName {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`RemoteImageSourceAuthoringPathname`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 1024,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct RemoteImageSourceAuthoringPathname(::std::string::String);
+    impl ::std::ops::Deref for RemoteImageSourceAuthoringPathname {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<RemoteImageSourceAuthoringPathname> for ::std::string::String {
+        fn from(value: RemoteImageSourceAuthoringPathname) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for RemoteImageSourceAuthoringPathname {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 1024usize {
+                return Err("longer than 1024 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for RemoteImageSourceAuthoringPathname {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for RemoteImageSourceAuthoringPathname {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for RemoteImageSourceAuthoringPathname {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for RemoteImageSourceAuthoringPathname {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`RemoteImageSourceAuthoringSearch`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 2048
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct RemoteImageSourceAuthoringSearch(::std::string::String);
+    impl ::std::ops::Deref for RemoteImageSourceAuthoringSearch {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<RemoteImageSourceAuthoringSearch> for ::std::string::String {
+        fn from(value: RemoteImageSourceAuthoringSearch) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for RemoteImageSourceAuthoringSearch {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 2048usize {
+                return Err("longer than 2048 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for RemoteImageSourceAuthoringSearch {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String> for RemoteImageSourceAuthoringSearch {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String> for RemoteImageSourceAuthoringSearch {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for RemoteImageSourceAuthoringSearch {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
 }
 pub mod cli_api {
     /// Error types.
@@ -5937,6 +6379,11 @@ pub mod cli_api {
     ///              "format": "uuid",
     ///              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     ///            },
+    ///            "imageSourceCount": {
+    ///              "type": "integer",
+    ///              "maximum": 9007199254740991.0,
+    ///              "minimum": 0.0
+    ///            },
     ///            "present": {
     ///              "type": "boolean"
     ///            },
@@ -5986,6 +6433,11 @@ pub mod cli_api {
     ///            "checksum": {
     ///              "type": "string",
     ///              "pattern": "^[0-9a-f]{64}$"
+    ///            },
+    ///            "imageSourceCount": {
+    ///              "type": "integer",
+    ///              "maximum": 9007199254740991.0,
+    ///              "minimum": 0.0
     ///            },
     ///            "invalid": {
     ///              "type": "boolean"
@@ -7139,6 +7591,11 @@ pub mod cli_api {
     ///          "format": "uuid",
     ///          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     ///        },
+    ///        "imageSourceCount": {
+    ///          "type": "integer",
+    ///          "maximum": 9007199254740991.0,
+    ///          "minimum": 0.0
+    ///        },
     ///        "present": {
     ///          "type": "boolean"
     ///        },
@@ -7188,6 +7645,11 @@ pub mod cli_api {
     ///        "checksum": {
     ///          "type": "string",
     ///          "pattern": "^[0-9a-f]{64}$"
+    ///        },
+    ///        "imageSourceCount": {
+    ///          "type": "integer",
+    ///          "maximum": 9007199254740991.0,
+    ///          "minimum": 0.0
     ///        },
     ///        "invalid": {
     ///          "type": "boolean"
@@ -7248,6 +7710,11 @@ pub mod cli_api {
     ///      "format": "uuid",
     ///      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
     ///    },
+    ///    "imageSourceCount": {
+    ///      "type": "integer",
+    ///      "maximum": 9007199254740991.0,
+    ///      "minimum": 0.0
+    ///    },
     ///    "present": {
     ///      "type": "boolean"
     ///    },
@@ -7292,6 +7759,12 @@ pub mod cli_api {
         pub checksum: ::std::option::Option<OnrezaCliApiV1EdgeRulesStatusResponseActiveChecksum>,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub id: ::std::option::Option<::uuid::Uuid>,
+        #[serde(
+            rename = "imageSourceCount",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub image_source_count: ::std::option::Option<i64>,
         pub present: bool,
         #[serde(
             rename = "publishedAt",
@@ -7477,6 +7950,11 @@ pub mod cli_api {
     ///      "type": "string",
     ///      "pattern": "^[0-9a-f]{64}$"
     ///    },
+    ///    "imageSourceCount": {
+    ///      "type": "integer",
+    ///      "maximum": 9007199254740991.0,
+    ///      "minimum": 0.0
+    ///    },
     ///    "invalid": {
     ///      "type": "boolean"
     ///    },
@@ -7498,6 +7976,12 @@ pub mod cli_api {
     pub struct OnrezaCliApiV1EdgeRulesStatusResponseLocal {
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub checksum: ::std::option::Option<OnrezaCliApiV1EdgeRulesStatusResponseLocalChecksum>,
+        #[serde(
+            rename = "imageSourceCount",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub image_source_count: ::std::option::Option<i64>,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub invalid: ::std::option::Option<bool>,
         pub present: bool,

@@ -448,8 +448,9 @@ impl ResolvedHealthCheck {
 // ── Main deploy flow ─────────────────────────────────────────
 
 /// Discover ONREZA Functions, run the local policy preview (fail-fast before
-/// upload), and assemble the publish payload. Returns `None` when the project
-/// has neither functions nor edge rules.
+/// upload), and assemble the deployment-owned publish snapshot. Even an empty
+/// snapshot is sent so the platform can retire generated adapter config from a
+/// previous deployment without touching USER-owned Edge Rules.
 fn build_functions_payload(
     _config: &ProjectConfig,
     project_dir: &Path,
@@ -468,9 +469,8 @@ fn build_functions_payload(
             .map(|rule_set| crate::functions::edge_rule_count(&rule_set.edge_rules))
             .sum::<usize>();
 
-    if collected.is_empty() && user_edge_rules.is_none() && generated_edge_rule_sets.is_empty() {
-        return Ok(None);
-    }
+    let has_visible_config =
+        !collected.is_empty() || user_edge_rules.is_some() || !generated_edge_rule_sets.is_empty();
 
     let mut violation_count = 0usize;
     for function in &collected.functions {
@@ -496,15 +496,17 @@ fn build_functions_payload(
             format!("function policy check failed with {violation_count} violation(s)"),
         ));
     }
-    output::success(
-        json,
-        format_function_publish_summary(
-            collected.functions.len(),
-            collected.source_file_count(),
-            edge_rule_count,
-        ),
-        output::Phase::Deploy,
-    );
+    if has_visible_config {
+        output::success(
+            json,
+            format_function_publish_summary(
+                collected.functions.len(),
+                collected.source_file_count(),
+                edge_rule_count,
+            ),
+            output::Phase::Deploy,
+        );
+    }
     Ok(Some(crate::functions::build_payload(
         "DEPLOYMENT",
         &collected,
@@ -530,12 +532,21 @@ fn generated_nextjs_edge_rule_sets(
         descriptor.compatibility_report_line(),
         output::Phase::Deploy,
     );
-    let edge_rules = descriptor.generated_edge_rules().unwrap_or_else(|| {
+    let mut edge_rules = descriptor.generated_edge_rules().unwrap_or_else(|| {
         serde_json::json!({
             "schemaVersion": "EDGE_RULE_SET_V1",
             "rules": [],
         })
     });
+    let image_sources = descriptor.generated_remote_image_sources();
+    let image_source_count = image_sources.len();
+    edge_rules
+        .as_object_mut()
+        .expect("generated Next.js Edge Rules are an object")
+        .insert(
+            "imageSources".to_string(),
+            serde_json::Value::Array(image_sources),
+        );
     crate::functions::validate_edge_rules_value(
         "Next.js adapter generated Edge Rules",
         &edge_rules,
@@ -545,7 +556,10 @@ fn generated_nextjs_edge_rule_sets(
     output::status(
         json,
         "~",
-        format!("Generated {rule_count} Next.js Edge Rule(s) from adapter routing"),
+        format!(
+            "Generated {rule_count} Next.js Edge Rule(s) and {} remote image source(s) from adapter config",
+            image_source_count
+        ),
         output::Phase::Deploy,
     );
     Ok(vec![crate::functions::GeneratedEdgeRuleSet {
