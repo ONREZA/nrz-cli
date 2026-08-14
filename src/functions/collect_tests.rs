@@ -250,6 +250,60 @@ fn preview_flags_denied_capability() {
 }
 
 #[test]
+fn preview_flags_denied_globals_shadowed_by_erased_types() {
+    for (source, capability) in [
+        (
+            "export const config = {};\ntype Bun = { sql: unknown };\nexport default { fetch() { return Bun.sql; } };\n",
+            "Bun ambient runtime API",
+        ),
+        (
+            "export const config = {};\ninterface process { exit(code: number): never }\nexport default { fetch() { process.exit(1); } };\n",
+            "process control",
+        ),
+        (
+            "export const config = {};\ntype Worker = new (path: string) => unknown;\nexport default new Worker('worker.ts');\n",
+            "Worker",
+        ),
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "functions/api.nrz-fn.ts", source);
+        let collected = collect(tmp.path()).unwrap();
+        let function = &collected.functions[0];
+
+        let report = run_policy_preview(&function.entrypoint, &function.sources).unwrap();
+
+        assert_eq!(report.status, PolicyStatus::Failed, "{source}");
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|violation| violation.capability == capability),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn preview_allows_type_positions_and_runtime_value_bindings() {
+    for source in [
+        "export const config = {};\nconst Bun = { sql: () => 'local' };\nexport default { fetch() { return Bun.sql(); } };\n",
+        "export const config = {};\ntype Worker = string;\nconst label: Worker = 'ok';\nexport default label;\n",
+        "export const config = {};\nconst enum Bun { Version = 'local' }\nexport default Bun.Version;\n",
+        "export const config = {};\nconst enum process { Exit = 'local' }\nexport default process.Exit;\n",
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        write(tmp.path(), "functions/api.nrz-fn.ts", source);
+        let collected = collect(tmp.path()).unwrap();
+        let function = &collected.functions[0];
+
+        let report = run_policy_preview(&function.entrypoint, &function.sources).unwrap();
+
+        assert_eq!(report.status, PolicyStatus::Passed, "{source}");
+        assert!(report.violations.is_empty(), "{source}");
+    }
+}
+
+#[test]
 fn preview_flags_ambient_bun_alias_and_global_access() {
     for source in [
         "export const config = {};\nconst B = Bun;\nexport default { fetch() { return B.sql`select 1`; } };\n",
