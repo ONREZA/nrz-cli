@@ -1,5 +1,8 @@
 use super::*;
 
+const MANIFEST_RUNTIME_MEMORY_MB_MIN: i64 = 32;
+const MANIFEST_RUNTIME_MEMORY_MB_MAX: i64 = 8192;
+
 pub(super) const NODE_RUNTIME_METADATA_FILES: &[&str] = &[
     "package.json",
     "package-lock.json",
@@ -387,6 +390,26 @@ pub(super) fn conform_manifest_to_wire_contract(
                  This nrz may be behind the platform — try upgrading with `nrz upgrade`."
             )
         })?;
+    // typify currently leaves this bounded JSON Schema integer as i64, so
+    // re-apply the generated contract's inclusive range at the CLI boundary.
+    for layer in &wire.layers {
+        if let nrz_contract::manifest::OnrezaBuildOutputManifestLayersItem::Compute {
+            name,
+            runtime: Some(runtime),
+            ..
+        } = layer
+            && let Some(memory_mb) = runtime.memory_mb
+            && !(MANIFEST_RUNTIME_MEMORY_MB_MIN..=MANIFEST_RUNTIME_MEMORY_MB_MAX)
+                .contains(&memory_mb)
+        {
+            bail!(
+                "built manifest does not match the server manifest contract: layer '{}' runtime.memoryMb must be between {} and {}",
+                name.as_str(),
+                MANIFEST_RUNTIME_MEMORY_MB_MIN,
+                MANIFEST_RUNTIME_MEMORY_MB_MAX,
+            );
+        }
+    }
     serde_json::to_value(&wire).context("failed to serialize wire manifest")
 }
 

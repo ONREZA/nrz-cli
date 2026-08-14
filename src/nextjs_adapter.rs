@@ -792,6 +792,27 @@ impl AdapterDescriptor {
             && self.image_config_str("loaderFile") == Some(ONREZA_IMAGE_LOADER_RELATIVE_PATH)
     }
 
+    pub(crate) fn generated_remote_image_sources(&self) -> Vec<serde_json::Value> {
+        if !self.image_config_uses_onreza_optimizer() {
+            return Vec::new();
+        }
+        let Some(hint) = self
+            .deployment_hints
+            .image_optimizer
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+        else {
+            return Vec::new();
+        };
+        if hint.get("status").and_then(serde_json::Value::as_str) != Some("onreza_optimizer") {
+            return Vec::new();
+        }
+        hint.get("remoteImageSources")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     fn image_config_path_is_default(&self, path: &str) -> bool {
         let path = path.trim_end_matches('/');
         if path == "/_next/image" {

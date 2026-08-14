@@ -10,6 +10,7 @@ const RULES_FILENAME: &str = "onreza.rules.toml";
 const RATE_LIMIT_MAX_REQUESTS: u64 = 100_000;
 const RATE_LIMIT_MIN_WINDOW_SECONDS: u64 = 10;
 const RATE_LIMIT_MAX_WINDOW_SECONDS: u64 = 600;
+const MAX_REMOTE_IMAGE_SOURCES: usize = 128;
 const REDIRECT_STATUS_CODES: [u64; 4] = [301, 302, 307, 308];
 const REDIRECT_TARGET_MESSAGE: &str =
     "redirect target must be a relative path or an absolute http(s) URL";
@@ -41,11 +42,19 @@ pub fn edge_rule_count(value: &Value) -> usize {
         .map_or(0, Vec::len)
 }
 
+pub fn edge_image_source_count(value: &Value) -> usize {
+    value
+        .get("imageSources")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len)
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EdgeRulesCheckReport {
     pub path: String,
     pub rule_count: usize,
+    pub image_source_count: usize,
     pub rules: Vec<EdgeRuleCheckItem>,
 }
 
@@ -140,6 +149,7 @@ fn reject_authored_positions(path: &Path, value: &Value) -> anyhow::Result<()> {
 
 fn validate_edge_rules_refinements(path: &Path, value: &Value) -> anyhow::Result<()> {
     let normalized = edge_rules_contract_validation_value(value);
+    validate_remote_image_sources(path, &normalized)?;
     let Some(rules) = normalized.get("rules").and_then(Value::as_array) else {
         return Ok(());
     };
@@ -201,6 +211,145 @@ fn validate_edge_rules_refinements(path: &Path, value: &Value) -> anyhow::Result
     validate_pipeline_security_gate_shadowing(path, rules)?;
 
     Ok(())
+}
+
+fn validate_remote_image_sources(path: &Path, value: &Value) -> anyhow::Result<()> {
+    let Some(sources) = value.get("imageSources").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    if sources.len() > MAX_REMOTE_IMAGE_SOURCES {
+        return Err(anyhow::anyhow!(
+            "{} imageSources must contain at most {MAX_REMOTE_IMAGE_SOURCES} entries",
+            path.display()
+        ));
+    }
+
+    let mut seen_ids = HashSet::new();
+    for (index, source) in sources.iter().enumerate() {
+        let Some(source) = source.as_object() else {
+            continue;
+        };
+        let source_id = source
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or("<missing>");
+        if !seen_ids.insert(source_id.to_string()) {
+            return Err(anyhow::anyhow!(
+                "{} has duplicate remote image source id at imageSources[{index}].id: {source_id}",
+                path.display()
+            ));
+        }
+        if source.get("protocol").and_then(Value::as_str) != Some("https") {
+            return Err(anyhow::anyhow!(
+                "{} remote image source '{source_id}' must use https",
+                path.display()
+            ));
+        }
+        if !source
+            .get("hostname")
+            .and_then(Value::as_str)
+            .is_some_and(valid_remote_image_hostname)
+        {
+            return Err(anyhow::anyhow!(
+                "{} remote image source '{source_id}' hostname must be an exact domain or start with '*.' / '**.'",
+                path.display()
+            ));
+        }
+        if !source
+            .get("pathname")
+            .and_then(Value::as_str)
+            .is_some_and(valid_remote_image_pathname)
+        {
+            return Err(anyhow::anyhow!(
+                "{} remote image source '{source_id}' pathname must start with '/', avoid encoded separators/traversal, and use only full-segment '*' or trailing '**' wildcards",
+                path.display()
+            ));
+        }
+        if source
+            .get("search")
+            .and_then(Value::as_str)
+            .is_some_and(|search| !valid_remote_image_search(search))
+        {
+            return Err(anyhow::anyhow!(
+                "{} remote image source '{source_id}' search must be empty or start with '?' followed by an exact query and contain no whitespace or fragment",
+                path.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn valid_remote_image_hostname(value: &str) -> bool {
+    let exact = value
+        .strip_prefix("**.")
+        .or_else(|| value.strip_prefix("*."))
+        .unwrap_or(value);
+    if value.trim() != value || exact.is_empty() || exact.ends_with('.') || exact.len() > 253 {
+        return false;
+    }
+    let Ok(url) = url::Url::parse(&format!("https://{exact}/")) else {
+        return false;
+    };
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return false;
+    }
+    let Some(hostname) = url.domain() else {
+        return false;
+    };
+    if hostname != exact {
+        return false;
+    }
+    let labels = hostname.split('.').collect::<Vec<_>>();
+    labels.len() >= 2
+        && labels.iter().all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .as_bytes()
+                    .last()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+        && labels
+            .last()
+            .and_then(|label| label.as_bytes().first())
+            .is_some_and(u8::is_ascii_alphabetic)
+}
+
+fn valid_remote_image_pathname(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    if !value.starts_with('/')
+        || value.contains('?')
+        || value.contains('#')
+        || value.chars().any(char::is_whitespace)
+        || ["%2e", "%2f", "%5c", "%25"]
+            .iter()
+            .any(|encoding| lower.contains(encoding))
+    {
+        return false;
+    }
+    let last_segment = value.split('/').count().saturating_sub(1);
+    value.split('/').enumerate().all(|(index, segment)| {
+        !segment.contains('*') || segment == "*" || (segment == "**" && index == last_segment)
+    })
+}
+
+fn valid_remote_image_search(value: &str) -> bool {
+    (value.is_empty() || (value.starts_with('?') && value.len() > 1))
+        && !value.contains('#')
+        && !value.chars().any(char::is_whitespace)
 }
 
 /// The generated contract types rate_limit `limit`/`windowSeconds` as plain
@@ -873,6 +1022,7 @@ fn build_edge_rules_check_report(path: &Path, value: &Value) -> EdgeRulesCheckRe
     EdgeRulesCheckReport {
         path: path.display().to_string(),
         rule_count: edge_rule_count(value),
+        image_source_count: edge_image_source_count(value),
         rules,
     }
 }

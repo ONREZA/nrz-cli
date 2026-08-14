@@ -1790,6 +1790,26 @@ fn build_functions_payload_generates_nextjs_edge_rules_when_local_rules_absent()
 {
   "version": 1,
   "adapter": { "name": "@onreza/nrz-next-adapter", "version": "0.34.1" },
+  "config": {
+    "images": {
+      "loader": "custom",
+      "loaderFile": "./.onreza/cache/next-adapter/onreza-image-loader.mjs"
+    }
+  },
+  "deploymentHints": {
+    "imageOptimizer": {
+      "status": "onreza_optimizer",
+      "remoteImageSources": [
+        {
+          "id": "next.images.remote-pattern.0",
+          "protocol": "https",
+          "hostname": "cdn.example.com",
+          "pathname": "/tenant/**",
+          "search": ""
+        }
+      ]
+    }
+  },
   "routing": {
     "beforeMiddleware": [
       {
@@ -1835,6 +1855,33 @@ fn build_functions_payload_generates_nextjs_edge_rules_when_local_rules_absent()
         value["generatedEdgeRuleSets"][0]["edgeRules"]["rules"][0]["action"]["target"],
         "/new"
     );
+    assert_eq!(
+        value["generatedEdgeRuleSets"][0]["edgeRules"]["imageSources"][0]["hostname"],
+        "cdn.example.com"
+    );
+    assert_eq!(
+        value["generatedEdgeRuleSets"][0]["edgeRules"]["imageSources"][0]["search"],
+        ""
+    );
+}
+
+#[test]
+fn build_functions_payload_sends_empty_deployment_snapshot_without_adapter() {
+    let tmp = tempdir().unwrap();
+    let payload = build_functions_payload(
+        &nrz::config::ProjectConfig::default(),
+        tmp.path(),
+        true,
+        false,
+    )
+    .unwrap()
+    .expect("deployment snapshot must clear stale generated adapter config");
+    let value = serde_json::to_value(&payload).unwrap();
+
+    assert_eq!(value["origin"], "DEPLOYMENT");
+    assert_eq!(value["functions"], serde_json::json!([]));
+    assert!(value.get("edgeRules").is_none());
+    assert!(value.get("generatedEdgeRuleSets").is_none());
 }
 
 #[test]
@@ -4193,6 +4240,43 @@ fn wire_manifest_contract_rejects_unknown_layer_fields() {
         conform_manifest_to_wire_contract(with_unknown).is_err(),
         "unknown manifest fields must not reach the server"
     );
+}
+
+#[test]
+fn wire_manifest_contract_enforces_runtime_memory_bounds() {
+    for memory_mb in [-1, 31, 8193] {
+        let manifest = serde_json::json!({
+            "version": 1,
+            "layers": [{
+                "name": "app",
+                "target": "COMPUTE",
+                "directory": ".",
+                "entry": "server.js",
+                "runtime": { "memoryMb": memory_mb },
+            }],
+            "routes": [{ "pattern": "^/.*", "layer": "app" }],
+        });
+        assert!(
+            conform_manifest_to_wire_contract(manifest).is_err(),
+            "runtime.memoryMb={memory_mb} must not reach the server"
+        );
+    }
+
+    for memory_mb in [32, 8192] {
+        let manifest = serde_json::json!({
+            "version": 1,
+            "layers": [{
+                "name": "app",
+                "target": "COMPUTE",
+                "directory": ".",
+                "entry": "server.js",
+                "runtime": { "memoryMb": memory_mb },
+            }],
+            "routes": [{ "pattern": "^/.*", "layer": "app" }],
+        });
+        conform_manifest_to_wire_contract(manifest)
+            .unwrap_or_else(|error| panic!("runtime.memoryMb={memory_mb} must be valid: {error}"));
+    }
 }
 
 #[test]

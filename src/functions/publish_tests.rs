@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use super::{build_payload, check_edge_rules, collect, load_edge_rules};
+use super::{build_payload, check_edge_rules, collect, load_edge_rules, validate_edge_rules_value};
 
 fn write(dir: &Path, rel: &str, contents: &str) {
     let path = dir.join(rel);
@@ -281,6 +281,51 @@ action = { type = "allow" }
 
     let error = load_edge_rules(tmp.path()).unwrap_err();
     assert!(error.to_string().contains("duplicate edge rule id"));
+}
+
+#[test]
+fn edge_rules_validation_enforces_remote_image_source_limit() {
+    let image_sources = (0..=128)
+        .map(|index| {
+            serde_json::json!({
+                "id": format!("source-{index}"),
+                "protocol": "https",
+                "hostname": format!("images-{index}.example.com"),
+                "pathname": "/**"
+            })
+        })
+        .collect::<Vec<_>>();
+    let value = serde_json::json!({
+        "schemaVersion": "EDGE_RULE_SET_V1",
+        "rules": [],
+        "imageSources": image_sources
+    });
+
+    let error = validate_edge_rules_value("onreza.rules.toml", &value).unwrap_err();
+    assert!(error.to_string().contains("at most 128"));
+}
+
+#[test]
+fn edge_rules_validation_rejects_noncanonical_remote_image_hostnames() {
+    for hostname in [
+        "cdn.example.com:443",
+        "CDN.EXAMPLE.COM",
+        " cdn.example.com ",
+    ] {
+        let value = serde_json::json!({
+            "schemaVersion": "EDGE_RULE_SET_V1",
+            "rules": [],
+            "imageSources": [{
+                "id": "product-images",
+                "protocol": "https",
+                "hostname": hostname,
+                "pathname": "/**"
+            }]
+        });
+
+        let error = validate_edge_rules_value("onreza.rules.toml", &value).unwrap_err();
+        assert!(error.to_string().contains("hostname"));
+    }
 }
 
 #[test]

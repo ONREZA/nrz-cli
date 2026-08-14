@@ -135,6 +135,126 @@ fn clear_descriptor_removes_stale_adapter_output() {
 }
 
 #[test]
+fn adapter_normalizes_remote_patterns_without_widening_next_semantics() {
+    let script = format!(
+        r#"
+const adapter = require({adapter_path});
+const normalize = adapter.__test.buildRemoteImageSources;
+const loader = new Function(adapter.__test.imageLoaderSource({{}}).replace('export default ', '') + '\nreturn onrezaImageLoader')();
+const result = {{
+  omittedSearch: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', pathname: '/images/**' }}] }}),
+  exactDefaultPort: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', port: '', pathname: '/images/**' }}] }}),
+  exactSearch: normalize({{ remotePatterns: [new URL('https://cdn.example.com/images/**?v=1')] }}),
+  unicode: normalize({{ remotePatterns: [new URL('https://Изображения.РФ/**')] }}),
+  canonicalObjectHostname: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', port: '', pathname: '/**' }}] }}),
+  uppercaseObjectHostname: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'CDN.EXAMPLE.COM', port: '', pathname: '/**' }}] }}),
+  paddedObjectHostname: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: ' cdn.example.com ', port: '', pathname: '/**' }}] }}),
+  emptyObjectPathname: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', port: '', pathname: '' }}] }}),
+  legacyDomains: normalize({{ domains: ['cdn.example.com'] }}),
+  encodedTraversal: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', pathname: '/safe/%2e%2e/**' }}] }}),
+  insecure: normalize({{ remotePatterns: [{{ protocol: 'http', hostname: 'cdn.example.com', pathname: '/**' }}] }}),
+  localIpDecision: adapter.__test.imageOptimizerDecision({{ images: {{ dangerouslyAllowLocalIP: true }} }}),
+  redirectDecision: adapter.__test.imageOptimizerDecision({{ images: {{ maximumRedirects: 0 }} }}),
+  runtimePolicyFallbacks: Object.fromEntries([
+    ['minimumCacheTTL', 60],
+    ['maximumDiskCacheSize', 1_000_000],
+    ['maximumRedirects', 0],
+    ['maximumResponseBody', 1_000_000],
+    ['contentSecurityPolicy', "default-src 'none';"],
+    ['contentDispositionType', 'inline'],
+    ['customCacheHandler', true],
+  ].map(([name, value]) => [name, adapter.__test.imageOptimizerDecision({{ images: {{ [name]: value }} }})])),
+  defaultRuntimePolicyDecision: adapter.__test.imageOptimizerDecision({{ images: {{
+    minimumCacheTTL: 14_400,
+    maximumRedirects: 3,
+    maximumResponseBody: 50_000_000,
+    contentSecurityPolicy: "script-src 'none'; frame-src 'none'; sandbox;",
+    contentDispositionType: 'attachment',
+    customCacheHandler: false,
+  }} }}),
+  defaultQualitiesDecision: adapter.__test.imageOptimizerDecision({{ images: {{ qualities: [75] }} }}),
+  customQualitiesDecision: adapter.__test.imageOptimizerDecision({{ images: {{ qualities: [60, 75] }} }}),
+  upperHttpsLoader: loader({{ src: 'HTTPS://cdn.example.com/image.png', width: 640 }}),
+}};
+process.stdout.write(JSON.stringify(result));
+"#,
+        adapter_path = serde_json::to_string(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("assets/next-adapter/onreza-next-adapter.cjs")
+                .display()
+                .to_string()
+        )
+        .unwrap()
+    );
+    let output = std::process::Command::new("node")
+        .args(["-e", &script])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert!(result["omittedSearch"].is_null());
+    assert!(result["exactDefaultPort"][0].get("search").is_none());
+    assert_eq!(result["exactSearch"][0]["search"], "?v=1");
+    assert_eq!(
+        result["unicode"][0]["hostname"],
+        "xn--80abndcff3bev4o.xn--p1ai"
+    );
+    assert_eq!(
+        result["canonicalObjectHostname"][0]["hostname"],
+        "cdn.example.com"
+    );
+    assert!(result["uppercaseObjectHostname"].is_null());
+    assert!(result["paddedObjectHostname"].is_null());
+    assert!(result["emptyObjectPathname"].is_null());
+    assert!(result["legacyDomains"].is_null());
+    assert!(result["encodedTraversal"].is_null());
+    assert!(result["insecure"].is_null());
+    assert_eq!(result["localIpDecision"]["status"], "compute_fallback");
+    assert_eq!(result["redirectDecision"]["status"], "compute_fallback");
+    for policy in [
+        "minimumCacheTTL",
+        "maximumDiskCacheSize",
+        "maximumRedirects",
+        "maximumResponseBody",
+        "contentSecurityPolicy",
+        "contentDispositionType",
+        "customCacheHandler",
+    ] {
+        assert_eq!(
+            result["runtimePolicyFallbacks"][policy]["status"],
+            "compute_fallback"
+        );
+        assert!(
+            result["runtimePolicyFallbacks"][policy]["reason"]
+                .as_str()
+                .unwrap()
+                .contains(policy)
+        );
+    }
+    assert_eq!(
+        result["defaultRuntimePolicyDecision"]["status"],
+        "onreza_optimizer"
+    );
+    assert_eq!(
+        result["defaultQualitiesDecision"]["status"],
+        "onreza_optimizer"
+    );
+    assert_eq!(
+        result["customQualitiesDecision"]["status"],
+        "compute_fallback"
+    );
+    assert_eq!(
+        result["upperHttpsLoader"],
+        "/_onreza/image?url=HTTPS%3A%2F%2Fcdn.example.com%2Fimage.png&w=640&q=75"
+    );
+}
+
+#[test]
 fn static_file_mapping_uses_url_path_inside_static_layer() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join(".next/static/chunks/app.js");
@@ -1084,6 +1204,105 @@ fn generated_edge_rules_lower_supported_next_routing_subset() {
     );
     assert_eq!(summary["platform"]["routing"]["edgeRulesGenerated"], 2);
     assert_eq!(summary["platform"]["routing"]["edgeRulesUnsupported"], 2);
+}
+
+#[test]
+fn generated_remote_image_sources_read_normalized_adapter_hint() {
+    let descriptor: AdapterDescriptor = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "adapter": { "name": "@onreza/nrz-next-adapter" },
+        "config": {
+            "images": {
+                "loader": "custom",
+                "loaderFile": "./.onreza/cache/next-adapter/onreza-image-loader.mjs",
+            }
+        },
+        "deploymentHints": {
+            "imageOptimizer": {
+                "status": "onreza_optimizer",
+                "remoteImageSources": [
+                    {
+                        "id": "next.images.domain.0",
+                        "protocol": "https",
+                        "hostname": "legacy.example.com",
+                        "pathname": "/**"
+                    },
+                    {
+                        "id": "next.images.remote-pattern.0",
+                        "protocol": "https",
+                        "hostname": "*.assets.example.com",
+                        "pathname": "/tenants/*/**"
+                    },
+                    {
+                        "id": "next.images.remote-pattern.1",
+                        "protocol": "https",
+                        "hostname": "media.example.net",
+                        "pathname": "/account/**",
+                        "search": "?version=1"
+                    },
+                    {
+                        "id": "next.images.remote-pattern.2",
+                        "protocol": "https",
+                        "hostname": "static.example.org",
+                        "pathname": "/public/**",
+                        "search": ""
+                    }
+                ]
+            }
+        }
+    }))
+    .unwrap();
+
+    let image_sources = descriptor.generated_remote_image_sources();
+    let edge_rules = serde_json::json!({
+        "schemaVersion": "EDGE_RULE_SET_V1",
+        "imageSources": image_sources,
+        "rules": [],
+    });
+    crate::functions::validate_edge_rules_value(
+        "Next.js adapter generated remote image sources",
+        &edge_rules,
+    )
+    .unwrap();
+
+    assert_eq!(edge_rules["imageSources"].as_array().unwrap().len(), 4);
+    assert_eq!(edge_rules["imageSources"][0]["id"], "next.images.domain.0");
+    assert_eq!(edge_rules["imageSources"][0]["pathname"], "/**");
+    assert_eq!(
+        edge_rules["imageSources"][1]["hostname"],
+        "*.assets.example.com"
+    );
+    assert!(edge_rules["imageSources"][1].get("search").is_none());
+    assert_eq!(edge_rules["imageSources"][2]["search"], "?version=1");
+    assert_eq!(edge_rules["imageSources"][3]["search"], "");
+}
+
+#[test]
+fn generated_remote_image_sources_do_not_widen_unsupported_config() {
+    let descriptor: AdapterDescriptor = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "adapter": { "name": "@onreza/nrz-next-adapter" },
+        "config": {
+            "images": {
+                "loader": "custom",
+                "loaderFile": "./.onreza/cache/next-adapter/onreza-image-loader.mjs",
+            }
+        },
+        "deploymentHints": {
+            "imageOptimizer": {
+                "status": "compute_fallback",
+                "remoteImageSources": [{
+                    "id": "spoofed",
+                    "protocol": "https",
+                    "hostname": "images.example.com",
+                    "pathname": "/**"
+                }]
+            }
+        }
+    }))
+    .unwrap();
+
+    assert!(descriptor.generated_remote_image_sources().is_empty());
 }
 
 #[test]

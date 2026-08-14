@@ -49,7 +49,10 @@ fn check(args: RulesCheckArgs, json: bool) -> anyhow::Result<()> {
         report_check_human(&report);
         output::success(
             false,
-            format!("rules check passed ({} edge rule(s))", report.rule_count),
+            format!(
+                "rules check passed ({} edge rule(s), {} image source(s))",
+                report.rule_count, report.image_source_count
+            ),
             output::Phase::Rules,
         );
     }
@@ -85,10 +88,15 @@ async fn pull(
         .get("rules")
         .and_then(Value::as_array)
         .map_or(0, Vec::len);
+    let image_source_count = authoring
+        .get("imageSources")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
     let output = RulesPullOutput {
         path: path.display().to_string(),
         environment_id: ctx.environment_id,
         rule_count,
+        image_source_count,
         version: active.version,
         source: active.source,
         checksum: active.checksum,
@@ -100,8 +108,8 @@ async fn pull(
         output::success(
             false,
             format!(
-                "pulled {} edge rule(s) into {}",
-                output.rule_count, output.path
+                "pulled {} edge rule(s) and {} image source(s) into {}",
+                output.rule_count, output.image_source_count, output.path
             ),
             output::Phase::Rules,
         );
@@ -124,6 +132,7 @@ async fn publish(
         )
     })?;
     let rule_count = functions::edge_rule_count(&edge_rules);
+    let image_source_count = functions::edge_image_source_count(&edge_rules);
     let ctx = remote_context(
         token,
         workspace,
@@ -160,12 +169,13 @@ async fn publish(
         output::json_output(&RulesPublishOutput {
             environment_id: ctx.environment_id,
             rule_count,
+            image_source_count,
             result: response,
         });
     } else {
         output::success(
             false,
-            format!("published {rule_count} edge rule(s)"),
+            format!("published {rule_count} edge rule(s) and {image_source_count} image source(s)"),
             output::Phase::Rules,
         );
     }
@@ -470,7 +480,10 @@ fn report_check_human(report: &functions::EdgeRulesCheckReport) {
     output::status(
         false,
         "✓",
-        format!("{} edge rule(s) in {}", report.rule_count, report.path),
+        format!(
+            "{} edge rule(s), {} image source(s) in {}",
+            report.rule_count, report.image_source_count, report.path
+        ),
         output::Phase::Rules,
     );
     for rule in &report.rules {
@@ -517,6 +530,7 @@ pub(crate) fn active_rule_set_to_authoring_value(
             .as_deref()
             .unwrap_or(EDGE_RULE_SET_SCHEMA_VERSION),
         "rules": rules,
+        "imageSources": rule_set.image_sources,
     });
     serde_json::from_value::<nrz_contract::EdgeRuleSetAuthoring>(value.clone())
         .context("active Edge Rules cannot be converted to onreza.rules.toml authoring shape")?;
@@ -538,6 +552,25 @@ pub(crate) fn edge_rule_set_authoring_to_toml(value: &Value) -> anyhow::Result<S
     }
     if let Some(source) = object.get("source") {
         write_assignment(&mut out, "source", source)?;
+    }
+
+    if let Some(image_sources) = object.get("imageSources").and_then(Value::as_array) {
+        for source in image_sources {
+            let source = source
+                .as_object()
+                .ok_or_else(|| anyhow::anyhow!("Edge Rules image source must be an object"))?;
+            out.push('\n');
+            out.push_str("[[imageSources]]\n");
+            for key in ordered_image_source_keys(source) {
+                write_assignment(
+                    &mut out,
+                    key,
+                    source
+                        .get(key)
+                        .expect("ordered image source key must exist"),
+                )?;
+            }
+        }
     }
 
     for rule in rules {
@@ -568,6 +601,25 @@ fn ordered_rule_keys(rule: &Map<String, Value>) -> Vec<&str> {
     for key in rule.keys() {
         let key = key.as_str();
         if key != "position" && !preferred.contains(&key) {
+            keys.push(key);
+        }
+    }
+    keys
+}
+
+fn ordered_image_source_keys(source: &Map<String, Value>) -> Vec<&str> {
+    let preferred = [
+        "id", "name", "enabled", "protocol", "hostname", "pathname", "search",
+    ];
+    let mut keys = Vec::with_capacity(source.len());
+    for key in preferred {
+        if source.contains_key(key) {
+            keys.push(key);
+        }
+    }
+    for key in source.keys() {
+        let key = key.as_str();
+        if !preferred.contains(&key) {
             keys.push(key);
         }
     }
@@ -725,6 +777,8 @@ pub(crate) struct ActiveEdgeRuleSet {
     pub(crate) schema_version: Option<String>,
     pub(crate) source: String,
     pub(crate) rules: Value,
+    #[serde(default)]
+    pub(crate) image_sources: Vec<Value>,
     pub(crate) checksum: String,
 }
 
@@ -734,6 +788,7 @@ struct RulesPullOutput {
     path: String,
     environment_id: String,
     rule_count: usize,
+    image_source_count: usize,
     version: i64,
     source: String,
     checksum: String,
@@ -744,6 +799,7 @@ struct RulesPullOutput {
 struct RulesPublishOutput {
     environment_id: String,
     rule_count: usize,
+    image_source_count: usize,
     result: Value,
 }
 
@@ -844,6 +900,9 @@ fn format_status_side(value: &Value, active: bool) -> String {
     let mut parts = Vec::new();
     if let Some(rule_count) = value.get("ruleCount").and_then(Value::as_i64) {
         parts.push(format!("{rule_count} rule(s)"));
+    }
+    if let Some(image_source_count) = value.get("imageSourceCount").and_then(Value::as_i64) {
+        parts.push(format!("{image_source_count} image source(s)"));
     }
     if active {
         if let Some(version) = value.get("version").and_then(Value::as_i64) {

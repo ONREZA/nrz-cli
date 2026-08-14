@@ -201,6 +201,9 @@ fn nextjs_16_2_adapter_conformance_builds_descriptor_and_cli_report() {
 const nextConfig = {
   basePath: '/docs',
   trailingSlash: true,
+  images: {
+    remotePatterns: [new URL('https://cdn.example.com/tenants/acme/**')],
+  },
   async redirects() {
     return [
       { source: '/old/:slug', destination: '/blog/:slug', permanent: false },
@@ -256,7 +259,11 @@ export default function RootLayout({ children }) {
 import Image from 'next/image'
 
 export default function Page() {
-  return <main>home <Image src="/pixel.png" width={1} height={1} alt="pixel" /></main>
+  return <main>
+    home
+    <Image src="/pixel.png" width={1} height={1} alt="pixel" />
+    <Image src="https://cdn.example.com/tenants/acme/hero.png" width={1} height={1} alt="remote pixel" />
+  </main>
 }
 "#,
     );
@@ -361,8 +368,32 @@ export const config = {
     );
     assert_eq!(descriptor["config"]["images"]["path"], "/_onreza/image");
     assert_eq!(
+        descriptor["config"]["images"]["remotePatterns"][0]["hostname"],
+        "cdn.example.com"
+    );
+    assert_eq!(
+        descriptor["config"]["images"]["remotePatterns"][0]["pathname"],
+        "/tenants/acme/**"
+    );
+    assert_eq!(
+        descriptor["config"]["images"]["remotePatterns"][0]["search"],
+        ""
+    );
+    assert_eq!(
         descriptor["deploymentHints"]["imageOptimizer"]["status"],
         "onreza_optimizer"
+    );
+    assert_eq!(
+        descriptor["deploymentHints"]["imageOptimizer"]["remoteImageSources"][0]["hostname"],
+        "cdn.example.com"
+    );
+    assert_eq!(
+        descriptor["deploymentHints"]["imageOptimizer"]["remoteImageSources"][0]["pathname"],
+        "/tenants/acme/**"
+    );
+    assert_eq!(
+        descriptor["deploymentHints"]["imageOptimizer"]["remoteImageSources"][0]["search"],
+        ""
     );
     assert!(descriptor["routing"]["beforeMiddleware"].is_array());
     assert!(descriptor["routing"]["beforeFiles"].is_array());
@@ -416,6 +447,11 @@ export const config = {
         fs::read_to_string(project.path().join(".next/server/app/index.html"))
             .unwrap()
             .contains("/_onreza/image?url=%2Fpublic%2Fpixel.png")
+    );
+    assert!(
+        fs::read_to_string(project.path().join(".next/server/app/index.html"))
+            .unwrap()
+            .contains("url=https%3A%2F%2Fcdn.example.com%2Ftenants%2Facme%2Fhero.png")
     );
 
     let output = run_nrz_build_json(project.path());
