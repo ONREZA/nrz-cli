@@ -280,12 +280,11 @@ fn validate_remote_image_sources(path: &Path, value: &Value) -> anyhow::Result<(
 }
 
 fn valid_remote_image_hostname(value: &str) -> bool {
-    let normalized = value.trim().to_ascii_lowercase();
-    let exact = normalized
+    let exact = value
         .strip_prefix("**.")
-        .or_else(|| normalized.strip_prefix("*."))
-        .unwrap_or(&normalized);
-    if exact.is_empty() || exact.ends_with('.') {
+        .or_else(|| value.strip_prefix("*."))
+        .unwrap_or(value);
+    if value.trim() != value || exact.is_empty() || exact.ends_with('.') || exact.len() > 253 {
         return false;
     }
     let Ok(url) = url::Url::parse(&format!("https://{exact}/")) else {
@@ -303,6 +302,9 @@ fn valid_remote_image_hostname(value: &str) -> bool {
     let Some(hostname) = url.domain() else {
         return false;
     };
+    if hostname != exact {
+        return false;
+    }
     let labels = hostname.split('.').collect::<Vec<_>>();
     labels.len() >= 2
         && labels.iter().all(|label| {

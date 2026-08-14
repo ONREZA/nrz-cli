@@ -149,11 +149,29 @@ const result = {{
   canonicalObjectHostname: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', port: '', pathname: '/**' }}] }}),
   uppercaseObjectHostname: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'CDN.EXAMPLE.COM', port: '', pathname: '/**' }}] }}),
   paddedObjectHostname: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: ' cdn.example.com ', port: '', pathname: '/**' }}] }}),
+  emptyObjectPathname: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', port: '', pathname: '' }}] }}),
   legacyDomains: normalize({{ domains: ['cdn.example.com'] }}),
   encodedTraversal: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', pathname: '/safe/%2e%2e/**' }}] }}),
   insecure: normalize({{ remotePatterns: [{{ protocol: 'http', hostname: 'cdn.example.com', pathname: '/**' }}] }}),
   localIpDecision: adapter.__test.imageOptimizerDecision({{ images: {{ dangerouslyAllowLocalIP: true }} }}),
   redirectDecision: adapter.__test.imageOptimizerDecision({{ images: {{ maximumRedirects: 0 }} }}),
+  runtimePolicyFallbacks: Object.fromEntries([
+    ['minimumCacheTTL', 60],
+    ['maximumDiskCacheSize', 1_000_000],
+    ['maximumRedirects', 0],
+    ['maximumResponseBody', 1_000_000],
+    ['contentSecurityPolicy', "default-src 'none';"],
+    ['contentDispositionType', 'inline'],
+    ['customCacheHandler', true],
+  ].map(([name, value]) => [name, adapter.__test.imageOptimizerDecision({{ images: {{ [name]: value }} }})])),
+  defaultRuntimePolicyDecision: adapter.__test.imageOptimizerDecision({{ images: {{
+    minimumCacheTTL: 14_400,
+    maximumRedirects: 3,
+    maximumResponseBody: 50_000_000,
+    contentSecurityPolicy: "script-src 'none'; frame-src 'none'; sandbox;",
+    contentDispositionType: 'attachment',
+    customCacheHandler: false,
+  }} }}),
   defaultQualitiesDecision: adapter.__test.imageOptimizerDecision({{ images: {{ qualities: [75] }} }}),
   customQualitiesDecision: adapter.__test.imageOptimizerDecision({{ images: {{ qualities: [60, 75] }} }}),
   upperHttpsLoader: loader({{ src: 'HTTPS://cdn.example.com/image.png', width: 640 }}),
@@ -192,11 +210,36 @@ process.stdout.write(JSON.stringify(result));
     );
     assert!(result["uppercaseObjectHostname"].is_null());
     assert!(result["paddedObjectHostname"].is_null());
+    assert!(result["emptyObjectPathname"].is_null());
     assert!(result["legacyDomains"].is_null());
     assert!(result["encodedTraversal"].is_null());
     assert!(result["insecure"].is_null());
     assert_eq!(result["localIpDecision"]["status"], "compute_fallback");
     assert_eq!(result["redirectDecision"]["status"], "compute_fallback");
+    for policy in [
+        "minimumCacheTTL",
+        "maximumDiskCacheSize",
+        "maximumRedirects",
+        "maximumResponseBody",
+        "contentSecurityPolicy",
+        "contentDispositionType",
+        "customCacheHandler",
+    ] {
+        assert_eq!(
+            result["runtimePolicyFallbacks"][policy]["status"],
+            "compute_fallback"
+        );
+        assert!(
+            result["runtimePolicyFallbacks"][policy]["reason"]
+                .as_str()
+                .unwrap()
+                .contains(policy)
+        );
+    }
+    assert_eq!(
+        result["defaultRuntimePolicyDecision"]["status"],
+        "onreza_optimizer"
+    );
     assert_eq!(
         result["defaultQualitiesDecision"]["status"],
         "onreza_optimizer"

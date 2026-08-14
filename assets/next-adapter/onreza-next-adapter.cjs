@@ -12,6 +12,15 @@ const MAX_REMOTE_IMAGE_PATHNAME_LENGTH = 1024
 const MAX_REMOTE_IMAGE_SEARCH_LENGTH = 2048
 const REMOTE_IMAGE_DOMAIN_PATTERN =
   /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+const NEXT_IMAGE_RUNTIME_POLICY_DEFAULTS = Object.freeze({
+  minimumCacheTTL: 14_400,
+  maximumDiskCacheSize: undefined,
+  maximumRedirects: 3,
+  maximumResponseBody: 50_000_000,
+  contentSecurityPolicy: "script-src 'none'; frame-src 'none'; sandbox;",
+  contentDispositionType: 'attachment',
+  customCacheHandler: false,
+})
 const installedImageSourcesByProject = new Map()
 
 function jsonReplacer(_key, value) {
@@ -75,6 +84,17 @@ function isDefaultImageQualities(value) {
     value == null ||
     (Array.isArray(value) && value.length === 1 && value[0] === 75)
   )
+}
+
+function firstNonDefaultImageRuntimePolicy(images) {
+  for (const [name, defaultValue] of Object.entries(
+    NEXT_IMAGE_RUNTIME_POLICY_DEFAULTS,
+  )) {
+    if (images[name] !== undefined && images[name] !== defaultValue) {
+      return name
+    }
+  }
+  return null
 }
 
 function hasUserAssetPrefix(config) {
@@ -166,7 +186,7 @@ function normalizeRemotePattern(pattern, index) {
   const protocol = value.protocol
   const port = value.port
   const hostname = normalizeRemoteHostname(value.hostname, true)
-  const pathname = normalizeRemotePathname(value.pathname || '/**')
+  const pathname = normalizeRemotePathname(value.pathname ?? '/**')
   const search = normalizeRemoteSearch(value.search, exactSearchByDefault)
   if (
     (protocol !== 'https' && protocol !== 'https:') ||
@@ -267,6 +287,15 @@ function imageOptimizerDecision(config) {
     }
   }
 
+  const customRuntimePolicy = firstNonDefaultImageRuntimePolicy(images)
+  if (customRuntimePolicy != null) {
+    return {
+      status: 'compute_fallback',
+      primitive: 'COMPUTE layer',
+      reason: `images.${customRuntimePolicy} requires Next.js image optimizer semantics`,
+    }
+  }
+
   if (!isDefaultImageQualities(images.qualities)) {
     return {
       status: 'compute_fallback',
@@ -316,14 +345,6 @@ function imageOptimizerDecision(config) {
       status: 'compute_fallback',
       primitive: 'COMPUTE layer',
       reason: 'local-IP image fetching is incompatible with ONREZA SSRF policy',
-    }
-  }
-
-  if (images.maximumRedirects != null && images.maximumRedirects !== 3) {
-    return {
-      status: 'compute_fallback',
-      primitive: 'COMPUTE layer',
-      reason: 'custom image redirect limits require Next.js fetch semantics',
     }
   }
 

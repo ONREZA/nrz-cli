@@ -306,6 +306,29 @@ fn edge_rules_validation_enforces_remote_image_source_limit() {
 }
 
 #[test]
+fn edge_rules_validation_rejects_noncanonical_remote_image_hostnames() {
+    for hostname in [
+        "cdn.example.com:443",
+        "CDN.EXAMPLE.COM",
+        " cdn.example.com ",
+    ] {
+        let value = serde_json::json!({
+            "schemaVersion": "EDGE_RULE_SET_V1",
+            "rules": [],
+            "imageSources": [{
+                "id": "product-images",
+                "protocol": "https",
+                "hostname": hostname,
+                "pathname": "/**"
+            }]
+        });
+
+        let error = validate_edge_rules_value("onreza.rules.toml", &value).unwrap_err();
+        assert!(error.to_string().contains("hostname"));
+    }
+}
+
+#[test]
 fn load_edge_rules_rejects_cache_rule_missing_request_vary() {
     let tmp = tempfile::tempdir().unwrap();
     write(
