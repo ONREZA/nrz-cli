@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { test } from "bun:test";
 
 import {
+  artifactChecksums,
   createPackageJson,
   createPostinstall,
-  parseReleaseChecksums,
   releaseAssets,
 } from "./create-npm-package";
 import { REQUIRED_RELEASE_ASSETS } from "./release-assets";
@@ -16,6 +16,7 @@ import {
   createChecksums,
   findReleaseByTag,
   type GitHubRelease,
+  verifyPublishedAssets,
 } from "./publish-github-release";
 import {
   filterReleaseCommits,
@@ -77,23 +78,22 @@ test("release assets are tied to the selected GitHub release tag", () => {
   );
 });
 
-test("npm package uses checksums from the published release manifest", () => {
-  const checksums = parseReleaseChecksums(
-    [
-      `${"0".repeat(64)}  nrz-linux-x64.tar.gz`,
-      `${"1".repeat(64)}  nrz-darwin-x64.tar.gz`,
-      `${"2".repeat(64)}  nrz-darwin-arm64.tar.gz`,
-      `${"3".repeat(64)}  nrz-win32-x64.tar.gz`,
-      "",
-    ].join("\n"),
-  );
+test("npm package uses checksums from the CI-built release artifacts", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nrz-npm-artifacts-"));
+  try {
+    for (const asset of REQUIRED_RELEASE_ASSETS) {
+      writeFileSync(join(dir, asset), asset);
+    }
 
-  assert.deepEqual(checksums, {
-    "linux-x64": "0".repeat(64),
-    "darwin-x64": "1".repeat(64),
-    "darwin-arm64": "2".repeat(64),
-    "win32-x64": "3".repeat(64),
-  });
+    const checksums = artifactChecksums(dir);
+
+    assert.equal(
+      checksums["linux-x64"],
+      "5634f923b26f33338f294ce3822e370c29c8817d7944898552e053701387fd15",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("GitHub release lookup includes draft releases by tag", async () => {
@@ -122,6 +122,55 @@ test("GitHub release lookup includes draft releases by tag", async () => {
     "GET /repos/ONREZA/nrz-cli/releases/tags/v0.33.0-beta.1",
     "GET /repos/ONREZA/nrz-cli/releases?per_page=100",
   ]);
+});
+
+test("published release retries require the exact CI-built assets", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "nrz-release-retry-"));
+  try {
+    const archive = join(dir, "nrz-linux-x64.tar.gz");
+    const checksums = join(dir, "checksums-sha256.txt");
+    writeFileSync(archive, "ci archive");
+    writeFileSync(checksums, "ci checksums");
+
+    const release: GitHubRelease = {
+      id: 123,
+      tag_name: "v0.33.0-beta.1",
+      draft: false,
+      html_url: "https://github.com/ONREZA/nrz-cli/releases/tag/v0.33.0-beta.1",
+      assets: [
+        { id: 1, name: "nrz-linux-x64.tar.gz" },
+        { id: 2, name: "checksums-sha256.txt" },
+      ],
+    };
+    const published = new Map([
+      [1, new TextEncoder().encode("ci archive")],
+      [2, new TextEncoder().encode("ci checksums")],
+    ]);
+
+    await verifyPublishedAssets(
+      release,
+      {
+        "nrz-linux-x64.tar.gz": archive,
+        "checksums-sha256.txt": checksums,
+      },
+      async (assetId) => published.get(assetId)!,
+    );
+
+    published.set(1, new TextEncoder().encode("repacked archive"));
+    await assert.rejects(
+      verifyPublishedAssets(
+        release,
+        {
+          "nrz-linux-x64.tar.gz": archive,
+          "checksums-sha256.txt": checksums,
+        },
+        async (assetId) => published.get(assetId)!,
+      ),
+      /does not match the CI-built artifact/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("GitHub release notes include the same checksum text as the uploaded checksum file", () => {
