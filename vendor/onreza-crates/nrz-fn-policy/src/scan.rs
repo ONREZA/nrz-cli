@@ -11,7 +11,7 @@ use oxc_ast::ast::{
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
-use oxc_semantic::{IsGlobalReference, Scoping, SemanticBuilder, SymbolId};
+use oxc_semantic::{Scoping, SemanticBuilder, SymbolId};
 use oxc_span::SourceType;
 
 /// A denied runtime capability detected statically in a single module.
@@ -648,12 +648,18 @@ fn is_global_reference_name(
 }
 
 fn is_runtime_global_reference(identifier: &IdentifierReference<'_>, scoping: &Scoping) -> bool {
-    identifier.is_global_reference(scoping)
-        || identifier_symbol_id(identifier, scoping).is_some_and(|symbol_id| {
-            let flags = scoping.symbol_flags(symbol_id);
-            // Type-only symbols and const enums are erased before the function runs.
-            flags.is_ambient() || !flags.is_value() || flags.is_const_enum()
-        })
+    let Some(reference_id) = identifier.reference_id.get() else {
+        return false;
+    };
+    let reference = scoping.get_reference(reference_id);
+    if !reference.is_value() || reference.is_type() {
+        return false;
+    }
+
+    reference.symbol_id().is_none_or(|symbol_id| {
+        let flags = scoping.symbol_flags(symbol_id);
+        flags.is_ambient() || !flags.is_value()
+    })
 }
 
 fn is_intrinsic_global_reference(identifier: &IdentifierReference<'_>, scoping: &Scoping) -> bool {
