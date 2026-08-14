@@ -140,6 +140,7 @@ fn adapter_normalizes_remote_patterns_without_widening_next_semantics() {
         r#"
 const adapter = require({adapter_path});
 const normalize = adapter.__test.buildRemoteImageSources;
+const loader = new Function(adapter.__test.imageLoaderSource({{}}).replace('export default ', '') + '\nreturn onrezaImageLoader')();
 const result = {{
   omittedSearch: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', pathname: '/images/**' }}] }}),
   exactDefaultPort: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', port: '', pathname: '/images/**' }}] }}),
@@ -150,6 +151,7 @@ const result = {{
   insecure: normalize({{ remotePatterns: [{{ protocol: 'http', hostname: 'cdn.example.com', pathname: '/**' }}] }}),
   localIpDecision: adapter.__test.imageOptimizerDecision({{ images: {{ dangerouslyAllowLocalIP: true }} }}),
   redirectDecision: adapter.__test.imageOptimizerDecision({{ images: {{ maximumRedirects: 0 }} }}),
+  upperHttpsLoader: loader({{ src: 'HTTPS://cdn.example.com/image.png', width: 640 }}),
 }};
 process.stdout.write(JSON.stringify(result));
 "#,
@@ -184,6 +186,10 @@ process.stdout.write(JSON.stringify(result));
     assert!(result["insecure"].is_null());
     assert_eq!(result["localIpDecision"]["status"], "compute_fallback");
     assert_eq!(result["redirectDecision"]["status"], "compute_fallback");
+    assert_eq!(
+        result["upperHttpsLoader"],
+        "/_onreza/image?url=HTTPS%3A%2F%2Fcdn.example.com%2Fimage.png&w=640&q=75"
+    );
 }
 
 #[test]

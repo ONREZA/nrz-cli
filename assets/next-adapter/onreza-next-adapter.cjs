@@ -358,7 +358,7 @@ function normalizeSource(src) {
 
 function sourceBundlePath(src) {
   const normalized = normalizeSource(src)
-  if (normalized.startsWith('https://')) {
+  if (normalized.slice(0, 8).toLowerCase() === 'https://') {
     return normalized
   }
   if (normalized.startsWith('/_static/') || normalized.startsWith('/public/')) {
@@ -547,5 +547,6 @@ const adapter = {
 module.exports = adapter
 module.exports.__test = {
   buildRemoteImageSources,
+  imageLoaderSource,
   imageOptimizerDecision,
 }
