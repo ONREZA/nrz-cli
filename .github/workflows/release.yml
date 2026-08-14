@@ -149,7 +149,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: '1.96.0'
+          toolchain: '1.97'
           targets: ${{ matrix.target }}
 
       - name: Build release binary

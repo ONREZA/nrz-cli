@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.36.3] - 2026-07-29
+
+### 🐛 Bug Fixes
+
+- **deploy:** clarify deployment failures ([3fda924](https://github.com/ONREZA/nrz-cli/commit/3fda92420e65293f94d64a3ae57deda32fd3aace))
+- **release:** trust published checksums ([fb0d0a3](https://github.com/ONREZA/nrz-cli/commit/fb0d0a39bc7ede0293f368f4ac63856bdf7a2ec5))
+- **cli:** isolate function policy aliases ([af84fc0](https://github.com/ONREZA/nrz-cli/commit/af84fc0f9d28ad01e9592e1be869da3653f6f187))
+- **cli:** address security review comments ([aade544](https://github.com/ONREZA/nrz-cli/commit/aade5447d1c2a2386e57170ae9b6d31b39e42cb5))
+- **cli:** close security review gaps ([9b32ecf](https://github.com/ONREZA/nrz-cli/commit/9b32ecf4fc2d9461ee81438aeb177c63e51a7fc3))
+- **cli:** improve security remediation dx ([2cd46f6](https://github.com/ONREZA/nrz-cli/commit/2cd46f6ee6dea5c8eeb653ecf14d93a3cdc7bad1))
+- **release:** stage npm binary replacement ([a146a7c](https://github.com/ONREZA/nrz-cli/commit/a146a7c70e07eedd7c36468bc0af2b09202dcfd5))
+- **cli:** preserve rules during replacement ([8d1d35f](https://github.com/ONREZA/nrz-cli/commit/8d1d35f0d0b1dfdf68834bfe48d26abf5cfe77ac))
+- **build:** allow workspace pnpm prisma ([e588108](https://github.com/ONREZA/nrz-cli/commit/e5881085232085f2ec3a3b6522407a9687a6c937))
+- **cli:** harden security boundaries ([cb7ef30](https://github.com/ONREZA/nrz-cli/commit/cb7ef3064b8177ed01fdc14295cf40f042da5f29))
+
+### 📚 Documentation
+
+- **cli:** remove completed findings report ([b71a0f7](https://github.com/ONREZA/nrz-cli/commit/b71a0f7caca7cd8e49d68695b5c9c2478a4b7575))
+
 ## [0.36.2] - 2026-07-16
 
 ### 🐛 Bug Fixes

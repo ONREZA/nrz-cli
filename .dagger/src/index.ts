@@ -6,7 +6,7 @@ import {
   releaseAssetName,
 } from "../scripts/release-assets";
 
-const RUST_IMAGE = "rust:1.96-bookworm";
+const RUST_IMAGE = "rust:1.97-bookworm";
 const BUN_IMAGE = "oven/bun:1.3.14-debian";
 const ALPINE_IMAGE = "alpine:3.20";
 const RELEASE_GIT_METADATA_SCRIPT = ".dagger/scripts/capture-git-metadata.ts";
