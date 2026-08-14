@@ -109,6 +109,15 @@ export class NrzCli {
       .sync();
 
     let ctr = rustContainer(source);
+    ctr = ctr.withExec([
+      "sh",
+      "-ceu",
+      [
+        "apt-get update",
+        "apt-get install -y --no-install-recommends nodejs",
+        "rm -rf /var/lib/apt/lists/*",
+      ].join("\n"),
+    ]);
     ctr = ctr.withExec(["rustup", "component", "add", "rustfmt", "clippy"]);
     ctr = ctr.withExec(["cargo", "test", "--all"]);
     ctr = ctr.withExec(["cargo", "fmt", "--", "--check"]);
