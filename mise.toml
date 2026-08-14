@@ -1,9 +1,10 @@
 [tools]
 bun = "1.3.14"
-rust = "1.96.0"
+rust = "1.97"
 cocogitto = "7.0.0"
 lefthook = "2.1.9"
 actionlint = "1.7.12"
+"aqua:EmbarkStudios/cargo-deny" = "0.20.2"
 
 [tasks.hooks]
 description = "Install Git hooks"
@@ -45,6 +46,10 @@ run = "cog check --from-latest-tag --ignore-merge-commits"
 description = "Lint GitHub Actions workflows"
 run = "actionlint"
 
+[tasks."licenses:check"]
+description = "Check Rust dependency licenses"
+run = "cargo deny check licenses"
+
 [tasks.check]
 description = "Run the standard local quality gate"
 run = [
@@ -53,5 +58,6 @@ run = [
   "cargo test",
   "cd .dagger && bun install --frozen-lockfile && bun run typecheck && bun test scripts/release-scripts.test.ts",
   "actionlint",
+  "cargo deny check licenses",
   "cog check --from-latest-tag --ignore-merge-commits",
 ]

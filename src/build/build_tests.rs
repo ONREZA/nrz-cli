@@ -3090,6 +3090,31 @@ fn prisma_copies_symlink_from_workspace_pnpm_store() {
 
 #[cfg(unix)]
 #[test]
+fn prisma_skips_symlink_to_workspace_pnpm_store_root() {
+    let workspace = tempfile::tempdir().unwrap();
+    let project = workspace.path().join("apps/web");
+    let output = tempfile::tempdir().unwrap();
+    let store = workspace.path().join("node_modules/.pnpm");
+    let private_package = store.join("private-dep@1.0.0/node_modules/private-dep");
+    std::fs::create_dir_all(&private_package).unwrap();
+    std::fs::write(private_package.join("secret.txt"), "secret").unwrap();
+
+    let prisma_dir = project.join("node_modules/@prisma");
+    std::fs::create_dir_all(&prisma_dir).unwrap();
+    std::os::unix::fs::symlink(&store, prisma_dir.join("client-leak")).unwrap();
+
+    copy_missing_prisma_packages(&project, workspace.path(), output.path(), true).unwrap();
+
+    assert!(
+        !output
+            .path()
+            .join("node_modules/@prisma/client-leak")
+            .exists()
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn prisma_skips_symlink_to_non_store_workspace_directory() {
     let workspace = tempfile::tempdir().unwrap();
     let project = workspace.path().join("apps/web");
