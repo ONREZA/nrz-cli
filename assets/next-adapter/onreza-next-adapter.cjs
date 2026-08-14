@@ -70,6 +70,13 @@ function isDefaultLocalPatterns(value) {
   )
 }
 
+function isDefaultImageQualities(value) {
+  return (
+    value == null ||
+    (Array.isArray(value) && value.length === 1 && value[0] === 75)
+  )
+}
+
 function hasUserAssetPrefix(config) {
   if (!hasNonEmptyString(config.assetPrefix)) {
     return false
@@ -165,6 +172,7 @@ function normalizeRemotePattern(pattern, index) {
     (protocol !== 'https' && protocol !== 'https:') ||
     port !== '' ||
     hostname == null ||
+    (!(value instanceof URL) && hostname !== value.hostname) ||
     pathname == null ||
     search === null ||
     value.username ||
@@ -256,6 +264,14 @@ function imageOptimizerDecision(config) {
       status: 'compute_fallback',
       primitive: 'COMPUTE layer',
       reason: 'assetPrefix requires Next.js image URL semantics',
+    }
+  }
+
+  if (!isDefaultImageQualities(images.qualities)) {
+    return {
+      status: 'compute_fallback',
+      primitive: 'COMPUTE layer',
+      reason: 'custom image qualities require Next.js quality validation',
     }
   }
 

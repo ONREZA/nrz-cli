@@ -4243,6 +4243,43 @@ fn wire_manifest_contract_rejects_unknown_layer_fields() {
 }
 
 #[test]
+fn wire_manifest_contract_enforces_runtime_memory_bounds() {
+    for memory_mb in [-1, 31, 8193] {
+        let manifest = serde_json::json!({
+            "version": 1,
+            "layers": [{
+                "name": "app",
+                "target": "COMPUTE",
+                "directory": ".",
+                "entry": "server.js",
+                "runtime": { "memoryMb": memory_mb },
+            }],
+            "routes": [{ "pattern": "^/.*", "layer": "app" }],
+        });
+        assert!(
+            conform_manifest_to_wire_contract(manifest).is_err(),
+            "runtime.memoryMb={memory_mb} must not reach the server"
+        );
+    }
+
+    for memory_mb in [32, 8192] {
+        let manifest = serde_json::json!({
+            "version": 1,
+            "layers": [{
+                "name": "app",
+                "target": "COMPUTE",
+                "directory": ".",
+                "entry": "server.js",
+                "runtime": { "memoryMb": memory_mb },
+            }],
+            "routes": [{ "pattern": "^/.*", "layer": "app" }],
+        });
+        conform_manifest_to_wire_contract(manifest)
+            .unwrap_or_else(|error| panic!("runtime.memoryMb={memory_mb} must be valid: {error}"));
+    }
+}
+
+#[test]
 fn wire_manifest_contract_preserves_route_fallthrough_when() {
     let fallthrough_when = serde_json::json!([
         { "type": "header", "name": "rsc", "value": "1" },

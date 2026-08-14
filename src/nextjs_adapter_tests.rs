@@ -146,11 +146,16 @@ const result = {{
   exactDefaultPort: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', port: '', pathname: '/images/**' }}] }}),
   exactSearch: normalize({{ remotePatterns: [new URL('https://cdn.example.com/images/**?v=1')] }}),
   unicode: normalize({{ remotePatterns: [new URL('https://Изображения.РФ/**')] }}),
+  canonicalObjectHostname: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', port: '', pathname: '/**' }}] }}),
+  uppercaseObjectHostname: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'CDN.EXAMPLE.COM', port: '', pathname: '/**' }}] }}),
+  paddedObjectHostname: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: ' cdn.example.com ', port: '', pathname: '/**' }}] }}),
   legacyDomains: normalize({{ domains: ['cdn.example.com'] }}),
   encodedTraversal: normalize({{ remotePatterns: [{{ protocol: 'https', hostname: 'cdn.example.com', pathname: '/safe/%2e%2e/**' }}] }}),
   insecure: normalize({{ remotePatterns: [{{ protocol: 'http', hostname: 'cdn.example.com', pathname: '/**' }}] }}),
   localIpDecision: adapter.__test.imageOptimizerDecision({{ images: {{ dangerouslyAllowLocalIP: true }} }}),
   redirectDecision: adapter.__test.imageOptimizerDecision({{ images: {{ maximumRedirects: 0 }} }}),
+  defaultQualitiesDecision: adapter.__test.imageOptimizerDecision({{ images: {{ qualities: [75] }} }}),
+  customQualitiesDecision: adapter.__test.imageOptimizerDecision({{ images: {{ qualities: [60, 75] }} }}),
   upperHttpsLoader: loader({{ src: 'HTTPS://cdn.example.com/image.png', width: 640 }}),
 }};
 process.stdout.write(JSON.stringify(result));
@@ -181,11 +186,25 @@ process.stdout.write(JSON.stringify(result));
         result["unicode"][0]["hostname"],
         "xn--80abndcff3bev4o.xn--p1ai"
     );
+    assert_eq!(
+        result["canonicalObjectHostname"][0]["hostname"],
+        "cdn.example.com"
+    );
+    assert!(result["uppercaseObjectHostname"].is_null());
+    assert!(result["paddedObjectHostname"].is_null());
     assert!(result["legacyDomains"].is_null());
     assert!(result["encodedTraversal"].is_null());
     assert!(result["insecure"].is_null());
     assert_eq!(result["localIpDecision"]["status"], "compute_fallback");
     assert_eq!(result["redirectDecision"]["status"], "compute_fallback");
+    assert_eq!(
+        result["defaultQualitiesDecision"]["status"],
+        "onreza_optimizer"
+    );
+    assert_eq!(
+        result["customQualitiesDecision"]["status"],
+        "compute_fallback"
+    );
     assert_eq!(
         result["upperHttpsLoader"],
         "/_onreza/image?url=HTTPS%3A%2F%2Fcdn.example.com%2Fimage.png&w=640&q=75"
