@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,7 +13,6 @@ import {
 const outDir = "/out/npm";
 const binDir = join(outDir, "bin");
 const scriptsDir = join(outDir, "scripts");
-const checksumManifestPath = "/release/checksums-sha256.txt";
 
 interface NpmPackageOptions {
   version: string;
@@ -57,35 +57,13 @@ export function releaseAssets(tag: string): Record<string, string> {
   );
 }
 
-export function parseReleaseChecksums(text: string): Record<string, string> {
-  const checksums: Record<string, string> = {};
-  const assetToPlatform = new Map(
-    RELEASE_PLATFORMS.map((platform) => [releaseAssetName(platform), platform]),
+export function artifactChecksums(distDir: string): Record<string, string> {
+  return Object.fromEntries(
+    RELEASE_PLATFORMS.map((platform) => {
+      const archive = readFileSync(join(distDir, releaseAssetName(platform)));
+      return [platform, createHash("sha256").update(archive).digest("hex")];
+    }),
   );
-  const checksumPattern = /^([a-f0-9]{64})  ([^\s/]+)$/;
-
-  for (const line of text.trim().split("\n")) {
-    const match = checksumPattern.exec(line);
-    if (!match) {
-      throw new Error(`Invalid published checksum entry: ${line}`);
-    }
-    const [, digest, asset] = match;
-    const platform = assetToPlatform.get(asset);
-    if (!platform) {
-      throw new Error(`Unexpected published checksum asset: ${asset}`);
-    }
-    if (checksums[platform]) {
-      throw new Error(`Duplicate published checksum for ${platform}`);
-    }
-    checksums[platform] = digest;
-  }
-
-  for (const platform of RELEASE_PLATFORMS) {
-    if (!checksums[platform]) {
-      throw new Error(`Missing published checksum for ${platform}`);
-    }
-  }
-  return checksums;
 }
 
 export function createPackageJson({ version, channel }: NpmPackageOptions): ReleasePackageJson {
@@ -333,7 +311,7 @@ function main(): void {
   mkdirSync(scriptsDir, { recursive: true });
 
   const assets = releaseAssets(tag);
-  const checksums = parseReleaseChecksums(readFileSync(checksumManifestPath, "utf8"));
+  const checksums = artifactChecksums("/dist");
   writeFileSync(join(outDir, "package.json"), `${JSON.stringify(createPackageJson({ version, channel }), null, 2)}\n`);
   writeFileSync(
     join(scriptsDir, "postinstall.js"),
