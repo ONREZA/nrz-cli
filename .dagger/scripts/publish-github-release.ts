@@ -14,7 +14,7 @@ const prerelease = channel !== "stable";
 const apiBase = "https://api.github.com";
 const uploadBase = "https://uploads.github.com";
 const artifactRoot = "/dist";
-interface GitHubAsset {
+export interface GitHubAsset {
   id: number;
   name: string;
 }
@@ -28,6 +28,7 @@ export interface GitHubRelease {
 }
 
 type Requester = <T>(method: string, path: string, body?: unknown) => Promise<T | null>;
+type AssetDownloader = (assetId: number) => Promise<Uint8Array>;
 
 export interface ChecksumArtifact {
   path: string;
@@ -111,6 +112,41 @@ async function uploadAsset(releaseId: number, filePath: string, name: string): P
   }
 }
 
+async function downloadAsset(assetId: number): Promise<Uint8Array> {
+  const response = await fetch(`${apiBase}/repos/${repository}/releases/assets/${assetId}`, {
+    headers: {
+      Accept: "application/octet-stream",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Download release asset ${assetId} failed: ${response.status} ${await response.text()}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+export async function verifyPublishedAssets(
+  release: GitHubRelease,
+  expectedPaths: Readonly<Record<string, string>>,
+  downloader: AssetDownloader = downloadAsset,
+): Promise<void> {
+  const assets = new Map((release.assets || []).map((asset) => [asset.name, asset]));
+
+  for (const [name, expectedPath] of Object.entries(expectedPaths)) {
+    const asset = assets.get(name);
+    if (!asset) {
+      throw new Error(`Release ${release.tag_name} is missing published asset: ${name}`);
+    }
+
+    const expectedDigest = createHash("sha256").update(readFileSync(expectedPath)).digest("hex");
+    const actualDigest = createHash("sha256").update(await downloader(asset.id)).digest("hex");
+    if (actualDigest !== expectedDigest) {
+      throw new Error(`Published release asset ${name} does not match the CI-built artifact`);
+    }
+  }
+}
+
 export function appendChecksumsToReleaseNotes(notes: string, checksumText: string): string {
   const checksums = checksumText.trim();
   if (!checksums) {
@@ -163,18 +199,15 @@ async function main(): Promise<void> {
   const releaseBody = releaseNotes(checksum.text);
   const allUploads = [...assetPaths, checksum.path];
   const allNames = [...REQUIRED_RELEASE_ASSETS, "checksums-sha256.txt"];
+  const expectedPaths = Object.fromEntries(allNames.map((name, index) => [name, allUploads[index]]));
 
   let release = await findReleaseByTag(repository, tag);
   if (release && !release.draft) {
-    const existingNames = new Set((release.assets || []).map((asset) => asset.name));
-    const complete = allNames.every((name) => existingNames.has(name));
-    if (complete) {
-      process.stdout.write(
-        `${JSON.stringify({ tag, version, channel, releaseUrl: release.html_url, status: "already-published" }, null, 2)}\n`,
-      );
-      return;
-    }
-    throw new Error(`Release ${tag} already exists and is published but does not have a complete asset set`);
+    await verifyPublishedAssets(release, expectedPaths);
+    process.stdout.write(
+      `${JSON.stringify({ tag, version, channel, releaseUrl: release.html_url, status: "already-published" }, null, 2)}\n`,
+    );
+    return;
   }
 
   if (!release) {
@@ -223,6 +256,7 @@ async function main(): Promise<void> {
   if (missing.length > 0) {
     throw new Error(`Release ${tag} is missing uploaded assets: ${missing.join(", ")}`);
   }
+  await verifyPublishedAssets(release, expectedPaths);
 
   const finalizeBody: { draft: boolean; prerelease: boolean; make_latest?: "true" } = {
     draft: false,

@@ -228,10 +228,12 @@ export class NrzCli {
         "sh",
         "-ceu",
         [
+          "set -o pipefail",
           `mkdir -p /out/archive/${platform}`,
           `cp /input/${executable} /out/archive/${platform}/${executable}`,
           `chmod ${mode} /out/archive/${platform}/${executable}`,
-          `tar -czf /out/${releaseAssetName(platform)} -C /out/archive ${platform}`,
+          `find /out/archive/${platform} -exec touch -h -d @0 {} +`,
+          `tar --numeric-owner -cf - -C /out/archive ${platform} | gzip -c > /out/${releaseAssetName(platform)}`,
         ].join("\n"),
       ])
       .file(`/out/${releaseAssetName(platform)}`);
@@ -250,6 +252,7 @@ export class NrzCli {
         "sh",
         "-ceu",
         [
+          "set -o pipefail",
           `for platform in ${RELEASE_PLATFORMS.join(" ")}; do`,
           "  binary=nrz",
           "  mode=0755",
@@ -259,7 +262,8 @@ export class NrzCli {
           "  mkdir -p \"/out/archive/$platform\"",
           "  cp \"$src\" \"/out/archive/$platform/$binary\"",
           "  chmod \"$mode\" \"/out/archive/$platform/$binary\"",
-          "  tar -czf \"/out/nrz-$platform.tar.gz\" -C /out/archive \"$platform\"",
+          "  find \"/out/archive/$platform\" -exec touch -h -d @0 {} +",
+          "  tar --numeric-owner -cf - -C /out/archive \"$platform\" | gzip -c > \"/out/nrz-$platform.tar.gz\"",
           "done",
           "rm -rf /out/archive",
         ].join("\n"),

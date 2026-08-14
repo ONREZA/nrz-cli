@@ -16,6 +16,7 @@ import {
   createChecksums,
   findReleaseByTag,
   type GitHubRelease,
+  verifyPublishedAssets,
 } from "./publish-github-release";
 import {
   filterReleaseCommits,
@@ -121,6 +122,55 @@ test("GitHub release lookup includes draft releases by tag", async () => {
     "GET /repos/ONREZA/nrz-cli/releases/tags/v0.33.0-beta.1",
     "GET /repos/ONREZA/nrz-cli/releases?per_page=100",
   ]);
+});
+
+test("published release retries require the exact CI-built assets", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "nrz-release-retry-"));
+  try {
+    const archive = join(dir, "nrz-linux-x64.tar.gz");
+    const checksums = join(dir, "checksums-sha256.txt");
+    writeFileSync(archive, "ci archive");
+    writeFileSync(checksums, "ci checksums");
+
+    const release: GitHubRelease = {
+      id: 123,
+      tag_name: "v0.33.0-beta.1",
+      draft: false,
+      html_url: "https://github.com/ONREZA/nrz-cli/releases/tag/v0.33.0-beta.1",
+      assets: [
+        { id: 1, name: "nrz-linux-x64.tar.gz" },
+        { id: 2, name: "checksums-sha256.txt" },
+      ],
+    };
+    const published = new Map([
+      [1, new TextEncoder().encode("ci archive")],
+      [2, new TextEncoder().encode("ci checksums")],
+    ]);
+
+    await verifyPublishedAssets(
+      release,
+      {
+        "nrz-linux-x64.tar.gz": archive,
+        "checksums-sha256.txt": checksums,
+      },
+      async (assetId) => published.get(assetId)!,
+    );
+
+    published.set(1, new TextEncoder().encode("repacked archive"));
+    await assert.rejects(
+      verifyPublishedAssets(
+        release,
+        {
+          "nrz-linux-x64.tar.gz": archive,
+          "checksums-sha256.txt": checksums,
+        },
+        async (assetId) => published.get(assetId)!,
+      ),
+      /does not match the CI-built artifact/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("GitHub release notes include the same checksum text as the uploaded checksum file", () => {
