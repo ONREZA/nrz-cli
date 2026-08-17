@@ -1,10 +1,10 @@
-//! ONREZA Functions publish support: bounded source collection + local policy
-//! preview. The CLI is transport — it collects self-contained function source
-//! and runs the same static policy as the platform for fast feedback, but the
-//! platform (`artifact-ingest`) is the authoritative trust boundary.
+//! ONREZA Functions publish support: bounded source collection and Edge Rules.
+//! The CLI validates executable compatibility with its pinned native runtime;
+//! the platform remains the authoritative trust and policy boundary.
 
 mod collect;
 mod payload;
+#[cfg(test)]
 mod policy;
 mod rules;
 mod rules_authoring;
@@ -16,8 +16,9 @@ mod publish_tests;
 #[cfg(test)]
 mod rules_authoring_tests;
 
-pub use collect::{CollectedFunction, CollectedFunctions, collect};
+pub use collect::{CollectedFunctions, collect};
 pub use payload::{FunctionPublishPayload, GeneratedEdgeRuleSet, build_payload};
+#[cfg(test)]
 pub use policy::run_policy_preview;
 pub(crate) use rules::validate_edge_rules_value;
 pub use rules::{

@@ -1780,8 +1780,8 @@ fn functions_payload_serializes_edge_rules_force() {
     assert_eq!(value["edgeRulesForce"], true);
 }
 
-#[test]
-fn build_functions_payload_generates_nextjs_edge_rules_when_local_rules_absent() {
+#[tokio::test]
+async fn build_functions_payload_generates_nextjs_edge_rules_when_local_rules_absent() {
     let tmp = tempdir().unwrap();
     fs::create_dir_all(tmp.path().join(".onreza")).unwrap();
     fs::write(
@@ -1831,6 +1831,7 @@ fn build_functions_payload_generates_nextjs_edge_rules_when_local_rules_absent()
         true,
         false,
     )
+    .await
     .unwrap()
     .expect("generated Next.js Edge Rules should create a functions payload");
     let value = serde_json::to_value(&payload).unwrap();
@@ -1865,8 +1866,8 @@ fn build_functions_payload_generates_nextjs_edge_rules_when_local_rules_absent()
     );
 }
 
-#[test]
-fn build_functions_payload_sends_empty_deployment_snapshot_without_adapter() {
+#[tokio::test]
+async fn build_functions_payload_sends_empty_deployment_snapshot_without_adapter() {
     let tmp = tempdir().unwrap();
     let payload = build_functions_payload(
         &nrz::config::ProjectConfig::default(),
@@ -1874,6 +1875,7 @@ fn build_functions_payload_sends_empty_deployment_snapshot_without_adapter() {
         true,
         false,
     )
+    .await
     .unwrap()
     .expect("deployment snapshot must clear stale generated adapter config");
     let value = serde_json::to_value(&payload).unwrap();
@@ -1884,8 +1886,8 @@ fn build_functions_payload_sends_empty_deployment_snapshot_without_adapter() {
     assert!(value.get("generatedEdgeRuleSets").is_none());
 }
 
-#[test]
-fn build_functions_payload_sends_empty_nextjs_generated_contribution_for_clearing() {
+#[tokio::test]
+async fn build_functions_payload_sends_empty_nextjs_generated_contribution_for_clearing() {
     let tmp = tempdir().unwrap();
     fs::create_dir_all(tmp.path().join(".onreza")).unwrap();
     fs::write(
@@ -1907,6 +1909,7 @@ fn build_functions_payload_sends_empty_nextjs_generated_contribution_for_clearin
         true,
         false,
     )
+    .await
     .unwrap()
     .expect("empty Next.js generated contribution should clear stale adapter rules");
     let value = serde_json::to_value(&payload).unwrap();
@@ -1927,8 +1930,8 @@ fn build_functions_payload_sends_empty_nextjs_generated_contribution_for_clearin
     );
 }
 
-#[test]
-fn build_functions_payload_sends_user_and_nextjs_generated_rules_separately() {
+#[tokio::test]
+async fn build_functions_payload_sends_user_and_nextjs_generated_rules_separately() {
     let tmp = tempdir().unwrap();
     fs::create_dir_all(tmp.path().join(".onreza")).unwrap();
     fs::write(
@@ -1970,6 +1973,7 @@ action = { type = "allow" }
         true,
         false,
     )
+    .await
     .unwrap()
     .expect("user Edge Rules should create a functions payload");
     let value = serde_json::to_value(&payload).unwrap();

@@ -365,10 +365,6 @@ impl std::fmt::Display for AlreadyReportedError {
 
 impl std::error::Error for AlreadyReportedError {}
 
-pub fn already_reported_error() -> anyhow::Error {
-    anyhow::Error::new(AlreadyReportedError { diagnostic: None })
-}
-
 pub fn reported_terminal_diagnostic(error: &anyhow::Error) -> Option<&TerminalDiagnostic> {
     error
         .chain()
