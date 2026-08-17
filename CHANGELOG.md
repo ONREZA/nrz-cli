@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.37.0] - 2026-08-17
+
+### ✨ Features
+
+- **cli:** embed functions runtime flow ([026ba61](https://github.com/ONREZA/nrz-cli/commit/026ba61b4a89804b4cf4ab4bac2d931d15f84b8e))
+- image optimizer policies ([fd52a5f](https://github.com/ONREZA/nrz-cli/commit/fd52a5f40509dccc1af94d47e683a34e1bf31311))
+
+### 🐛 Bug Fixes
+
+- **release:** verify exact release assets ([f06bdf1](https://github.com/ONREZA/nrz-cli/commit/f06bdf143fbdc96a9ac8d9f355e12fde3ea08f36))
+- **cli:** detect erased global aliases ([8d6a2ec](https://github.com/ONREZA/nrz-cli/commit/8d6a2ecda75a56f4d10ce0b5477b918feb3c5284))
+- **build:** restrict pnpm prisma package sources ([227779a](https://github.com/ONREZA/nrz-cli/commit/227779a5db8501bcbb26177cc30b5cee65084151))
+
+### 🔧 Changed
+
+- **deps:** refresh rust toolchain ([f6c7ced](https://github.com/ONREZA/nrz-cli/commit/f6c7ced787d566e9466de28201bd0cb7e3d73454))
+
 ## [0.36.3] - 2026-07-29
 
 ### 🐛 Bug Fixes
