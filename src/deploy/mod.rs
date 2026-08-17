@@ -447,11 +447,11 @@ impl ResolvedHealthCheck {
 
 // ── Main deploy flow ─────────────────────────────────────────
 
-/// Discover ONREZA Functions, run the local policy preview (fail-fast before
-/// upload), and assemble the deployment-owned publish snapshot. Even an empty
-/// snapshot is sent so the platform can retire generated adapter config from a
-/// previous deployment without touching USER-owned Edge Rules.
-fn build_functions_payload(
+/// Discover ONREZA Functions, validate them with the pinned native runtime,
+/// and assemble the deployment-owned publish snapshot. Even an empty snapshot
+/// is sent so the platform can retire generated adapter config from a previous
+/// deployment without touching USER-owned Edge Rules.
+async fn build_functions_payload(
     _config: &ProjectConfig,
     project_dir: &Path,
     json: bool,
@@ -472,29 +472,17 @@ fn build_functions_payload(
     let has_visible_config =
         !collected.is_empty() || user_edge_rules.is_some() || !generated_edge_rule_sets.is_empty();
 
-    let mut violation_count = 0usize;
-    for function in &collected.functions {
-        let report = crate::functions::run_policy_preview(&function.entrypoint, &function.sources)?;
-        if report.status == nrz_fn_policy::PolicyStatus::Failed {
-            violation_count += report.violations.len();
-            for violation in &report.violations {
-                let location = violation.importer.as_deref().unwrap_or(&report.entrypoint);
-                output::warn(
-                    json,
-                    format!(
-                        "{} ({location}): {} — {}",
-                        function.name, violation.capability, violation.reason
-                    ),
-                    output::Phase::Deploy,
-                );
-            }
-        }
-    }
-    if violation_count > 0 {
-        return Err(output::coded_error(
-            "ONREZA_FUNCTIONS_POLICY",
-            format!("function policy check failed with {violation_count} violation(s)"),
-        ));
+    if !collected.is_empty() {
+        let runtime = crate::functions_runtime::preflight(project_dir, &collected).await?;
+        output::status(
+            json,
+            "✓",
+            format!(
+                "{} loaded {} function(s) for {}",
+                runtime.runtime_release_id, runtime.functions_loaded, runtime.target
+            ),
+            output::Phase::Deploy,
+        );
     }
     if has_visible_config {
         output::success(

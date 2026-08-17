@@ -8,11 +8,32 @@ pub struct FunctionsArgs {
 
 #[derive(Subcommand)]
 pub enum FunctionsCommand {
-    /// Run the ONREZA Functions policy check against the local source bundle
+    /// Load local Functions with the exact runtime used by the platform
     Check(FunctionsCheckArgs),
 
     /// Invoke an active ONREZA Function revision in the remote sandbox
     Invoke(Box<FunctionsInvokeArgs>),
+
+    /// Inspect or install the CLI-pinned local Functions runtime
+    Runtime(FunctionsRuntimeArgs),
+}
+
+#[derive(Parser)]
+pub struct FunctionsRuntimeArgs {
+    #[command(subcommand)]
+    pub command: FunctionsRuntimeCommand,
+}
+
+#[derive(Subcommand)]
+pub enum FunctionsRuntimeCommand {
+    /// Download and verify the CLI-pinned runtime when it is not cached
+    Install,
+
+    /// Report whether the exact CLI-pinned runtime is installed
+    Status,
+
+    /// Install when needed and print the exact runtime binary path
+    Path,
 }
 
 #[derive(Parser)]

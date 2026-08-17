@@ -127,7 +127,7 @@ checkout. Legacy `--env`/`NRZ_ENV` остался только у локальн
 | `nrz deployments` | Список deployments проекта. | `--limit` (1..100, default 10), `--project-id`. |
 | `nrz logs` | Runtime logs проекта с фильтрацией. | `--deployment-id`, `--project-id`, `--limit` (1..1000, default 50), `--search`. |
 | `nrz rollback` | Создает rollback deployment. | `--deployment-id`; если не задан, ищет текущий live deployment через `--project-id`/config. |
-| `nrz functions check [DIR]` | Локальная проверка ONREZA Functions policy и `onreza.rules.toml`. | Ошибка `ONREZA_FUNCTIONS_NOT_FOUND`, если нет function entries и rules-файла; policy failure кодируется как `ONREZA_FUNCTIONS_POLICY`. |
+| `nrz functions check [DIR]` | Загружает Functions через точный STABLE runtime и проверяет `onreza.rules.toml`. | Runtime скачивается в пользовательский cache при первом Function-check; ошибка `ONREZA_FUNCTIONS_NOT_FOUND`, если нет function entries и rules-файла. |
 | `nrz kv ...` | Локальный KV store для dev/emulator state. | Не ходит в API. Хранилище: `.onreza/data/kv.<env>.json` от текущей директории; default env namespace `development`. |
 | `nrz db ...` | Managed PostgreSQL (kaiki) операции. | Management идет через `/v1/kaiki/databases`; project-scoped команды фильтруют/обновляют `projectAttachments`. `query` и `schema` получают connection URI через API и выполняют SQL локально из `nrz`. Database auto-resolve: explicit arg -> config `[db].database` -> auto-inject attachment -> первый attached DB. |
 | `nrz env ...` | Безопасное управление platform env vars, проверка и запуск команд с материализованным snapshot. | `--project-id` global внутри группы; точный context выбирается через `--environment`/`NRZ_ENVIRONMENT`/`nrz context`. Dotenv pull/push отсутствуют. |
@@ -195,7 +195,8 @@ checkout. Legacy `--env`/`NRZ_ENV` остался только у локальн
 | `nrz kv delete <KEY>` | Удаляет local KV key. | `--env`. |
 | `nrz kv list` | Список local KV keys. | `--env`, `--prefix`, `--limit` (default 100). |
 | `nrz kv clear` | Удаляет весь local KV файл выбранного env namespace. | `--env`, `--force` обязателен для реальной очистки. |
-| `nrz functions check [DIR]` | Проверяет local ONREZA Functions/rules payload до publish/deploy. | JSON output включает functions reports, edge rules report и policy error/code при нарушениях. |
+| `nrz functions check [DIR]` | Загружает local Functions точным platform runtime и проверяет rules payload до publish/deploy. | JSON output включает runtime identity, загруженные entrypoints и Edge Rules report. |
+| `nrz functions runtime install/status/path` | Управляет локальным cache точного STABLE runtime. | Обычные `functions check` и `deploy` устанавливают runtime автоматически; эти команды нужны для диагностики и offline-подготовки. |
 | `nrz functions invoke <NAME>` | Вызывает активную Function revision. | `--environment` или общий сохранённый context. |
 | `nrz rules pull/publish/status` | Читает или публикует user-authored Edge Rules. | `--environment` или общий сохранённый context. |
 

@@ -2,22 +2,22 @@ use std::path::Path;
 
 use anyhow::Context;
 use base64::Engine;
-use nrz_fn_policy::{PolicyReport, PolicyStatus};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::api::{ApiClient, path_segment};
 use crate::auth;
 use crate::cli::functions::{
-    FunctionsArgs, FunctionsCheckArgs, FunctionsCommand, FunctionsInvokeArgs,
+    FunctionsArgs, FunctionsCheckArgs, FunctionsCommand, FunctionsInvokeArgs, FunctionsRuntimeArgs,
+    FunctionsRuntimeCommand,
 };
 use crate::execution_context;
 use crate::functions;
+use crate::functions_runtime::{CachedRuntime, RuntimePreflight, RuntimeResolver, preflight};
 use crate::output::{self, Phase};
 use nrz::config;
 use nrz::config::ProjectConfig;
 
-const POLICY_ERROR_CODE: &str = "ONREZA_FUNCTIONS_POLICY";
 const MAX_TEST_INVOKE_HEADER_COUNT: usize = 64;
 const MAX_TEST_INVOKE_HEADER_NAME_LENGTH: usize = 128;
 const MAX_TEST_INVOKE_HEADER_VALUE_LENGTH: usize = 8_192;
@@ -33,12 +33,13 @@ pub async fn run(
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     match args.command {
-        FunctionsCommand::Check(args) => check(args, json),
+        FunctionsCommand::Check(args) => check(args, json).await,
         FunctionsCommand::Invoke(args) => invoke(*args, json, token, workspace, config).await,
+        FunctionsCommand::Runtime(args) => runtime(args, json).await,
     }
 }
 
-fn check(args: FunctionsCheckArgs, json: bool) -> anyhow::Result<()> {
+async fn check(args: FunctionsCheckArgs, json: bool) -> anyhow::Result<()> {
     let project_dir = Path::new(&args.dir)
         .canonicalize()
         .with_context(|| format!("project directory not found: {}", args.dir))?;
@@ -52,47 +53,45 @@ fn check(args: FunctionsCheckArgs, json: bool) -> anyhow::Result<()> {
         ));
     }
 
-    let mut reports = Vec::with_capacity(collected.functions.len());
-    let mut violation_count = 0usize;
-    for function in &collected.functions {
-        let report = functions::run_policy_preview(&function.entrypoint, &function.sources)?;
-        if report.status == PolicyStatus::Failed {
-            violation_count += report.violations.len();
-        }
-        if !json {
-            report_human(function, &report);
-        }
-        reports.push(FunctionCheckItem {
+    let runtime = if collected.is_empty() {
+        None
+    } else {
+        Some(preflight(&project_dir, &collected).await?)
+    };
+    let functions = collected
+        .functions
+        .iter()
+        .map(|function| FunctionCheckItem {
             name: function.name.clone(),
-            report,
-        });
-    }
+            entrypoint: function.entrypoint.clone(),
+        })
+        .collect();
 
     if !json {
         report_edge_rules_human(edge_rules.as_ref());
     }
 
     let edge_rule_count = edge_rules.as_ref().map_or(0, |report| report.rule_count);
-    let policy_error = (violation_count > 0)
-        .then(|| format!("function policy check failed with {violation_count} violation(s)"));
-
     if json {
         output::json_output(&FunctionCheckReport {
-            functions: reports,
+            runtime: runtime.clone(),
+            functions,
             edge_rules: edge_rules.clone(),
-            error: policy_error.clone(),
-            code: policy_error.as_ref().map(|_| POLICY_ERROR_CODE.to_string()),
         });
     }
 
-    if let Some(policy_error) = policy_error {
-        if json {
-            return Err(output::already_reported_error());
-        }
-        return Err(output::coded_error(POLICY_ERROR_CODE, policy_error));
-    }
-
     if !json {
+        if let Some(runtime) = runtime {
+            output::status(
+                false,
+                "✓",
+                format!(
+                    "{} loaded {} function(s) for {}",
+                    runtime.runtime_release_id, runtime.functions_loaded, runtime.target
+                ),
+                Phase::Functions,
+            );
+        }
         output::success(
             false,
             format!(
@@ -109,44 +108,75 @@ fn check(args: FunctionsCheckArgs, json: bool) -> anyhow::Result<()> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FunctionCheckReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime: Option<RuntimePreflight>,
     functions: Vec<FunctionCheckItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
     edge_rules: Option<functions::EdgeRulesCheckReport>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    code: Option<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FunctionCheckItem {
     name: String,
-    report: PolicyReport,
+    entrypoint: String,
 }
 
-fn report_human(function: &functions::CollectedFunction, report: &PolicyReport) {
-    if report.violations.is_empty() {
-        return;
+async fn runtime(args: FunctionsRuntimeArgs, json: bool) -> anyhow::Result<()> {
+    let resolver = RuntimeResolver::pinned()?;
+    match args.command {
+        FunctionsRuntimeCommand::Install => {
+            let runtime = resolver.resolve().await?;
+            report_installed_runtime(runtime, json);
+        }
+        FunctionsRuntimeCommand::Status => {
+            let status = resolver.status().await?;
+            if json {
+                output::json_output(&status);
+            } else {
+                output::status(
+                    false,
+                    if status.installed { "✓" } else { "○" },
+                    format!(
+                        "{} for {} is {} at {}",
+                        status.runtime_release_id,
+                        status.target,
+                        if status.installed {
+                            "installed"
+                        } else {
+                            "not installed"
+                        },
+                        status.path.display()
+                    ),
+                    Phase::Functions,
+                );
+            }
+        }
+        FunctionsRuntimeCommand::Path => {
+            let runtime = resolver.resolve().await?;
+            if json {
+                output::json_output(&runtime);
+            } else {
+                println!("{}", runtime.path.display());
+            }
+        }
     }
-    output::status(
-        false,
-        "✗",
-        format!(
-            "{} policy violation(s) in function '{}' ({}):",
-            report.violations.len(),
-            function.name,
-            report.entrypoint
-        ),
-        Phase::Functions,
-    );
-    for violation in &report.violations {
-        let location = violation.importer.as_deref().unwrap_or(&report.entrypoint);
-        eprintln!(
-            "    {} {} — {}",
-            console::style(location).dim(),
-            console::style(&violation.capability).yellow(),
-            violation.reason
+    Ok(())
+}
+
+fn report_installed_runtime(runtime: CachedRuntime, json: bool) {
+    if json {
+        output::json_output(&runtime);
+    } else {
+        output::success(
+            false,
+            format!(
+                "{} for {} is ready at {}",
+                runtime.runtime_release_id,
+                runtime.target,
+                runtime.path.display()
+            ),
+            Phase::Functions,
         );
     }
 }

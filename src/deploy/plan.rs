@@ -469,7 +469,8 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     )?;
 
     let functions =
-        super::build_functions_payload(effective.config(), project_dir, json, args.force_rules)?;
+        super::build_functions_payload(effective.config(), project_dir, json, args.force_rules)
+            .await?;
     let has_compute_layer = super::manifest_has_compute_layer(&runtime_artifact.manifest);
     let health_check = if has_compute_layer {
         Some(super::resolve_health_check(

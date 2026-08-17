@@ -17,6 +17,7 @@ mod errors;
 mod execution_context;
 mod frameworks;
 mod functions;
+mod functions_runtime;
 mod init;
 mod link;
 mod logs;
@@ -108,6 +109,9 @@ fn config_dir_for_command(command: &Command) -> PathBuf {
         Command::Functions(args) => match &args.command {
             cli::functions::FunctionsCommand::Check(args) => Path::new(&args.dir).to_path_buf(),
             cli::functions::FunctionsCommand::Invoke(args) => Path::new(&args.dir).to_path_buf(),
+            cli::functions::FunctionsCommand::Runtime(_) => {
+                std::env::current_dir().unwrap_or_default()
+            }
         },
         Command::Rules(args) => match &args.command {
             cli::rules::RulesCommand::Check(args) => Path::new(&args.dir).to_path_buf(),
