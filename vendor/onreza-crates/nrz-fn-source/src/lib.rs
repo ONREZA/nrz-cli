@@ -4,9 +4,9 @@ use std::fmt;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     ArrayExpression, ArrayExpressionElement, BindingPattern, Declaration, ExportAllDeclaration,
-    ExportNamedDeclaration, Expression, ImportDeclaration, ImportExpression, ObjectExpression,
-    ObjectPropertyKind, PropertyKey, PropertyKind, Statement, VariableDeclarationKind,
-    VariableDeclarator,
+    ExportFromDeclaration, Expression, ImportDeclaration, ImportExpression, ObjectExpression,
+    ObjectPropertyKind, PropertyKey, PropertyKind, Statement, VariableDeclaration,
+    VariableDeclarationKind,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
@@ -131,21 +131,22 @@ fn find_exported_config<'a>(
             Statement::TSTypeAliasDeclaration(_)
             | Statement::TSInterfaceDeclaration(_)
             | Statement::TSEnumDeclaration(_)
-            | Statement::TSModuleDeclaration(_)
+            | Statement::TSExternalModuleDeclaration(_)
+            | Statement::TSNamespaceDeclaration(_)
             | Statement::TSGlobalDeclaration(_) => continue,
-            Statement::ExportNamedDeclaration(export) => {
-                if export.source.is_some() {
-                    return Err(FunctionConfigError::new(
-                        "ONREZA Functions v1 does not support re-export imports",
-                    ));
-                }
-                if let Some(Declaration::VariableDeclaration(declaration)) = &export.declaration
-                    && let Some(config) = config_declarator(declaration.declarations.as_slice())?
+            Statement::ExportDeclaration(export) => {
+                if let Declaration::VariableDeclaration(declaration) = &export.declaration
+                    && let Some(config) = config_declarator(declaration)?
                 {
                     return Ok(Some(config));
                 }
                 return Err(FunctionConfigError::new(
                     "`export const config` must be the first runtime declaration in a function entry",
+                ));
+            }
+            Statement::ExportFromDeclaration(_) | Statement::ExportAllDeclaration(_) => {
+                return Err(FunctionConfigError::new(
+                    "ONREZA Functions v1 does not support re-export imports",
                 ));
             }
             Statement::ImportDeclaration(_) => {
@@ -164,19 +165,19 @@ fn find_exported_config<'a>(
 }
 
 fn config_declarator<'a>(
-    declarations: &'a [VariableDeclarator<'a>],
+    declaration: &'a VariableDeclaration<'a>,
 ) -> Result<Option<&'a Expression<'a>>, FunctionConfigError> {
-    for declaration in declarations {
-        if declaration.kind != VariableDeclarationKind::Const {
-            continue;
-        }
-        let BindingPattern::BindingIdentifier(identifier) = &declaration.id else {
+    if declaration.kind != VariableDeclarationKind::Const {
+        return Ok(None);
+    }
+    for declarator in &declaration.declarations {
+        let BindingPattern::BindingIdentifier(identifier) = &declarator.id else {
             continue;
         };
         if identifier.name != CONFIG_EXPORT_NAME {
             continue;
         }
-        let Some(init) = &declaration.init else {
+        let Some(init) = &declarator.init else {
             return Err(FunctionConfigError::new(
                 "`export const config` must initialize a literal object",
             ));
@@ -442,11 +443,9 @@ impl<'a> Visit<'a> for ImportVisitor {
         walk::walk_import_declaration(self, it);
     }
 
-    fn visit_export_named_declaration(&mut self, it: &ExportNamedDeclaration<'a>) {
-        if let Some(source) = &it.source {
-            self.imports.push(source.value.to_string());
-        }
-        walk::walk_export_named_declaration(self, it);
+    fn visit_export_from_declaration(&mut self, it: &ExportFromDeclaration<'a>) {
+        self.imports.push(it.source.value.to_string());
+        walk::walk_export_from_declaration(self, it);
     }
 
     fn visit_export_all_declaration(&mut self, it: &ExportAllDeclaration<'a>) {
