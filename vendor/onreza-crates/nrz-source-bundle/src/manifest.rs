@@ -1,5 +1,5 @@
 // @generated vendored copy of platform crates/nrz-source-bundle/src/manifest.rs.
-// Do not edit; regenerate via 'bun run sync:nrz-cli-crates <nrz-cli-path>'.
+// Do not edit; regenerate via 'NRZ_CLI_DIR=<path> moon run workspace:sync-nrz-cli-crates'.
 
 #![allow(dead_code, unused, clippy::all)]
 use serde::{Deserialize, Serialize};
