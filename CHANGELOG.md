@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.37.1] - 2026-08-23
+
+### ♻️ Changed
+
+- **deploy:** use native function preflight ([50f3ecf](https://github.com/ONREZA/nrz-cli/commit/50f3ecf562c257d894efff9edc5a1c53cb6c4086))
+
 ## [0.37.0] - 2026-08-17
 
 ### ✨ Features
