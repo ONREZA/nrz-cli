@@ -15,11 +15,11 @@ use uuid::Uuid;
 
 const PROTOCOL_VERSION: &str = "onreza-functions-poc/v1";
 const RELEASE_ORIGIN: &str = "https://releases.onreza.ru";
-const PINNED_RUNTIME_RELEASE_ID: &str = "runtime-30dc5afe4fcbe3ad9c9ec2fb751650c3429238cb";
-const PINNED_MANIFEST_URL: &str = "https://releases.onreza.ru/releases/runtime-30dc5afe4fcbe3ad9c9ec2fb751650c3429238cb/manifest.json";
+const PINNED_RUNTIME_RELEASE_ID: &str = "runtime-49b71f869c9cf9c3f8e83a1306f57e0425cdc267";
+const PINNED_MANIFEST_URL: &str = "https://releases.onreza.ru/releases/runtime-49b71f869c9cf9c3f8e83a1306f57e0425cdc267/manifest.json";
 const PINNED_MANIFEST_SHA256: &str =
-    "28e0fd27220868364a6779b09da451b88b79a0b2f7f032f8790cba12beb21948";
-const PINNED_SIGNATURE_URL: &str = "https://releases.onreza.ru/releases/runtime-30dc5afe4fcbe3ad9c9ec2fb751650c3429238cb/manifest.sig";
+    "730b51b9fe1fe3409440ee67c491355c5d73b6db1843ae28af97f26d123ecca5";
+const PINNED_SIGNATURE_URL: &str = "https://releases.onreza.ru/releases/runtime-49b71f869c9cf9c3f8e83a1306f57e0425cdc267/manifest.sig";
 const SIGNING_PUBLIC_KEY_PEM: &str =
     include_str!("../../assets/functions-runtime-signing-public.pem");
 

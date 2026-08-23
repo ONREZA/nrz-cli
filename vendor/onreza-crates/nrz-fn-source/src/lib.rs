@@ -15,7 +15,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
 
 const CONFIG_EXPORT_NAME: &str = "config";
-const MAX_FUNCTION_NAME_LENGTH: usize = 64;
+
+pub const FUNCTION_ENTRY_SUFFIXES: &[&str] = &[
+    ".nrz-fn.ts",
+    ".nrz-fn.tsx",
+    ".nrz-fn.js",
+    ".nrz-fn.jsx",
+    ".nrz-fn.mjs",
+];
+pub const FUNCTION_SOURCE_EXTENSIONS: &[&str] = &[".ts", ".tsx", ".js", ".jsx", ".mjs"];
+pub const FUNCTION_SOURCE_DENIED_PATH_SEGMENT: &str = "node_modules";
+pub const MAX_FUNCTIONS_PER_PUBLISH: usize = 1000;
+pub const MAX_FUNCTION_SOURCE_FILE_BYTES: u64 = 128 * 1024;
+pub const MAX_FUNCTION_SOURCE_FILES_PER_FUNCTION: usize = 1;
+pub const MAX_FUNCTION_NAME_LENGTH: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,8 +90,8 @@ impl fmt::Display for FunctionConfigError {
 
 impl Error for FunctionConfigError {}
 
-/// Parse a ONREZA Function entry file without executing user code and extract the
-/// canonical `export const config = { ... }` declaration plus import usage.
+/// Parse an ONREZA Function entry file without executing user code and extract
+/// the serializable `export const config = { ... }` declaration plus imports.
 pub fn analyze_function_entry(
     path: &str,
     source: &str,
@@ -222,10 +235,39 @@ fn validate_config_declaration(
     Ok(declaration)
 }
 
-fn validate_function_name(name: &str) -> Result<(), FunctionConfigError> {
+pub fn is_function_entry_path(path: &str) -> bool {
+    FUNCTION_ENTRY_SUFFIXES
+        .iter()
+        .any(|suffix| path.ends_with(suffix))
+}
+
+pub fn is_supported_function_source_path(path: &str) -> bool {
+    !path
+        .split(['/', '\\'])
+        .any(|segment| segment == FUNCTION_SOURCE_DENIED_PATH_SEGMENT)
+        && FUNCTION_SOURCE_EXTENSIONS
+            .iter()
+            .any(|extension| path.ends_with(extension))
+}
+
+pub fn function_name_from_entrypoint(entrypoint: &str) -> Result<&str, FunctionConfigError> {
+    let file_name = entrypoint.rsplit(['/', '\\']).next().unwrap_or(entrypoint);
+    let Some(name) = FUNCTION_ENTRY_SUFFIXES
+        .iter()
+        .find_map(|suffix| file_name.strip_suffix(suffix))
+    else {
+        return Err(FunctionConfigError::new(
+            "function entry must use *.nrz-fn.ts/js/mjs suffix",
+        ));
+    };
+    validate_function_name(name)?;
+    Ok(name)
+}
+
+pub fn validate_function_name(name: &str) -> Result<(), FunctionConfigError> {
     if name.is_empty() || name.len() > MAX_FUNCTION_NAME_LENGTH {
         return Err(FunctionConfigError::new(format!(
-            "function config name must be 1..={MAX_FUNCTION_NAME_LENGTH} characters"
+            "function name must be 1..={MAX_FUNCTION_NAME_LENGTH} characters"
         )));
     }
     let valid = name
@@ -235,7 +277,7 @@ fn validate_function_name(name: &str) -> Result<(), FunctionConfigError> {
         && !name.ends_with('-');
     if !valid {
         return Err(FunctionConfigError::new(
-            "function config name must use lowercase letters, digits, and '-'",
+            "function name must use lowercase letters, digits, and '-'",
         ));
     }
     Ok(())
@@ -243,7 +285,7 @@ fn validate_function_name(name: &str) -> Result<(), FunctionConfigError> {
 
 #[cfg(test)]
 mod tests {
-    use super::analyze_function_entry;
+    use super::{analyze_function_entry, function_name_from_entrypoint};
 
     #[test]
     fn rejects_http_route_trigger_declarations() {
@@ -257,6 +299,16 @@ export default {};
         .unwrap_err();
 
         assert!(error.message().contains("EdgeRuleSet pipeline"));
+    }
+
+    #[test]
+    fn derives_and_validates_function_name_from_entrypoint() {
+        assert_eq!(
+            function_name_from_entrypoint("functions/billing-webhook.nrz-fn.ts").unwrap(),
+            "billing-webhook"
+        );
+        assert!(function_name_from_entrypoint("functions/Billing.nrz-fn.ts").is_err());
+        assert!(function_name_from_entrypoint("functions/api.ts").is_err());
     }
 }
 

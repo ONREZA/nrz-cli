@@ -1,12 +1,8 @@
 //! Generated platform contract types for nrz-cli binary builds.
 
 mod generated;
-mod policy_config;
 
 pub use generated::*;
-/// Frozen ONREZA Functions static-policy config. Deserialize into the consumer's
-/// policy config type so denied/allowed sets stay drift-free.
-pub use policy_config::ONREZA_FUNCTIONS_POLICY_CONFIG_JSON;
 
 pub use cli_api::{
     OnrezaCliApiV1EdgeRulesStatusRequest as CliEdgeRulesStatusRequest,
@@ -27,5 +23,3 @@ pub use cli_api::{
     OnrezaCliApiV1UploadFailedResponse as CliUploadFailedResponse,
 };
 pub use edge_rules::OnrezaEdgeRuleSetV1 as EdgeRuleSetAuthoring;
-pub use onreza_functions_policy::OnrezaFunctionsPolicyResultV1 as OnrezaFunctionsPolicyResult;
-pub use onreza_functions_runtime_policy::OnrezaFunctionsRuntimePolicyV1 as OnrezaFunctionsRuntimePolicy;

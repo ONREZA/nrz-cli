@@ -414,7 +414,7 @@ pub(super) fn conform_manifest_to_wire_contract(
 }
 
 /// Wire boundary for the ONREZA Functions publish payload, which rides in
-/// `CreateDeploymentBody.functions` and is re-validated by the platform against its
+/// the deployment source request and is re-validated by the platform against its
 /// `FunctionPublishPayloadSchema`. Round-trip through the generated contract type so an
 /// unknown field or a bad origin is rejected before the bytes leave the CLI. The edge
 /// rule set is passed through opaquely — the platform owns its validation.

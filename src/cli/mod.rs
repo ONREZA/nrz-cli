@@ -154,7 +154,7 @@ pub enum Command {
     /// Detect framework, package manager, and project features
     Detect(DetectArgs),
 
-    /// Manage ONREZA Functions (policy check, ...)
+    /// Manage ONREZA Functions (native-runtime check, ...)
     Functions(FunctionsArgs),
 
     /// Manage Edge Rules authored in onreza.rules.toml

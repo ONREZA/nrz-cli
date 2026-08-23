@@ -21,8 +21,16 @@ pub(crate) async fn preflight(
     collected: &CollectedFunctions,
 ) -> anyhow::Result<RuntimePreflight> {
     let runtime = RuntimeResolver::pinned()?.resolve().await?;
+    preflight_with_runtime(project_dir, collected, &runtime).await
+}
+
+pub(super) async fn preflight_with_runtime(
+    project_dir: &Path,
+    collected: &CollectedFunctions,
+    runtime: &super::CachedRuntime,
+) -> anyhow::Result<RuntimePreflight> {
     for function in &collected.functions {
-        RuntimeProcess::start(&runtime, project_dir, &function.entrypoint)
+        RuntimeProcess::start(runtime, project_dir, &function.entrypoint)
             .await
             .with_context(|| format!("Functions runtime failed to load '{}'", function.name))?
             .shutdown()
@@ -32,9 +40,9 @@ pub(crate) async fn preflight(
             })?;
     }
     Ok(RuntimePreflight {
-        runtime_release_id: runtime.runtime_release_id,
-        target: runtime.target,
-        path: runtime.path,
+        runtime_release_id: runtime.runtime_release_id.clone(),
+        target: runtime.target.clone(),
+        path: runtime.path.clone(),
         functions_loaded: collected.functions.len(),
     })
 }

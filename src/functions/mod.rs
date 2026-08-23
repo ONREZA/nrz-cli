@@ -1,11 +1,9 @@
 //! ONREZA Functions publish support: bounded source collection and Edge Rules.
 //! The CLI validates executable compatibility with its pinned native runtime;
-//! the platform remains the authoritative trust and policy boundary.
+//! the native runtime remains the executable compatibility authority.
 
 mod collect;
 mod payload;
-#[cfg(test)]
-mod policy;
 mod rules;
 mod rules_authoring;
 
@@ -18,8 +16,6 @@ mod rules_authoring_tests;
 
 pub use collect::{CollectedFunctions, collect};
 pub use payload::{FunctionPublishPayload, GeneratedEdgeRuleSet, build_payload};
-#[cfg(test)]
-pub use policy::run_policy_preview;
 pub(crate) use rules::validate_edge_rules_value;
 pub use rules::{
     EdgeRulesCheckReport, check_edge_rules, edge_image_source_count, edge_rule_count,

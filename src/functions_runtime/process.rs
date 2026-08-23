@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
@@ -5,8 +6,8 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, Lines};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
@@ -14,11 +15,15 @@ use super::CachedRuntime;
 
 const PROTOCOL_VERSION: &str = "onreza-functions-poc/v1";
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
+const MAX_RUNTIME_STDERR_BYTES: usize = 64 * 1024;
+const STDERR_TRUNCATED_MARKER: &[u8] = b"[earlier runtime stderr truncated]\n";
+const STDERR_DRAIN_TIMEOUT_MARKER: &[u8] = b"[runtime stderr drain timed out]\n";
 
 pub(crate) struct RuntimeProcess {
     child: Child,
     stdin: ChildStdin,
-    stdout: Lines<BufReader<ChildStdout>>,
+    stdout: BufReader<ChildStdout>,
     stderr: Option<JoinHandle<Vec<u8>>>,
 }
 
@@ -71,15 +76,11 @@ impl RuntimeProcess {
             .stderr
             .take()
             .context("runtime stderr pipe is missing")?;
-        let stderr = tokio::spawn(async move {
-            let mut bytes = Vec::new();
-            let _ = child_stderr.read_to_end(&mut bytes).await;
-            bytes
-        });
+        let stderr = tokio::spawn(async move { capture_runtime_stderr(&mut child_stderr).await });
         let mut process = Self {
             child,
             stdin,
-            stdout: BufReader::new(stdout).lines(),
+            stdout: BufReader::new(stdout),
             stderr: Some(stderr),
         };
         let ready = match process.read_control().await {
@@ -112,7 +113,11 @@ impl RuntimeProcess {
                     .kill()
                     .await
                     .context("failed to stop ONREZA Functions runtime")?;
-                bail!("ONREZA Functions runtime did not stop within 5 seconds");
+                let stderr = self.take_stderr().await;
+                bail!(
+                    "ONREZA Functions runtime did not stop within 5 seconds: {}",
+                    stderr_context(&stderr)
+                );
             }
         };
         let stderr = self.take_stderr().await;
@@ -140,20 +145,71 @@ impl RuntimeProcess {
     }
 
     async fn read_control(&mut self) -> anyhow::Result<ControlMessage> {
-        let line = timeout(CONTROL_TIMEOUT, self.stdout.next_line())
+        let mut line = Vec::new();
+        let mut limited = (&mut self.stdout).take((MAX_CONTROL_MESSAGE_BYTES + 1) as u64);
+        let bytes_read = timeout(CONTROL_TIMEOUT, limited.read_until(b'\n', &mut line))
             .await
-            .context("ONREZA Functions runtime control timeout")??
-            .context("ONREZA Functions runtime closed its control stream")?;
-        serde_json::from_str(&line)
+            .context("ONREZA Functions runtime control timeout")??;
+        if bytes_read == 0 {
+            bail!("ONREZA Functions runtime closed its control stream");
+        }
+        if line.len() > MAX_CONTROL_MESSAGE_BYTES {
+            bail!(
+                "ONREZA Functions runtime control message exceeds {MAX_CONTROL_MESSAGE_BYTES} bytes"
+            );
+        }
+        if line.last() == Some(&b'\n') {
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+        }
+        serde_json::from_slice(&line)
             .context("ONREZA Functions runtime returned invalid control JSON")
     }
 
     async fn take_stderr(&mut self) -> Vec<u8> {
         match self.stderr.take() {
-            Some(task) => task.await.unwrap_or_default(),
+            Some(mut task) => match timeout(CONTROL_TIMEOUT, &mut task).await {
+                Ok(result) => result.unwrap_or_default(),
+                Err(_) => {
+                    task.abort();
+                    STDERR_DRAIN_TIMEOUT_MARKER.to_vec()
+                }
+            },
             None => Vec::new(),
         }
     }
+}
+
+async fn capture_runtime_stderr(stderr: &mut ChildStderr) -> Vec<u8> {
+    let mut retained = VecDeque::<u8>::with_capacity(MAX_RUNTIME_STDERR_BYTES);
+    let mut chunk = [0_u8; 8192];
+    let mut truncated = false;
+
+    loop {
+        let read = match stderr.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        let overflow = retained
+            .len()
+            .saturating_add(read)
+            .saturating_sub(MAX_RUNTIME_STDERR_BYTES);
+        if overflow > 0 {
+            retained.drain(..overflow);
+            truncated = true;
+        }
+        retained.extend(&chunk[..read]);
+    }
+
+    let mut output =
+        Vec::with_capacity(retained.len() + usize::from(truncated) * STDERR_TRUNCATED_MARKER.len());
+    if truncated {
+        output.extend_from_slice(STDERR_TRUNCATED_MARKER);
+    }
+    output.extend(retained);
+    output
 }
 
 #[cfg(windows)]

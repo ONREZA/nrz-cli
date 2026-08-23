@@ -1487,7 +1487,7 @@ dependencies = [
  "indicatif",
  "libc",
  "nrz-contract",
- "nrz-fn-policy",
+ "nrz-fn-source",
  "nrz-source-bundle",
  "open",
  "percent-encoding",
@@ -1523,7 +1523,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nrz-fn-policy"
+name = "nrz-fn-source"
 version = "0.1.0"
 dependencies = [
  "oxc_allocator",

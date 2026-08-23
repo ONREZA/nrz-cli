@@ -226,7 +226,7 @@ test("release cargo manifest points nrz crates at sanitized vendor snapshot", ()
     '',
     '[dependencies]',
     'nrz-contract = { version = "0.1", path = "../deployment/crates/nrz-contract" }',
-    'nrz-fn-policy = { version = "0.1", path = "../deployment/crates/nrz-fn-policy" }',
+    'nrz-fn-source = { version = "0.1", path = "../deployment/crates/nrz-fn-source" }',
     'nrz-source-bundle = { version = "0.1", path = "../deployment/crates/nrz-source-bundle" }',
     '',
   ].join("\n");
@@ -235,7 +235,7 @@ test("release cargo manifest points nrz crates at sanitized vendor snapshot", ()
 
   assert.match(updated, /^version = "0\.33\.0-beta\.0"$/m);
   assert.match(updated, /^nrz-contract = \{ path = "vendor\/onreza-crates\/nrz-contract" \}$/m);
-  assert.match(updated, /^nrz-fn-policy = \{ path = "vendor\/onreza-crates\/nrz-fn-policy" \}$/m);
+  assert.match(updated, /^nrz-fn-source = \{ path = "vendor\/onreza-crates\/nrz-fn-source" \}$/m);
   assert.match(updated, /^nrz-source-bundle = \{ path = "vendor\/onreza-crates\/nrz-source-bundle" \}$/m);
   assert.doesNotMatch(updated, /\.\.\/deployment/);
 });
@@ -248,7 +248,7 @@ test("release cargo manifest accepts already sanitized nrz crate dependencies", 
     '',
     '[dependencies]',
     'nrz-contract = { path = "vendor/onreza-crates/nrz-contract" }',
-    'nrz-fn-policy = { path = "vendor/onreza-crates/nrz-fn-policy" }',
+    'nrz-fn-source = { path = "vendor/onreza-crates/nrz-fn-source" }',
     'nrz-source-bundle = { path = "vendor/onreza-crates/nrz-source-bundle" }',
     '',
   ].join("\n");
@@ -257,7 +257,7 @@ test("release cargo manifest accepts already sanitized nrz crate dependencies", 
 
   assert.match(updated, /^version = "0\.33\.0-beta\.0"$/m);
   assert.match(updated, /^nrz-contract = \{ path = "vendor\/onreza-crates\/nrz-contract" \}$/m);
-  assert.match(updated, /^nrz-fn-policy = \{ path = "vendor\/onreza-crates\/nrz-fn-policy" \}$/m);
+  assert.match(updated, /^nrz-fn-source = \{ path = "vendor\/onreza-crates\/nrz-fn-source" \}$/m);
   assert.match(updated, /^nrz-source-bundle = \{ path = "vendor\/onreza-crates\/nrz-source-bundle" \}$/m);
 });
 
@@ -272,7 +272,7 @@ test("release cargo lock leaves vendored crate versions stable", () => {
     'version = "0.1.0"',
     "",
     "[[package]]",
-    'name = "nrz-fn-policy"',
+    'name = "nrz-fn-source"',
     'version = "0.1.0"',
     "",
     "[[package]]",
@@ -285,7 +285,7 @@ test("release cargo lock leaves vendored crate versions stable", () => {
 
   assert.match(updated, /\[\[package\]\]\nname = "nrz"\nversion = "0\.33\.0-beta\.0"/);
   assert.match(updated, /\[\[package\]\]\nname = "nrz-contract"\nversion = "0\.1\.0"/);
-  assert.match(updated, /\[\[package\]\]\nname = "nrz-fn-policy"\nversion = "0\.1\.0"/);
+  assert.match(updated, /\[\[package\]\]\nname = "nrz-fn-source"\nversion = "0\.1\.0"/);
   assert.match(updated, /\[\[package\]\]\nname = "nrz-source-bundle"\nversion = "0\.1\.0"/);
 });
 

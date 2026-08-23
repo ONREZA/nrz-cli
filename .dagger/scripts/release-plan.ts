@@ -10,7 +10,7 @@ const defaultChannel = "stable";
 const releaseCommitPrefix = "chore(release):";
 const vendoredCrateDependencies = [
   { name: "nrz-contract", path: "vendor/onreza-crates/nrz-contract" },
-  { name: "nrz-fn-policy", path: "vendor/onreza-crates/nrz-fn-policy" },
+  { name: "nrz-fn-source", path: "vendor/onreza-crates/nrz-fn-source" },
   { name: "nrz-source-bundle", path: "vendor/onreza-crates/nrz-source-bundle" },
 ] as const;
 
