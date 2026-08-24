@@ -5411,7 +5411,7 @@ pub mod edge_rules {
                 })
         }
     }
-    ///Authoring contract for onreza.rules.toml. nrz-cli and the publish platform validate this shape, then the platform normalizes it into the runtime EdgeRuleSet served by the edge runtime. Server validation additionally enforces unique rule ids and cache-rule Vary coverage.
+    ///Authoring contract for onreza.rules.toml. nrz-cli and ONREZA Platform validate this shape, then normalize it into the routing rules used by the platform data plane. Server validation additionally enforces unique rule ids and cache-rule Vary coverage.
     ///
     /// <details><summary>JSON schema</summary>
     ///
@@ -5419,7 +5419,7 @@ pub mod edge_rules {
     ///{
     ///  "$id": "https://docs.onreza.ru/schemas/onreza-rules-v1.schema.json",
     ///  "title": "ONREZA Edge Rule Set v1",
-    ///  "description": "Authoring contract for onreza.rules.toml. nrz-cli and the publish platform validate this shape, then the platform normalizes it into the runtime EdgeRuleSet served by the edge runtime. Server validation additionally enforces unique rule ids and cache-rule Vary coverage.",
+    ///  "description": "Authoring contract for onreza.rules.toml. nrz-cli and ONREZA Platform validate this shape, then normalize it into the routing rules used by the platform data plane. Server validation additionally enforces unique rule ids and cache-rule Vary coverage.",
     ///  "examples": [
     ///    {
     ///      "rules": [
