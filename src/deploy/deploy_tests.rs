@@ -1781,6 +1781,32 @@ fn functions_payload_serializes_edge_rules_force() {
 }
 
 #[tokio::test]
+async fn invalid_function_declaration_is_classified_as_invalid_config() {
+    let tmp = tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("functions")).unwrap();
+    fs::write(
+        tmp.path().join("functions/submit-lead.nrz-fn.ts"),
+        "await Promise.resolve();\nexport const config = { runtime: \"bun\" };\n",
+    )
+    .unwrap();
+
+    let error = build_functions_payload(
+        &nrz::config::ProjectConfig::default(),
+        tmp.path(),
+        true,
+        false,
+    )
+    .await
+    .expect_err("executable code before config must be rejected");
+
+    expect_code(&error, "INVALID_CONFIG");
+    assert!(
+        format!("{error:#}").contains("function entry must declare `export const config"),
+        "specific authoring guidance must survive classification: {error:#}"
+    );
+}
+
+#[tokio::test]
 async fn build_functions_payload_generates_nextjs_edge_rules_when_local_rules_absent() {
     let tmp = tempdir().unwrap();
     fs::create_dir_all(tmp.path().join(".onreza")).unwrap();

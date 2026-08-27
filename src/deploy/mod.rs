@@ -457,7 +457,8 @@ async fn build_functions_payload(
     json: bool,
     edge_rules_force: bool,
 ) -> anyhow::Result<Option<crate::functions::FunctionPublishPayload>> {
-    let collected = crate::functions::collect(project_dir)?;
+    let collected = crate::functions::collect(project_dir)
+        .map_err(|error| output::with_default_code(error, "INVALID_CONFIG"))?;
     let user_edge_rules = crate::functions::load_edge_rules(project_dir)
         .map_err(|error| output::with_default_code(error, "INVALID_CONFIG"))?;
     let generated_edge_rule_sets = generated_nextjs_edge_rule_sets(project_dir, json)?;
