@@ -418,6 +418,21 @@ pub(super) struct BuildLogSession {
     json: bool,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum BuildLogSuccess {
+    ArtifactsUploaded,
+    EdgeHandoffPublished,
+}
+
+impl BuildLogSuccess {
+    pub(super) fn message(self) -> &'static str {
+        match self {
+            Self::ArtifactsUploaded => "Build artifacts uploaded",
+            Self::EdgeHandoffPublished => "Build handoff published",
+        }
+    }
+}
+
 pub(super) struct StartBuildLogSession<'a> {
     pub client: &'a ApiClient,
     pub project_id: &'a str,
@@ -566,10 +581,10 @@ impl BuildLogSession {
         self.emitter.as_ref()
     }
 
-    pub(super) async fn finish(&mut self, result: &anyhow::Result<()>) {
+    pub(super) async fn finish(&mut self, result: &anyhow::Result<()>, success: BuildLogSuccess) {
         if let Some(emitter) = &self.emitter {
             match result {
-                Ok(()) => emitter.info(BuildLogPhase::Complete, "Build artifacts uploaded"),
+                Ok(()) => emitter.info(BuildLogPhase::Complete, success.message()),
                 Err(error) => emitter.error(BuildLogPhase::Error, &error.to_string()),
             }
             emitter.close();

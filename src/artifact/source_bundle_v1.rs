@@ -65,8 +65,7 @@ pub(crate) struct SourceBundlePlan {
 }
 
 impl SourceBundlePlan {
-    #[cfg(test)]
-    pub(crate) fn source_path_for_test(&self) -> &Path {
+    pub(crate) fn source_path(&self) -> &Path {
         &self.source_path
     }
 
