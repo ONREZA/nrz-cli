@@ -1,6 +1,5 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail, ensure};
@@ -198,10 +197,14 @@ fn write_new_synced_file(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
 }
 
 fn new_file(path: &Path) -> anyhow::Result<File> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    options
         .open(path)
         .with_context(|| format!("failed to create {}", path.display()))
 }
