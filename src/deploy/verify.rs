@@ -14,7 +14,6 @@ pub(super) struct DeployVerificationRequest<'a> {
     pub(super) api_client: &'a ApiClient,
     pub(super) project_id: &'a str,
     pub(super) url: &'a str,
-    pub(super) preview_protected: bool,
     pub(super) health_check: Option<&'a super::ResolvedHealthCheck>,
     pub(super) json: bool,
 }
@@ -54,29 +53,41 @@ pub(super) async fn verify_deployment(
         output::Phase::Deploy,
     );
 
-    let (header, access_secret_id) = if request.preview_protected {
-        let access = crate::preview::create_preview_access(
-            request.api_client,
-            request.project_id,
-            "nrz deploy --verify".to_string(),
-            Some(url.clone()),
-            crate::preview::AGENT_PREVIEW_ACCESS_TTL_SECONDS,
+    let initial_response = fetch_verification_url(&url, None).await.map_err(|error| {
+        verify_error(
+            format!("failed to verify deployment URL: {error:#}"),
+            &url,
+            &path,
+            None,
+            None,
+            false,
         )
-        .await
-        .context("failed to create temporary preview access for deploy verification")?;
-        let name = HeaderName::from_bytes(access.header_name.as_bytes())
-            .context("preview access returned an invalid header name")?;
-        let value = HeaderValue::from_str(&access.header_value)
-            .context("preview access returned an invalid header value")?;
-        (
-            Some(VerificationHeader { name, value }),
-            Some(access.secret_id),
-        )
-    } else {
-        (None, None)
-    };
+    })?;
 
-    let response = fetch_verification_url(&url, header.as_ref()).await;
+    let (response, access_secret_id, used_preview_bypass) =
+        if needs_preview_bypass(&initial_response) {
+            let access = crate::preview::create_preview_access(
+                request.api_client,
+                request.project_id,
+                "nrz deploy --verify".to_string(),
+                Some(url.clone()),
+                crate::preview::AGENT_PREVIEW_ACCESS_TTL_SECONDS,
+            )
+            .await
+            .context("failed to create temporary preview access for deploy verification")?;
+            let name = HeaderName::from_bytes(access.header_name.as_bytes())
+                .context("preview access returned an invalid header name")?;
+            let value = HeaderValue::from_str(&access.header_value)
+                .context("preview access returned an invalid header value")?;
+            (
+                fetch_verification_url(&url, Some(&VerificationHeader { name, value })).await,
+                Some(access.secret_id),
+                true,
+            )
+        } else {
+            (Ok(initial_response), None, false)
+        };
+
     let revoke_result = if let Some(secret_id) = access_secret_id.as_deref() {
         let result = crate::preview::revoke_preview_access(
             request.api_client,
@@ -103,11 +114,11 @@ pub(super) async fn verify_deployment(
             &path,
             None,
             None,
-            request.preview_protected,
+            used_preview_bypass,
         )
     })?;
 
-    validate_response(&url, &path, &response, request.preview_protected)?;
+    validate_response(&url, &path, &response, used_preview_bypass)?;
 
     if let Some((secret_id, Err(error))) = revoke_result {
         return Err(CliError::new(
@@ -138,8 +149,8 @@ pub(super) async fn verify_deployment(
         url,
         path,
         status_code: response.status_code,
-        used_preview_bypass: request.preview_protected,
-        preview_access_revoked: request.preview_protected.then_some(true),
+        used_preview_bypass,
+        preview_access_revoked: used_preview_bypass.then_some(true),
     })
 }
 
@@ -151,7 +162,7 @@ fn verification_path(health_check: Option<&super::ResolvedHealthCheck>) -> Strin
         .to_string()
 }
 
-fn verification_url(base_url: &str, path: &str) -> anyhow::Result<String> {
+pub(super) fn verification_url(base_url: &str, path: &str) -> anyhow::Result<String> {
     let mut url = url::Url::parse(base_url)
         .with_context(|| format!("deployment URL is not valid: {base_url}"))?;
     url.set_path(path);
@@ -226,6 +237,22 @@ fn validate_response(
     ))
 }
 
+fn needs_preview_bypass(response: &VerificationResponse) -> bool {
+    !(200..300).contains(&response.status_code)
+        && response
+            .location
+            .as_deref()
+            .is_some_and(is_preview_auth_location)
+}
+
+#[cfg(test)]
+pub(super) fn response_needs_preview_bypass(status_code: u16, location: Option<&str>) -> bool {
+    needs_preview_bypass(&VerificationResponse {
+        status_code,
+        location: location.map(str::to_string),
+    })
+}
+
 fn is_preview_auth_location(location: &str) -> bool {
     location.contains("/preview-auth") || location.contains("preview-auth?")
 }
@@ -251,25 +278,4 @@ fn verify_error(
             "For preview deployments, verification uses a temporary `nrz preview access` bypass and revokes it after the check.",
         )
         .into_anyhow()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn verification_url_replaces_path_and_query() {
-        assert_eq!(
-            verification_url("https://example.test/old?x=1", "/health").unwrap(),
-            "https://example.test/health"
-        );
-    }
-
-    #[test]
-    fn preview_auth_redirect_is_detected() {
-        assert!(is_preview_auth_location(
-            "https://app.onreza-stage.ru/preview-auth?projectId=1"
-        ));
-        assert!(!is_preview_auth_location("https://example.test/login"));
-    }
 }
