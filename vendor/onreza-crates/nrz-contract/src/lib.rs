@@ -23,3 +23,7 @@ pub use cli_api::{
     OnrezaCliApiV1UploadFailedResponse as CliUploadFailedResponse,
 };
 pub use edge_rules::OnrezaEdgeRuleSetV1 as EdgeRuleSetAuthoring;
+pub use runtime_artifact_graph::{
+    OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifest as DependencyMaterializationManifestV1Wire,
+    OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraph as RuntimeArtifactGraphV2Wire,
+};

@@ -15375,3 +15375,4601 @@ pub mod manifest {
         }
     }
 }
+pub mod runtime_artifact_graph {
+    /// Error types.
+    pub mod error {
+        /// Error from a `TryFrom` or `FromStr` implementation.
+        pub struct ConversionError(::std::borrow::Cow<'static, str>);
+        impl ::std::error::Error for ConversionError {}
+        impl ::std::fmt::Display for ConversionError {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> Result<(), ::std::fmt::Error> {
+                ::std::fmt::Display::fmt(&self.0, f)
+            }
+        }
+        impl ::std::fmt::Debug for ConversionError {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> Result<(), ::std::fmt::Error> {
+                ::std::fmt::Debug::fmt(&self.0, f)
+            }
+        }
+        impl From<&'static str> for ConversionError {
+            fn from(value: &'static str) -> Self {
+                Self(value.into())
+            }
+        }
+        impl From<String> for ConversionError {
+            fn from(value: String) -> Self {
+                Self(value.into())
+            }
+        }
+    }
+    ///Internal immutable contract for one application artifact, bounded dependency materializations, and declared runtime layer mounts.
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "$id": "https://docs.onreza.ru/schemas/runtime-artifact-graph-v2.schema.json",
+    ///  "title": "ONREZA Runtime Artifact Graph V2",
+    ///  "description": "Internal immutable contract for one application artifact, bounded dependency materializations, and declared runtime layer mounts.",
+    ///  "type": "object",
+    ///  "required": [
+    ///    "dependencyMaterializationManifest",
+    ///    "runtimeArtifactGraph"
+    ///  ],
+    ///  "properties": {
+    ///    "dependencyMaterializationManifest": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "blobDescriptor",
+    ///        "canonicalizationPolicyDigest",
+    ///        "compatibility",
+    ///        "expandedBytes",
+    ///        "expandedFileCount",
+    ///        "generatorDigest",
+    ///        "kind",
+    ///        "logicalTreeDigest",
+    ///        "nativeObjectCount",
+    ///        "regularFileCount",
+    ///        "schemaVersion",
+    ///        "symlinkCount"
+    ///      ],
+    ///      "properties": {
+    ///        "blobDescriptor": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "digest",
+    ///            "mediaType",
+    ///            "size"
+    ///          ],
+    ///          "properties": {
+    ///            "digest": {
+    ///              "type": "string",
+    ///              "pattern": "^sha256:[0-9a-f]{64}$"
+    ///            },
+    ///            "mediaType": {
+    ///              "type": "string",
+    ///              "const": "application/vnd.onreza.dependency.erofs.v1"
+    ///            },
+    ///            "size": {
+    ///              "type": "integer",
+    ///              "maximum": 9007199254740991.0,
+    ///              "minimum": 0.0
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        "canonicalizationPolicyDigest": {
+    ///          "type": "string",
+    ///          "pattern": "^sha256:[0-9a-f]{64}$"
+    ///        },
+    ///        "compatibility": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "abi",
+    ///            "architecture",
+    ///            "buildPolicyGeneration",
+    ///            "libc",
+    ///            "os",
+    ///            "packageManager",
+    ///            "packageManagerVersion",
+    ///            "runnerRootfsDigest",
+    ///            "runtimeFamily",
+    ///            "runtimeVersion"
+    ///          ],
+    ///          "properties": {
+    ///            "abi": {
+    ///              "type": "string",
+    ///              "maxLength": 128,
+    ///              "minLength": 1
+    ///            },
+    ///            "architecture": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "x86_64",
+    ///                "aarch64"
+    ///              ]
+    ///            },
+    ///            "buildPolicyGeneration": {
+    ///              "type": "integer",
+    ///              "maximum": 2147483647.0,
+    ///              "exclusiveMinimum": 0.0
+    ///            },
+    ///            "libc": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "glibc",
+    ///                "musl"
+    ///              ]
+    ///            },
+    ///            "os": {
+    ///              "type": "string",
+    ///              "const": "linux"
+    ///            },
+    ///            "packageManager": {
+    ///              "type": "string",
+    ///              "maxLength": 64,
+    ///              "minLength": 1
+    ///            },
+    ///            "packageManagerVersion": {
+    ///              "type": "string",
+    ///              "maxLength": 128,
+    ///              "minLength": 1
+    ///            },
+    ///            "runnerRootfsDigest": {
+    ///              "type": "string",
+    ///              "pattern": "^sha256:[0-9a-f]{64}$"
+    ///            },
+    ///            "runtimeFamily": {
+    ///              "type": "string",
+    ///              "maxLength": 64,
+    ///              "minLength": 1
+    ///            },
+    ///            "runtimeVersion": {
+    ///              "type": "string",
+    ///              "maxLength": 128,
+    ///              "minLength": 1
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        "expandedBytes": {
+    ///          "type": "integer",
+    ///          "maximum": 9007199254740991.0,
+    ///          "minimum": 0.0
+    ///        },
+    ///        "expandedFileCount": {
+    ///          "type": "integer",
+    ///          "maximum": 2147483647.0,
+    ///          "minimum": 0.0
+    ///        },
+    ///        "generatorDigest": {
+    ///          "type": "string",
+    ///          "pattern": "^sha256:[0-9a-f]{64}$"
+    ///        },
+    ///        "kind": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "JAVASCRIPT_NODE_MODULES",
+    ///            "PYTHON_SITE_PACKAGES"
+    ///          ]
+    ///        },
+    ///        "logicalTreeDigest": {
+    ///          "type": "string",
+    ///          "pattern": "^[0-9a-f]{64}$"
+    ///        },
+    ///        "nativeObjectCount": {
+    ///          "type": "integer",
+    ///          "maximum": 2147483647.0,
+    ///          "minimum": 0.0
+    ///        },
+    ///        "regularFileCount": {
+    ///          "type": "integer",
+    ///          "maximum": 2147483647.0,
+    ///          "minimum": 0.0
+    ///        },
+    ///        "schemaVersion": {
+    ///          "type": "string",
+    ///          "const": "DEPENDENCY_MATERIALIZATION_V1.0"
+    ///        },
+    ///        "symlinkCount": {
+    ///          "type": "integer",
+    ///          "maximum": 2147483647.0,
+    ///          "minimum": 0.0
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "runtimeArtifactGraph": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "application",
+    ///        "dependencies",
+    ///        "graphDigest",
+    ///        "runtimeLayers",
+    ///        "schemaVersion"
+    ///      ],
+    ///      "properties": {
+    ///        "application": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "artifactId",
+    ///            "blobDescriptor",
+    ///            "manifestDigest"
+    ///          ],
+    ///          "properties": {
+    ///            "artifactId": {
+    ///              "type": "string",
+    ///              "pattern": "^[0-9a-f]{64}$"
+    ///            },
+    ///            "blobDescriptor": {
+    ///              "type": "object",
+    ///              "required": [
+    ///                "digest",
+    ///                "mediaType",
+    ///                "size"
+    ///              ],
+    ///              "properties": {
+    ///                "digest": {
+    ///                  "type": "string",
+    ///                  "pattern": "^sha256:[0-9a-f]{64}$"
+    ///                },
+    ///                "mediaType": {
+    ///                  "type": "string",
+    ///                  "const": "application/vnd.onreza.source-bundle.tar+zstd.v1"
+    ///                },
+    ///                "size": {
+    ///                  "type": "integer",
+    ///                  "maximum": 9007199254740991.0,
+    ///                  "minimum": 0.0
+    ///                }
+    ///              },
+    ///              "additionalProperties": false
+    ///            },
+    ///            "manifestDigest": {
+    ///              "type": "string",
+    ///              "pattern": "^[0-9a-f]{64}$"
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        "dependencies": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "object",
+    ///            "required": [
+    ///              "blobDescriptor",
+    ///              "compatibility",
+    ///              "kind",
+    ///              "manifestDigest",
+    ///              "materializationId",
+    ///              "mountPoint"
+    ///            ],
+    ///            "properties": {
+    ///              "blobDescriptor": {
+    ///                "type": "object",
+    ///                "required": [
+    ///                  "digest",
+    ///                  "mediaType",
+    ///                  "size"
+    ///                ],
+    ///                "properties": {
+    ///                  "digest": {
+    ///                    "type": "string",
+    ///                    "pattern": "^sha256:[0-9a-f]{64}$"
+    ///                  },
+    ///                  "mediaType": {
+    ///                    "type": "string",
+    ///                    "const": "application/vnd.onreza.dependency.erofs.v1"
+    ///                  },
+    ///                  "size": {
+    ///                    "type": "integer",
+    ///                    "maximum": 9007199254740991.0,
+    ///                    "minimum": 0.0
+    ///                  }
+    ///                },
+    ///                "additionalProperties": false
+    ///              },
+    ///              "compatibility": {
+    ///                "type": "object",
+    ///                "required": [
+    ///                  "abi",
+    ///                  "architecture",
+    ///                  "buildPolicyGeneration",
+    ///                  "libc",
+    ///                  "os",
+    ///                  "packageManager",
+    ///                  "packageManagerVersion",
+    ///                  "runnerRootfsDigest",
+    ///                  "runtimeFamily",
+    ///                  "runtimeVersion"
+    ///                ],
+    ///                "properties": {
+    ///                  "abi": {
+    ///                    "type": "string",
+    ///                    "maxLength": 128,
+    ///                    "minLength": 1
+    ///                  },
+    ///                  "architecture": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "x86_64",
+    ///                      "aarch64"
+    ///                    ]
+    ///                  },
+    ///                  "buildPolicyGeneration": {
+    ///                    "type": "integer",
+    ///                    "maximum": 2147483647.0,
+    ///                    "exclusiveMinimum": 0.0
+    ///                  },
+    ///                  "libc": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "glibc",
+    ///                      "musl"
+    ///                    ]
+    ///                  },
+    ///                  "os": {
+    ///                    "type": "string",
+    ///                    "const": "linux"
+    ///                  },
+    ///                  "packageManager": {
+    ///                    "type": "string",
+    ///                    "maxLength": 64,
+    ///                    "minLength": 1
+    ///                  },
+    ///                  "packageManagerVersion": {
+    ///                    "type": "string",
+    ///                    "maxLength": 128,
+    ///                    "minLength": 1
+    ///                  },
+    ///                  "runnerRootfsDigest": {
+    ///                    "type": "string",
+    ///                    "pattern": "^sha256:[0-9a-f]{64}$"
+    ///                  },
+    ///                  "runtimeFamily": {
+    ///                    "type": "string",
+    ///                    "maxLength": 64,
+    ///                    "minLength": 1
+    ///                  },
+    ///                  "runtimeVersion": {
+    ///                    "type": "string",
+    ///                    "maxLength": 128,
+    ///                    "minLength": 1
+    ///                  }
+    ///                },
+    ///                "additionalProperties": false
+    ///              },
+    ///              "kind": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "JAVASCRIPT_NODE_MODULES",
+    ///                  "PYTHON_SITE_PACKAGES"
+    ///                ]
+    ///              },
+    ///              "manifestDigest": {
+    ///                "type": "string",
+    ///                "pattern": "^[0-9a-f]{64}$"
+    ///              },
+    ///              "materializationId": {
+    ///                "type": "string",
+    ///                "pattern": "^[0-9a-f]{64}$"
+    ///              },
+    ///              "mountPoint": {
+    ///                "type": "string",
+    ///                "maxLength": 512,
+    ///                "minLength": 1
+    ///              }
+    ///            },
+    ///            "additionalProperties": false
+    ///          },
+    ///          "maxItems": 16
+    ///        },
+    ///        "graphDigest": {
+    ///          "type": "string",
+    ///          "pattern": "^[0-9a-f]{64}$"
+    ///        },
+    ///        "runtimeLayers": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "object",
+    ///            "required": [
+    ///              "applicationRoot",
+    ///              "dependencyMaterializationIds",
+    ///              "entrypoint",
+    ///              "layerName",
+    ///              "runtimeConfig"
+    ///            ],
+    ///            "properties": {
+    ///              "applicationRoot": {
+    ///                "type": "string",
+    ///                "maxLength": 512,
+    ///                "minLength": 1
+    ///              },
+    ///              "dependencyMaterializationIds": {
+    ///                "type": "array",
+    ///                "items": {
+    ///                  "type": "string",
+    ///                  "pattern": "^[0-9a-f]{64}$"
+    ///                },
+    ///                "maxItems": 8
+    ///              },
+    ///              "entrypoint": {
+    ///                "type": "string",
+    ///                "maxLength": 512,
+    ///                "minLength": 1
+    ///              },
+    ///              "layerName": {
+    ///                "type": "string",
+    ///                "maxLength": 64,
+    ///                "minLength": 1
+    ///              },
+    ///              "runtimeConfig": {
+    ///                "type": "object",
+    ///                "properties": {
+    ///                  "maxConcurrency": {
+    ///                    "type": "integer",
+    ///                    "maximum": 100.0,
+    ///                    "exclusiveMinimum": 0.0
+    ///                  },
+    ///                  "memoryMb": {
+    ///                    "type": "integer",
+    ///                    "maximum": 8192.0,
+    ///                    "minimum": 32.0
+    ///                  },
+    ///                  "timeoutMs": {
+    ///                    "type": "integer",
+    ///                    "maximum": 9007199254740991.0,
+    ///                    "exclusiveMinimum": 0.0
+    ///                  }
+    ///                },
+    ///                "additionalProperties": false
+    ///              }
+    ///            },
+    ///            "additionalProperties": false
+    ///          },
+    ///          "maxItems": 10
+    ///        },
+    ///        "schemaVersion": {
+    ///          "type": "string",
+    ///          "const": "RUNTIME_ARTIFACT_GRAPH_V2.0"
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2 {
+        #[serde(rename = "dependencyMaterializationManifest")]
+        pub dependency_materialization_manifest:
+            OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifest,
+        #[serde(rename = "runtimeArtifactGraph")]
+        pub runtime_artifact_graph: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraph,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "blobDescriptor",
+    ///    "canonicalizationPolicyDigest",
+    ///    "compatibility",
+    ///    "expandedBytes",
+    ///    "expandedFileCount",
+    ///    "generatorDigest",
+    ///    "kind",
+    ///    "logicalTreeDigest",
+    ///    "nativeObjectCount",
+    ///    "regularFileCount",
+    ///    "schemaVersion",
+    ///    "symlinkCount"
+    ///  ],
+    ///  "properties": {
+    ///    "blobDescriptor": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "digest",
+    ///        "mediaType",
+    ///        "size"
+    ///      ],
+    ///      "properties": {
+    ///        "digest": {
+    ///          "type": "string",
+    ///          "pattern": "^sha256:[0-9a-f]{64}$"
+    ///        },
+    ///        "mediaType": {
+    ///          "type": "string",
+    ///          "const": "application/vnd.onreza.dependency.erofs.v1"
+    ///        },
+    ///        "size": {
+    ///          "type": "integer",
+    ///          "maximum": 9007199254740991.0,
+    ///          "minimum": 0.0
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "canonicalizationPolicyDigest": {
+    ///      "type": "string",
+    ///      "pattern": "^sha256:[0-9a-f]{64}$"
+    ///    },
+    ///    "compatibility": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "abi",
+    ///        "architecture",
+    ///        "buildPolicyGeneration",
+    ///        "libc",
+    ///        "os",
+    ///        "packageManager",
+    ///        "packageManagerVersion",
+    ///        "runnerRootfsDigest",
+    ///        "runtimeFamily",
+    ///        "runtimeVersion"
+    ///      ],
+    ///      "properties": {
+    ///        "abi": {
+    ///          "type": "string",
+    ///          "maxLength": 128,
+    ///          "minLength": 1
+    ///        },
+    ///        "architecture": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "x86_64",
+    ///            "aarch64"
+    ///          ]
+    ///        },
+    ///        "buildPolicyGeneration": {
+    ///          "type": "integer",
+    ///          "maximum": 2147483647.0,
+    ///          "exclusiveMinimum": 0.0
+    ///        },
+    ///        "libc": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "glibc",
+    ///            "musl"
+    ///          ]
+    ///        },
+    ///        "os": {
+    ///          "type": "string",
+    ///          "const": "linux"
+    ///        },
+    ///        "packageManager": {
+    ///          "type": "string",
+    ///          "maxLength": 64,
+    ///          "minLength": 1
+    ///        },
+    ///        "packageManagerVersion": {
+    ///          "type": "string",
+    ///          "maxLength": 128,
+    ///          "minLength": 1
+    ///        },
+    ///        "runnerRootfsDigest": {
+    ///          "type": "string",
+    ///          "pattern": "^sha256:[0-9a-f]{64}$"
+    ///        },
+    ///        "runtimeFamily": {
+    ///          "type": "string",
+    ///          "maxLength": 64,
+    ///          "minLength": 1
+    ///        },
+    ///        "runtimeVersion": {
+    ///          "type": "string",
+    ///          "maxLength": 128,
+    ///          "minLength": 1
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "expandedBytes": {
+    ///      "type": "integer",
+    ///      "maximum": 9007199254740991.0,
+    ///      "minimum": 0.0
+    ///    },
+    ///    "expandedFileCount": {
+    ///      "type": "integer",
+    ///      "maximum": 2147483647.0,
+    ///      "minimum": 0.0
+    ///    },
+    ///    "generatorDigest": {
+    ///      "type": "string",
+    ///      "pattern": "^sha256:[0-9a-f]{64}$"
+    ///    },
+    ///    "kind": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "JAVASCRIPT_NODE_MODULES",
+    ///        "PYTHON_SITE_PACKAGES"
+    ///      ]
+    ///    },
+    ///    "logicalTreeDigest": {
+    ///      "type": "string",
+    ///      "pattern": "^[0-9a-f]{64}$"
+    ///    },
+    ///    "nativeObjectCount": {
+    ///      "type": "integer",
+    ///      "maximum": 2147483647.0,
+    ///      "minimum": 0.0
+    ///    },
+    ///    "regularFileCount": {
+    ///      "type": "integer",
+    ///      "maximum": 2147483647.0,
+    ///      "minimum": 0.0
+    ///    },
+    ///    "schemaVersion": {
+    ///      "type": "string",
+    ///      "const": "DEPENDENCY_MATERIALIZATION_V1.0"
+    ///    },
+    ///    "symlinkCount": {
+    ///      "type": "integer",
+    ///      "maximum": 2147483647.0,
+    ///      "minimum": 0.0
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifest {
+        #[serde(rename = "blobDescriptor")]
+        pub blob_descriptor: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptor,
+        #[serde(rename = "canonicalizationPolicyDigest")]
+        pub canonicalization_policy_digest: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest,
+        pub compatibility: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibility,
+        #[serde(rename = "expandedBytes")]
+        pub expanded_bytes: i64,
+        #[serde(rename = "expandedFileCount")]
+        pub expanded_file_count: i64,
+        #[serde(rename = "generatorDigest")]
+        pub generator_digest: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest,
+        pub kind: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestKind,
+        #[serde(rename = "logicalTreeDigest")]
+        pub logical_tree_digest: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest,
+        #[serde(rename = "nativeObjectCount")]
+        pub native_object_count: i64,
+        #[serde(rename = "regularFileCount")]
+        pub regular_file_count: i64,
+        #[serde(rename = "schemaVersion")]
+        pub schema_version: ::std::string::String,
+        #[serde(rename = "symlinkCount")]
+        pub symlink_count: i64,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptor`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "digest",
+    ///    "mediaType",
+    ///    "size"
+    ///  ],
+    ///  "properties": {
+    ///    "digest": {
+    ///      "type": "string",
+    ///      "pattern": "^sha256:[0-9a-f]{64}$"
+    ///    },
+    ///    "mediaType": {
+    ///      "type": "string",
+    ///      "const": "application/vnd.onreza.dependency.erofs.v1"
+    ///    },
+    ///    "size": {
+    ///      "type": "integer",
+    ///      "maximum": 9007199254740991.0,
+    ///      "minimum": 0.0
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptor {
+        pub digest:
+            OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest,
+        #[serde(rename = "mediaType")]
+        pub media_type: ::std::string::String,
+        pub size: i64,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^sha256:[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| {
+                    ::regress::Regex::new("^sha256:[0-9a-f]{64}$").unwrap()
+                });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^sha256:[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^sha256:[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<
+        OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest,
+    > for ::std::string::String {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest {
+        type Err = self::error::ConversionError;
+        fn from_str(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+            { ::regress::Regex::new("^sha256:[0-9a-f]{64}$").unwrap() });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^sha256:[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibility`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "abi",
+    ///    "architecture",
+    ///    "buildPolicyGeneration",
+    ///    "libc",
+    ///    "os",
+    ///    "packageManager",
+    ///    "packageManagerVersion",
+    ///    "runnerRootfsDigest",
+    ///    "runtimeFamily",
+    ///    "runtimeVersion"
+    ///  ],
+    ///  "properties": {
+    ///    "abi": {
+    ///      "type": "string",
+    ///      "maxLength": 128,
+    ///      "minLength": 1
+    ///    },
+    ///    "architecture": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "x86_64",
+    ///        "aarch64"
+    ///      ]
+    ///    },
+    ///    "buildPolicyGeneration": {
+    ///      "type": "integer",
+    ///      "maximum": 2147483647.0,
+    ///      "exclusiveMinimum": 0.0
+    ///    },
+    ///    "libc": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "glibc",
+    ///        "musl"
+    ///      ]
+    ///    },
+    ///    "os": {
+    ///      "type": "string",
+    ///      "const": "linux"
+    ///    },
+    ///    "packageManager": {
+    ///      "type": "string",
+    ///      "maxLength": 64,
+    ///      "minLength": 1
+    ///    },
+    ///    "packageManagerVersion": {
+    ///      "type": "string",
+    ///      "maxLength": 128,
+    ///      "minLength": 1
+    ///    },
+    ///    "runnerRootfsDigest": {
+    ///      "type": "string",
+    ///      "pattern": "^sha256:[0-9a-f]{64}$"
+    ///    },
+    ///    "runtimeFamily": {
+    ///      "type": "string",
+    ///      "maxLength": 64,
+    ///      "minLength": 1
+    ///    },
+    ///    "runtimeVersion": {
+    ///      "type": "string",
+    ///      "maxLength": 128,
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibility {
+        pub abi: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi,
+        pub architecture: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityArchitecture,
+        #[serde(rename = "buildPolicyGeneration")]
+        pub build_policy_generation: ::std::num::NonZeroU64,
+        pub libc: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityLibc,
+        pub os: ::std::string::String,
+        #[serde(rename = "packageManager")]
+        pub package_manager: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager,
+        #[serde(rename = "packageManagerVersion")]
+        pub package_manager_version: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion,
+        #[serde(rename = "runnerRootfsDigest")]
+        pub runner_rootfs_digest: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest,
+        #[serde(rename = "runtimeFamily")]
+        pub runtime_family: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily,
+        #[serde(rename = "runtimeVersion")]
+        pub runtime_version: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 128,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 128usize {
+                return Err("longer than 128 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityArchitecture`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "x86_64",
+    ///    "aarch64"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityArchitecture {
+        #[serde(rename = "x86_64")]
+        X8664,
+        #[serde(rename = "aarch64")]
+        Aarch64,
+    }
+    impl ::std::fmt::Display
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityArchitecture
+    {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::X8664 => f.write_str("x86_64"),
+                Self::Aarch64 => f.write_str("aarch64"),
+            }
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityArchitecture
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "x86_64" => Ok(Self::X8664),
+                "aarch64" => Ok(Self::Aarch64),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityArchitecture
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityArchitecture
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityArchitecture
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityLibc`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "glibc",
+    ///    "musl"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityLibc {
+        #[serde(rename = "glibc")]
+        Glibc,
+        #[serde(rename = "musl")]
+        Musl,
+    }
+    impl ::std::fmt::Display
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityLibc
+    {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Glibc => f.write_str("glibc"),
+                Self::Musl => f.write_str("musl"),
+            }
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityLibc
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "glibc" => Ok(Self::Glibc),
+                "musl" => Ok(Self::Musl),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityLibc
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityLibc
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityLibc
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 64,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<
+        OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager,
+    > for ::std::string::String {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 64usize {
+                return Err("longer than 64 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 128,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<
+        OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion,
+    > for ::std::string::String {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion {
+        type Err = self::error::ConversionError;
+        fn from_str(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 128usize {
+                return Err("longer than 128 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^sha256:[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<
+        OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest,
+    > for ::std::string::String {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest {
+        type Err = self::error::ConversionError;
+        fn from_str(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+            { ::regress::Regex::new("^sha256:[0-9a-f]{64}$").unwrap() });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^sha256:[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 64,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 64usize {
+                return Err("longer than 64 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 128,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<
+        OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion,
+    > for ::std::string::String {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 128usize {
+                return Err("longer than 128 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^sha256:[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| {
+                    ::regress::Regex::new("^sha256:[0-9a-f]{64}$").unwrap()
+                });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^sha256:[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestKind`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "JAVASCRIPT_NODE_MODULES",
+    ///    "PYTHON_SITE_PACKAGES"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestKind {
+        #[serde(rename = "JAVASCRIPT_NODE_MODULES")]
+        JavascriptNodeModules,
+        #[serde(rename = "PYTHON_SITE_PACKAGES")]
+        PythonSitePackages,
+    }
+    impl ::std::fmt::Display for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestKind {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::JavascriptNodeModules => f.write_str("JAVASCRIPT_NODE_MODULES"),
+                Self::PythonSitePackages => f.write_str("PYTHON_SITE_PACKAGES"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestKind {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "JAVASCRIPT_NODE_MODULES" => Ok(Self::JavascriptNodeModules),
+                "PYTHON_SITE_PACKAGES" => Ok(Self::PythonSitePackages),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestKind
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestKind
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestKind
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| ::regress::Regex::new("^[0-9a-f]{64}$").unwrap());
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraph`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "application",
+    ///    "dependencies",
+    ///    "graphDigest",
+    ///    "runtimeLayers",
+    ///    "schemaVersion"
+    ///  ],
+    ///  "properties": {
+    ///    "application": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "artifactId",
+    ///        "blobDescriptor",
+    ///        "manifestDigest"
+    ///      ],
+    ///      "properties": {
+    ///        "artifactId": {
+    ///          "type": "string",
+    ///          "pattern": "^[0-9a-f]{64}$"
+    ///        },
+    ///        "blobDescriptor": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "digest",
+    ///            "mediaType",
+    ///            "size"
+    ///          ],
+    ///          "properties": {
+    ///            "digest": {
+    ///              "type": "string",
+    ///              "pattern": "^sha256:[0-9a-f]{64}$"
+    ///            },
+    ///            "mediaType": {
+    ///              "type": "string",
+    ///              "const": "application/vnd.onreza.source-bundle.tar+zstd.v1"
+    ///            },
+    ///            "size": {
+    ///              "type": "integer",
+    ///              "maximum": 9007199254740991.0,
+    ///              "minimum": 0.0
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        },
+    ///        "manifestDigest": {
+    ///          "type": "string",
+    ///          "pattern": "^[0-9a-f]{64}$"
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "dependencies": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "object",
+    ///        "required": [
+    ///          "blobDescriptor",
+    ///          "compatibility",
+    ///          "kind",
+    ///          "manifestDigest",
+    ///          "materializationId",
+    ///          "mountPoint"
+    ///        ],
+    ///        "properties": {
+    ///          "blobDescriptor": {
+    ///            "type": "object",
+    ///            "required": [
+    ///              "digest",
+    ///              "mediaType",
+    ///              "size"
+    ///            ],
+    ///            "properties": {
+    ///              "digest": {
+    ///                "type": "string",
+    ///                "pattern": "^sha256:[0-9a-f]{64}$"
+    ///              },
+    ///              "mediaType": {
+    ///                "type": "string",
+    ///                "const": "application/vnd.onreza.dependency.erofs.v1"
+    ///              },
+    ///              "size": {
+    ///                "type": "integer",
+    ///                "maximum": 9007199254740991.0,
+    ///                "minimum": 0.0
+    ///              }
+    ///            },
+    ///            "additionalProperties": false
+    ///          },
+    ///          "compatibility": {
+    ///            "type": "object",
+    ///            "required": [
+    ///              "abi",
+    ///              "architecture",
+    ///              "buildPolicyGeneration",
+    ///              "libc",
+    ///              "os",
+    ///              "packageManager",
+    ///              "packageManagerVersion",
+    ///              "runnerRootfsDigest",
+    ///              "runtimeFamily",
+    ///              "runtimeVersion"
+    ///            ],
+    ///            "properties": {
+    ///              "abi": {
+    ///                "type": "string",
+    ///                "maxLength": 128,
+    ///                "minLength": 1
+    ///              },
+    ///              "architecture": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "x86_64",
+    ///                  "aarch64"
+    ///                ]
+    ///              },
+    ///              "buildPolicyGeneration": {
+    ///                "type": "integer",
+    ///                "maximum": 2147483647.0,
+    ///                "exclusiveMinimum": 0.0
+    ///              },
+    ///              "libc": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "glibc",
+    ///                  "musl"
+    ///                ]
+    ///              },
+    ///              "os": {
+    ///                "type": "string",
+    ///                "const": "linux"
+    ///              },
+    ///              "packageManager": {
+    ///                "type": "string",
+    ///                "maxLength": 64,
+    ///                "minLength": 1
+    ///              },
+    ///              "packageManagerVersion": {
+    ///                "type": "string",
+    ///                "maxLength": 128,
+    ///                "minLength": 1
+    ///              },
+    ///              "runnerRootfsDigest": {
+    ///                "type": "string",
+    ///                "pattern": "^sha256:[0-9a-f]{64}$"
+    ///              },
+    ///              "runtimeFamily": {
+    ///                "type": "string",
+    ///                "maxLength": 64,
+    ///                "minLength": 1
+    ///              },
+    ///              "runtimeVersion": {
+    ///                "type": "string",
+    ///                "maxLength": 128,
+    ///                "minLength": 1
+    ///              }
+    ///            },
+    ///            "additionalProperties": false
+    ///          },
+    ///          "kind": {
+    ///            "type": "string",
+    ///            "enum": [
+    ///              "JAVASCRIPT_NODE_MODULES",
+    ///              "PYTHON_SITE_PACKAGES"
+    ///            ]
+    ///          },
+    ///          "manifestDigest": {
+    ///            "type": "string",
+    ///            "pattern": "^[0-9a-f]{64}$"
+    ///          },
+    ///          "materializationId": {
+    ///            "type": "string",
+    ///            "pattern": "^[0-9a-f]{64}$"
+    ///          },
+    ///          "mountPoint": {
+    ///            "type": "string",
+    ///            "maxLength": 512,
+    ///            "minLength": 1
+    ///          }
+    ///        },
+    ///        "additionalProperties": false
+    ///      },
+    ///      "maxItems": 16
+    ///    },
+    ///    "graphDigest": {
+    ///      "type": "string",
+    ///      "pattern": "^[0-9a-f]{64}$"
+    ///    },
+    ///    "runtimeLayers": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "object",
+    ///        "required": [
+    ///          "applicationRoot",
+    ///          "dependencyMaterializationIds",
+    ///          "entrypoint",
+    ///          "layerName",
+    ///          "runtimeConfig"
+    ///        ],
+    ///        "properties": {
+    ///          "applicationRoot": {
+    ///            "type": "string",
+    ///            "maxLength": 512,
+    ///            "minLength": 1
+    ///          },
+    ///          "dependencyMaterializationIds": {
+    ///            "type": "array",
+    ///            "items": {
+    ///              "type": "string",
+    ///              "pattern": "^[0-9a-f]{64}$"
+    ///            },
+    ///            "maxItems": 8
+    ///          },
+    ///          "entrypoint": {
+    ///            "type": "string",
+    ///            "maxLength": 512,
+    ///            "minLength": 1
+    ///          },
+    ///          "layerName": {
+    ///            "type": "string",
+    ///            "maxLength": 64,
+    ///            "minLength": 1
+    ///          },
+    ///          "runtimeConfig": {
+    ///            "type": "object",
+    ///            "properties": {
+    ///              "maxConcurrency": {
+    ///                "type": "integer",
+    ///                "maximum": 100.0,
+    ///                "exclusiveMinimum": 0.0
+    ///              },
+    ///              "memoryMb": {
+    ///                "type": "integer",
+    ///                "maximum": 8192.0,
+    ///                "minimum": 32.0
+    ///              },
+    ///              "timeoutMs": {
+    ///                "type": "integer",
+    ///                "maximum": 9007199254740991.0,
+    ///                "exclusiveMinimum": 0.0
+    ///              }
+    ///            },
+    ///            "additionalProperties": false
+    ///          }
+    ///        },
+    ///        "additionalProperties": false
+    ///      },
+    ///      "maxItems": 10
+    ///    },
+    ///    "schemaVersion": {
+    ///      "type": "string",
+    ///      "const": "RUNTIME_ARTIFACT_GRAPH_V2.0"
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraph {
+        pub application: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplication,
+        pub dependencies:
+            ::std::vec::Vec<OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItem>,
+        #[serde(rename = "graphDigest")]
+        pub graph_digest: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest,
+        #[serde(rename = "runtimeLayers")]
+        pub runtime_layers:
+            ::std::vec::Vec<OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItem>,
+        #[serde(rename = "schemaVersion")]
+        pub schema_version: ::std::string::String,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplication`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "artifactId",
+    ///    "blobDescriptor",
+    ///    "manifestDigest"
+    ///  ],
+    ///  "properties": {
+    ///    "artifactId": {
+    ///      "type": "string",
+    ///      "pattern": "^[0-9a-f]{64}$"
+    ///    },
+    ///    "blobDescriptor": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "digest",
+    ///        "mediaType",
+    ///        "size"
+    ///      ],
+    ///      "properties": {
+    ///        "digest": {
+    ///          "type": "string",
+    ///          "pattern": "^sha256:[0-9a-f]{64}$"
+    ///        },
+    ///        "mediaType": {
+    ///          "type": "string",
+    ///          "const": "application/vnd.onreza.source-bundle.tar+zstd.v1"
+    ///        },
+    ///        "size": {
+    ///          "type": "integer",
+    ///          "maximum": 9007199254740991.0,
+    ///          "minimum": 0.0
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "manifestDigest": {
+    ///      "type": "string",
+    ///      "pattern": "^[0-9a-f]{64}$"
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplication {
+        #[serde(rename = "artifactId")]
+        pub artifact_id: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId,
+        #[serde(rename = "blobDescriptor")]
+        pub blob_descriptor:
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptor,
+        #[serde(rename = "manifestDigest")]
+        pub manifest_digest:
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId>
+        for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| ::regress::Regex::new("^[0-9a-f]{64}$").unwrap());
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptor`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "digest",
+    ///    "mediaType",
+    ///    "size"
+    ///  ],
+    ///  "properties": {
+    ///    "digest": {
+    ///      "type": "string",
+    ///      "pattern": "^sha256:[0-9a-f]{64}$"
+    ///    },
+    ///    "mediaType": {
+    ///      "type": "string",
+    ///      "const": "application/vnd.onreza.source-bundle.tar+zstd.v1"
+    ///    },
+    ///    "size": {
+    ///      "type": "integer",
+    ///      "maximum": 9007199254740991.0,
+    ///      "minimum": 0.0
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptor {
+        pub digest: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest,
+        #[serde(rename = "mediaType")]
+        pub media_type: ::std::string::String,
+        pub size: i64,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^sha256:[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| {
+                    ::regress::Regex::new("^sha256:[0-9a-f]{64}$").unwrap()
+                });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^sha256:[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| ::regress::Regex::new("^[0-9a-f]{64}$").unwrap());
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "blobDescriptor",
+    ///    "compatibility",
+    ///    "kind",
+    ///    "manifestDigest",
+    ///    "materializationId",
+    ///    "mountPoint"
+    ///  ],
+    ///  "properties": {
+    ///    "blobDescriptor": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "digest",
+    ///        "mediaType",
+    ///        "size"
+    ///      ],
+    ///      "properties": {
+    ///        "digest": {
+    ///          "type": "string",
+    ///          "pattern": "^sha256:[0-9a-f]{64}$"
+    ///        },
+    ///        "mediaType": {
+    ///          "type": "string",
+    ///          "const": "application/vnd.onreza.dependency.erofs.v1"
+    ///        },
+    ///        "size": {
+    ///          "type": "integer",
+    ///          "maximum": 9007199254740991.0,
+    ///          "minimum": 0.0
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "compatibility": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "abi",
+    ///        "architecture",
+    ///        "buildPolicyGeneration",
+    ///        "libc",
+    ///        "os",
+    ///        "packageManager",
+    ///        "packageManagerVersion",
+    ///        "runnerRootfsDigest",
+    ///        "runtimeFamily",
+    ///        "runtimeVersion"
+    ///      ],
+    ///      "properties": {
+    ///        "abi": {
+    ///          "type": "string",
+    ///          "maxLength": 128,
+    ///          "minLength": 1
+    ///        },
+    ///        "architecture": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "x86_64",
+    ///            "aarch64"
+    ///          ]
+    ///        },
+    ///        "buildPolicyGeneration": {
+    ///          "type": "integer",
+    ///          "maximum": 2147483647.0,
+    ///          "exclusiveMinimum": 0.0
+    ///        },
+    ///        "libc": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "glibc",
+    ///            "musl"
+    ///          ]
+    ///        },
+    ///        "os": {
+    ///          "type": "string",
+    ///          "const": "linux"
+    ///        },
+    ///        "packageManager": {
+    ///          "type": "string",
+    ///          "maxLength": 64,
+    ///          "minLength": 1
+    ///        },
+    ///        "packageManagerVersion": {
+    ///          "type": "string",
+    ///          "maxLength": 128,
+    ///          "minLength": 1
+    ///        },
+    ///        "runnerRootfsDigest": {
+    ///          "type": "string",
+    ///          "pattern": "^sha256:[0-9a-f]{64}$"
+    ///        },
+    ///        "runtimeFamily": {
+    ///          "type": "string",
+    ///          "maxLength": 64,
+    ///          "minLength": 1
+    ///        },
+    ///        "runtimeVersion": {
+    ///          "type": "string",
+    ///          "maxLength": 128,
+    ///          "minLength": 1
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
+    ///    "kind": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "JAVASCRIPT_NODE_MODULES",
+    ///        "PYTHON_SITE_PACKAGES"
+    ///      ]
+    ///    },
+    ///    "manifestDigest": {
+    ///      "type": "string",
+    ///      "pattern": "^[0-9a-f]{64}$"
+    ///    },
+    ///    "materializationId": {
+    ///      "type": "string",
+    ///      "pattern": "^[0-9a-f]{64}$"
+    ///    },
+    ///    "mountPoint": {
+    ///      "type": "string",
+    ///      "maxLength": 512,
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItem {
+        #[serde(rename = "blobDescriptor")]
+        pub blob_descriptor:
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptor,
+        pub compatibility:
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibility,
+        pub kind: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemKind,
+        #[serde(rename = "manifestDigest")]
+        pub manifest_digest:
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest,
+        #[serde(rename = "materializationId")]
+        pub materialization_id:
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId,
+        #[serde(rename = "mountPoint")]
+        pub mount_point: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptor`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "digest",
+    ///    "mediaType",
+    ///    "size"
+    ///  ],
+    ///  "properties": {
+    ///    "digest": {
+    ///      "type": "string",
+    ///      "pattern": "^sha256:[0-9a-f]{64}$"
+    ///    },
+    ///    "mediaType": {
+    ///      "type": "string",
+    ///      "const": "application/vnd.onreza.dependency.erofs.v1"
+    ///    },
+    ///    "size": {
+    ///      "type": "integer",
+    ///      "maximum": 9007199254740991.0,
+    ///      "minimum": 0.0
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptor {
+        pub digest:
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest,
+        #[serde(rename = "mediaType")]
+        pub media_type: ::std::string::String,
+        pub size: i64,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^sha256:[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| {
+                    ::regress::Regex::new("^sha256:[0-9a-f]{64}$").unwrap()
+                });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^sha256:[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibility`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "abi",
+    ///    "architecture",
+    ///    "buildPolicyGeneration",
+    ///    "libc",
+    ///    "os",
+    ///    "packageManager",
+    ///    "packageManagerVersion",
+    ///    "runnerRootfsDigest",
+    ///    "runtimeFamily",
+    ///    "runtimeVersion"
+    ///  ],
+    ///  "properties": {
+    ///    "abi": {
+    ///      "type": "string",
+    ///      "maxLength": 128,
+    ///      "minLength": 1
+    ///    },
+    ///    "architecture": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "x86_64",
+    ///        "aarch64"
+    ///      ]
+    ///    },
+    ///    "buildPolicyGeneration": {
+    ///      "type": "integer",
+    ///      "maximum": 2147483647.0,
+    ///      "exclusiveMinimum": 0.0
+    ///    },
+    ///    "libc": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "glibc",
+    ///        "musl"
+    ///      ]
+    ///    },
+    ///    "os": {
+    ///      "type": "string",
+    ///      "const": "linux"
+    ///    },
+    ///    "packageManager": {
+    ///      "type": "string",
+    ///      "maxLength": 64,
+    ///      "minLength": 1
+    ///    },
+    ///    "packageManagerVersion": {
+    ///      "type": "string",
+    ///      "maxLength": 128,
+    ///      "minLength": 1
+    ///    },
+    ///    "runnerRootfsDigest": {
+    ///      "type": "string",
+    ///      "pattern": "^sha256:[0-9a-f]{64}$"
+    ///    },
+    ///    "runtimeFamily": {
+    ///      "type": "string",
+    ///      "maxLength": 64,
+    ///      "minLength": 1
+    ///    },
+    ///    "runtimeVersion": {
+    ///      "type": "string",
+    ///      "maxLength": 128,
+    ///      "minLength": 1
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibility {
+        pub abi: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi,
+        pub architecture: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityArchitecture,
+        #[serde(rename = "buildPolicyGeneration")]
+        pub build_policy_generation: ::std::num::NonZeroU64,
+        pub libc: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityLibc,
+        pub os: ::std::string::String,
+        #[serde(rename = "packageManager")]
+        pub package_manager: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager,
+        #[serde(rename = "packageManagerVersion")]
+        pub package_manager_version: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion,
+        #[serde(rename = "runnerRootfsDigest")]
+        pub runner_rootfs_digest: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest,
+        #[serde(rename = "runtimeFamily")]
+        pub runtime_family: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily,
+        #[serde(rename = "runtimeVersion")]
+        pub runtime_version: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 128,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 128usize {
+                return Err("longer than 128 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityArchitecture`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "x86_64",
+    ///    "aarch64"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityArchitecture {
+        #[serde(rename = "x86_64")]
+        X8664,
+        #[serde(rename = "aarch64")]
+        Aarch64,
+    }
+    impl ::std::fmt::Display
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityArchitecture {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::X8664 => f.write_str("x86_64"),
+                Self::Aarch64 => f.write_str("aarch64"),
+            }
+        }
+    }
+    impl ::std::str::FromStr
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityArchitecture {
+        type Err = self::error::ConversionError;
+        fn from_str(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "x86_64" => Ok(Self::X8664),
+                "aarch64" => Ok(Self::Aarch64),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityArchitecture {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityArchitecture {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityArchitecture {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityLibc`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "glibc",
+    ///    "musl"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityLibc {
+        #[serde(rename = "glibc")]
+        Glibc,
+        #[serde(rename = "musl")]
+        Musl,
+    }
+    impl ::std::fmt::Display
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityLibc
+    {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Glibc => f.write_str("glibc"),
+                Self::Musl => f.write_str("musl"),
+            }
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityLibc
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "glibc" => Ok(Self::Glibc),
+                "musl" => Ok(Self::Musl),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityLibc
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityLibc
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityLibc
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 64,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<
+        OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager,
+    > for ::std::string::String {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager {
+        type Err = self::error::ConversionError;
+        fn from_str(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 64usize {
+                return Err("longer than 64 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 128,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<
+        OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion,
+    > for ::std::string::String {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion {
+        type Err = self::error::ConversionError;
+        fn from_str(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 128usize {
+                return Err("longer than 128 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^sha256:[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<
+        OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest,
+    > for ::std::string::String {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest {
+        type Err = self::error::ConversionError;
+        fn from_str(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+            { ::regress::Regex::new("^sha256:[0-9a-f]{64}$").unwrap() });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^sha256:[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 64,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<
+        OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily,
+    > for ::std::string::String {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily {
+        type Err = self::error::ConversionError;
+        fn from_str(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 64usize {
+                return Err("longer than 64 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 128,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<
+        OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion,
+    > for ::std::string::String {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion {
+        type Err = self::error::ConversionError;
+        fn from_str(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 128usize {
+                return Err("longer than 128 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemKind`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "JAVASCRIPT_NODE_MODULES",
+    ///    "PYTHON_SITE_PACKAGES"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemKind {
+        #[serde(rename = "JAVASCRIPT_NODE_MODULES")]
+        JavascriptNodeModules,
+        #[serde(rename = "PYTHON_SITE_PACKAGES")]
+        PythonSitePackages,
+    }
+    impl ::std::fmt::Display for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemKind {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::JavascriptNodeModules => f.write_str("JAVASCRIPT_NODE_MODULES"),
+                Self::PythonSitePackages => f.write_str("PYTHON_SITE_PACKAGES"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemKind {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "JAVASCRIPT_NODE_MODULES" => Ok(Self::JavascriptNodeModules),
+                "PYTHON_SITE_PACKAGES" => Ok(Self::PythonSitePackages),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemKind
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemKind
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemKind
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| ::regress::Regex::new("^[0-9a-f]{64}$").unwrap());
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| ::regress::Regex::new("^[0-9a-f]{64}$").unwrap());
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 512,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 512usize {
+                return Err("longer than 512 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest(::std::string::String);
+    impl ::std::ops::Deref for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| ::regress::Regex::new("^[0-9a-f]{64}$").unwrap());
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "applicationRoot",
+    ///    "dependencyMaterializationIds",
+    ///    "entrypoint",
+    ///    "layerName",
+    ///    "runtimeConfig"
+    ///  ],
+    ///  "properties": {
+    ///    "applicationRoot": {
+    ///      "type": "string",
+    ///      "maxLength": 512,
+    ///      "minLength": 1
+    ///    },
+    ///    "dependencyMaterializationIds": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "pattern": "^[0-9a-f]{64}$"
+    ///      },
+    ///      "maxItems": 8
+    ///    },
+    ///    "entrypoint": {
+    ///      "type": "string",
+    ///      "maxLength": 512,
+    ///      "minLength": 1
+    ///    },
+    ///    "layerName": {
+    ///      "type": "string",
+    ///      "maxLength": 64,
+    ///      "minLength": 1
+    ///    },
+    ///    "runtimeConfig": {
+    ///      "type": "object",
+    ///      "properties": {
+    ///        "maxConcurrency": {
+    ///          "type": "integer",
+    ///          "maximum": 100.0,
+    ///          "exclusiveMinimum": 0.0
+    ///        },
+    ///        "memoryMb": {
+    ///          "type": "integer",
+    ///          "maximum": 8192.0,
+    ///          "minimum": 32.0
+    ///        },
+    ///        "timeoutMs": {
+    ///          "type": "integer",
+    ///          "maximum": 9007199254740991.0,
+    ///          "exclusiveMinimum": 0.0
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItem {
+        #[serde(rename = "applicationRoot")]
+        pub application_root: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot,
+        #[serde(rename = "dependencyMaterializationIds")]
+        pub dependency_materialization_ids: ::std::vec::Vec<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem,
+        >,
+        pub entrypoint: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint,
+        #[serde(rename = "layerName")]
+        pub layer_name: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName,
+        #[serde(rename = "runtimeConfig")]
+        pub runtime_config: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfig,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 512,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 512usize {
+                return Err("longer than 512 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "pattern": "^[0-9a-f]{64}$"
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<
+        OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem,
+    > for ::std::string::String {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+            { ::regress::Regex::new("^[0-9a-f]{64}$").unwrap() });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[0-9a-f]{64}$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 512,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 512usize {
+                return Err("longer than 512 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 64,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 64usize {
+                return Err("longer than 64 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfig`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "properties": {
+    ///    "maxConcurrency": {
+    ///      "type": "integer",
+    ///      "maximum": 100.0,
+    ///      "exclusiveMinimum": 0.0
+    ///    },
+    ///    "memoryMb": {
+    ///      "type": "integer",
+    ///      "maximum": 8192.0,
+    ///      "minimum": 32.0
+    ///    },
+    ///    "timeoutMs": {
+    ///      "type": "integer",
+    ///      "maximum": 9007199254740991.0,
+    ///      "exclusiveMinimum": 0.0
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfig {
+        #[serde(
+            rename = "maxConcurrency",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub max_concurrency: ::std::option::Option<::std::num::NonZeroU64>,
+        #[serde(
+            rename = "memoryMb",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub memory_mb: ::std::option::Option<i64>,
+        #[serde(
+            rename = "timeoutMs",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub timeout_ms: ::std::option::Option<::std::num::NonZeroU64>,
+    }
+    impl ::std::default::Default
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfig
+    {
+        fn default() -> Self {
+            Self {
+                max_concurrency: Default::default(),
+                memory_mb: Default::default(),
+                timeout_ms: Default::default(),
+            }
+        }
+    }
+}

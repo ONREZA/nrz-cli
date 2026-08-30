@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.38.0-beta.1] - 2026-08-29
+
+### 🐛 Bug Fixes
+
+- **deploy:** keep handoff portable ([cf17cfa](https://github.com/ONREZA/nrz-cli/commit/cf17cfa87b0fcbf36045ca7243079d9788516503))
+- **deploy:** classify function config errors ([70adf22](https://github.com/ONREZA/nrz-cli/commit/70adf22021d4d1c6e262dfcd7bc93f9f3938d7bd))
+
+### ✨ Features
+
+- **deploy:** publish local build handoff ([c31eccc](https://github.com/ONREZA/nrz-cli/commit/c31eccc4d562b5e2d611adda548979eeb687f287))
+- **build:** sync runtime artifact contract ([5b10e12](https://github.com/ONREZA/nrz-cli/commit/5b10e12de9a4c08521117ea7fa52edb68b708b05))
+
+### 🔧 Changed
+
+- **config:** sync platform terminology ([13d8511](https://github.com/ONREZA/nrz-cli/commit/13d851151644b0d70af24e1aeb9510d6358d3214))
+- update vendored sync command ([a7329c6](https://github.com/ONREZA/nrz-cli/commit/a7329c6e5ec5c94b406f3c164209daf50b676249))
+- **deps:** sync function source contract ([d032d05](https://github.com/ONREZA/nrz-cli/commit/d032d052f833620daac8f372f1402da3524bf275))
+
+## [0.38.0-beta.0] - 2026-08-29
+
+### ✨ Features
+
+- **deploy:** publish local build handoff ([c31eccc](https://github.com/ONREZA/nrz-cli/commit/c31eccc4d562b5e2d611adda548979eeb687f287))
+- **build:** sync runtime artifact contract ([5b10e12](https://github.com/ONREZA/nrz-cli/commit/5b10e12de9a4c08521117ea7fa52edb68b708b05))
+
+### 🐛 Bug Fixes
+
+- **deploy:** classify function config errors ([70adf22](https://github.com/ONREZA/nrz-cli/commit/70adf22021d4d1c6e262dfcd7bc93f9f3938d7bd))
+
+### 🔧 Changed
+
+- **config:** sync platform terminology ([13d8511](https://github.com/ONREZA/nrz-cli/commit/13d851151644b0d70af24e1aeb9510d6358d3214))
+- update vendored sync command ([a7329c6](https://github.com/ONREZA/nrz-cli/commit/a7329c6e5ec5c94b406f3c164209daf50b676249))
+- **deps:** sync function source contract ([d032d05](https://github.com/ONREZA/nrz-cli/commit/d032d052f833620daac8f372f1402da3524bf275))
+
 ## [0.37.1] - 2026-08-23
 
 ### ♻️ Changed

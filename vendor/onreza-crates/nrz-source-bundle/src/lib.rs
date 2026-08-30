@@ -1,7 +1,13 @@
 //! Shared SOURCE_BUNDLE_V1 manifest canonicalization for nrz-cli binary builds.
 
+pub mod handoff;
 pub mod manifest;
 
+pub use handoff::{
+    EDGE_BUILD_HANDOFF_V1_FILE, EDGE_BUILD_HANDOFF_V1_SCHEMA_VERSION,
+    EDGE_BUILD_SOURCE_BUNDLE_V1_FILE, EdgeBuildHandoffV1, EdgeBuildSourceBundleV1,
+    SOURCE_BUNDLE_V1_MEDIA_TYPE,
+};
 pub use manifest::{
     RouteFallthroughCondition, SOURCE_BUNDLE_V1_SCHEMA_VERSION, SourceBundleSummary,
     SourceLogicalManifest, SourceLogicalManifestEntryType, SourceLogicalManifestFile,

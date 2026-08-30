@@ -1,9 +1,21 @@
 use std::time::Duration;
 
 use super::build_logs::{
-    ExactValueRedactor, collect_upload_batch, error_code, error_details, parse_env_toggle,
-    sanitize_message, truncate_utf8,
+    BuildLogSuccess, ExactValueRedactor, collect_upload_batch, error_code, error_details,
+    parse_env_toggle, sanitize_message, truncate_utf8,
 };
+
+#[test]
+fn build_log_success_message_matches_artifact_authority() {
+    assert_eq!(
+        BuildLogSuccess::ArtifactsUploaded.message(),
+        "Build artifacts uploaded"
+    );
+    assert_eq!(
+        BuildLogSuccess::EdgeHandoffPublished.message(),
+        "Build handoff published"
+    );
+}
 
 #[test]
 fn parses_build_log_upload_environment_toggles() {
