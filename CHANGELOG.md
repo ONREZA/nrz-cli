@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.37.2] - 2026-08-30
+
+### 🐛 Bug Fixes
+
+- **deploy:** verify protected live urls (#11) ([4dd5f38](https://github.com/ONREZA/nrz-cli/commit/4dd5f382caee6895e4c0e8108add1bdcc64389d1))
+- **deploy:** classify function config errors ([70adf22](https://github.com/ONREZA/nrz-cli/commit/70adf22021d4d1c6e262dfcd7bc93f9f3938d7bd))
+
+### 🔧 Changed
+
+- **config:** sync platform terminology ([13d8511](https://github.com/ONREZA/nrz-cli/commit/13d851151644b0d70af24e1aeb9510d6358d3214))
+- update vendored sync command ([a7329c6](https://github.com/ONREZA/nrz-cli/commit/a7329c6e5ec5c94b406f3c164209daf50b676249))
+- **deps:** sync function source contract ([d032d05](https://github.com/ONREZA/nrz-cli/commit/d032d052f833620daac8f372f1402da3524bf275))
+
 ## [0.37.1] - 2026-08-23
 
 ### ♻️ Changed
