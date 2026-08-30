@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.37.3] - 2026-08-30
+
+### 🐛 Bug Fixes
+
+- **cli:** align runtime release (#13) ([76c3038](https://github.com/ONREZA/nrz-cli/commit/76c3038597cd2e3c2c47830de0f170ea1bb7b9e8))
+
 ## [0.37.2] - 2026-08-30
 
 ### 🐛 Bug Fixes
