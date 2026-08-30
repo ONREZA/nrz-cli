@@ -13,7 +13,7 @@ use url::Url;
 
 use super::preflight::preflight_with_runtime;
 use super::process::RuntimeProcess;
-use super::{CachedRuntime, RuntimeResolver};
+use super::{CachedRuntime, RUNTIME_PROTOCOL_VERSION, RuntimeResolver};
 
 #[derive(Clone)]
 struct ReleaseFixture {
@@ -34,7 +34,7 @@ async fn installs_and_reuses_a_verified_runtime_artifact() {
     let manifest = serde_json::to_vec(&json!({
         "schemaVersion": 1,
         "runtimeReleaseId": runtime_release_id,
-        "protocolVersion": "onreza-functions-poc/v1",
+        "protocolVersion": RUNTIME_PROTOCOL_VERSION,
         "source": { "revision": source_revision },
         "artifacts": [{
             "target": target,
@@ -114,7 +114,7 @@ use std::io::{self, BufRead};
 
 fn main() {
     let release = std::env::var("ONREZA_FUNCTIONS_RUNTIME_RELEASE_ID").unwrap();
-    println!("{{\"type\":\"ready\",\"protocolVersion\":\"onreza-functions-poc/v1\",\"runtimeReleaseId\":\"{}\"}}", release);
+    println!("{{\"type\":\"ready\",\"protocolVersion\":\"onreza-functions-poc/v2\",\"runtimeReleaseId\":\"{}\"}}", release);
     for line in io::stdin().lock().lines() {
         let line = line.unwrap();
         if line.contains("\"type\":\"shutdown\"") { break; }
@@ -248,7 +248,7 @@ fn main() {{
     let entrypoint = std::env::var("ONREZA_FUNCTIONS_ENTRYPOINT").unwrap();
     let mut log = std::fs::OpenOptions::new().create(true).append(true).open({entry_log:?}).unwrap();
     writeln!(log, "{{}}", entrypoint).unwrap();
-    println!("{{{{\"type\":\"ready\",\"protocolVersion\":\"onreza-functions-poc/v1\",\"runtimeReleaseId\":\"{{}}\"}}}}", release);
+    println!("{{{{\"type\":\"ready\",\"protocolVersion\":\"onreza-functions-poc/v2\",\"runtimeReleaseId\":\"{{}}\"}}}}", release);
     for line in io::stdin().lock().lines() {{
         if line.unwrap().contains("\"type\":\"shutdown\"") {{ break; }}
     }}
