@@ -201,6 +201,25 @@ pub fn log_line(stream: &str, level: &str, phase: &str, msg: &str) {
     emit_frame(&serde_json::json!({"s": stream, "p": phase, "l": level, "m": cap_message(msg)}));
 }
 
+pub(crate) fn info_structured_frame(
+    phase: &str,
+    message: &str,
+    details: &serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "s": "user",
+        "p": phase,
+        "l": "info",
+        "m": cap_message(message),
+        "details": details,
+    })
+}
+
+/// Emit a user-visible progress frame with machine-readable details.
+pub fn log_info_structured(phase: &str, message: &str, details: &serde_json::Value) {
+    emit_frame(&info_structured_frame(phase, message, details));
+}
+
 /// Print status message to stderr, or structured JSON log in JSON mode.
 pub fn status(json: bool, icon: &str, msg: impl std::fmt::Display, phase: Phase) {
     let msg = msg.to_string();

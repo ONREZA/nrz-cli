@@ -1,14 +1,29 @@
 use super::*;
 
+pub(super) struct PrepareUploadAndCompleteRequest<'a> {
+    pub(super) client: &'a ApiClient,
+    pub(super) deployment_id: &'a str,
+    pub(super) workspace_id: &'a str,
+    pub(super) project_id: &'a str,
+    pub(super) deployment_attempt_id: &'a str,
+    pub(super) json: bool,
+    pub(super) plan: &'a SourceBundlePlan,
+    pub(super) runtime_artifact_files: &'a crate::artifact::RuntimeArtifactFileBreakdown,
+}
+
 pub(super) async fn prepare_upload_and_complete(
-    client: &ApiClient,
-    deployment_id: &str,
-    workspace_id: &str,
-    project_id: &str,
-    deployment_attempt_id: &str,
-    json: bool,
-    plan: &SourceBundlePlan,
+    request: PrepareUploadAndCompleteRequest<'_>,
 ) -> anyhow::Result<()> {
+    let PrepareUploadAndCompleteRequest {
+        client,
+        deployment_id,
+        workspace_id,
+        project_id,
+        deployment_attempt_id,
+        json,
+        plan,
+        runtime_artifact_files,
+    } = request;
     output::status(
         json,
         "~",
@@ -34,79 +49,85 @@ pub(super) async fn prepare_upload_and_complete(
         None,
     )?;
 
-    let mut prepared = prepare_upload_with_retry(client, deployment_uuid, &body, json).await?;
+    let mut prepared =
+        prepare_upload_with_retry(client, deployment_uuid, &body, json, runtime_artifact_files)
+            .await?;
 
-    let multipart_completion =
-        match upload_source_object(client, &prepared, plan, json).await {
-            Ok(completion) => completion,
-            Err(error) if is_conditional_upload_conflict(&error) => {
-                output::status(
-                    json,
-                    "~",
-                    "Recovering SOURCE_BUNDLE_V1 source upload...",
-                    output::Phase::Deploy,
-                );
-                let recovery_body = build_prepare_upload_request(
-                    deployment_uuid,
-                    workspace_uuid,
-                    project_uuid,
-                    attempt_uuid,
-                    plan,
-                    Some(CliPrepareUploadSourceUploadRecovery {
-                        failed_upload_session_id: prepared.upload_session_id,
-                        reason: SOURCE_UPLOAD_RECOVERY_CONDITIONAL_PRECONDITION_FAILED.to_string(),
-                    }),
-                )?;
-                let recovered_prepared =
-                    match prepare_upload_with_retry(client, deployment_uuid, &recovery_body, json)
-                        .await
-                    {
-                        Ok(prepared) => prepared,
-                        Err(recovery_error) => {
-                            report_source_object_upload_failed(
-                                client,
-                                deployment_id,
-                                deployment_attempt_id,
-                                &prepared,
-                                &recovery_error,
-                                json,
-                            )
-                            .await;
-                            return Err(recovery_error);
-                        }
-                    };
-                match upload_source_object(client, &recovered_prepared, plan, json).await {
-                    Ok(completion) => {
-                        prepared = recovered_prepared;
-                        completion
-                    }
-                    Err(recovery_error) => {
-                        report_source_object_upload_failed(
-                            client,
-                            deployment_id,
-                            deployment_attempt_id,
-                            &recovered_prepared,
-                            &recovery_error,
-                            json,
-                        )
-                        .await;
-                        return Err(recovery_error);
-                    }
+    let multipart_completion = match upload_source_object(client, &prepared, plan, json).await {
+        Ok(completion) => completion,
+        Err(error) if is_conditional_upload_conflict(&error) => {
+            output::status(
+                json,
+                "~",
+                "Recovering SOURCE_BUNDLE_V1 source upload...",
+                output::Phase::Deploy,
+            );
+            let recovery_body = build_prepare_upload_request(
+                deployment_uuid,
+                workspace_uuid,
+                project_uuid,
+                attempt_uuid,
+                plan,
+                Some(CliPrepareUploadSourceUploadRecovery {
+                    failed_upload_session_id: prepared.upload_session_id,
+                    reason: SOURCE_UPLOAD_RECOVERY_CONDITIONAL_PRECONDITION_FAILED.to_string(),
+                }),
+            )?;
+            let recovered_prepared = match prepare_upload_with_retry(
+                client,
+                deployment_uuid,
+                &recovery_body,
+                json,
+                runtime_artifact_files,
+            )
+            .await
+            {
+                Ok(prepared) => prepared,
+                Err(recovery_error) => {
+                    report_source_object_upload_failed(
+                        client,
+                        deployment_id,
+                        deployment_attempt_id,
+                        &prepared,
+                        &recovery_error,
+                        json,
+                    )
+                    .await;
+                    return Err(recovery_error);
+                }
+            };
+            match upload_source_object(client, &recovered_prepared, plan, json).await {
+                Ok(completion) => {
+                    prepared = recovered_prepared;
+                    completion
+                }
+                Err(recovery_error) => {
+                    report_source_object_upload_failed(
+                        client,
+                        deployment_id,
+                        deployment_attempt_id,
+                        &recovered_prepared,
+                        &recovery_error,
+                        json,
+                    )
+                    .await;
+                    return Err(recovery_error);
                 }
             }
-            Err(error) => {
-                report_source_object_upload_failed(
-                    client,
-                    deployment_id,
-                    deployment_attempt_id,
-                    &prepared,
-                    &error,
-                    json,
-                )
-                .await;
-                return Err(error);
-            }
-        };
+        }
+        Err(error) => {
+            report_source_object_upload_failed(
+                client,
+                deployment_id,
+                deployment_attempt_id,
+                &prepared,
+                &error,
+                json,
+            )
+            .await;
+            return Err(error);
+        }
+    };
     // Completion endpoints are idempotent, but response failures are ambiguous:
     // the server may already have accepted the completion before the CLI hears
     // back. Do not send upload-failed after this point.
@@ -262,19 +283,86 @@ pub(super) struct SourceMultipartCompletion {
 /// `AlreadyReportedError` so `main` does not re-emit a code-less envelope.
 /// Everything else stays a contextual `anyhow` that `main` renders as the
 /// terminal outcome.
-pub(super) fn prepare_upload_terminal_error(error: anyhow::Error, json: bool) -> anyhow::Error {
-    if json
-        && let Some(api_err) = error.downcast_ref::<crate::api::StructuredApiError>()
-        && (api_err.code == "LIMIT_EXCEEDED" || api_err.code == "SUBSCRIPTION_REQUIRED")
-    {
-        return output::report_terminal_error(
-            "deploy",
-            &api_err.message,
-            &api_err.code,
-            api_err.details.as_ref(),
-        );
+pub(super) fn prepare_upload_terminal_error(
+    error: anyhow::Error,
+    json: bool,
+    runtime_artifact_files: &crate::artifact::RuntimeArtifactFileBreakdown,
+) -> anyhow::Error {
+    if let Some(api_error) = error.downcast_ref::<crate::api::StructuredApiError>() {
+        let is_file_limit = api_error.code == "LIMIT_EXCEEDED"
+            && api_error
+                .details
+                .as_ref()
+                .and_then(|details| details.get("limitType"))
+                .and_then(serde_json::Value::as_str)
+                == Some("maxDeploymentFiles");
+        let details = is_file_limit.then(|| {
+            let mut details = api_error
+                .details
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({}));
+            if let Some(object) = details.as_object_mut() {
+                object.insert(
+                    "runtimeArtifactFiles".to_string(),
+                    serde_json::json!(runtime_artifact_files),
+                );
+            }
+            details
+        });
+        let message = if is_file_limit {
+            runtime_artifact_file_limit_message(&api_error.message, runtime_artifact_files)
+        } else {
+            api_error.message.clone()
+        };
+
+        if json && (api_error.code == "LIMIT_EXCEEDED" || api_error.code == "SUBSCRIPTION_REQUIRED")
+        {
+            return output::report_terminal_error(
+                "deploy",
+                &message,
+                &api_error.code,
+                details.as_ref().or(api_error.details.as_ref()),
+            );
+        }
+        if is_file_limit {
+            let mut error =
+                crate::errors::CliError::new(&api_error.code, message).phase(output::Phase::Deploy);
+            if let Some(details) = details {
+                error = error.details(details);
+            }
+            return error.into_anyhow();
+        }
     }
     error.context("failed to prepare upload")
+}
+
+fn runtime_artifact_file_limit_message(
+    message: &str,
+    breakdown: &crate::artifact::RuntimeArtifactFileBreakdown,
+) -> String {
+    let categories = breakdown
+        .categories()
+        .map(|(label, count)| format!("{label} {count}"))
+        .collect::<Vec<_>>();
+
+    let mut guidance = format!(
+        "{message}\n\nRuntime artifact file breakdown: {}; total {}.",
+        categories.join(", "),
+        breakdown.total
+    );
+    if breakdown.includes_installed_dependencies() {
+        guidance.push_str(
+            "\nFor PROCESS/SSR deployments, installed Node.js dependencies are part of the runtime artifact even when Output Directory is build or dist.",
+        );
+        guidance.push_str(
+            "\nReduce the runtime closure by pruning development dependencies after the build (for example, npm prune --omit=dev) or by producing a self-contained server bundle. Use a static adapter only when SSR is not required.",
+        );
+    } else {
+        guidance.push_str(
+            "\nReduce generated deployment files or produce a more compact, self-contained artifact before retrying.",
+        );
+    }
+    guidance
 }
 
 pub(super) async fn prepare_upload_with_retry(
@@ -282,6 +370,7 @@ pub(super) async fn prepare_upload_with_retry(
     deployment_id: Uuid,
     body: &CliPrepareUploadRequest,
     json: bool,
+    runtime_artifact_files: &crate::artifact::RuntimeArtifactFileBreakdown,
 ) -> anyhow::Result<PrepareUploadResponse> {
     let started = Instant::now();
     let mut delay = PREPARE_UPLOAD_INITIAL_RETRY_DELAY;
@@ -299,7 +388,11 @@ pub(super) async fn prepare_upload_with_retry(
             Ok(resp) => return Ok(resp),
             Err(error) => {
                 let Some(retry) = classify_prepare_upload_retry_error(&error) else {
-                    return Err(prepare_upload_terminal_error(error, json));
+                    return Err(prepare_upload_terminal_error(
+                        error,
+                        json,
+                        runtime_artifact_files,
+                    ));
                 };
 
                 let elapsed = started.elapsed();

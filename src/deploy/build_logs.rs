@@ -566,10 +566,10 @@ impl BuildLogSession {
         self.emitter.as_ref()
     }
 
-    pub(super) async fn finish(&mut self, result: &anyhow::Result<()>) {
+    pub(super) async fn finish(&mut self, result: &anyhow::Result<()>, success_message: &str) {
         if let Some(emitter) = &self.emitter {
             match result {
-                Ok(()) => emitter.info(BuildLogPhase::Complete, "Build artifacts uploaded"),
+                Ok(()) => emitter.info(BuildLogPhase::Complete, success_message),
                 Err(error) => emitter.error(BuildLogPhase::Error, &error.to_string()),
             }
             emitter.close();

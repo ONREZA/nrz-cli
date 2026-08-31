@@ -1,7 +1,30 @@
 use super::output::{
-    FRAME_SENTINEL, Phase, cap_message, render_frame, report_terminal_error,
+    FRAME_SENTINEL, Phase, cap_message, info_structured_frame, render_frame, report_terminal_error,
     reported_terminal_diagnostic, terminal_line, terminal_text,
 };
+
+#[test]
+fn structured_info_frame_preserves_machine_readable_details() {
+    let frame = info_structured_frame(
+        "deploy",
+        "Runtime artifact files: total 20679",
+        &serde_json::json!({
+            "runtimeArtifactFiles": {
+                "buildOutput": 1055,
+                "nodeModules": 19620,
+                "metadata": 4,
+                "workspacePackages": 0,
+                "other": 0,
+                "total": 20679
+            }
+        }),
+    );
+
+    assert_eq!(frame["s"], "user");
+    assert_eq!(frame["p"], "deploy");
+    assert_eq!(frame["l"], "info");
+    assert_eq!(frame["details"]["runtimeArtifactFiles"]["total"], 20_679);
+}
 
 #[test]
 fn phase_as_str_all_variants() {

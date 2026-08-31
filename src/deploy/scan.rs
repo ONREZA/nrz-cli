@@ -30,7 +30,7 @@ pub(super) fn scan_runtime_artifact(
     scan: &RuntimeArtifactScan,
 ) -> anyhow::Result<Vec<FileEntry>> {
     match scan {
-        RuntimeArtifactScan::All => scan_dir(root_dir),
+        RuntimeArtifactScan::All | RuntimeArtifactScan::NodeRuntimeRoot => scan_dir(root_dir),
         RuntimeArtifactScan::Selected {
             roots,
             symlink_roots,
@@ -40,7 +40,7 @@ pub(super) fn scan_runtime_artifact(
 
 pub(super) fn scan_selected_runtime_roots(
     root_dir: &Path,
-    roots: &[String],
+    roots: &[crate::artifact::RuntimeArtifactScanRoot],
     symlink_roots: &[String],
 ) -> anyhow::Result<Vec<FileEntry>> {
     let mut files = Vec::new();
@@ -49,7 +49,7 @@ pub(super) fn scan_selected_runtime_roots(
 
     let mut queued_roots = roots
         .iter()
-        .map(|root| normalize_runtime_artifact_path(root))
+        .map(|root| normalize_runtime_artifact_path(&root.path))
         .collect::<anyhow::Result<VecDeque<_>>>()?;
     let mut scheduled_roots = queued_roots.iter().cloned().collect::<HashSet<_>>();
     let mut scanned_roots = HashSet::new();

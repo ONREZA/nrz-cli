@@ -403,7 +403,7 @@ pub(super) fn merge_command_environment(
     merged.into_iter().collect()
 }
 
-fn remove_private_cli_environment(command: &mut std::process::Command) {
+pub(super) fn remove_private_cli_environment(command: &mut std::process::Command) {
     for key in crate::execution_context::private_cli_environment_keys() {
         command.env_remove(key);
     }

@@ -425,6 +425,36 @@ impl BuildSettingSource {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum IgnoredBuildBehavior {
+    Automatic,
+    OnlyProduction,
+    OnlyPreview,
+    OnlyChanges,
+    ChangesInFolder,
+    Never,
+    BashScript,
+    NodeScript,
+    Custom,
+}
+
+impl IgnoredBuildBehavior {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Automatic => "AUTOMATIC",
+            Self::OnlyProduction => "ONLY_PRODUCTION",
+            Self::OnlyPreview => "ONLY_PREVIEW",
+            Self::OnlyChanges => "ONLY_CHANGES",
+            Self::ChangesInFolder => "CHANGES_IN_FOLDER",
+            Self::Never => "NEVER",
+            Self::BashScript => "BASH_SCRIPT",
+            Self::NodeScript => "NODE_SCRIPT",
+            Self::Custom => "CUSTOM",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectBuildSettings {
@@ -436,6 +466,9 @@ pub struct ProjectBuildSettings {
     pub build_command_source: Option<BuildSettingSource>,
     pub output_directory: Option<String>,
     pub output_directory_source: Option<BuildSettingSource>,
+    pub ignored_build_behavior: Option<IgnoredBuildBehavior>,
+    pub ignored_build_folder: Option<String>,
+    pub ignored_build_command: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

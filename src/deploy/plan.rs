@@ -8,7 +8,7 @@ use crate::artifact::source_bundle_v1::{
 };
 use crate::artifact::{
     ArtifactFileCollection, ArtifactRootScope, BuildArtifact, BuildManifestSource, FileEntry,
-    RuntimeArtifact, RuntimeArtifactScan,
+    RuntimeArtifact, RuntimeArtifactFileBreakdown, RuntimeArtifactScan,
 };
 use crate::build;
 use crate::build::manifest as build_manifest;
@@ -52,6 +52,7 @@ pub(super) struct ArtifactPlan {
     pub(super) build: BuildArtifact,
     pub(super) runtime: RuntimeArtifact,
     pub(super) files: ArtifactFileCollection,
+    pub(super) file_breakdown: RuntimeArtifactFileBreakdown,
 }
 
 pub(super) struct DeployPlan {
@@ -127,6 +128,7 @@ impl DeployPlan {
                 scan: self.artifact.runtime.scan.explain(),
                 upload_strategy: "source_bundle_v1",
                 has_compute_layer: self.has_compute_layer,
+                file_breakdown: self.artifact.file_breakdown.clone(),
             },
             source_bundle: SourceBundleExplain {
                 format: SOURCE_BUNDLE_FORMAT,
@@ -232,6 +234,7 @@ struct RuntimeArtifactExplain {
     scan: serde_json::Value,
     upload_strategy: &'static str,
     has_compute_layer: bool,
+    file_breakdown: RuntimeArtifactFileBreakdown,
 }
 
 #[derive(Debug, Serialize)]
@@ -467,6 +470,8 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         &files,
         effective.git_lfs_enabled(),
     )?;
+    let file_breakdown = runtime_artifact.scan.file_breakdown(&files);
+    emit_runtime_artifact_file_breakdown(json, &file_breakdown, request.build_logs);
 
     let functions =
         super::build_functions_payload(effective.config(), project_dir, json, args.force_rules)
@@ -490,6 +495,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             build: build_artifact,
             runtime: runtime_artifact,
             files: artifact_files,
+            file_breakdown,
         },
         compute,
         build_command,
@@ -503,6 +509,41 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         health_check,
         warnings,
     })
+}
+
+fn emit_runtime_artifact_file_breakdown(
+    json: bool,
+    breakdown: &RuntimeArtifactFileBreakdown,
+    build_logs: Option<&super::BuildLogEmitter>,
+) {
+    let categories = breakdown
+        .categories()
+        .map(|(label, count)| format!("{label}: {count}"))
+        .collect::<Vec<_>>();
+    let summary = format!(
+        "Runtime artifact files: {}; total: {}",
+        categories.join(", "),
+        breakdown.total
+    );
+    if json {
+        output::log_info_structured(
+            output::Phase::Deploy.as_str(),
+            &summary,
+            &serde_json::json!({ "runtimeArtifactFiles": breakdown }),
+        );
+    } else {
+        output::status(false, "~", &summary, output::Phase::Deploy);
+    }
+    if let Some(build_logs) = build_logs {
+        build_logs.info(super::BuildLogPhase::Detect, &summary);
+    }
+    if breakdown.includes_installed_dependencies() {
+        const DEPENDENCY_EXPLANATION: &str = "PROCESS runtime includes installed Node.js dependencies because the server entry resolves packages at runtime; Output Directory only selects the build output.";
+        output::status(json, "~", DEPENDENCY_EXPLANATION, output::Phase::Deploy);
+        if let Some(build_logs) = build_logs {
+            build_logs.info(super::BuildLogPhase::Detect, DEPENDENCY_EXPLANATION);
+        }
+    }
 }
 
 pub(super) fn contextualize_missing_build_output(

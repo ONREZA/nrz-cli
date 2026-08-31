@@ -899,6 +899,17 @@ fn prepare_deploy_files_keeps_static_build_output_node_modules_assets() {
 
     assert!(paths.contains(&"index.html"));
     assert!(paths.contains(&"node_modules/pkg/index.js"));
+    assert_eq!(
+        RuntimeArtifactScan::All.file_breakdown(&deployable),
+        crate::artifact::RuntimeArtifactFileBreakdown {
+            build_output: 2,
+            node_modules: 0,
+            metadata: 0,
+            workspace_packages: 0,
+            other: 0,
+            total: 2,
+        }
+    );
     source_bundle_v1::build_source_bundle_plan(output.path(), &manifest, &deployable).unwrap();
 }
 
@@ -1023,6 +1034,43 @@ fn node_process_runtime_artifact_uses_project_root_for_nestjs() {
     assert_eq!(
         nest_runtime.role,
         source_bundle_v1::SourceLogicalManifestFileRole::Compute
+    );
+}
+
+#[test]
+fn process_root_output_keeps_dependency_categories_distinct() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"main":"server.js"}"#).unwrap();
+    fs::write(dir.path().join("server.js"), "require('runtime-pkg')").unwrap();
+    fs::create_dir_all(dir.path().join("node_modules/runtime-pkg")).unwrap();
+    fs::write(
+        dir.path().join("node_modules/runtime-pkg/index.js"),
+        "module.exports = true",
+    )
+    .unwrap();
+
+    let detection = make_detection("express", None);
+    let artifact = resolve_runtime_artifact(
+        dir.path(),
+        dir.path(),
+        dir.path().to_path_buf(),
+        build_manifest::generate_compute_manifest("server.js"),
+        &detection,
+        true,
+    )
+    .unwrap();
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+
+    assert_eq!(
+        artifact.scan.file_breakdown(&scanned),
+        crate::artifact::RuntimeArtifactFileBreakdown {
+            build_output: 1,
+            node_modules: 1,
+            metadata: 1,
+            workspace_packages: 0,
+            other: 0,
+            total: 3,
+        }
     );
 }
 
@@ -1164,6 +1212,18 @@ fn adapter_node_runtimes_include_project_dependencies() {
         );
 
         let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+        assert_eq!(
+            artifact.scan.file_breakdown(&scanned),
+            crate::artifact::RuntimeArtifactFileBreakdown {
+                build_output: 1,
+                node_modules: 1,
+                metadata: 1,
+                workspace_packages: 0,
+                other: 0,
+                total: 3,
+            },
+            "framework: {framework}"
+        );
         let paths = scanned
             .iter()
             .map(|file| file.path.as_str())
@@ -1274,6 +1334,14 @@ fn node_process_runtime_artifact_prefers_workspace_root_for_hoisted_app_symlink(
     );
 
     let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let breakdown = artifact.scan.file_breakdown(&scanned);
+    assert_eq!(breakdown.total, scanned.len());
+    assert!(breakdown.build_output > 0);
+    assert!(breakdown.node_modules > 0);
+    assert!(breakdown.metadata > 0);
+    assert_eq!(breakdown.workspace_packages, 0);
+    let structured = serde_json::to_string(&breakdown).unwrap();
+    assert!(!structured.contains(&workspace.path().display().to_string()));
     let paths = scanned
         .iter()
         .map(|file| file.path.as_str())
@@ -1354,6 +1422,9 @@ fn node_process_runtime_artifact_includes_workspace_hoisted_deps_with_app_node_m
 
     assert_eq!(artifact.root_dir, workspace.path());
     let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let breakdown = artifact.scan.file_breakdown(&scanned);
+    assert_eq!(breakdown.total, scanned.len());
+    assert_eq!(breakdown.workspace_packages, 0);
     let paths = scanned
         .iter()
         .map(|file| file.path.as_str())
@@ -1434,6 +1505,9 @@ fn node_process_runtime_artifact_includes_workspace_package_symlink_targets() {
 
     assert_eq!(artifact.root_dir, workspace.path());
     let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let breakdown = artifact.scan.file_breakdown(&scanned);
+    assert_eq!(breakdown.total, scanned.len());
+    assert!(breakdown.workspace_packages > 0);
     let paths = scanned
         .iter()
         .map(|file| file.path.as_str())
@@ -1605,7 +1679,15 @@ fn node_process_runtime_artifact_falls_back_when_build_output_outside_project() 
     // Build output lives outside the project, so relocation can't apply: the
     // deploy degrades to scanning the build output as-is instead of erroring.
     assert_eq!(artifact.root_dir, external_output.path());
-    assert!(matches!(artifact.scan, RuntimeArtifactScan::All));
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    assert_eq!(
+        scanned
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["src/main.js"]
+    );
+    assert_eq!(artifact.scan.file_breakdown(&scanned).build_output, 1);
     let compute_layer = artifact
         .manifest
         .layers
@@ -2400,11 +2482,27 @@ fn limit_exceeded_api_error() -> anyhow::Error {
     crate::api::StructuredApiError {
         status: reqwest::StatusCode::FORBIDDEN,
         code: "LIMIT_EXCEEDED".into(),
-        message: "Deployment exceeds maximum file count (15503 / 5000).".into(),
+        message: "Deployment exceeds maximum file count (20679 / 20000).".into(),
         retry_after_seconds: None,
-        details: Some(serde_json::json!({"limitType": "maxDeploymentFiles", "limit": 5000})),
+        details: Some(serde_json::json!({
+            "limitType": "maxDeploymentFiles",
+            "current": 20679,
+            "limit": 20000,
+            "plan": "HOBBY"
+        })),
     }
     .into()
+}
+
+fn file_breakdown() -> crate::artifact::RuntimeArtifactFileBreakdown {
+    crate::artifact::RuntimeArtifactFileBreakdown {
+        build_output: 1_055,
+        node_modules: 19_620,
+        metadata: 4,
+        workspace_packages: 0,
+        other: 0,
+        total: 20_679,
+    }
 }
 
 #[test]
@@ -2412,25 +2510,45 @@ fn prepare_upload_limit_error_in_json_mode_is_reported_on_both_channels() {
     // JSON mode: report_terminal_error emits the stderr frame (Builder) + stdout
     // envelope with code (CLI/automation) and returns AlreadyReportedError so
     // main does not re-emit a code-less envelope.
-    let mapped = prepare_upload_terminal_error(limit_exceeded_api_error(), true);
+    let mapped = prepare_upload_terminal_error(limit_exceeded_api_error(), true, &file_breakdown());
     assert!(
         mapped
             .downcast_ref::<crate::output::AlreadyReportedError>()
             .is_some(),
         "limit error in JSON mode must be fully reported (AlreadyReportedError), got: {mapped:#}"
     );
+    let diagnostic = output::reported_terminal_diagnostic(&mapped).unwrap();
+    assert_eq!(
+        diagnostic.details.as_ref().unwrap()["runtimeArtifactFiles"]["total"],
+        20_679
+    );
+    assert_eq!(
+        diagnostic.details.as_ref().unwrap()["runtimeArtifactFiles"]["nodeModules"],
+        19_620
+    );
 }
 
 #[test]
 fn prepare_upload_limit_error_in_human_mode_stays_contextual() {
     // Human mode: no machine envelope — a contextual error main prints as "Error:".
-    let mapped = prepare_upload_terminal_error(limit_exceeded_api_error(), false);
+    let mapped =
+        prepare_upload_terminal_error(limit_exceeded_api_error(), false, &file_breakdown());
     assert!(
         mapped
             .downcast_ref::<crate::output::AlreadyReportedError>()
             .is_none()
     );
-    assert!(mapped.to_string().contains("failed to prepare upload"));
+    assert!(
+        mapped
+            .to_string()
+            .contains("Runtime artifact file breakdown")
+    );
+    assert!(mapped.to_string().contains("node_modules 19620"));
+    assert!(
+        mapped
+            .to_string()
+            .contains("static adapter only when SSR is not required")
+    );
 }
 
 #[test]
@@ -2445,7 +2563,7 @@ fn prepare_upload_platform_error_in_json_mode_is_not_swallowed() {
         details: None,
     }
     .into();
-    let mapped = prepare_upload_terminal_error(error, true);
+    let mapped = prepare_upload_terminal_error(error, true, &file_breakdown());
     assert!(
         mapped
             .downcast_ref::<crate::output::AlreadyReportedError>()
@@ -3587,6 +3705,7 @@ fn deploy_output_serializes_public_json_as_camel_case() {
         status: "live".to_string(),
         target: deploy_target_output(Some(false)),
         preview_protected: true,
+        runtime_artifact_files: file_breakdown(),
         warnings: vec![],
         health_check: Some(HealthCheckInfo::Http {
             path: "/health".to_string(),
@@ -3607,11 +3726,29 @@ fn deploy_output_serializes_public_json_as_camel_case() {
     assert_eq!(value["deploymentId"], "dep_123");
     assert_eq!(value["target"]["environment"], "preview");
     assert_eq!(value["previewProtected"], true);
+    assert_eq!(value["runtimeArtifactFiles"]["total"], 20_679);
     assert_eq!(value["healthCheck"]["path"], "/health");
     assert_eq!(value["verification"]["usedPreviewBypass"], true);
     assert_eq!(value["verification"]["previewAccessRevoked"], true);
     assert!(value.get("deployment_id").is_none());
     assert!(value.get("health_check").is_none());
+}
+
+#[test]
+fn skipped_deploy_output_is_machine_readable() {
+    let value = serde_json::to_value(SkippedDeployOutput {
+        deployment_id: "dep_123",
+        status: "skipped",
+    })
+    .unwrap();
+
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "deploymentId": "dep_123",
+            "status": "skipped",
+        })
+    );
 }
 
 // ── is_nextjs_project ───────────────────────────────────────
@@ -4397,6 +4534,10 @@ fn wire_functions_contract_accepts_generated_edge_rule_contributions() {
 
 #[test]
 fn pre_source_mutations_use_the_stable_execution_contract() {
+    assert_eq!(
+        crate::execution_context::RUNNER_CONTEXT_PROTOCOL,
+        "runner-context-v2"
+    );
     let body = PreSourceFailureBody {
         protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
         attempt: 2,
