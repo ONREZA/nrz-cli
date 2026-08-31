@@ -8,14 +8,122 @@ mod support;
 use axum::{
     Json, Router,
     body::Bytes,
-    http::StatusCode,
+    extract::{OriginalUri, State},
+    http::{Method, StatusCode},
     response::IntoResponse,
     routing::{delete, get, post},
 };
 use predicates::str::contains;
 use serde_json::json;
 use std::fs;
+use std::sync::{Arc, Mutex};
 use support::cli::{nrz, stdout_json};
+
+#[derive(Clone)]
+struct EdgeBuildApiState {
+    deployment_id: String,
+    requests: Arc<Mutex<Vec<String>>>,
+}
+
+impl EdgeBuildApiState {
+    fn record(&self, method: Method, uri: &OriginalUri) {
+        self.requests
+            .lock()
+            .expect("request log")
+            .push(format!("{method} {}", uri.0.path()));
+    }
+}
+
+async fn edge_build_runner_context(
+    State(state): State<EdgeBuildApiState>,
+    uri: OriginalUri,
+) -> Json<serde_json::Value> {
+    state.record(Method::GET, &uri);
+    Json(json!({
+        "protocolVersion": "execution-context-v1",
+        "context": {
+            "workspaceId": "workspace-edge",
+            "workspaceSlug": "edge",
+            "projectId": "project-edge",
+            "projectName": "Edge project",
+            "environmentId": "environment-edge",
+            "environmentName": "Preview",
+            "environmentType": "PREVIEW",
+            "sourceRef": "0123456789abcdef0123456789abcdef01234567",
+            "selectionSource": "DEPLOYMENT"
+        },
+        "deployment": {
+            "id": state.deployment_id,
+            "attempt": 1,
+            "status": "BUILDING",
+            "url": null
+        },
+        "settings": {}
+    }))
+}
+
+async fn edge_build_materialize(
+    State(state): State<EdgeBuildApiState>,
+    uri: OriginalUri,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    state.record(Method::POST, &uri);
+    assert_eq!(body, json!({ "purpose": "DEPLOY" }));
+    Json(json!({
+        "protocolVersion": "execution-context-v1",
+        "context": {
+            "workspaceId": "workspace-edge",
+            "workspaceSlug": "edge",
+            "projectId": "project-edge",
+            "projectName": "Edge project",
+            "environmentId": "environment-edge",
+            "environmentName": "Preview",
+            "environmentType": "PREVIEW",
+            "sourceRef": "0123456789abcdef0123456789abcdef01234567",
+            "selectionSource": "DEPLOYMENT"
+        },
+        "variables": {},
+        "secretKeys": [],
+        "snapshot": {
+            "fingerprint": format!("v1:{}", "0".repeat(64)),
+            "resolvedAt": "2026-08-29T00:00:00Z",
+            "source": "DEPLOYMENT",
+            "deploymentId": state.deployment_id
+        }
+    }))
+}
+
+async fn reject_unexpected_edge_build_request(
+    State(state): State<EdgeBuildApiState>,
+    method: Method,
+    uri: OriginalUri,
+) -> impl IntoResponse {
+    state.record(method, &uri);
+    (
+        StatusCode::IM_A_TEAPOT,
+        Json(json!({ "error": "unexpected Edge build request" })),
+    )
+}
+
+fn spawn_edge_build_handoff_mock(deployment_id: &str) -> (String, Arc<Mutex<Vec<String>>>) {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let state = EdgeBuildApiState {
+        deployment_id: deployment_id.to_string(),
+        requests: Arc::clone(&requests),
+    };
+    let app = Router::new()
+        .route(
+            "/v1/deployments/{deployment_id}/runner-context",
+            get(edge_build_runner_context),
+        )
+        .route(
+            "/v1/deployments/{deployment_id}/execution-context/materialize",
+            post(edge_build_materialize),
+        )
+        .fallback(reject_unexpected_edge_build_request)
+        .with_state(state);
+    (support::api_mock::spawn(app), requests)
+}
 
 fn spawn_project_settings_mock() -> String {
     let app = Router::new().route(
@@ -165,6 +273,59 @@ fn help_returns_exit_0() {
     let mut cmd = nrz();
     cmd.arg("--help");
     cmd.assert().success();
+}
+
+#[test]
+fn edge_build_publishes_local_handoff_without_legacy_source_mutations() {
+    let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
+    let (api_url, requests) = spawn_edge_build_handoff_mock(deployment_id);
+    let project = tempfile::tempdir().unwrap();
+    let output_dir = tempfile::tempdir().unwrap();
+    fs::write(project.path().join("index.html"), "<h1>Edge build</h1>").unwrap();
+
+    let output = nrz()
+        .current_dir(project.path())
+        .env("NRZ_API_URL", api_url)
+        .env("NRZ_RUNNER", "PLATFORM")
+        .env("NRZ_EDGE_BUILD_HANDOFF", "V1")
+        .env("ONREZA_OUTPUT_DIR", output_dir.path())
+        .args([
+            "--token",
+            "runner-token",
+            "deploy",
+            "--resume-deployment",
+            deployment_id,
+            "--skip-build",
+            "--skip-install",
+            "--skip-env-check",
+            "--no-log-upload",
+            "--compute",
+            "static",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let handoff: nrz_source_bundle::EdgeBuildHandoffV1 =
+        serde_json::from_slice(&output.stdout).unwrap();
+    handoff.validate().unwrap();
+    assert_eq!(
+        fs::read(output_dir.path().join("edge-build-handoff-v1.json")).unwrap(),
+        output.stdout
+    );
+    assert!(output_dir.path().join("source-bundle-v1.tar.zst").is_file());
+    assert_eq!(
+        requests.lock().unwrap().as_slice(),
+        [
+            format!("GET /v1/deployments/{deployment_id}/runner-context"),
+            format!("POST /v1/deployments/{deployment_id}/execution-context/materialize"),
+        ]
+    );
 }
 
 #[test]
@@ -1313,9 +1474,12 @@ fn broken_onreza_toml_emits_invalid_config_code() {
 fn dev_json_reserves_stdout_for_one_terminal_object() {
     let temp = tempfile::tempdir().unwrap();
     let command = "printf 'child stdout\\n'; printf 'child stderr\\n' >&2";
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
+    let emulator_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let emulator_port = emulator_listener.local_addr().unwrap().port();
+    let port = emulator_port
+        .checked_sub(1)
+        .expect("ephemeral emulator port must have a preceding dev port");
+    drop(emulator_listener);
 
     let output = nrz()
         .current_dir(&temp)

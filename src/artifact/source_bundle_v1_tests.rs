@@ -556,7 +556,7 @@ fn source_bundle_archive_is_owner_only() {
     let files = scan_dir(dir.path()).unwrap();
 
     let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
-    let mode = fs::metadata(plan.source_path_for_test())
+    let mode = fs::metadata(plan.source_path())
         .unwrap()
         .permissions()
         .mode()

@@ -12,6 +12,9 @@ mod bundle_tests;
 mod command;
 #[cfg(test)]
 mod deploy_tests;
+mod edge_handoff;
+#[cfg(test)]
+mod edge_handoff_tests;
 pub(crate) mod hash;
 pub(crate) mod health_check;
 #[cfg(test)]
@@ -601,6 +604,10 @@ pub async fn run(
             })
         })
         .transpose()?;
+    let edge_build_handoff =
+        edge_handoff::EdgeBuildHandoffOutput::from_process_environment(resume_deployment_id)?;
+    let server_failure_mutations_enabled = edge_build_handoff.is_none();
+    let pre_source_failure_client = server_failure_mutations_enabled.then_some(&client);
 
     let runner_context = if let Some(deployment_id) = resume_deployment_id {
         let context: RunnerContextResponse = client
@@ -729,7 +736,7 @@ pub async fn run(
             Ok(materialized) => materialized,
             Err(error) => {
                 report_pre_source_failure(
-                    &client,
+                    pre_source_failure_client,
                     &runner.deployment.id,
                     runner.deployment.attempt,
                     PreSourceFailureCode::MaterializationFailed,
@@ -810,7 +817,7 @@ pub async fn run(
             Ok(materialized) => materialized,
             Err(error) => {
                 report_pre_source_failure(
-                    &client,
+                    pre_source_failure_client,
                     &admitted.deployment.id,
                     admitted.deployment.attempt,
                     PreSourceFailureCode::MaterializationFailed,
@@ -832,7 +839,7 @@ pub async fn run(
             deployment.status
         );
         report_pre_source_failure(
-            &client,
+            pre_source_failure_client,
             &deployment.id,
             deployment.attempt,
             PreSourceFailureCode::ConfigInvalid,
@@ -848,7 +855,7 @@ pub async fn run(
             "ENV_SNAPSHOT_SCOPE_MISMATCH: deployment context changed during admission"
         );
         report_pre_source_failure(
-            &client,
+            pre_source_failure_client,
             &deployment.id,
             deployment.attempt,
             PreSourceFailureCode::ConfigInvalid,
@@ -867,7 +874,7 @@ pub async fn run(
         )
     {
         report_pre_source_failure(
-            &client,
+            pre_source_failure_client,
             &deployment.id,
             deployment.attempt,
             PreSourceFailureCode::ConfigInvalid,
@@ -882,7 +889,7 @@ pub async fn run(
         crate::execution_context::warn_local_dotenv_drift(&command_context.project_dir, json)
     {
         report_pre_source_failure(
-            &client,
+            pre_source_failure_client,
             &deployment.id,
             deployment.attempt,
             PreSourceFailureCode::ConfigInvalid,
@@ -905,7 +912,7 @@ pub async fn run(
             Err(error) => {
                 let error = error.context("failed to initialize deployment output redaction");
                 report_pre_source_failure(
-                    &client,
+                    pre_source_failure_client,
                     &deployment.id,
                     deployment.attempt,
                     PreSourceFailureCode::BuildFailed,
@@ -951,6 +958,19 @@ pub async fn run(
             emitter.info(BuildLogPhase::Detect, "Build output validated");
         }
         let upload_plan = deploy_plan.materialize_source_bundle(json)?;
+        if let Some(publisher) = &edge_build_handoff {
+            let handoff = publisher.publish(&upload_plan)?;
+            if json {
+                output::json_output(&handoff);
+            } else {
+                output::success(
+                    false,
+                    "Edge build handoff published for trusted Agent verification",
+                    output::Phase::Deploy,
+                );
+            }
+            return Ok(());
+        }
         register_deployment_source(
             &client,
             &admitted_deployment_id,
@@ -1143,7 +1163,7 @@ pub async fn run(
         && !source_registered
     {
         report_pre_source_failure(
-            &client,
+            pre_source_failure_client,
             &admitted_deployment_id,
             deployment.attempt,
             PreSourceFailureCode::BuildFailed,
@@ -1154,13 +1174,18 @@ pub async fn run(
         .await;
     }
     if let Some(session) = build_log_session.as_mut() {
-        session.finish(&deploy_result).await;
+        let success = if edge_build_handoff.is_some() {
+            BuildLogSuccess::EdgeHandoffPublished
+        } else {
+            BuildLogSuccess::ArtifactsUploaded
+        };
+        session.finish(&deploy_result, success).await;
     }
     deploy_result
 }
 
 async fn report_pre_source_failure(
-    client: &ApiClient,
+    client: Option<&ApiClient>,
     deployment_id: &str,
     attempt: u32,
     error_code: PreSourceFailureCode,
@@ -1168,6 +1193,9 @@ async fn report_pre_source_failure(
     redactor: Option<&ExactValueRedactor>,
     json: bool,
 ) {
+    let Some(client) = client else {
+        return;
+    };
     let path = format!(
         "/v1/deployments/{}/execution-context/fail-before-source",
         path_segment(deployment_id)
