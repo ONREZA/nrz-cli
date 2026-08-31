@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.37.4] - 2026-08-31
+
+### 🐛 Bug Fixes
+
+- **deploy:** restore build pipeline contracts ([f88c7ce](https://github.com/ONREZA/nrz-cli/commit/f88c7ce5446e610d72884a95691599e38abd0fe0))
+
 ## [0.37.3] - 2026-08-30
 
 ### 🐛 Bug Fixes
