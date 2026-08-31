@@ -24,6 +24,8 @@ mod runtime_artifact;
 mod scan;
 mod source_upload;
 mod verify;
+#[cfg(test)]
+mod verify_tests;
 
 use build_logs::*;
 use command::*;
@@ -1094,7 +1096,6 @@ pub async fn run(
                                 api_client: &client,
                                 project_id: &project_id,
                                 url,
-                                preview_protected,
                                 health_check: deploy_health_check.as_ref(),
                                 json,
                             })

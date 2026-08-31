@@ -6392,7 +6392,7 @@ pub mod cli_api {
     ///                {
     ///                  "type": "string",
     ///                  "format": "date-time",
-    ///                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    ///                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
     ///                },
     ///                {
     ///                  "type": "null"
@@ -6537,17 +6537,20 @@ pub mod cli_api {
     ///          "type": "array",
     ///          "items": {
     ///            "type": "array",
-    ///            "prefixItems": [
+    ///            "items": [
     ///              {
+    ///                "type": "string",
     ///                "maxLength": 128,
-    ///                "minLength": 1,
-    ///                "type": "string"
+    ///                "minLength": 1
     ///              },
     ///              {
-    ///                "maxLength": 8192,
-    ///                "type": "string"
+    ///                "type": "string",
+    ///                "maxLength": 8192
     ///              }
-    ///            ]
+    ///            ],
+    ///            "additionalItems": false,
+    ///            "maxItems": 2,
+    ///            "minItems": 2
     ///          },
     ///          "maxItems": 64
     ///        },
@@ -6624,17 +6627,20 @@ pub mod cli_api {
     ///                  "type": "array",
     ///                  "items": {
     ///                    "type": "array",
-    ///                    "prefixItems": [
+    ///                    "items": [
     ///                      {
+    ///                        "type": "string",
     ///                        "maxLength": 128,
-    ///                        "minLength": 1,
-    ///                        "type": "string"
+    ///                        "minLength": 1
     ///                      },
     ///                      {
-    ///                        "maxLength": 8192,
-    ///                        "type": "string"
+    ///                        "type": "string",
+    ///                        "maxLength": 8192
     ///                      }
-    ///                    ]
+    ///                    ],
+    ///                    "additionalItems": false,
+    ///                    "maxItems": 2,
+    ///                    "minItems": 2
     ///                  }
     ///                },
     ///                "status": {
@@ -7018,7 +7024,7 @@ pub mod cli_api {
     ///        "expiresAt": {
     ///          "type": "string",
     ///          "format": "date-time",
-    ///          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    ///          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
     ///        },
     ///        "fastPath": {
     ///          "type": "boolean"
@@ -7329,7 +7335,7 @@ pub mod cli_api {
     ///            "expiredAt": {
     ///              "type": "string",
     ///              "format": "date-time",
-    ///              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    ///              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
     ///            },
     ///            "kind": {
     ///              "type": "string",
@@ -7604,7 +7610,7 @@ pub mod cli_api {
     ///            {
     ///              "type": "string",
     ///              "format": "date-time",
-    ///              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    ///              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
     ///            },
     ///            {
     ///              "type": "null"
@@ -7723,7 +7729,7 @@ pub mod cli_api {
     ///        {
     ///          "type": "string",
     ///          "format": "date-time",
-    ///          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    ///          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
     ///        },
     ///        {
     ///          "type": "null"
@@ -8239,17 +8245,20 @@ pub mod cli_api {
     ///      "type": "array",
     ///      "items": {
     ///        "type": "array",
-    ///        "prefixItems": [
+    ///        "items": [
     ///          {
+    ///            "type": "string",
     ///            "maxLength": 128,
-    ///            "minLength": 1,
-    ///            "type": "string"
+    ///            "minLength": 1
     ///          },
     ///          {
-    ///            "maxLength": 8192,
-    ///            "type": "string"
+    ///            "type": "string",
+    ///            "maxLength": 8192
     ///          }
-    ///        ]
+    ///        ],
+    ///        "additionalItems": false,
+    ///        "maxItems": 2,
+    ///        "minItems": 2
     ///      },
     ///      "maxItems": 64
     ///    },
@@ -8301,7 +8310,10 @@ pub mod cli_api {
         pub debug: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub event: ::std::option::Option<OnrezaCliApiV1FunctionTestInvokeRequestEvent>,
-        pub headers: ::std::vec::Vec<::std::vec::Vec<::serde_json::Value>>,
+        pub headers: ::std::vec::Vec<(
+            OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem0,
+            OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem1,
+        )>,
         pub host: OnrezaCliApiV1FunctionTestInvokeRequestHost,
         pub method: OnrezaCliApiV1FunctionTestInvokeRequestMethod,
         pub path: OnrezaCliApiV1FunctionTestInvokeRequestPath,
@@ -8377,6 +8389,158 @@ pub mod cli_api {
         Queue(::serde_json::Value),
         #[serde(rename = "scheduled")]
         Scheduled(::serde_json::Value),
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem0`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 128,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem0(::std::string::String);
+    impl ::std::ops::Deref for OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem0 {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem0>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem0) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem0 {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 128usize {
+                return Err("longer than 128 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem0 {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem0
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem0
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem0 {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem1`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 8192
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem1(::std::string::String);
+    impl ::std::ops::Deref for OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem1 {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem1>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem1) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem1 {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 8192usize {
+                return Err("longer than 8192 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem1 {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem1
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem1
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for OnrezaCliApiV1FunctionTestInvokeRequestHeadersItemItem1 {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
     }
     ///`OnrezaCliApiV1FunctionTestInvokeRequestHost`
     ///
@@ -8769,17 +8933,20 @@ pub mod cli_api {
     ///              "type": "array",
     ///              "items": {
     ///                "type": "array",
-    ///                "prefixItems": [
+    ///                "items": [
     ///                  {
+    ///                    "type": "string",
     ///                    "maxLength": 128,
-    ///                    "minLength": 1,
-    ///                    "type": "string"
+    ///                    "minLength": 1
     ///                  },
     ///                  {
-    ///                    "maxLength": 8192,
-    ///                    "type": "string"
+    ///                    "type": "string",
+    ///                    "maxLength": 8192
     ///                  }
-    ///                ]
+    ///                ],
+    ///                "additionalItems": false,
+    ///                "maxItems": 2,
+    ///                "minItems": 2
     ///              }
     ///            },
     ///            "status": {
@@ -8888,17 +9055,20 @@ pub mod cli_api {
     ///          "type": "array",
     ///          "items": {
     ///            "type": "array",
-    ///            "prefixItems": [
+    ///            "items": [
     ///              {
+    ///                "type": "string",
     ///                "maxLength": 128,
-    ///                "minLength": 1,
-    ///                "type": "string"
+    ///                "minLength": 1
     ///              },
     ///              {
-    ///                "maxLength": 8192,
-    ///                "type": "string"
+    ///                "type": "string",
+    ///                "maxLength": 8192
     ///              }
-    ///            ]
+    ///            ],
+    ///            "additionalItems": false,
+    ///            "maxItems": 2,
+    ///            "minItems": 2
     ///          }
     ///        },
     ///        "status": {
@@ -9052,17 +9222,20 @@ pub mod cli_api {
     ///      "type": "array",
     ///      "items": {
     ///        "type": "array",
-    ///        "prefixItems": [
+    ///        "items": [
     ///          {
+    ///            "type": "string",
     ///            "maxLength": 128,
-    ///            "minLength": 1,
-    ///            "type": "string"
+    ///            "minLength": 1
     ///          },
     ///          {
-    ///            "maxLength": 8192,
-    ///            "type": "string"
+    ///            "type": "string",
+    ///            "maxLength": 8192
     ///          }
-    ///        ]
+    ///        ],
+    ///        "additionalItems": false,
+    ///        "maxItems": 2,
+    ///        "minItems": 2
     ///      }
     ///    },
     ///    "status": {
@@ -9090,11 +9263,194 @@ pub mod cli_api {
         )]
         pub body_preview: ::std::option::Option<::std::string::String>,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
-        pub headers: ::std::vec::Vec<::std::vec::Vec<::serde_json::Value>>,
+        pub headers: ::std::vec::Vec<(
+            OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem0,
+            OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem1,
+        )>,
         #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
         pub status: ::std::option::Option<i64>,
         #[serde(flatten)]
         pub extra: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem0`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 128,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem0(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem0
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem0,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem0,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem0
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 128usize {
+                return Err("longer than 128 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem0
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem0
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem0
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem0
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem1`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 8192
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem1(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem1
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem1,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem1,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem1
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 8192usize {
+                return Err("longer than 8192 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem1
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem1
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem1
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaCliApiV1FunctionTestInvokeResponseInvocationResponseHeadersItemItem1
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
     }
     ///`OnrezaCliApiV1FunctionTestInvokeResponseInvocationTimings`
     ///
@@ -10944,7 +11300,7 @@ pub mod cli_api {
     ///    "expiresAt": {
     ///      "type": "string",
     ///      "format": "date-time",
-    ///      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    ///      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
     ///    },
     ///    "fastPath": {
     ///      "type": "boolean"
@@ -12522,7 +12878,7 @@ pub mod cli_api {
     ///        "expiredAt": {
     ///          "type": "string",
     ///          "format": "date-time",
-    ///          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+    ///          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
     ///        },
     ///        "kind": {
     ///          "type": "string",

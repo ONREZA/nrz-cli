@@ -1370,7 +1370,7 @@ fn functions_runtime_status_json_emits_single_object_without_downloading() {
     let value: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
     assert_eq!(
         value["runtimeReleaseId"],
-        "runtime-49b71f869c9cf9c3f8e83a1306f57e0425cdc267"
+        "runtime-2d20a492936c63b6dd1dd6b23f0e950af7e071e3"
     );
     assert_eq!(value["installed"], false);
     assert!(

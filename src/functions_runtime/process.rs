@@ -11,9 +11,8 @@ use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
-use super::CachedRuntime;
+use super::{CachedRuntime, RUNTIME_PROTOCOL_VERSION};
 
-const PROTOCOL_VERSION: &str = "onreza-functions-poc/v1";
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CONTROL_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_RUNTIME_STDERR_BYTES: usize = 64 * 1024;
@@ -95,7 +94,7 @@ impl RuntimeProcess {
             }
         };
         if ready.kind != "ready"
-            || ready.protocol_version.as_deref() != Some(PROTOCOL_VERSION)
+            || ready.protocol_version.as_deref() != Some(RUNTIME_PROTOCOL_VERSION)
             || ready.runtime_release_id.as_deref() != Some(&runtime.runtime_release_id)
         {
             bail!("ONREZA Functions runtime returned an incompatible ready message");

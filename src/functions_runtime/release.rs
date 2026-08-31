@@ -13,13 +13,14 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use url::Url;
 use uuid::Uuid;
 
-const PROTOCOL_VERSION: &str = "onreza-functions-poc/v1";
+use super::RUNTIME_PROTOCOL_VERSION;
+
 const RELEASE_ORIGIN: &str = "https://releases.onreza.ru";
-const PINNED_RUNTIME_RELEASE_ID: &str = "runtime-49b71f869c9cf9c3f8e83a1306f57e0425cdc267";
-const PINNED_MANIFEST_URL: &str = "https://releases.onreza.ru/releases/runtime-49b71f869c9cf9c3f8e83a1306f57e0425cdc267/manifest.json";
+const PINNED_RUNTIME_RELEASE_ID: &str = "runtime-2d20a492936c63b6dd1dd6b23f0e950af7e071e3";
+const PINNED_MANIFEST_URL: &str = "https://releases.onreza.ru/releases/runtime-2d20a492936c63b6dd1dd6b23f0e950af7e071e3/manifest.json";
 const PINNED_MANIFEST_SHA256: &str =
-    "730b51b9fe1fe3409440ee67c491355c5d73b6db1843ae28af97f26d123ecca5";
-const PINNED_SIGNATURE_URL: &str = "https://releases.onreza.ru/releases/runtime-49b71f869c9cf9c3f8e83a1306f57e0425cdc267/manifest.sig";
+    "01ec22c0eb82575f3a9a57f9c9bfbc8d156cfbb3499a3fc796a0c023fd17a7fd";
+const PINNED_SIGNATURE_URL: &str = "https://releases.onreza.ru/releases/runtime-2d20a492936c63b6dd1dd6b23f0e950af7e071e3/manifest.sig";
 const SIGNING_PUBLIC_KEY_PEM: &str =
     include_str!("../../assets/functions-runtime-signing-public.pem");
 
@@ -370,7 +371,7 @@ fn validate_manifest<'a>(
 ) -> anyhow::Result<&'a RuntimeArtifact> {
     if manifest.schema_version != 1
         || manifest.runtime_release_id != expected_release_id
-        || manifest.protocol_version != PROTOCOL_VERSION
+        || manifest.protocol_version != RUNTIME_PROTOCOL_VERSION
         || format!("runtime-{}", manifest.source.revision) != expected_release_id
     {
         bail!("signed Functions runtime manifest does not match the CLI runtime contract");
