@@ -1474,9 +1474,12 @@ fn broken_onreza_toml_emits_invalid_config_code() {
 fn dev_json_reserves_stdout_for_one_terminal_object() {
     let temp = tempfile::tempdir().unwrap();
     let command = "printf 'child stdout\\n'; printf 'child stderr\\n' >&2";
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
+    let emulator_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let emulator_port = emulator_listener.local_addr().unwrap().port();
+    let port = emulator_port
+        .checked_sub(1)
+        .expect("ephemeral emulator port must have a preceding dev port");
+    drop(emulator_listener);
 
     let output = nrz()
         .current_dir(&temp)
