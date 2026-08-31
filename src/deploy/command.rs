@@ -45,7 +45,7 @@ pub(super) fn is_recursive_deploy_command(command: &str) -> bool {
     })
 }
 
-fn is_shell_assignment(token: &str) -> bool {
+pub(super) fn is_shell_assignment(token: &str) -> bool {
     let Some((name, _)) = token.split_once('=') else {
         return false;
     };
@@ -56,7 +56,7 @@ fn is_shell_assignment(token: &str) -> bool {
         && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
-fn command_token_basename(token: &str) -> String {
+pub(super) fn command_token_basename(token: &str) -> String {
     token
         .trim_matches(['\'', '"'])
         .rsplit(['/', '\\'])
@@ -385,6 +385,13 @@ pub(super) fn run_install_step(
         &install_env,
         build_logs,
     )?;
+    super::dependency_scripts::run_bun_dependency_scripts_if_needed(
+        &cmd,
+        project_dir,
+        json,
+        &install_env,
+        build_logs,
+    )?;
     output::success(json, "Dependencies installed", output::Phase::Deploy);
     if let Some(build_logs) = build_logs {
         build_logs.info(BuildLogPhase::Install, "Dependencies installed");
@@ -403,7 +410,7 @@ pub(super) fn merge_command_environment(
     merged.into_iter().collect()
 }
 
-fn remove_private_cli_environment(command: &mut std::process::Command) {
+pub(super) fn remove_private_cli_environment(command: &mut std::process::Command) {
     for key in crate::execution_context::private_cli_environment_keys() {
         command.env_remove(key);
     }

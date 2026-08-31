@@ -10,6 +10,9 @@ pub(crate) mod bundle;
 #[cfg(test)]
 mod bundle_tests;
 mod command;
+mod dependency_scripts;
+#[cfg(test)]
+mod dependency_scripts_tests;
 #[cfg(test)]
 mod deploy_tests;
 mod edge_handoff;
