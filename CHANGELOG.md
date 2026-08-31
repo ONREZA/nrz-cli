@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.38.0-beta.2] - 2026-08-31
+
+### ✅ Testing
+
+- **cli:** reserve emulator port ([048dcc2](https://github.com/ONREZA/nrz-cli/commit/048dcc2f68f82f7223754b810fc1763c37791ea8))
+
+### 🔧 Changed
+
+- **deps:** merge current main ([1ba0979](https://github.com/ONREZA/nrz-cli/commit/1ba0979af6ae0f8ca0a5742e91ab30787ec3e035))
+- **deps:** sync platform contracts ([450b4a1](https://github.com/ONREZA/nrz-cli/commit/450b4a1513901678f09cc04d7c0e6c7adb096d1b))
+
+### ✨ Features
+
+- **build:** add runtime artifact contract ([56394ac](https://github.com/ONREZA/nrz-cli/commit/56394acd12f84eeb4a7f6ecc846b266e0072f264))
+
 ## [0.38.0-beta.1] - 2026-08-29
 
 ### 🐛 Bug Fixes
