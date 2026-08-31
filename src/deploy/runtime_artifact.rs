@@ -3,16 +3,6 @@ use super::*;
 const MANIFEST_RUNTIME_MEMORY_MB_MIN: i64 = 32;
 const MANIFEST_RUNTIME_MEMORY_MB_MAX: i64 = 8192;
 
-pub(super) const NODE_RUNTIME_METADATA_FILES: &[&str] = &[
-    "package.json",
-    "package-lock.json",
-    "npm-shrinkwrap.json",
-    "pnpm-lock.yaml",
-    "yarn.lock",
-    "bun.lock",
-    "bun.lockb",
-];
-
 pub(super) struct NodeProjectRuntimePlan {
     runtime_root: PathBuf,
     build_output_prefix: String,
@@ -34,10 +24,17 @@ pub(super) fn resolve_runtime_artifact(
         &manifest,
         detection,
     ) else {
+        let scan = if detection.metadata.runtime.runtime_type == RuntimeType::Node
+            && manifest_has_compute_layer(&manifest)
+        {
+            RuntimeArtifactScan::NodeRuntimeRoot
+        } else {
+            RuntimeArtifactScan::All
+        };
         return Ok(RuntimeArtifact {
             root_dir: build_output_dir,
             manifest,
-            scan: RuntimeArtifactScan::All,
+            scan,
         });
     };
 
@@ -52,12 +49,16 @@ pub(super) fn resolve_runtime_artifact(
     );
     let symlink_roots = workspace_package_runtime_roots(&plan.runtime_root);
 
+    let runtime_root_label = if plan.runtime_root == workspace_root_dir {
+        "workspace root"
+    } else {
+        "project root"
+    };
     output::status(
         json,
         "~",
         format!(
-            "Runtime artifact: Node runtime root {} (entry and dependencies share one runtime root)",
-            plan.runtime_root.display()
+            "Runtime artifact: Node {runtime_root_label} (entry and dependencies share one runtime root)"
         ),
         output::Phase::Deploy,
     );
@@ -260,15 +261,30 @@ pub(super) fn node_project_runtime_scan_roots(
     runtime_root: &Path,
     project_prefix: &str,
     build_output_prefix: &str,
-) -> Vec<String> {
+) -> Vec<crate::artifact::RuntimeArtifactScanRoot> {
     let mut roots = Vec::new();
-    push_existing_runtime_scan_root(&mut roots, runtime_root, build_output_prefix);
+    push_existing_runtime_scan_root(
+        &mut roots,
+        runtime_root,
+        build_output_prefix,
+        crate::artifact::RuntimeArtifactScanRootKind::BuildOutput,
+    );
     // Ship the whole node_modules tree. The transitive dependency closure can't
     // be pruned without a package-manager-aware resolver, and under-shipping
     // breaks the process at runtime — over-shipping is the safe trade-off.
-    push_existing_runtime_scan_root(&mut roots, runtime_root, "node_modules");
-    for file in NODE_RUNTIME_METADATA_FILES {
-        push_existing_runtime_scan_root(&mut roots, runtime_root, file);
+    push_existing_runtime_scan_root(
+        &mut roots,
+        runtime_root,
+        "node_modules",
+        crate::artifact::RuntimeArtifactScanRootKind::NodeModules,
+    );
+    for file in crate::artifact::NODE_RUNTIME_METADATA_FILES {
+        push_existing_runtime_scan_root(
+            &mut roots,
+            runtime_root,
+            file,
+            crate::artifact::RuntimeArtifactScanRootKind::Metadata,
+        );
     }
 
     if project_prefix != "." {
@@ -277,13 +293,15 @@ pub(super) fn node_project_runtime_scan_roots(
             runtime_root,
             &join_runtime_artifact_paths(project_prefix, "node_modules")
                 .expect("project node_modules path must be safe"),
+            crate::artifact::RuntimeArtifactScanRootKind::NodeModules,
         );
-        for file in NODE_RUNTIME_METADATA_FILES {
+        for file in crate::artifact::NODE_RUNTIME_METADATA_FILES {
             push_existing_runtime_scan_root(
                 &mut roots,
                 runtime_root,
                 &join_runtime_artifact_paths(project_prefix, file)
                     .expect("project metadata path must be safe"),
+                crate::artifact::RuntimeArtifactScanRootKind::Metadata,
             );
         }
     }
@@ -312,15 +330,19 @@ fn workspace_package_runtime_roots(runtime_root: &Path) -> Vec<String> {
 }
 
 pub(super) fn push_existing_runtime_scan_root(
-    roots: &mut Vec<String>,
+    roots: &mut Vec<crate::artifact::RuntimeArtifactScanRoot>,
     runtime_root: &Path,
     path: &str,
+    kind: crate::artifact::RuntimeArtifactScanRootKind,
 ) {
-    if roots.iter().any(|existing| existing == path) {
+    if roots.iter().any(|existing| existing.path == path) {
         return;
     }
     if runtime_root.join(path).exists() {
-        roots.push(path.to_string());
+        roots.push(crate::artifact::RuntimeArtifactScanRoot {
+            path: path.to_string(),
+            kind,
+        });
     }
 }
 

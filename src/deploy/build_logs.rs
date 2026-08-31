@@ -421,6 +421,7 @@ pub(super) struct BuildLogSession {
 #[derive(Clone, Copy)]
 pub(super) enum BuildLogSuccess {
     ArtifactsUploaded,
+    DeploymentSkipped,
     EdgeHandoffPublished,
 }
 
@@ -428,6 +429,7 @@ impl BuildLogSuccess {
     pub(super) fn message(self) -> &'static str {
         match self {
             Self::ArtifactsUploaded => "Build artifacts uploaded",
+            Self::DeploymentSkipped => "Deployment skipped by Ignored Build Step",
             Self::EdgeHandoffPublished => "Build handoff published",
         }
     }
