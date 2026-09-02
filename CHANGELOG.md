@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.38.1] - 2026-09-02
+
+### 🐛 Bug Fixes
+
+- **cli:** restore windows release build ([249792e](https://github.com/ONREZA/nrz-cli/commit/249792e14415c305bb5694e3a4ee1ab92da3b488))
+
 ## [0.38.0] - 2026-09-02
 
 ### ✨ Features
