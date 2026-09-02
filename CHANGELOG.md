@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.38.0] - 2026-09-02
+
+### ✨ Features
+
+- **deploy:** unify runtime publication ([5b27b1d](https://github.com/ONREZA/nrz-cli/commit/5b27b1de4ffa83681d2024fc9577b2205fe8520e))
+- **deploy:** add edge build handoff ([00324e4](https://github.com/ONREZA/nrz-cli/commit/00324e4943bc7bcf9156747fd2c39b8aec072465))
+
+### 🔧 Changed
+
+- **deps:** sync platform contracts ([450b4a1](https://github.com/ONREZA/nrz-cli/commit/450b4a1513901678f09cc04d7c0e6c7adb096d1b))
+
 ## [0.38.0-beta.3] - 2026-08-31
 
 ### ✅ Testing
