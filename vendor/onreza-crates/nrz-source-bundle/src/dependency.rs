@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Component, Path, PathBuf};
 
@@ -15,7 +16,9 @@ use crate::{
 };
 
 const DEPENDENCY_FILE_ROLE: &str = "dependency";
+#[cfg(unix)]
 const FILE_MODE: u32 = 0o644;
+#[cfg(unix)]
 const EXECUTABLE_FILE_MODE: u32 = 0o755;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,7 +177,7 @@ pub fn extract_dependency_source_trees(
                         "dependency symlink escapes its source root: {path} -> {link_target}"
                     )));
                 }
-                std::os::unix::fs::symlink(&link_target, &output)
+                create_dependency_symlink(&link_target, &output)
                     .map_err(|source| io_error("create dependency symlink", &output, source))?;
             }
         }
@@ -356,7 +359,9 @@ fn write_verified_file<R: Read>(
     executable: bool,
 ) -> Result<(), DependencySourceTreeError> {
     let mut options = OpenOptions::new();
-    options.write(true).create_new(true).mode(FILE_MODE);
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(FILE_MODE);
     let mut file = options
         .open(output)
         .map_err(|source| io_error("create dependency file", output, source))?;
@@ -385,13 +390,36 @@ fn write_verified_file<R: Read>(
             expected.path
         )));
     }
+    set_dependency_file_permissions(output, executable)
+        .map_err(|source| io_error("set dependency file permissions", output, source))?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn create_dependency_symlink(link_target: &str, output: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(link_target, output)
+}
+
+#[cfg(not(unix))]
+fn create_dependency_symlink(_link_target: &str, _output: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "dependency symlink extraction requires a Unix platform",
+    ))
+}
+
+#[cfg(unix)]
+fn set_dependency_file_permissions(output: &Path, executable: bool) -> std::io::Result<()> {
     let mode = if executable {
         EXECUTABLE_FILE_MODE
     } else {
         FILE_MODE
     };
     fs::set_permissions(output, fs::Permissions::from_mode(mode))
-        .map_err(|source| io_error("set dependency file permissions", output, source))?;
+}
+
+#[cfg(not(unix))]
+fn set_dependency_file_permissions(_output: &Path, _executable: bool) -> std::io::Result<()> {
     Ok(())
 }
 
@@ -459,6 +487,7 @@ mod tests {
     use super::*;
     use crate::{SOURCE_BUNDLE_V1_SCHEMA_VERSION, SourceLogicalManifestLayer, sha256_hex};
 
+    #[cfg(unix)]
     #[test]
     fn extracts_a_closed_dependency_tree_with_exact_modes_and_links() {
         let directory = tempdir().unwrap();
