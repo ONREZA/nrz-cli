@@ -533,7 +533,11 @@ async fn open_verified_upload_file(
     expected_sha256: &str,
 ) -> Result<tokio::fs::File, SourcePublicationError> {
     let mut options = tokio::fs::OpenOptions::new();
-    options.read(true).custom_flags(libc::O_NOFOLLOW);
+    options.read(true);
+    #[cfg(unix)]
+    {
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
     let mut file = options
         .open(path)
         .await
