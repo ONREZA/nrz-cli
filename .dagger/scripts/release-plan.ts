@@ -12,6 +12,7 @@ const vendoredCrateDependencies = [
   { name: "nrz-contract", path: "vendor/onreza-crates/nrz-contract" },
   { name: "nrz-fn-source", path: "vendor/onreza-crates/nrz-fn-source" },
   { name: "nrz-source-bundle", path: "vendor/onreza-crates/nrz-source-bundle" },
+  { name: "nrz-source-publisher", path: "vendor/onreza-crates/nrz-source-publisher" },
 ] as const;
 
 type Bump = "major" | "minor" | "patch";

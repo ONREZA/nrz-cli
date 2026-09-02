@@ -40,7 +40,7 @@ async fn edge_build_runner_context(
 ) -> Json<serde_json::Value> {
     state.record(Method::GET, &uri);
     Json(json!({
-        "protocolVersion": "execution-context-v1",
+        "protocolVersion": "runner-context-v2",
         "context": {
             "workspaceId": "workspace-edge",
             "workspaceSlug": "edge",
@@ -58,7 +58,19 @@ async fn edge_build_runner_context(
             "status": "BUILDING",
             "url": null
         },
-        "settings": {}
+        "settings": {
+            "frameworkPreset": null,
+            "gitLfsEnabled": false,
+            "installCommand": null,
+            "installCommandSource": "PRESET",
+            "buildCommand": null,
+            "buildCommandSource": "PRESET",
+            "outputDirectory": null,
+            "outputDirectorySource": "PRESET",
+            "ignoredBuildBehavior": "AUTOMATIC",
+            "ignoredBuildFolder": null,
+            "ignoredBuildCommand": null
+        }
     }))
 }
 

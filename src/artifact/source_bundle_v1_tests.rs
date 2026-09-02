@@ -22,6 +22,17 @@ fn static_manifest() -> crate::build::manifest::Manifest {
     .unwrap()
 }
 
+fn compute_manifest() -> crate::build::manifest::Manifest {
+    serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "layers": [
+            { "name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js" }
+        ],
+        "routes": []
+    }))
+    .unwrap()
+}
+
 #[tokio::test]
 async fn source_bundle_plan_is_deterministic_and_uses_identity_file_hashes() {
     let dir = tempdir().unwrap();
@@ -45,11 +56,143 @@ async fn source_bundle_plan_is_deterministic_and_uses_identity_file_hashes() {
         first.logical_manifest.files[0].role,
         SourceLogicalManifestFileRole::Static
     );
-    assert!(first.multipart.is_none());
-
-    let compressed = first.read_all().await.unwrap();
+    let compressed = tokio::fs::read(first.source_path()).await.unwrap();
     assert_eq!(sha256_hex(&compressed), first.source_sha256);
     assert_eq!(compressed.len() as u64, first.source_size_bytes);
+}
+
+#[test]
+fn source_bundle_assigns_dependency_ownership_only_for_trusted_materialization() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("node_modules/pkg")).unwrap();
+    fs::write(dir.path().join("server.js"), b"require('pkg')").unwrap();
+    fs::write(
+        dir.path().join("node_modules/pkg/index.js"),
+        b"module.exports = 1",
+    )
+    .unwrap();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let plan = build_source_bundle_plan_with_scan(
+        dir.path(),
+        &compute_manifest(),
+        &files,
+        &RuntimeArtifactScan::NodeRuntimeRoot,
+        RuntimeDependencyPackaging::TrustedMaterialization,
+    )
+    .unwrap();
+    let embedded = build_source_bundle_plan_with_scan(
+        dir.path(),
+        &compute_manifest(),
+        &files,
+        &RuntimeArtifactScan::NodeRuntimeRoot,
+        RuntimeDependencyPackaging::Embedded,
+    )
+    .unwrap();
+
+    let server = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "server.js")
+        .unwrap();
+    let dependency = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "node_modules/pkg/index.js")
+        .unwrap();
+    assert_eq!(server.role, SourceLogicalManifestFileRole::Compute);
+    assert_eq!(dependency.role, SourceLogicalManifestFileRole::Dependency);
+    assert_eq!(dependency.layer_name.as_deref(), Some("server"));
+    let embedded_dependency = embedded
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "node_modules/pkg/index.js")
+        .unwrap();
+    assert_eq!(
+        embedded_dependency.role,
+        SourceLogicalManifestFileRole::Compute
+    );
+    assert_eq!(embedded_dependency.layer_name.as_deref(), Some("server"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn source_bundle_projects_workspace_packages_into_dependency_root() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("dist")).unwrap();
+    fs::write(dir.path().join("dist/server.js"), b"require('pkg')").unwrap();
+    fs::create_dir_all(dir.path().join("packages/pkg")).unwrap();
+    fs::write(
+        dir.path().join("packages/pkg/package.json"),
+        br#"{"name":"pkg"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("packages/pkg/bin.js"),
+        b"console.log('pkg')",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.path().join("node_modules/.bin")).unwrap();
+    std::os::unix::fs::symlink("../packages/pkg", dir.path().join("node_modules/pkg")).unwrap();
+    std::os::unix::fs::symlink("../pkg/bin.js", dir.path().join("node_modules/.bin/pkg")).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
+    let scan = RuntimeArtifactScan::Selected {
+        roots: vec![
+            RuntimeArtifactScanRoot {
+                path: "dist".into(),
+                kind: RuntimeArtifactScanRootKind::BuildOutput,
+            },
+            RuntimeArtifactScanRoot {
+                path: "node_modules".into(),
+                kind: RuntimeArtifactScanRootKind::NodeModules,
+            },
+        ],
+        symlink_roots: vec!["packages/pkg".into()],
+    };
+
+    let plan = build_source_bundle_plan_with_scan(
+        dir.path(),
+        &compute_manifest(),
+        &files,
+        &scan,
+        RuntimeDependencyPackaging::TrustedMaterialization,
+    )
+    .unwrap();
+
+    assert!(
+        plan.logical_manifest
+            .files
+            .iter()
+            .all(|file| !file.path.starts_with("packages/pkg"))
+    );
+    let package = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "node_modules/pkg/package.json")
+        .unwrap();
+    assert_eq!(package.role, SourceLogicalManifestFileRole::Dependency);
+    let bin = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "node_modules/.bin/pkg")
+        .unwrap();
+    assert_eq!(bin.link_target.as_deref(), Some("../pkg/bin.js"));
+
+    let compressed = tokio::fs::read(plan.source_path()).await.unwrap();
+    let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
+    let extracted = tempdir().unwrap();
+    tar::Archive::new(Cursor::new(tar_bytes))
+        .unpack(extracted.path())
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(extracted.path().join("node_modules/.bin/pkg")).unwrap(),
+        "console.log('pkg')"
+    );
 }
 
 #[tokio::test]
@@ -60,7 +203,7 @@ async fn source_bundle_embeds_canonical_logical_manifest_first() {
     let files = scan_dir(dir.path()).unwrap();
 
     let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
-    let compressed = plan.read_all().await.unwrap();
+    let compressed = tokio::fs::read(plan.source_path()).await.unwrap();
     let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
     let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
     let mut entries = archive.entries().unwrap();
@@ -76,8 +219,6 @@ async fn source_bundle_embeds_canonical_logical_manifest_first() {
         sha256_hex(manifest_body.as_bytes()),
         plan.logical_manifest_sha256
     );
-    assert_eq!(plan.logical_manifest_summary.file_count, 1);
-    assert_eq!(plan.logical_manifest_summary.logical_static_bytes, "5");
 }
 
 #[test]
@@ -255,6 +396,7 @@ fn logical_manifest_sha_uses_stable_key_ordering() {
             content_type: Some("text/html; charset=utf-8".into()),
             role: SourceLogicalManifestFileRole::Static,
             layer_name: Some("static".into()),
+            executable: false,
         }],
         layers: vec![SourceLogicalManifestLayer {
             name: "static".into(),
@@ -304,6 +446,7 @@ fn canonical_logical_manifest_json_matches_source_bundle_v1_golden() {
                 content_type: Some("application/javascript; charset=utf-8".into()),
                 role: SourceLogicalManifestFileRole::Compute,
                 layer_name: Some("api".into()),
+                executable: true,
             },
             SourceLogicalManifestFile {
                 path: "index.html".into(),
@@ -314,6 +457,7 @@ fn canonical_logical_manifest_json_matches_source_bundle_v1_golden() {
                 content_type: Some("text/html; charset=utf-8".into()),
                 role: SourceLogicalManifestFileRole::Static,
                 layer_name: Some("static".into()),
+                executable: false,
             },
             SourceLogicalManifestFile {
                 path: "link.html".into(),
@@ -324,6 +468,7 @@ fn canonical_logical_manifest_json_matches_source_bundle_v1_golden() {
                 content_type: None,
                 role: SourceLogicalManifestFileRole::Static,
                 layer_name: Some("static".into()),
+                executable: false,
             },
         ],
         layers: vec![
@@ -355,11 +500,11 @@ fn canonical_logical_manifest_json_matches_source_bundle_v1_golden() {
     let canonical = canonical_logical_manifest_json(&manifest).unwrap();
     assert_eq!(
         canonical,
-        r#"{"capabilities":[],"entrypoints":["api/handler.js"],"files":[{"contentType":"application/javascript; charset=utf-8","layerName":"api","path":"api/handler.js","role":"compute","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":128},{"contentType":"text/html; charset=utf-8","layerName":"static","path":"index.html","role":"static","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":5},{"entryType":"symlink","layerName":"static","linkTarget":"index.html","path":"link.html","role":"static","sha256":"0eb547304658805aad788d320f10bf1f292797b5e6d745a3bf617584da017051","size":0}],"layers":[{"entrypoint":"api/handler.js","name":"api","rootPath":"api","runtimeConfig":{"memoryMb":256,"timeoutMs":10000},"target":"COMPUTE"},{"name":"static","target":"STATIC"}],"routes":[{"layerName":"api","methods":["GET","POST"],"pattern":"/api/*","priority":10}],"schemaVersion":"SOURCE_BUNDLE_V1.0"}"#
+        r#"{"capabilities":[],"entrypoints":["api/handler.js"],"files":[{"contentType":"application/javascript; charset=utf-8","executable":true,"layerName":"api","path":"api/handler.js","role":"compute","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size":128},{"contentType":"text/html; charset=utf-8","layerName":"static","path":"index.html","role":"static","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":5},{"entryType":"symlink","layerName":"static","linkTarget":"index.html","path":"link.html","role":"static","sha256":"0eb547304658805aad788d320f10bf1f292797b5e6d745a3bf617584da017051","size":0}],"layers":[{"entrypoint":"api/handler.js","name":"api","rootPath":"api","runtimeConfig":{"memoryMb":256,"timeoutMs":10000},"target":"COMPUTE"},{"name":"static","target":"STATIC"}],"routes":[{"layerName":"api","methods":["GET","POST"],"pattern":"/api/*","priority":10}],"schemaVersion":"SOURCE_BUNDLE_V1.0"}"#
     );
     assert_eq!(
         compute_logical_manifest_sha256(&manifest).unwrap(),
-        "9e8de07148ec4b8cd504c0c065439d12410bed9c0e2c14734e73527b4aa0d875"
+        "0ad27552cb64fab088d6e4c4b44c2cd83df43dbd2f5ee76add074e6832aad62a"
     );
     assert_eq!(
         compute_logical_manifest_sha256(&manifest).unwrap(),
@@ -393,7 +538,7 @@ async fn source_bundle_plan_serializes_hardlinked_files_as_regular_files() {
     assert_eq!(package_manifest_entry.entry_type, None);
     assert_eq!(package_manifest_entry.size, b"esbuild".len() as u64);
 
-    let compressed = plan.read_all().await.unwrap();
+    let compressed = tokio::fs::read(plan.source_path()).await.unwrap();
     let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
     let mut archive = tar::Archive::new(Cursor::new(tar_bytes.as_slice()));
     let mut hardlinked_paths = Vec::new();
@@ -456,7 +601,7 @@ async fn source_bundle_plan_preserves_safe_relative_symlinks() {
     assert_eq!(symlink.size, 0);
     assert_eq!(symlink.sha256, sha256_hex(b".pnpm/pkg"));
 
-    let compressed = plan.read_all().await.unwrap();
+    let compressed = tokio::fs::read(plan.source_path()).await.unwrap();
     let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
     let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
     let mut saw_symlink = false;
@@ -500,7 +645,7 @@ async fn source_bundle_plan_accepts_symlink_chain_through_archive_prefix() {
 
     let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
 
-    let compressed = plan.read_all().await.unwrap();
+    let compressed = tokio::fs::read(plan.source_path()).await.unwrap();
     let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
     let extracted = tempdir().unwrap();
     tar::Archive::new(Cursor::new(tar_bytes))
@@ -578,7 +723,7 @@ async fn source_bundle_plan_accepts_symlink_to_directory_with_symlink_only_desce
 
     let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
 
-    let compressed = plan.read_all().await.unwrap();
+    let compressed = tokio::fs::read(plan.source_path()).await.unwrap();
     let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
     let extracted = tempdir().unwrap();
     tar::Archive::new(Cursor::new(tar_bytes))
@@ -660,11 +805,4 @@ fn source_bundle_plan_rejects_legacy_manifest_middleware() {
         ),
         "{err}"
     );
-}
-
-#[test]
-fn source_bundle_multipart_threshold_matches_server_contract() {
-    assert!(!should_use_multipart(MULTIPART_THRESHOLD_BYTES - 1));
-    assert!(should_use_multipart(MULTIPART_THRESHOLD_BYTES));
-    assert!(should_use_multipart(MULTIPART_THRESHOLD_BYTES + 1));
 }

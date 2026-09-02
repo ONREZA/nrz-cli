@@ -228,6 +228,7 @@ test("release cargo manifest points nrz crates at sanitized vendor snapshot", ()
     'nrz-contract = { version = "0.1", path = "../deployment/crates/nrz-contract" }',
     'nrz-fn-source = { version = "0.1", path = "../deployment/crates/nrz-fn-source" }',
     'nrz-source-bundle = { version = "0.1", path = "../deployment/crates/nrz-source-bundle" }',
+    'nrz-source-publisher = { version = "0.1", path = "../deployment/crates/nrz-source-publisher" }',
     '',
   ].join("\n");
 
@@ -237,6 +238,7 @@ test("release cargo manifest points nrz crates at sanitized vendor snapshot", ()
   assert.match(updated, /^nrz-contract = \{ path = "vendor\/onreza-crates\/nrz-contract" \}$/m);
   assert.match(updated, /^nrz-fn-source = \{ path = "vendor\/onreza-crates\/nrz-fn-source" \}$/m);
   assert.match(updated, /^nrz-source-bundle = \{ path = "vendor\/onreza-crates\/nrz-source-bundle" \}$/m);
+  assert.match(updated, /^nrz-source-publisher = \{ path = "vendor\/onreza-crates\/nrz-source-publisher" \}$/m);
   assert.doesNotMatch(updated, /\.\.\/deployment/);
 });
 
@@ -250,6 +252,7 @@ test("release cargo manifest accepts already sanitized nrz crate dependencies", 
     'nrz-contract = { path = "vendor/onreza-crates/nrz-contract" }',
     'nrz-fn-source = { path = "vendor/onreza-crates/nrz-fn-source" }',
     'nrz-source-bundle = { path = "vendor/onreza-crates/nrz-source-bundle" }',
+    'nrz-source-publisher = { path = "vendor/onreza-crates/nrz-source-publisher" }',
     '',
   ].join("\n");
 
@@ -259,6 +262,7 @@ test("release cargo manifest accepts already sanitized nrz crate dependencies", 
   assert.match(updated, /^nrz-contract = \{ path = "vendor\/onreza-crates\/nrz-contract" \}$/m);
   assert.match(updated, /^nrz-fn-source = \{ path = "vendor\/onreza-crates\/nrz-fn-source" \}$/m);
   assert.match(updated, /^nrz-source-bundle = \{ path = "vendor\/onreza-crates\/nrz-source-bundle" \}$/m);
+  assert.match(updated, /^nrz-source-publisher = \{ path = "vendor\/onreza-crates\/nrz-source-publisher" \}$/m);
 });
 
 test("release cargo lock leaves vendored crate versions stable", () => {

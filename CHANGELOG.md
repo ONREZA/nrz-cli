@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.38.0-beta.3] - 2026-08-31
+
+### ✅ Testing
+
+- **deploy:** align runner context fixture ([666c9f7](https://github.com/ONREZA/nrz-cli/commit/666c9f74e25fe33d3277317da81aad117cb81755))
+
+### 🐛 Bug Fixes
+
+- **deploy:** restore build pipeline contracts ([fbd943b](https://github.com/ONREZA/nrz-cli/commit/fbd943b2e73a6fc716cd5602aadaaff847c4151a))
+- **deploy:** run dependency lifecycle scripts ([965bbc0](https://github.com/ONREZA/nrz-cli/commit/965bbc04c2043f961f44af6fad9289691b21b5fc))
+
+### ✨ Features
+
+- **deploy:** add edge build handoff ([00324e4](https://github.com/ONREZA/nrz-cli/commit/00324e4943bc7bcf9156747fd2c39b8aec072465))
+
+### 🔧 Changed
+
+- **deps:** sync platform contracts ([450b4a1](https://github.com/ONREZA/nrz-cli/commit/450b4a1513901678f09cc04d7c0e6c7adb096d1b))
+
 ## [0.38.0-beta.2] - 2026-08-31
 
 ### ✅ Testing

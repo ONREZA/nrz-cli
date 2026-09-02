@@ -6,9 +6,6 @@ use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 mod client_tests;
 
 pub use client::ApiClient;
-pub(crate) use client::ConditionalUploadConflict;
-pub(crate) use client::PresignedHeadVerify;
-pub(crate) use client::PresignedPutHeaders;
 pub use client::StructuredApiError;
 pub(crate) use client::classify_api_retry;
 

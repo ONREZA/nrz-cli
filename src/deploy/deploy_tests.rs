@@ -1,10 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use axum::Router;
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::IntoResponse;
-use axum::routing::put;
+use axum::http::StatusCode;
 use tempfile::tempdir;
 
 use crate::artifact::source_bundle_v1;
@@ -71,26 +68,6 @@ fn server_install_settings(
         install_command_source: source,
         ..Default::default()
     }
-}
-
-async fn conditional_pack_put(headers: HeaderMap) -> impl IntoResponse {
-    match headers
-        .get("if-none-match")
-        .and_then(|value| value.to_str().ok())
-    {
-        Some("*") => (StatusCode::OK, "ok"),
-        _ => (StatusCode::BAD_REQUEST, "missing if-none-match"),
-    }
-}
-
-async fn spawn_conditional_pack_put_mock() -> (String, tokio::task::JoinHandle<()>) {
-    let app = Router::new().route("/upload", put(conditional_pack_put));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let handle = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (format!("http://{addr}/upload"), handle)
 }
 
 #[test]
@@ -702,7 +679,7 @@ fn build_command_preset_source_uses_local_package_manager() {
 }
 
 #[test]
-fn build_command_detected_empty_suppresses_auto_detect() {
+fn build_command_detected_empty_keeps_auto_detect() {
     let dir = tempdir().unwrap();
     fs::write(
         dir.path().join("package.json"),
@@ -717,7 +694,49 @@ fn build_command_detected_empty_suppresses_auto_detect() {
         server_build_settings(None, Some(nrz::config::BuildSettingSource::Detected)),
     );
     let result = resolve_build_command(None, dir.path(), &effective);
+    assert_eq!(result.unwrap(), "npm run build");
+}
+
+#[test]
+fn build_command_user_empty_suppresses_auto_detect() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let effective = effective_with_server_settings(
+        dir.path(),
+        config,
+        server_build_settings(None, Some(nrz::config::BuildSettingSource::User)),
+    );
+    let result = resolve_build_command(None, dir.path(), &effective);
     assert!(result.is_none());
+}
+
+#[test]
+fn build_command_detected_source_uses_local_package_manager() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+
+    let config = nrz::config::ProjectConfig::default();
+    let effective = effective_with_server_settings(
+        dir.path(),
+        config,
+        server_build_settings(
+            Some("npm run build"),
+            Some(nrz::config::BuildSettingSource::Detected),
+        ),
+    );
+    let result = resolve_build_command(None, dir.path(), &effective);
+    assert_eq!(result.unwrap(), "pnpm run build");
 }
 
 #[test]
@@ -772,6 +791,38 @@ fn install_command_preset_source_uses_local_package_manager() {
     );
     let result = resolve_install_command(dir.path(), &effective);
     assert_eq!(result.unwrap(), "pnpm install");
+}
+
+#[test]
+fn install_command_detected_source_uses_local_package_manager() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+
+    let effective = effective_with_server_settings(
+        dir.path(),
+        nrz::config::ProjectConfig::default(),
+        server_install_settings(
+            Some("npm install"),
+            Some(nrz::config::BuildSettingSource::Detected),
+        ),
+    );
+    let result = resolve_install_command(dir.path(), &effective);
+    assert_eq!(result.unwrap(), "pnpm install");
+}
+
+#[test]
+fn install_command_user_empty_suppresses_auto_detect() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+
+    let effective = effective_with_server_settings(
+        dir.path(),
+        nrz::config::ProjectConfig::default(),
+        server_install_settings(None, Some(nrz::config::BuildSettingSource::User)),
+    );
+    let result = resolve_install_command(dir.path(), &effective);
+    assert!(result.is_none());
 }
 
 #[test]
@@ -899,6 +950,17 @@ fn prepare_deploy_files_keeps_static_build_output_node_modules_assets() {
 
     assert!(paths.contains(&"index.html"));
     assert!(paths.contains(&"node_modules/pkg/index.js"));
+    assert_eq!(
+        RuntimeArtifactScan::All.file_breakdown(&deployable),
+        crate::artifact::RuntimeArtifactFileBreakdown {
+            build_output: 2,
+            node_modules: 0,
+            metadata: 0,
+            workspace_packages: 0,
+            other: 0,
+            total: 2,
+        }
+    );
     source_bundle_v1::build_source_bundle_plan(output.path(), &manifest, &deployable).unwrap();
 }
 
@@ -1023,6 +1085,43 @@ fn node_process_runtime_artifact_uses_project_root_for_nestjs() {
     assert_eq!(
         nest_runtime.role,
         source_bundle_v1::SourceLogicalManifestFileRole::Compute
+    );
+}
+
+#[test]
+fn process_root_output_keeps_dependency_categories_distinct() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"main":"server.js"}"#).unwrap();
+    fs::write(dir.path().join("server.js"), "require('runtime-pkg')").unwrap();
+    fs::create_dir_all(dir.path().join("node_modules/runtime-pkg")).unwrap();
+    fs::write(
+        dir.path().join("node_modules/runtime-pkg/index.js"),
+        "module.exports = true",
+    )
+    .unwrap();
+
+    let detection = make_detection("express", None);
+    let artifact = resolve_runtime_artifact(
+        dir.path(),
+        dir.path(),
+        dir.path().to_path_buf(),
+        build_manifest::generate_compute_manifest("server.js"),
+        &detection,
+        true,
+    )
+    .unwrap();
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+
+    assert_eq!(
+        artifact.scan.file_breakdown(&scanned),
+        crate::artifact::RuntimeArtifactFileBreakdown {
+            build_output: 1,
+            node_modules: 1,
+            metadata: 1,
+            workspace_packages: 0,
+            other: 0,
+            total: 3,
+        }
     );
 }
 
@@ -1164,6 +1263,18 @@ fn adapter_node_runtimes_include_project_dependencies() {
         );
 
         let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+        assert_eq!(
+            artifact.scan.file_breakdown(&scanned),
+            crate::artifact::RuntimeArtifactFileBreakdown {
+                build_output: 1,
+                node_modules: 1,
+                metadata: 1,
+                workspace_packages: 0,
+                other: 0,
+                total: 3,
+            },
+            "framework: {framework}"
+        );
         let paths = scanned
             .iter()
             .map(|file| file.path.as_str())
@@ -1274,6 +1385,14 @@ fn node_process_runtime_artifact_prefers_workspace_root_for_hoisted_app_symlink(
     );
 
     let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let breakdown = artifact.scan.file_breakdown(&scanned);
+    assert_eq!(breakdown.total, scanned.len());
+    assert!(breakdown.build_output > 0);
+    assert!(breakdown.node_modules > 0);
+    assert!(breakdown.metadata > 0);
+    assert_eq!(breakdown.workspace_packages, 0);
+    let structured = serde_json::to_string(&breakdown).unwrap();
+    assert!(!structured.contains(&workspace.path().display().to_string()));
     let paths = scanned
         .iter()
         .map(|file| file.path.as_str())
@@ -1354,6 +1473,9 @@ fn node_process_runtime_artifact_includes_workspace_hoisted_deps_with_app_node_m
 
     assert_eq!(artifact.root_dir, workspace.path());
     let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let breakdown = artifact.scan.file_breakdown(&scanned);
+    assert_eq!(breakdown.total, scanned.len());
+    assert_eq!(breakdown.workspace_packages, 0);
     let paths = scanned
         .iter()
         .map(|file| file.path.as_str())
@@ -1434,6 +1556,9 @@ fn node_process_runtime_artifact_includes_workspace_package_symlink_targets() {
 
     assert_eq!(artifact.root_dir, workspace.path());
     let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let breakdown = artifact.scan.file_breakdown(&scanned);
+    assert_eq!(breakdown.total, scanned.len());
+    assert!(breakdown.workspace_packages > 0);
     let paths = scanned
         .iter()
         .map(|file| file.path.as_str())
@@ -1605,7 +1730,15 @@ fn node_process_runtime_artifact_falls_back_when_build_output_outside_project() 
     // Build output lives outside the project, so relocation can't apply: the
     // deploy degrades to scanning the build output as-is instead of erroring.
     assert_eq!(artifact.root_dir, external_output.path());
-    assert!(matches!(artifact.scan, RuntimeArtifactScan::All));
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    assert_eq!(
+        scanned
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["src/main.js"]
+    );
+    assert_eq!(artifact.scan.file_breakdown(&scanned).build_output, 1);
     let compute_layer = artifact
         .manifest
         .layers
@@ -2015,568 +2148,95 @@ action = { type = "allow" }
     );
 }
 
-#[test]
-fn prepare_upload_request_serializes_source_bundle_v1_contract() {
-    let logical_manifest = source_bundle_v1::SourceLogicalManifest {
-        schema_version: source_bundle_v1::SOURCE_BUNDLE_SCHEMA_VERSION.to_string(),
-        capabilities: vec![],
-        files: vec![source_bundle_v1::SourceLogicalManifestFile {
-            path: "index.html".into(),
-            sha256: "a".repeat(64),
-            size: 12,
-            entry_type: None,
-            link_target: None,
-            content_type: Some("text/html; charset=utf-8".into()),
-            role: source_bundle_v1::SourceLogicalManifestFileRole::Static,
-            layer_name: Some("static".into()),
-        }],
-        layers: vec![source_bundle_v1::SourceLogicalManifestLayer {
-            name: "static".into(),
-            target: source_bundle_v1::SourceLogicalManifestLayerTarget::Static,
-            root_path: None,
-            entrypoint: None,
-            runtime_config: None,
-        }],
-        routes: vec![],
-        entrypoints: vec![],
-    };
-    let logical_manifest_sha256 =
-        source_bundle_v1::compute_logical_manifest_sha256(&logical_manifest).unwrap();
-    let logical_manifest_summary = source_bundle_v1::SourceLogicalManifestSummary {
-        file_count: 1,
-        logical_static_bytes: "12".into(),
-        artifact_size_bytes: "0".into(),
-        max_static_file_size_bytes: "12".into(),
-    };
-    let body = CliPrepareUploadRequest {
-        deployment_id: Uuid::now_v7(),
-        workspace_id: Uuid::now_v7(),
-        project_id: Uuid::now_v7(),
-        deployment_attempt_id: Uuid::now_v7(),
-        operation_id: Uuid::now_v7(),
-        artifact_format: "SOURCE_BUNDLE_V1".into(),
-        cli_protocol_version: source_bundle_v1::CLI_PROTOCOL_VERSION.try_into().unwrap(),
-        logical_manifest_summary: to_contract_manifest_summary(&logical_manifest_summary).unwrap(),
-        logical_manifest_sha256: logical_manifest_sha256.as_str().try_into().unwrap(),
-        source_format: source_bundle_v1::SOURCE_BUNDLE_FORMAT.into(),
-        source_sha256: "b".repeat(64).as_str().try_into().unwrap(),
-        source_size_bytes: "4096".try_into().unwrap(),
-        multipart: None,
-        source_upload_recovery: None,
-    };
-
-    let value = serde_json::to_value(&body).unwrap();
-    assert_eq!(value["artifactFormat"], "SOURCE_BUNDLE_V1");
-    assert_eq!(
-        value["cliProtocolVersion"],
-        "source-bundle-v1-embedded-manifest"
-    );
-    assert_eq!(value["sourceFormat"], "tar.zst");
-    assert_eq!(value["sourceSizeBytes"], "4096");
-    assert_eq!(value["logicalManifestSummary"]["fileCount"], 1);
-    assert_eq!(value["logicalManifestSha256"], logical_manifest_sha256);
-    let mut keys = value
-        .as_object()
-        .unwrap()
-        .keys()
-        .cloned()
-        .collect::<Vec<_>>();
-    keys.sort();
-    assert_eq!(
-        keys,
-        [
-            "artifactFormat",
-            "cliProtocolVersion",
-            "deploymentAttemptId",
-            "deploymentId",
-            "logicalManifestSha256",
-            "logicalManifestSummary",
-            "operationId",
-            "projectId",
-            "sourceFormat",
-            "sourceSha256",
-            "sourceSizeBytes",
-            "workspaceId",
-        ]
-    );
-}
-
-#[test]
-fn prepare_upload_request_serializes_source_upload_recovery_context() {
-    let failed_upload_session_id = Uuid::now_v7();
-    let body = CliPrepareUploadRequest {
-        deployment_id: Uuid::now_v7(),
-        workspace_id: Uuid::now_v7(),
-        project_id: Uuid::now_v7(),
-        deployment_attempt_id: Uuid::now_v7(),
-        operation_id: Uuid::now_v7(),
-        artifact_format: "SOURCE_BUNDLE_V1".into(),
-        cli_protocol_version: source_bundle_v1::CLI_PROTOCOL_VERSION.try_into().unwrap(),
-        logical_manifest_summary: CliLogicalManifestSummary {
-            file_count: 1,
-            logical_static_bytes: "12".try_into().unwrap(),
-            artifact_size_bytes: "0".try_into().unwrap(),
-            max_static_file_size_bytes: "12".try_into().unwrap(),
-        },
-        logical_manifest_sha256: "a".repeat(64).as_str().try_into().unwrap(),
-        source_format: source_bundle_v1::SOURCE_BUNDLE_FORMAT.into(),
-        source_sha256: "b".repeat(64).as_str().try_into().unwrap(),
-        source_size_bytes: "4096".try_into().unwrap(),
-        multipart: None,
-        source_upload_recovery: Some(CliPrepareUploadSourceUploadRecovery {
-            failed_upload_session_id,
-            reason: SOURCE_UPLOAD_RECOVERY_CONDITIONAL_PRECONDITION_FAILED.to_string(),
-        }),
-    };
-
-    let value = serde_json::to_value(&body).unwrap();
-    assert_eq!(
-        value["sourceUploadRecovery"]["reason"],
-        "conditional-precondition-failed"
-    );
-    assert_eq!(
-        value["sourceUploadRecovery"]["failedUploadSessionId"],
-        failed_upload_session_id.to_string()
-    );
-}
-
-#[test]
-fn upload_failed_request_serializes_source_bundle_v1_contract() {
-    let body = CliUploadFailedRequest {
-        deployment_id: Uuid::now_v7(),
-        upload_session_id: Uuid::now_v7(),
-        deployment_attempt_id: Uuid::now_v7(),
-        operation_id: Uuid::now_v7(),
-        artifact_format: "SOURCE_BUNDLE_V1".into(),
-        source_artifact_id: "c".repeat(64).as_str().try_into().unwrap(),
-        error_code: SOURCE_UPLOAD_PUT_FAILED.try_into().unwrap(),
-        error_log: "S3 rejected the upload".try_into().unwrap(),
-    };
-
-    let value = serde_json::to_value(&body).unwrap();
-    assert_eq!(value["artifactFormat"], "SOURCE_BUNDLE_V1");
-    assert_eq!(value["errorCode"], SOURCE_UPLOAD_PUT_FAILED);
-    assert_eq!(value["errorLog"], "S3 rejected the upload");
-    assert!(value.get("sourceSha256").is_none());
-    assert!(value.get("sourceSizeBytes").is_none());
-}
-
-#[test]
-fn upload_complete_request_serializes_source_bundle_v1_contract() {
-    let body = CliUploadCompleteRequest {
-        deployment_id: Uuid::now_v7(),
-        upload_session_id: Uuid::now_v7(),
-        deployment_attempt_id: Uuid::now_v7(),
-        operation_id: Uuid::now_v7(),
-        artifact_format: "SOURCE_BUNDLE_V1".into(),
-        source_artifact_id: "c".repeat(64).as_str().try_into().unwrap(),
-        source_sha256: "d".repeat(64).as_str().try_into().unwrap(),
-        source_size_bytes: "4096".try_into().unwrap(),
-        logical_manifest_sha256: "e".repeat(64).as_str().try_into().unwrap(),
-    };
-
-    let value = serde_json::to_value(&body).unwrap();
-    assert_eq!(value["artifactFormat"], "SOURCE_BUNDLE_V1");
-    assert_eq!(value["sourceSizeBytes"], "4096");
-    assert!(value["deploymentId"].is_string());
-    assert!(value["uploadSessionId"].is_string());
-}
-
-#[test]
-fn multipart_complete_request_serializes_source_bundle_v1_contract() {
-    let body = CliMultipartCompleteRequest {
-        deployment_id: Uuid::now_v7(),
-        upload_session_id: Uuid::now_v7(),
-        deployment_attempt_id: Uuid::now_v7(),
-        operation_id: Uuid::now_v7(),
-        artifact_format: "SOURCE_BUNDLE_V1".into(),
-        source_artifact_id: "c".repeat(64).as_str().try_into().unwrap(),
-        upload_id: "upload-id".try_into().unwrap(),
-        parts: vec![CliMultipartCompletePart {
-            part_number: std::num::NonZeroU64::new(1).unwrap(),
-            e_tag: "\"etag\"".try_into().unwrap(),
-        }],
-    };
-
-    let value = serde_json::to_value(&body).unwrap();
-    assert_eq!(value["artifactFormat"], "SOURCE_BUNDLE_V1");
-    assert_eq!(value["parts"][0]["partNumber"], 1);
-    assert_eq!(value["parts"][0]["eTag"], "\"etag\"");
-}
-
-#[test]
-fn upload_failed_reporting_uses_only_source_object_upload_failure_code() {
-    assert_eq!(SOURCE_UPLOAD_PUT_FAILED, "SOURCE_UPLOAD_PUT_FAILED");
-}
-
-#[test]
-fn upload_failure_log_is_bounded_for_server_contract() {
-    let long = "x".repeat(MAX_UPLOAD_FAILURE_LOG_LENGTH + 10);
-    let error = anyhow::anyhow!("{long}");
-    let truncated = upload_failure_log(&error);
-    assert_eq!(truncated.len(), MAX_UPLOAD_FAILURE_LOG_LENGTH);
-}
-
-#[test]
-fn upload_failure_log_redacts_presigned_url_query_before_reporting() {
-    let error = anyhow::anyhow!(
-        "error sending request for url (https://bucket.s3.example/source.tar.zst?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=signature-secret&X-Amz-Credential=credential-secret)"
-    )
-    .context("failed to upload SOURCE_BUNDLE_V1 source object");
-
-    let log = upload_failure_log(&error);
-
-    assert!(log.contains("failed to upload SOURCE_BUNDLE_V1 source object"));
-    assert!(
-        log.contains("https://bucket.s3.example/source.tar.zst?REDACTED)"),
-        "{log}"
-    );
-    assert!(!log.contains("X-Amz-Signature"), "{log}");
-    assert!(!log.contains("signature-secret"), "{log}");
-    assert!(!log.contains("credential-secret"), "{log}");
-}
-
-#[test]
-fn control_plane_backpressure_honors_retry_after_above_backoff_cap() {
-    let error: anyhow::Error = crate::api::StructuredApiError {
-        status: reqwest::StatusCode::SERVICE_UNAVAILABLE,
-        code: "SERVICE_UNAVAILABLE".into(),
-        message: "Artifact ingest service is overloaded".into(),
-        retry_after_seconds: Some(30),
-        details: None,
-    }
-    .into();
-
-    assert_eq!(
-        classify_prepare_upload_retry_error(&error),
-        Some(SourceControlPlaneRetry {
-            reason: SourceControlPlaneRetryReason::ControlPlaneBackpressure,
-            retry_after: Some(Duration::from_secs(30)),
-        })
-    );
-    assert_eq!(
-        retry_delay_with_hint(
-            Some(Duration::from_secs(30)),
-            Duration::from_millis(500),
-            Duration::from_secs(5),
-            Duration::from_secs(60),
-        ),
-        Duration::from_secs(30)
-    );
-}
-
-#[test]
-fn retry_delay_caps_only_fallback_backoff_and_remaining_budget() {
-    assert_eq!(
-        retry_delay_with_hint(
-            None,
-            Duration::from_secs(30),
-            Duration::from_secs(5),
-            Duration::from_secs(60),
-        ),
-        Duration::from_secs(5)
-    );
-    assert_eq!(
-        retry_delay_with_hint(
-            Some(Duration::from_secs(30)),
-            Duration::from_millis(500),
-            Duration::from_secs(5),
-            Duration::from_secs(60),
-        ),
-        Duration::from_secs(30)
-    );
-    assert_eq!(
-        retry_delay_with_hint(
-            Some(Duration::from_secs(30)),
-            Duration::from_millis(500),
-            Duration::from_secs(5),
-            Duration::from_secs(10),
-        ),
-        Duration::from_secs(10)
-    );
-}
-
-#[tokio::test]
-async fn source_single_put_sends_conditional_header_from_wire_hint() {
-    let content = Bytes::from_static(b"hello source");
-    let sha256 = sha256_hex(&content);
-    let (url, _server) = spawn_conditional_pack_put_mock().await;
-    let client = ApiClient::anonymous().unwrap();
-    let headers = PresignedPutHeaders::if_none_match_any();
-
-    upload_single_put(
-        &client,
-        SinglePutUpload {
-            url: &url,
-            bytes: content,
-            content_length: 12,
-            sha256: &sha256,
-            headers: &headers,
-            verify_head: None,
-            label: "SOURCE_BUNDLE_V1 source object".into(),
-        },
-    )
-    .await
-    .expect("single SOURCE_BUNDLE_V1 PUT should include If-None-Match");
-}
-
-#[test]
-fn upload_complete_incomplete_response_is_retryable() {
-    let attempt = classify_upload_complete_response(UploadCompleteResponse::Incomplete {
-        missing_source_object: true,
-    })
-    .unwrap();
-
-    assert_eq!(
-        attempt,
-        SourceCompletionAttempt::Retry(SourceControlPlaneRetry {
-            reason: SourceControlPlaneRetryReason::S3Visibility,
-            retry_after: None,
-        })
-    );
-}
-
-#[test]
-fn upload_complete_operation_in_progress_error_is_retryable() {
-    let error: anyhow::Error = crate::api::StructuredApiError {
-        status: reqwest::StatusCode::CONFLICT,
-        code: "OPERATION_IN_PROGRESS".into(),
-        message: "upload-complete: waiting on owner verify".into(),
-        retry_after_seconds: None,
-        details: None,
-    }
-    .into();
-
-    assert_eq!(
-        classify_upload_complete_retry_error(&error),
-        Some(SourceControlPlaneRetry {
-            reason: SourceControlPlaneRetryReason::OwnerVerifyInProgress,
-            retry_after: None,
-        })
-    );
-}
-
-#[test]
-fn upload_complete_control_plane_backpressure_is_retryable() {
-    let error: anyhow::Error = crate::api::StructuredApiError {
-        status: reqwest::StatusCode::SERVICE_UNAVAILABLE,
-        code: "SERVICE_UNAVAILABLE".into(),
-        message: "Artifact ingest service is overloaded".into(),
-        retry_after_seconds: Some(2),
-        details: None,
-    }
-    .into();
-
-    assert_eq!(
-        classify_upload_complete_retry_error(&error),
-        Some(SourceControlPlaneRetry {
-            reason: SourceControlPlaneRetryReason::ControlPlaneBackpressure,
-            retry_after: Some(Duration::from_secs(2)),
-        })
-    );
-}
-
-#[test]
-fn prepare_upload_operation_in_progress_error_is_retryable() {
-    let error: anyhow::Error = crate::api::StructuredApiError {
-        status: reqwest::StatusCode::CONFLICT,
-        code: "OPERATION_IN_PROGRESS".into(),
-        message: "prepare-upload is already in progress".into(),
-        retry_after_seconds: None,
-        details: None,
-    }
-    .into();
-
-    assert_eq!(
-        classify_prepare_upload_retry_error(&error),
-        Some(SourceControlPlaneRetry {
-            reason: SourceControlPlaneRetryReason::PrepareUploadInProgress,
-            retry_after: None,
-        })
-    );
-}
-
-fn limit_exceeded_api_error() -> anyhow::Error {
-    crate::api::StructuredApiError {
-        status: reqwest::StatusCode::FORBIDDEN,
+fn limit_exceeded_publication_error() -> nrz_source_publisher::SourcePublicationError {
+    nrz_source_publisher::StructuredControlPlaneError {
+        status: reqwest::StatusCode::FORBIDDEN.as_u16(),
         code: "LIMIT_EXCEEDED".into(),
-        message: "Deployment exceeds maximum file count (15503 / 5000).".into(),
-        retry_after_seconds: None,
-        details: Some(serde_json::json!({"limitType": "maxDeploymentFiles", "limit": 5000})),
+        message: "Deployment exceeds maximum file count (20679 / 20000).".into(),
+        retry_after: None,
+        details: Some(serde_json::json!({
+            "limitType": "maxDeploymentFiles",
+            "current": 20679,
+            "limit": 20000,
+            "plan": "HOBBY"
+        })),
     }
     .into()
 }
 
+fn file_breakdown() -> crate::artifact::RuntimeArtifactFileBreakdown {
+    crate::artifact::RuntimeArtifactFileBreakdown {
+        build_output: 1_055,
+        node_modules: 19_620,
+        metadata: 4,
+        workspace_packages: 0,
+        other: 0,
+        total: 20_679,
+    }
+}
+
 #[test]
-fn prepare_upload_limit_error_in_json_mode_is_reported_on_both_channels() {
-    // JSON mode: report_terminal_error emits the stderr frame (Builder) + stdout
-    // envelope with code (CLI/automation) and returns AlreadyReportedError so
-    // main does not re-emit a code-less envelope.
-    let mapped = prepare_upload_terminal_error(limit_exceeded_api_error(), true);
+fn publication_limit_error_in_json_mode_preserves_runtime_breakdown() {
+    let mapped = map_publication_error(limit_exceeded_publication_error(), true, &file_breakdown());
     assert!(
         mapped
             .downcast_ref::<crate::output::AlreadyReportedError>()
             .is_some(),
-        "limit error in JSON mode must be fully reported (AlreadyReportedError), got: {mapped:#}"
+        "limit error in JSON mode must be fully reported, got: {mapped:#}"
+    );
+    let diagnostic = output::reported_terminal_diagnostic(&mapped).unwrap();
+    assert_eq!(
+        diagnostic.details.as_ref().unwrap()["runtimeArtifactFiles"]["total"],
+        20_679
+    );
+    assert_eq!(
+        diagnostic.details.as_ref().unwrap()["runtimeArtifactFiles"]["nodeModules"],
+        19_620
     );
 }
 
 #[test]
-fn prepare_upload_limit_error_in_human_mode_stays_contextual() {
-    // Human mode: no machine envelope — a contextual error main prints as "Error:".
-    let mapped = prepare_upload_terminal_error(limit_exceeded_api_error(), false);
+fn publication_limit_error_in_human_mode_is_actionable() {
+    let mapped =
+        map_publication_error(limit_exceeded_publication_error(), false, &file_breakdown());
     assert!(
         mapped
             .downcast_ref::<crate::output::AlreadyReportedError>()
             .is_none()
     );
-    assert!(mapped.to_string().contains("failed to prepare upload"));
+    assert!(
+        mapped
+            .to_string()
+            .contains("Runtime artifact file breakdown")
+    );
+    assert!(mapped.to_string().contains("node_modules 19620"));
+    assert!(
+        mapped
+            .to_string()
+            .contains("static adapter only when SSR is not required")
+    );
 }
 
 #[test]
-fn prepare_upload_platform_error_in_json_mode_is_not_swallowed() {
-    // A non-limit (platform-fault) structured error must NOT be marked
-    // already-reported — main keeps ownership so it surfaces / routes to Sentry.
-    let error: anyhow::Error = crate::api::StructuredApiError {
-        status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+fn publication_platform_error_in_json_mode_is_not_swallowed() {
+    let error = nrz_source_publisher::StructuredControlPlaneError {
+        status: reqwest::StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
         code: "INTERNAL".into(),
         message: "boom".into(),
-        retry_after_seconds: None,
+        retry_after: None,
         details: None,
     }
     .into();
-    let mapped = prepare_upload_terminal_error(error, true);
+    let mapped = map_publication_error(error, true, &file_breakdown());
     assert!(
         mapped
             .downcast_ref::<crate::output::AlreadyReportedError>()
             .is_none()
     );
-    assert!(mapped.to_string().contains("failed to prepare upload"));
-}
-
-#[tokio::test]
-async fn prepare_upload_transport_error_is_retryable() {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
-    let error = anyhow::Error::new(
-        reqwest::Client::new()
-            .post(format!("http://{addr}/v1/deployments/d/prepare-upload"))
-            .send()
-            .await
-            .expect_err("closed listener should refuse the request"),
-    )
-    .context("request failed: POST /v1/deployments/d/prepare-upload");
-
-    assert_eq!(
-        classify_prepare_upload_retry_error(&error),
-        Some(SourceControlPlaneRetry {
-            reason: SourceControlPlaneRetryReason::TransportAmbiguous,
-            retry_after: None,
-        })
-    );
-}
-
-#[test]
-fn upload_failed_control_plane_backpressure_is_retryable() {
-    let error: anyhow::Error = crate::api::StructuredApiError {
-        status: reqwest::StatusCode::SERVICE_UNAVAILABLE,
-        code: "SERVICE_UNAVAILABLE".into(),
-        message: "Artifact ingest service is overloaded".into(),
-        retry_after_seconds: Some(2),
-        details: None,
-    }
-    .into();
-
-    assert_eq!(
-        classify_upload_failed_retry_error(&error),
-        Some(SourceControlPlaneRetry {
-            reason: SourceControlPlaneRetryReason::ControlPlaneBackpressure,
-            retry_after: Some(Duration::from_secs(2)),
-        })
-    );
-}
-
-#[test]
-fn upload_failed_operation_in_progress_error_is_retryable() {
-    let error: anyhow::Error = crate::api::StructuredApiError {
-        status: reqwest::StatusCode::CONFLICT,
-        code: "OPERATION_IN_PROGRESS".into(),
-        message: "upload-failed is already running".into(),
-        retry_after_seconds: None,
-        details: None,
-    }
-    .into();
-
-    assert_eq!(
-        classify_upload_failed_retry_error(&error),
-        Some(SourceControlPlaneRetry {
-            reason: SourceControlPlaneRetryReason::FailureReportInProgress,
-            retry_after: None,
-        })
-    );
-}
-
-#[test]
-fn multipart_complete_operation_in_progress_error_is_retryable() {
-    let error: anyhow::Error = crate::api::StructuredApiError {
-        status: reqwest::StatusCode::CONFLICT,
-        code: "OPERATION_IN_PROGRESS".into(),
-        message: "multipart-complete is already running".into(),
-        retry_after_seconds: None,
-        details: None,
-    }
-    .into();
-
-    assert_eq!(
-        classify_multipart_complete_retry_error(&error),
-        Some(SourceControlPlaneRetry {
-            reason: SourceControlPlaneRetryReason::CompletionInProgress,
-            retry_after: None,
-        })
-    );
-}
-
-#[tokio::test]
-async fn multipart_complete_transport_error_is_retryable() {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    drop(listener);
-    let error = anyhow::Error::new(
-        reqwest::Client::new()
-            .post(format!("http://{addr}/v1/deployments/d/multipart-complete"))
-            .send()
-            .await
-            .expect_err("closed listener should refuse the request"),
-    )
-    .context("request failed: POST /v1/deployments/d/multipart-complete");
-
-    assert_eq!(
-        classify_multipart_complete_retry_error(&error),
-        Some(SourceControlPlaneRetry {
-            reason: SourceControlPlaneRetryReason::TransportAmbiguous,
-            retry_after: None,
-        })
-    );
-}
-
-#[test]
-fn upload_complete_source_object_incomplete_error_is_retryable() {
-    let error: anyhow::Error = crate::api::StructuredApiError {
-        status: reqwest::StatusCode::BAD_REQUEST,
-        code: "VALIDATION_ERROR".into(),
-        message: "Upload is incomplete: source object is not visible in S3 yet.".into(),
-        retry_after_seconds: None,
-        details: Some(serde_json::json!({ "field": "sourceObject" })),
-    }
-    .into();
-
-    assert_eq!(
-        classify_upload_complete_retry_error(&error),
-        Some(SourceControlPlaneRetry {
-            reason: SourceControlPlaneRetryReason::S3Visibility,
-            retry_after: None,
-        })
+    assert!(
+        mapped
+            .to_string()
+            .contains("failed to publish verified source bundle")
     );
 }
 
@@ -3587,6 +3247,7 @@ fn deploy_output_serializes_public_json_as_camel_case() {
         status: "live".to_string(),
         target: deploy_target_output(Some(false)),
         preview_protected: true,
+        runtime_artifact_files: file_breakdown(),
         warnings: vec![],
         health_check: Some(HealthCheckInfo::Http {
             path: "/health".to_string(),
@@ -3607,11 +3268,29 @@ fn deploy_output_serializes_public_json_as_camel_case() {
     assert_eq!(value["deploymentId"], "dep_123");
     assert_eq!(value["target"]["environment"], "preview");
     assert_eq!(value["previewProtected"], true);
+    assert_eq!(value["runtimeArtifactFiles"]["total"], 20_679);
     assert_eq!(value["healthCheck"]["path"], "/health");
     assert_eq!(value["verification"]["usedPreviewBypass"], true);
     assert_eq!(value["verification"]["previewAccessRevoked"], true);
     assert!(value.get("deployment_id").is_none());
     assert!(value.get("health_check").is_none());
+}
+
+#[test]
+fn skipped_deploy_output_is_machine_readable() {
+    let value = serde_json::to_value(SkippedDeployOutput {
+        deployment_id: "dep_123",
+        status: "skipped",
+    })
+    .unwrap();
+
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "deploymentId": "dep_123",
+            "status": "skipped",
+        })
+    );
 }
 
 // ── is_nextjs_project ───────────────────────────────────────
@@ -4397,6 +4076,10 @@ fn wire_functions_contract_accepts_generated_edge_rule_contributions() {
 
 #[test]
 fn pre_source_mutations_use_the_stable_execution_contract() {
+    assert_eq!(
+        crate::execution_context::RUNNER_CONTEXT_PROTOCOL,
+        "runner-context-v2"
+    );
     let body = PreSourceFailureBody {
         protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
         attempt: 2,

@@ -1,0 +1,25 @@
+[package]
+name = "nrz-source-publisher"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Shared SOURCE_BUNDLE_V1 publication state machine used by nrz CLI binary builds"
+
+[dependencies]
+base64 = "0.22"
+bytes = "1"
+futures = "0.3"
+hex = "0.4"
+libc = "0.2"
+nrz-contract = { path = "../nrz-contract" }
+nrz-runtime-artifact = { path = "../nrz-runtime-artifact" }
+nrz-source-bundle = { path = "../nrz-source-bundle" }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "time"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v7"] }

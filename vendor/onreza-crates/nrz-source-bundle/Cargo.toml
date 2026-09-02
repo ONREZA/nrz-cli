@@ -6,7 +6,15 @@ license = "MIT"
 description = "Shared SOURCE_BUNDLE_V1 manifest canonicalization used by nrz CLI binary builds"
 
 [dependencies]
+async-compression = { version = "0.4", features = ["tokio", "zstd"] }
+bytes = "1"
+futures = "0.3"
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
+tar = "0.4"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util"] }
+tokio-util = { version = "0.7", features = ["io"] }
+zstd = "0.13"

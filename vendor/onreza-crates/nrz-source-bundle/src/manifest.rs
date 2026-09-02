@@ -1,7 +1,6 @@
 // @generated vendored copy of platform crates/nrz-source-bundle/src/manifest.rs.
 // Do not edit; regenerate via 'NRZ_CLI_DIR=<path> moon run workspace:sync-nrz-cli-crates'.
 
-#![allow(dead_code, unused, clippy::all)]
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -41,6 +40,8 @@ pub struct SourceLogicalManifestFile {
     pub role: String,
     #[serde(default)]
     pub layer_name: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub executable: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -53,6 +54,10 @@ pub enum SourceLogicalManifestEntryType {
 
 fn is_source_file_entry_type(entry_type: &SourceLogicalManifestEntryType) -> bool {
     *entry_type == SourceLogicalManifestEntryType::File
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

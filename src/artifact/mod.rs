@@ -43,28 +43,171 @@ pub(crate) struct RuntimeArtifact {
     pub(crate) scan: RuntimeArtifactScan,
 }
 
+pub(crate) const NODE_RUNTIME_METADATA_FILES: &[&str] = &[
+    "package.json",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lock",
+    "bun.lockb",
+];
+
 #[derive(Debug, Clone)]
 pub(crate) enum RuntimeArtifactScan {
     All,
+    NodeRuntimeRoot,
     Selected {
-        roots: Vec<String>,
+        roots: Vec<RuntimeArtifactScanRoot>,
         symlink_roots: Vec<String>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeArtifactScanRootKind {
+    BuildOutput,
+    NodeModules,
+    Metadata,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimeArtifactScanRoot {
+    pub(crate) path: String,
+    pub(crate) kind: RuntimeArtifactScanRootKind,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RuntimeArtifactFileBreakdown {
+    pub(crate) build_output: usize,
+    pub(crate) node_modules: usize,
+    pub(crate) metadata: usize,
+    pub(crate) workspace_packages: usize,
+    pub(crate) other: usize,
+    pub(crate) total: usize,
+}
+
+impl RuntimeArtifactFileBreakdown {
+    pub(crate) fn categories(&self) -> impl Iterator<Item = (&'static str, usize)> + '_ {
+        [
+            ("build output", self.build_output),
+            ("node_modules", self.node_modules),
+            ("metadata", self.metadata),
+            ("workspace packages", self.workspace_packages),
+            ("other runtime files", self.other),
+        ]
+        .into_iter()
+        .filter(|(_, count)| *count > 0)
+    }
+
+    pub(crate) fn includes_installed_dependencies(&self) -> bool {
+        self.node_modules > 0 || self.workspace_packages > 0
+    }
 }
 
 impl RuntimeArtifactScan {
     pub(crate) fn explain(&self) -> serde_json::Value {
         match self {
-            Self::All => serde_json::json!({ "mode": "all" }),
+            Self::All | Self::NodeRuntimeRoot => serde_json::json!({ "mode": "all" }),
             Self::Selected {
                 roots,
                 symlink_roots,
             } => serde_json::json!({
                 "mode": "selected",
-                "roots": roots,
+                "roots": roots.iter().map(|root| root.path.as_str()).collect::<Vec<_>>(),
                 "symlinkRoots": symlink_roots,
             }),
         }
+    }
+
+    pub(crate) fn file_breakdown(&self, files: &[FileEntry]) -> RuntimeArtifactFileBreakdown {
+        let mut breakdown = RuntimeArtifactFileBreakdown::default();
+        for file in files {
+            match self.file_category(&file.path) {
+                RuntimeArtifactFileCategory::BuildOutput => breakdown.build_output += 1,
+                RuntimeArtifactFileCategory::NodeModules => breakdown.node_modules += 1,
+                RuntimeArtifactFileCategory::Metadata => breakdown.metadata += 1,
+                RuntimeArtifactFileCategory::WorkspacePackage => breakdown.workspace_packages += 1,
+                RuntimeArtifactFileCategory::Other => breakdown.other += 1,
+            }
+        }
+        breakdown.total = files.len();
+        breakdown
+    }
+
+    pub(crate) fn owns_as_dependency(&self, path: &str) -> bool {
+        matches!(
+            self.file_category(path),
+            RuntimeArtifactFileCategory::NodeModules
+                | RuntimeArtifactFileCategory::WorkspacePackage
+        )
+    }
+
+    fn file_category(&self, path: &str) -> RuntimeArtifactFileCategory {
+        let (roots, symlink_roots) = match self {
+            Self::All => return RuntimeArtifactFileCategory::BuildOutput,
+            Self::NodeRuntimeRoot => return node_runtime_root_file_category(path),
+            Self::Selected {
+                roots,
+                symlink_roots,
+            } => (roots, symlink_roots),
+        };
+
+        if let Some(root) = roots
+            .iter()
+            .filter(|root| runtime_path_is_covered(path, root.path.as_str()))
+            .max_by_key(|root| runtime_root_specificity(&root.path))
+        {
+            return match root.kind {
+                RuntimeArtifactScanRootKind::BuildOutput => {
+                    RuntimeArtifactFileCategory::BuildOutput
+                }
+                RuntimeArtifactScanRootKind::NodeModules => {
+                    RuntimeArtifactFileCategory::NodeModules
+                }
+                RuntimeArtifactScanRootKind::Metadata => RuntimeArtifactFileCategory::Metadata,
+            };
+        }
+        if symlink_roots
+            .iter()
+            .any(|root| runtime_path_is_covered(path, root))
+        {
+            RuntimeArtifactFileCategory::WorkspacePackage
+        } else {
+            RuntimeArtifactFileCategory::Other
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeArtifactFileCategory {
+    BuildOutput,
+    NodeModules,
+    Metadata,
+    WorkspacePackage,
+    Other,
+}
+
+fn runtime_path_is_covered(path: &str, root: &str) -> bool {
+    root == "." || path == root || path.starts_with(&format!("{root}/"))
+}
+
+fn runtime_root_specificity(root: &str) -> usize {
+    if root == "." { 0 } else { root.len() }
+}
+
+fn node_runtime_root_file_category(path: &str) -> RuntimeArtifactFileCategory {
+    let mut last = None;
+    for component in path.split('/') {
+        if component == "node_modules" {
+            return RuntimeArtifactFileCategory::NodeModules;
+        }
+        last = Some(component);
+    }
+    if last.is_some_and(|name| NODE_RUNTIME_METADATA_FILES.contains(&name)) {
+        RuntimeArtifactFileCategory::Metadata
+    } else {
+        RuntimeArtifactFileCategory::BuildOutput
     }
 }
 

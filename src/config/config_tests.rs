@@ -146,7 +146,7 @@ fn effective_config_merges_server_settings_into_onreza_shape() {
     effective.apply_server_settings(Some(&ProjectBuildSettings {
         framework_preset: Some("vite".to_string()),
         build_command: Some("npm run build".to_string()),
-        build_command_source: Some(BuildSettingSource::Detected),
+        build_command_source: Some(BuildSettingSource::User),
         output_directory: Some("dist".to_string()),
         output_directory_source: Some(BuildSettingSource::Preset),
         ..Default::default()

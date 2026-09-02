@@ -1,7 +1,6 @@
 // @generated vendored copy of platform crates/nrz-source-bundle/src/handoff.rs.
 // Do not edit; regenerate via 'NRZ_CLI_DIR=<path> moon run workspace:sync-nrz-cli-crates'.
 
-#![allow(dead_code, unused, clippy::all)]
 use serde::{Deserialize, Serialize};
 
 pub const EDGE_BUILD_HANDOFF_V1_SCHEMA_VERSION: &str = "EDGE_BUILD_HANDOFF_V1.0";

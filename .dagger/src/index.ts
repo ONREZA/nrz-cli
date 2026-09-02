@@ -11,6 +11,13 @@ const BUN_IMAGE = "oven/bun:1.3.14-debian";
 const ALPINE_IMAGE = "alpine:3.20";
 const RELEASE_GIT_METADATA_SCRIPT = ".dagger/scripts/capture-git-metadata.ts";
 const CLI_CRATES_VENDOR_DIR = "vendor/onreza-crates";
+const REQUIRED_CLI_CRATES = [
+  "nrz-contract",
+  "nrz-fn-source",
+  "nrz-source-bundle",
+  "nrz-runtime-artifact",
+  "nrz-source-publisher",
+] as const;
 
 const PLATFORMS = new Set<string>(RELEASE_PLATFORMS);
 const CHANNELS = new Set(["stable", "beta"]);
@@ -194,12 +201,15 @@ export class NrzCli {
   ): Promise<Directory> {
     requireChannel(channel);
     const releaseSource = sourceWithReleaseGitMetadata(source);
+    const requiredCrateChecks = REQUIRED_CLI_CRATES.map(
+      (crate) => `test -f ${CLI_CRATES_VENDOR_DIR}/${crate}/Cargo.toml`,
+    ).join(" && ");
     const releaseDir = bunContainer(releaseSource)
       .withExec([
         "sh",
         "-ceu",
         [
-          `if ! test -f ${CLI_CRATES_VENDOR_DIR}/nrz-contract/Cargo.toml || ! test -f ${CLI_CRATES_VENDOR_DIR}/nrz-fn-source/Cargo.toml || ! test -f ${CLI_CRATES_VENDOR_DIR}/nrz-source-bundle/Cargo.toml; then`,
+          `if ! ${requiredCrateChecks}; then`,
           "  echo 'prepare-release requires vendor/onreza-crates from deployment scripts/sync-nrz-cli-crates.ts' >&2",
           "  exit 1",
           "fi",

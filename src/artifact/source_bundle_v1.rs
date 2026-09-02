@@ -4,26 +4,21 @@ use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, bail};
-use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use uuid::Uuid;
 
-use crate::artifact::FileEntry;
+use crate::artifact::{FileEntry, RuntimeArtifactScan};
 use crate::build::manifest::{LayerTarget, Manifest};
 use crate::deploy::hash::{sha256_finalize_hex, sha256_hex};
 use crate::deploy::hash_file_streaming;
 
 pub(crate) const SOURCE_BUNDLE_SCHEMA_VERSION: &str = "SOURCE_BUNDLE_V1.0";
 pub(crate) const SOURCE_BUNDLE_FORMAT: &str = "tar.zst";
-pub(crate) const CLI_PROTOCOL_VERSION: &str = "source-bundle-v1-embedded-manifest";
 const SOURCE_BUNDLE_METADATA_DIR: &str = ".__onreza";
 const SOURCE_BUNDLE_METADATA_PREFIX: &str = ".__onreza/";
 const SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH: &str = ".__onreza/logical-manifest.json";
 pub(crate) const SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS: usize = 512;
-pub(crate) const MULTIPART_THRESHOLD_BYTES: u64 = 256 * 1024 * 1024;
-pub(crate) const MULTIPART_CHUNK_BYTES: u64 = 16 * 1024 * 1024;
 
 const ZSTD_LEVEL: i32 = 9;
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
@@ -49,6 +44,7 @@ const TAR_MODE_OCTAL_WIDTH: usize = 7;
 const TAR_SIZE_OCTAL_WIDTH: usize = 11;
 const TAR_CHECKSUM_OCTAL_WIDTH: usize = 6;
 const TAR_FILE_MODE: u64 = 0o644;
+const TAR_EXECUTABLE_FILE_MODE: u64 = 0o755;
 const TAR_SYMLINK_MODE: u64 = 0o777;
 const TAR_SPACE: u8 = 0x20;
 
@@ -56,36 +52,15 @@ const TAR_SPACE: u8 = 0x20;
 pub(crate) struct SourceBundlePlan {
     #[cfg(test)]
     pub(crate) logical_manifest: SourceLogicalManifest,
-    pub(crate) logical_manifest_summary: SourceLogicalManifestSummary,
     pub(crate) logical_manifest_sha256: String,
     pub(crate) source_sha256: String,
     pub(crate) source_size_bytes: u64,
-    pub(crate) multipart: Option<SourceBundleMultipartDescriptor>,
     source_path: PathBuf,
 }
 
 impl SourceBundlePlan {
     pub(crate) fn source_path(&self) -> &Path {
         &self.source_path
-    }
-
-    pub(crate) fn source_size_string(&self) -> String {
-        self.source_size_bytes.to_string()
-    }
-
-    pub(crate) async fn read_all(&self) -> anyhow::Result<Bytes> {
-        Ok(Bytes::from(
-            tokio::fs::read(&self.source_path).await.with_context(|| {
-                format!(
-                    "failed to read SOURCE_BUNDLE_V1 archive {}",
-                    self.source_path.display()
-                )
-            })?,
-        ))
-    }
-
-    pub(crate) async fn read_chunk(&self, offset: u64, size: u64) -> anyhow::Result<Bytes> {
-        read_file_slice(&self.source_path, offset, size).await
     }
 }
 
@@ -121,6 +96,8 @@ pub(crate) struct SourceLogicalManifestFile {
     pub(crate) role: SourceLogicalManifestFileRole,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) layer_name: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) executable: bool,
 }
 
 #[allow(dead_code)]
@@ -137,6 +114,29 @@ pub(crate) enum SourceLogicalManifestFileRole {
     Static,
     Compute,
     Prerender,
+    Dependency,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeDependencyPackaging {
+    Embedded,
+    TrustedMaterialization,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+#[cfg(unix)]
+fn is_executable(metadata: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(_metadata: &std::fs::Metadata) -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,55 +172,16 @@ pub(crate) struct SourceLogicalManifestRoute {
     pub(crate) fallthrough_when: Option<Vec<crate::build::manifest::RouteFallthroughCondition>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SourceBundleMultipartPart {
-    pub(crate) part_number: u32,
-    pub(crate) size_bytes: u64,
-    pub(crate) sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SourceBundleMultipartDescriptor {
-    pub(crate) part_size_bytes: u64,
-    pub(crate) part_count: u32,
-    pub(crate) parts: Vec<SourceBundleMultipartPart>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SourceLogicalManifestSummary {
-    pub(crate) file_count: u64,
-    pub(crate) logical_static_bytes: String,
-    pub(crate) artifact_size_bytes: String,
-    pub(crate) max_static_file_size_bytes: String,
-}
-
 #[derive(Debug, Clone)]
-pub(crate) struct PresignedSourceMultipartChunk {
-    pub(crate) part_number: u32,
-    pub(crate) url: String,
-    pub(crate) content_length: u64,
-    pub(crate) sha256: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CompletedMultipartPart {
-    pub(crate) part_number: u32,
-    pub(crate) e_tag: String,
-}
-
-#[derive(Debug)]
 struct SourceBundleEntry {
     path: String,
     size: u64,
     sha256: String,
+    executable: bool,
     kind: SourceBundleEntryKind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum SourceBundleEntryKind {
     File {
         full_path: PathBuf,
@@ -249,17 +210,33 @@ struct LayerMatch<'a> {
     root_path: String,
 }
 
+#[cfg(test)]
 pub(crate) fn build_source_bundle_plan(
     output_dir: &Path,
     manifest: &Manifest,
     files: &[FileEntry],
 ) -> anyhow::Result<SourceBundlePlan> {
-    let entries = source_entries(output_dir, files)?;
-    let logical_manifest = build_logical_manifest(manifest, &entries)?;
+    build_source_bundle_plan_with_scan(
+        output_dir,
+        manifest,
+        files,
+        &RuntimeArtifactScan::All,
+        RuntimeDependencyPackaging::Embedded,
+    )
+}
+
+pub(crate) fn build_source_bundle_plan_with_scan(
+    output_dir: &Path,
+    manifest: &Manifest,
+    files: &[FileEntry],
+    scan: &RuntimeArtifactScan,
+    dependency_packaging: RuntimeDependencyPackaging,
+) -> anyhow::Result<SourceBundlePlan> {
+    let entries = source_entries(output_dir, files, scan)?;
+    let logical_manifest = build_logical_manifest(manifest, &entries, scan, dependency_packaging)?;
     ensure_manifest_covers_entries(&logical_manifest, &entries)?;
     let logical_manifest_json = canonical_logical_manifest_json(&logical_manifest)?;
     let logical_manifest_sha256 = sha256_hex(logical_manifest_json.as_bytes());
-    let logical_manifest_summary = summarize_logical_manifest(&logical_manifest);
 
     let source_path =
         std::env::temp_dir().join(format!("nrz-source-bundle-{}.tar.zst", Uuid::now_v7()));
@@ -269,20 +246,13 @@ pub(crate) fn build_source_bundle_plan(
         let _ = std::fs::remove_file(&source_path);
     }
     let (source_sha256, source_size_bytes) = write_result?;
-    let multipart = if should_use_multipart(source_size_bytes) {
-        Some(describe_multipart(&source_path, source_size_bytes)?)
-    } else {
-        None
-    };
 
     Ok(SourceBundlePlan {
         #[cfg(test)]
         logical_manifest,
-        logical_manifest_summary,
         logical_manifest_sha256,
         source_sha256,
         source_size_bytes,
-        multipart,
         source_path,
     })
 }
@@ -305,34 +275,10 @@ pub(crate) fn canonical_logical_manifest_json(
     ))
 }
 
-fn summarize_logical_manifest(manifest: &SourceLogicalManifest) -> SourceLogicalManifestSummary {
-    let mut logical_static_bytes = 0_u64;
-    let mut artifact_size_bytes = 0_u64;
-    let mut max_static_file_size_bytes = 0_u64;
-    for file in &manifest.files {
-        if file.role == SourceLogicalManifestFileRole::Static {
-            logical_static_bytes = logical_static_bytes.saturating_add(file.size);
-        } else {
-            artifact_size_bytes = artifact_size_bytes.saturating_add(file.size);
-        }
-        if matches!(
-            file.role,
-            SourceLogicalManifestFileRole::Static | SourceLogicalManifestFileRole::Prerender
-        ) {
-            max_static_file_size_bytes = max_static_file_size_bytes.max(file.size);
-        }
-    }
-    SourceLogicalManifestSummary {
-        file_count: manifest.files.len() as u64,
-        logical_static_bytes: logical_static_bytes.to_string(),
-        artifact_size_bytes: artifact_size_bytes.to_string(),
-        max_static_file_size_bytes: max_static_file_size_bytes.to_string(),
-    }
-}
-
 fn source_entries(
     output_dir: &Path,
     files: &[FileEntry],
+    scan: &RuntimeArtifactScan,
 ) -> anyhow::Result<Vec<SourceBundleEntry>> {
     let canonical_base = std::fs::canonicalize(output_dir)
         .with_context(|| format!("failed to canonicalize {}", output_dir.display()))?;
@@ -355,6 +301,7 @@ fn source_entries(
                 path: file.path.clone(),
                 size: 0,
                 sha256,
+                executable: false,
                 kind: SourceBundleEntryKind::Symlink {
                     link_target: symlink.link_target,
                     resolved_path: symlink.resolved_path,
@@ -380,9 +327,11 @@ fn source_entries(
             path: file.path.clone(),
             size,
             sha256,
+            executable: is_executable(&metadata),
             kind: SourceBundleEntryKind::File { full_path },
         });
     }
+    let mut entries = project_workspace_dependencies(entries, scan)?;
     let path_index = SourceArchivePathIndex::from_entries(&entries)?;
     for entry in &entries {
         if let SourceBundleEntryKind::Symlink {
@@ -397,9 +346,224 @@ fn source_entries(
     Ok(entries)
 }
 
+#[derive(Debug)]
+struct WorkspaceDependencyProjection {
+    dependency_root: String,
+    link_path: String,
+    workspace_root: String,
+}
+
+fn project_workspace_dependencies(
+    entries: Vec<SourceBundleEntry>,
+    scan: &RuntimeArtifactScan,
+) -> anyhow::Result<Vec<SourceBundleEntry>> {
+    let RuntimeArtifactScan::Selected { symlink_roots, .. } = scan else {
+        return Ok(entries);
+    };
+    if symlink_roots.is_empty() {
+        return Ok(entries);
+    }
+
+    let projections = entries
+        .iter()
+        .filter_map(|entry| {
+            let SourceBundleEntryKind::Symlink { resolved_path, .. } = &entry.kind else {
+                return None;
+            };
+            let workspace_root = symlink_roots
+                .iter()
+                .find(|root| root.as_str() == resolved_path)?;
+            let dependency_root = dependency_root(&entry.path)?;
+            Some(WorkspaceDependencyProjection {
+                dependency_root,
+                link_path: entry.path.clone(),
+                workspace_root: workspace_root.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+    if projections.is_empty() {
+        return Ok(entries);
+    }
+
+    let mut projected = Vec::with_capacity(entries.len());
+    for entry in &entries {
+        if projections
+            .iter()
+            .any(|projection| projection.link_path == entry.path)
+        {
+            continue;
+        }
+        if !symlink_roots
+            .iter()
+            .any(|root| path_in_root(&entry.path, root))
+        {
+            projected.push(rewrite_dependency_symlink(entry, &projections)?);
+            continue;
+        }
+
+        for projection in projections
+            .iter()
+            .filter(|projection| path_in_root(&entry.path, &projection.workspace_root))
+        {
+            let suffix = entry
+                .path
+                .strip_prefix(&projection.workspace_root)
+                .unwrap_or_default()
+                .trim_start_matches('/');
+            if suffix.is_empty() {
+                continue;
+            }
+            let path = format!("{}/{suffix}", projection.link_path);
+            let kind = match &entry.kind {
+                SourceBundleEntryKind::File { full_path } => SourceBundleEntryKind::File {
+                    full_path: full_path.clone(),
+                },
+                SourceBundleEntryKind::Symlink { resolved_path, .. } => {
+                    let projected_target =
+                        project_dependency_target(resolved_path, projection, &projections)?;
+                    let link_target = relative_symlink_target(&path, &projected_target)?;
+                    SourceBundleEntryKind::Symlink {
+                        link_target,
+                        resolved_path: projected_target,
+                    }
+                }
+            };
+            projected.push(SourceBundleEntry {
+                path,
+                size: entry.size,
+                sha256: match &kind {
+                    SourceBundleEntryKind::File { .. } => entry.sha256.clone(),
+                    SourceBundleEntryKind::Symlink { link_target, .. } => {
+                        sha256_hex(link_target.as_bytes())
+                    }
+                },
+                executable: entry.executable,
+                kind,
+            });
+        }
+    }
+    Ok(projected)
+}
+
+fn rewrite_dependency_symlink(
+    entry: &SourceBundleEntry,
+    projections: &[WorkspaceDependencyProjection],
+) -> anyhow::Result<SourceBundleEntry> {
+    let SourceBundleEntryKind::Symlink { resolved_path, .. } = &entry.kind else {
+        return Ok(entry.clone());
+    };
+    let Some(root) = dependency_root(&entry.path) else {
+        return Ok(entry.clone());
+    };
+    let Some(projection) = projections.iter().find(|candidate| {
+        candidate.dependency_root == root && path_in_root(resolved_path, &candidate.workspace_root)
+    }) else {
+        return Ok(entry.clone());
+    };
+    let projected_target = replace_path_root(
+        resolved_path,
+        &projection.workspace_root,
+        &projection.link_path,
+    )?;
+    let link_target = relative_symlink_target(&entry.path, &projected_target)?;
+    Ok(SourceBundleEntry {
+        path: entry.path.clone(),
+        size: 0,
+        sha256: sha256_hex(link_target.as_bytes()),
+        executable: false,
+        kind: SourceBundleEntryKind::Symlink {
+            link_target,
+            resolved_path: projected_target,
+        },
+    })
+}
+
+fn dependency_root(path: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    for segment in path.split('/') {
+        parts.push(segment);
+        if segment == "node_modules" {
+            return Some(parts.join("/"));
+        }
+    }
+    None
+}
+
+fn project_dependency_target(
+    resolved_path: &str,
+    current: &WorkspaceDependencyProjection,
+    projections: &[WorkspaceDependencyProjection],
+) -> anyhow::Result<String> {
+    if path_in_root(resolved_path, &current.workspace_root) {
+        return replace_path_root(resolved_path, &current.workspace_root, &current.link_path);
+    }
+    if path_in_root(resolved_path, &current.dependency_root) {
+        return Ok(resolved_path.to_string());
+    }
+    if let Some(target) = projections.iter().find(|candidate| {
+        candidate.dependency_root == current.dependency_root
+            && path_in_root(resolved_path, &candidate.workspace_root)
+    }) {
+        return replace_path_root(resolved_path, &target.workspace_root, &target.link_path);
+    }
+    bail!(
+        "SOURCE_BUNDLE_V1 workspace dependency symlink escapes dependency root: {} -> {}",
+        current.link_path,
+        resolved_path
+    )
+}
+
+fn replace_path_root(path: &str, root: &str, replacement: &str) -> anyhow::Result<String> {
+    let suffix = path
+        .strip_prefix(root)
+        .context("workspace dependency path did not match its root")?
+        .trim_start_matches('/');
+    let projected = if suffix.is_empty() {
+        replacement.to_string()
+    } else {
+        format!("{replacement}/{suffix}")
+    };
+    validate_source_path(&projected)?;
+    Ok(projected)
+}
+
+fn relative_symlink_target(path: &str, target: &str) -> anyhow::Result<String> {
+    validate_source_path(path)?;
+    validate_source_path(target)?;
+    let from = Path::new(path)
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => part.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let to = Path::new(target)
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => part.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let common = from
+        .iter()
+        .zip(&to)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut relative = vec![".."; from.len().saturating_sub(common)];
+    relative.extend(to[common..].iter().copied());
+    if relative.is_empty() {
+        bail!("SOURCE_BUNDLE_V1 recursive projected symlink: {path} -> {target}");
+    }
+    Ok(relative.join("/"))
+}
+
 fn build_logical_manifest(
     manifest: &Manifest,
     entries: &[SourceBundleEntry],
+    scan: &RuntimeArtifactScan,
+    dependency_packaging: RuntimeDependencyPackaging,
 ) -> anyhow::Result<SourceLogicalManifest> {
     if manifest.middleware.is_some() {
         bail!(
@@ -417,7 +581,9 @@ fn build_logical_manifest(
             &entry.path,
             matched_layer.as_ref(),
             &prerender_paths,
-        );
+            scan,
+            dependency_packaging,
+        )?;
         let (entry_type, link_target) = match &entry.kind {
             SourceBundleEntryKind::File { .. } => (None, None),
             SourceBundleEntryKind::Symlink { link_target, .. } => (
@@ -434,6 +600,7 @@ fn build_logical_manifest(
             content_type: content_type_from_path(&entry.path).map(str::to_string),
             role,
             layer_name,
+            executable: entry.executable,
         });
     }
     logical_files.sort_by(|a, b| compare_utf8(&a.path, &b.path));
@@ -546,15 +713,31 @@ fn file_role(
     path: &str,
     matched_layer: Option<&LayerMatch<'_>>,
     prerender_paths: &[String],
-) -> (SourceLogicalManifestFileRole, Option<String>) {
+    scan: &RuntimeArtifactScan,
+    dependency_packaging: RuntimeDependencyPackaging,
+) -> anyhow::Result<(SourceLogicalManifestFileRole, Option<String>)> {
+    if dependency_packaging == RuntimeDependencyPackaging::TrustedMaterialization
+        && scan.owns_as_dependency(path)
+    {
+        let Some(layer_match) =
+            matched_layer.filter(|matched| matched.layer.target == LayerTarget::Compute)
+        else {
+            bail!("dependency-owned file '{path}' is not assigned to a compute layer");
+        };
+        return Ok((
+            SourceLogicalManifestFileRole::Dependency,
+            Some(layer_match.layer.name.clone()),
+        ));
+    }
+
     if prerender_paths.iter().any(|candidate| candidate == path) {
-        return (
+        return Ok((
             SourceLogicalManifestFileRole::Prerender,
             manifest
                 .prerender
                 .as_ref()
                 .map(|prerender| prerender.layer.clone()),
-        );
+        ));
     }
 
     let Some(layer_match) = matched_layer else {
@@ -563,14 +746,14 @@ fn file_role(
             .iter()
             .find(|layer| layer.target == LayerTarget::Static)
             .map(|layer| layer.name.clone());
-        return (SourceLogicalManifestFileRole::Static, fallback_static);
+        return Ok((SourceLogicalManifestFileRole::Static, fallback_static));
     };
 
     let role = match layer_match.layer.target {
         LayerTarget::Static => SourceLogicalManifestFileRole::Static,
         LayerTarget::Compute => SourceLogicalManifestFileRole::Compute,
     };
-    (role, Some(layer_match.layer.name.clone()))
+    Ok((role, Some(layer_match.layer.name.clone())))
 }
 
 fn source_layer_from_manifest(
@@ -906,7 +1089,7 @@ fn write_tar_metadata_entry<W: Write>(
     path: &str,
     body: &[u8],
 ) -> anyhow::Result<()> {
-    writer.write_all(&tar_header(path, body.len() as u64, b'0', None))?;
+    writer.write_all(&tar_header(path, body.len() as u64, b'0', None, false))?;
     writer.write_all(body)?;
     write_tar_padding(writer, body.len() as u64)?;
     Ok(())
@@ -937,6 +1120,7 @@ fn write_tar_entry<W: Write>(writer: &mut W, entry: &SourceBundleEntry) -> anyho
             pax_body.len() as u64,
             b'x',
             None,
+            false,
         ))?;
         writer.write_all(&pax_body)?;
         write_tar_padding(writer, pax_body.len() as u64)?;
@@ -948,6 +1132,7 @@ fn write_tar_entry<W: Write>(writer: &mut W, entry: &SourceBundleEntry) -> anyho
             0,
             b'2',
             (!needs_pax_link_target).then_some(link_target.as_str()),
+            false,
         ))?;
         return Ok(());
     }
@@ -957,6 +1142,7 @@ fn write_tar_entry<W: Write>(writer: &mut W, entry: &SourceBundleEntry) -> anyho
         entry.size,
         b'0',
         None,
+        entry.executable,
     ))?;
     let SourceBundleEntryKind::File { full_path } = &entry.kind else {
         unreachable!("symlink entries return before file copy")
@@ -999,6 +1185,7 @@ fn tar_header(
     size: u64,
     type_flag: u8,
     link_name: Option<&str>,
+    executable: bool,
 ) -> [u8; TAR_BLOCK_SIZE] {
     let mut header = [0u8; TAR_BLOCK_SIZE];
     write_ascii(&mut header, 0, TAR_NAME_LENGTH, path);
@@ -1012,6 +1199,8 @@ fn tar_header(
     }
     let mode = if type_flag == b'2' {
         TAR_SYMLINK_MODE
+    } else if executable {
+        TAR_EXECUTABLE_FILE_MODE
     } else {
         TAR_FILE_MODE
     };
@@ -1103,52 +1292,6 @@ fn build_pax_key_value_record(key: &str, value: &str) -> String {
     }
 }
 
-pub(crate) fn should_use_multipart(source_size_bytes: u64) -> bool {
-    source_size_bytes >= MULTIPART_THRESHOLD_BYTES
-}
-
-fn describe_multipart(
-    source_path: &Path,
-    source_size_bytes: u64,
-) -> anyhow::Result<SourceBundleMultipartDescriptor> {
-    let mut file = std::fs::File::open(source_path)
-        .with_context(|| format!("failed to open {}", source_path.display()))?;
-    let mut parts = Vec::new();
-    let mut remaining = source_size_bytes;
-    let mut part_number = 1u32;
-    let mut buffer = vec![0u8; COPY_BUFFER_BYTES];
-
-    while remaining > 0 {
-        let part_size = remaining.min(MULTIPART_CHUNK_BYTES);
-        let mut hasher = Sha256::new();
-        let mut read_for_part = 0u64;
-        while read_for_part < part_size {
-            let limit = (part_size - read_for_part).min(COPY_BUFFER_BYTES as u64) as usize;
-            let read = file
-                .read(&mut buffer[..limit])
-                .context("failed to read SOURCE_BUNDLE_V1 multipart chunk")?;
-            if read == 0 {
-                bail!("SOURCE_BUNDLE_V1 archive truncated while describing multipart upload");
-            }
-            hasher.update(&buffer[..read]);
-            read_for_part += read as u64;
-        }
-        parts.push(SourceBundleMultipartPart {
-            part_number,
-            size_bytes: part_size,
-            sha256: sha256_finalize_hex(hasher),
-        });
-        remaining -= part_size;
-        part_number += 1;
-    }
-
-    Ok(SourceBundleMultipartDescriptor {
-        part_size_bytes: MULTIPART_CHUNK_BYTES,
-        part_count: parts.len() as u32,
-        parts,
-    })
-}
-
 struct HashingWriter<W> {
     inner: W,
     hasher: Sha256,
@@ -1213,19 +1356,4 @@ fn content_type_from_path(path: &str) -> Option<&'static str> {
         "pdf" => "application/pdf",
         _ => return None,
     })
-}
-
-async fn read_file_slice(path: &Path, offset: u64, size: u64) -> anyhow::Result<Bytes> {
-    let mut file = tokio::fs::File::open(path)
-        .await
-        .with_context(|| format!("failed to open {}", path.display()))?;
-    file.seek(std::io::SeekFrom::Start(offset))
-        .await
-        .with_context(|| format!("failed to seek {}", path.display()))?;
-    let mut buf =
-        vec![0u8; usize::try_from(size).context("file slice too large for this platform")?];
-    file.read_exact(&mut buf)
-        .await
-        .with_context(|| format!("failed to read {} bytes from {}", size, path.display()))?;
-    Ok(Bytes::from(buf))
 }

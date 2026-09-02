@@ -1,6 +1,6 @@
 [package]
 name = "nrz"
-version = "0.38.0-beta.2"
+version = "0.38.0-beta.3"
 edition = "2024"
 description = "ONREZA platform CLI — dev, build, deploy"
 license = "MIT"
@@ -19,6 +19,7 @@ path = "src/main.rs"
 nrz-contract = { path = "vendor/onreza-crates/nrz-contract" }
 nrz-fn-source = { path = "vendor/onreza-crates/nrz-fn-source" }
 nrz-source-bundle = { path = "vendor/onreza-crates/nrz-source-bundle" }
+nrz-source-publisher = { path = "vendor/onreza-crates/nrz-source-publisher" }
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }

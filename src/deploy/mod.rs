@@ -10,6 +10,9 @@ pub(crate) mod bundle;
 #[cfg(test)]
 mod bundle_tests;
 mod command;
+mod dependency_scripts;
+#[cfg(test)]
+mod dependency_scripts_tests;
 #[cfg(test)]
 mod deploy_tests;
 mod edge_handoff;
@@ -19,6 +22,9 @@ pub(crate) mod hash;
 pub(crate) mod health_check;
 #[cfg(test)]
 mod health_check_tests;
+mod ignored_build;
+#[cfg(test)]
+mod ignored_build_tests;
 mod plan;
 mod runtime_artifact;
 mod scan;
@@ -32,6 +38,7 @@ use command::*;
 use health_check::resolve_health_check;
 #[cfg(test)]
 use health_check::validate_health_path;
+use ignored_build::{IgnoredBuildOutcome, IgnoredBuildRequest};
 use runtime_artifact::*;
 pub(crate) use scan::hash_file_streaming;
 #[cfg(test)]
@@ -41,24 +48,17 @@ use source_upload::*;
 
 use std::collections::{HashSet, VecDeque};
 use std::io::Read;
-use std::num::NonZeroU64;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
-use bytes::Bytes;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::api::{
-    ApiClient, ConditionalUploadConflict, PresignedHeadVerify, PresignedPutHeaders,
-    classify_api_retry, path_segment,
-};
+use crate::api::{ApiClient, classify_api_retry, path_segment};
 use crate::artifact::source_bundle_v1::{
-    self, CLI_PROTOCOL_VERSION, CompletedMultipartPart, PresignedSourceMultipartChunk,
-    SOURCE_BUNDLE_FORMAT, SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, SourceBundlePlan,
-    source_bundle_contract_characters,
+    SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, SourceBundlePlan, source_bundle_contract_characters,
 };
 use crate::artifact::{ArtifactRootScope, FileEntry, RuntimeArtifact, RuntimeArtifactScan};
 use crate::auth;
@@ -69,32 +69,8 @@ use crate::detect::types::{ComputeType, RuntimeType};
 use crate::link;
 use crate::output;
 use nrz::config::{EffectiveProjectConfig, ProjectBuildSettings, ProjectConfig};
-use nrz_contract::cli_api::{
-    OnrezaCliApiV1MultipartCompleteRequestPartsItem as CliMultipartCompletePart,
-    OnrezaCliApiV1PrepareUploadRequestLogicalManifestSummary as CliLogicalManifestSummary,
-    OnrezaCliApiV1PrepareUploadRequestMultipart as CliPrepareMultipart,
-    OnrezaCliApiV1PrepareUploadRequestMultipartPartsItem as CliPrepareMultipartPart,
-    OnrezaCliApiV1PrepareUploadRequestSourceUploadRecovery as CliPrepareUploadSourceUploadRecovery,
-};
-use nrz_contract::{
-    CliMultipartCompleteRequest, CliMultipartCompleteResponse, CliPrepareUploadRequest,
-    CliPrepareUploadRequiredComplete, CliPrepareUploadResponse,
-    CliPrepareUploadResponseMultipartChunk, CliPrepareUploadResponsePresignedPutHeaders,
-    CliPrepareUploadResponsePresignedPutVerifyHead, CliUploadCompleteRequest,
-    CliUploadCompleteResponse, CliUploadFailedRequest, CliUploadFailedResponse,
-};
-use url::Url;
 use uuid::Uuid;
 
-const SOURCE_COMPLETION_RETRY_BUDGET: Duration = Duration::from_secs(30 * 60);
-const SOURCE_COMPLETION_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
-const SOURCE_COMPLETION_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
-const PREPARE_UPLOAD_RETRY_BUDGET: Duration = Duration::from_secs(10 * 60);
-const PREPARE_UPLOAD_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
-const PREPARE_UPLOAD_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
-const UPLOAD_FAILED_RETRY_BUDGET: Duration = Duration::from_secs(5 * 60);
-const UPLOAD_FAILED_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
-const UPLOAD_FAILED_MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 const SOURCE_REGISTRATION_RETRY_BUDGET: Duration = Duration::from_secs(10 * 60);
 const SOURCE_REGISTRATION_REQUEST_TIMEOUT: Duration = Duration::from_secs(370);
 const SOURCE_REGISTRATION_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
@@ -103,11 +79,7 @@ const PRE_SOURCE_FAILURE_RETRY_BUDGET: Duration = Duration::from_secs(10);
 const PRE_SOURCE_FAILURE_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const PRE_SOURCE_FAILURE_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(250);
 const PRE_SOURCE_FAILURE_MAX_RETRY_DELAY: Duration = Duration::from_secs(2);
-const MAX_UPLOAD_FAILURE_LOG_LENGTH: usize = 4096;
-const REDACTED_URL_COMPONENT: &str = "REDACTED";
-const SOURCE_UPLOAD_PUT_FAILED: &str = "SOURCE_UPLOAD_PUT_FAILED";
-const SOURCE_UPLOAD_RECOVERY_CONDITIONAL_PRECONDITION_FAILED: &str =
-    "conditional-precondition-failed";
+const MAX_PRE_SOURCE_FAILURE_LOG_LENGTH: usize = 4096;
 const NEXTJS_ADAPTER_EDGE_RULE_PRODUCER: &str = "nextjs-adapter";
 #[derive(Debug)]
 struct DeploySymlinkTarget {
@@ -203,6 +175,26 @@ struct PreSourceFailureResponse {
     accepted: bool,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreSourceSkipBody<'a> {
+    protocol_version: &'static str,
+    attempt: u32,
+    reason: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+struct PreSourceSkipResponse {
+    accepted: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkippedDeployOutput<'a> {
+    deployment_id: &'a str,
+    status: &'static str,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RunnerDeploymentContext {
@@ -272,6 +264,7 @@ struct DeployOutput {
     status: String,
     target: DeployTargetOutput,
     preview_protected: bool,
+    runtime_artifact_files: crate::artifact::RuntimeArtifactFileBreakdown,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -606,6 +599,11 @@ pub async fn run(
         .transpose()?;
     let edge_build_handoff =
         edge_handoff::EdgeBuildHandoffOutput::from_process_environment(resume_deployment_id)?;
+    let dependency_packaging = if edge_build_handoff.is_some() {
+        crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization
+    } else {
+        crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::Embedded
+    };
     let server_failure_mutations_enabled = edge_build_handoff.is_none();
     let pre_source_failure_client = server_failure_mutations_enabled.then_some(&client);
 
@@ -614,8 +612,12 @@ pub async fn run(
             .get(&format!("/v1/deployments/{deployment_id}/runner-context"))
             .await
             .context("failed to fetch exact deployment runner context")?;
-        if context.protocol_version != crate::execution_context::EXECUTION_CONTEXT_PROTOCOL {
-            bail!("unsupported execution context protocol");
+        if context.protocol_version != crate::execution_context::RUNNER_CONTEXT_PROTOCOL {
+            bail!(
+                "unsupported runner context protocol {}; expected {}",
+                context.protocol_version,
+                crate::execution_context::RUNNER_CONTEXT_PROTOCOL
+            );
         }
         Some(context)
     } else {
@@ -711,7 +713,7 @@ pub async fn run(
             target_production: args.prod.then_some(true),
         })
         .await?;
-        let source_bundle = deploy_plan.materialize_source_bundle(json)?;
+        let source_bundle = deploy_plan.materialize_source_bundle(json, dependency_packaging)?;
         let explain = deploy_plan.explain(
             &command_context,
             early_project_id.as_deref(),
@@ -939,7 +941,42 @@ pub async fn run(
 
     let admitted_deployment_id = deployment.id.clone();
     let mut source_registered = false;
+    let mut skipped_by_ignored_build_step = false;
     let deploy_result = async {
+        if let Some(runner) = &runner_context {
+            match ignored_build::evaluate(IgnoredBuildRequest {
+                settings: &runner.settings,
+                environment_type: &execution_context.environment_type,
+                project_dir: &command_context.project_dir,
+                execution_env: &execution_env,
+                json,
+                build_logs: build_log_session
+                    .as_ref()
+                    .and_then(BuildLogSession::emitter),
+            })
+            .await?
+            {
+                IgnoredBuildOutcome::Continue { .. } => {}
+                IgnoredBuildOutcome::Skip { reason } => {
+                    mark_pre_source_skipped(&client, &deployment.id, deployment.attempt, &reason)
+                        .await?;
+                    skipped_by_ignored_build_step = true;
+                    output::success(
+                        json,
+                        "Deployment marked SKIPPED; install and build were not started",
+                        output::Phase::Deploy,
+                    );
+                    if json {
+                        output::json_output(&SkippedDeployOutput {
+                            deployment_id: &deployment.id,
+                            status: "skipped",
+                        });
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
         let deploy_plan = plan::build(plan::DeployPlanRequest {
             args: &args,
             command: &command_context,
@@ -957,7 +994,8 @@ pub async fn run(
         {
             emitter.info(BuildLogPhase::Detect, "Build output validated");
         }
-        let upload_plan = deploy_plan.materialize_source_bundle(json)?;
+        let upload_plan = deploy_plan.materialize_source_bundle(json, dependency_packaging)?;
+        let runtime_artifact_files = deploy_plan.artifact.file_breakdown.clone();
         if let Some(publisher) = &edge_build_handoff {
             let handoff = publisher.publish(&upload_plan)?;
             if json {
@@ -992,6 +1030,7 @@ pub async fn run(
                 upload_plan,
                 json,
                 warnings: deploy_plan.warnings,
+                runtime_artifact_files,
             })
             .await;
         }
@@ -999,6 +1038,7 @@ pub async fn run(
         // ── Normal flow continues below ─────────────────────────────────
 
         let deploy_warnings = deploy_plan.warnings.clone();
+        let deploy_runtime_artifact_files = runtime_artifact_files;
         let deploy_health_check = deploy_plan.health_check.clone();
         let deploy_production = deploy_plan.production;
         let sync_detection = deploy_plan.artifact.build.detection.clone();
@@ -1043,15 +1083,16 @@ pub async fn run(
             emitter.info(BuildLogPhase::Upload, "Uploading deployment source bundle");
         }
 
-        prepare_upload_and_complete(
-            &client,
-            &deployment.id,
-            &execution_context.workspace_id,
-            &project_id,
-            &deployment_attempt_id,
+        prepare_upload_and_complete(PrepareUploadAndCompleteRequest {
+            client: &client,
+            deployment_id: &deployment.id,
+            workspace_id: &execution_context.workspace_id,
+            project_id: &project_id,
+            deployment_attempt_id: &deployment_attempt_id,
             json,
-            &upload_plan,
-        )
+            plan: &upload_plan,
+            runtime_artifact_files: &deploy_runtime_artifact_files,
+        })
         .await?;
         if let Some(emitter) = build_log_session
             .as_ref()
@@ -1112,6 +1153,7 @@ pub async fn run(
                             status: "live".into(),
                             target,
                             preview_protected,
+                            runtime_artifact_files: deploy_runtime_artifact_files.clone(),
                             warnings: deploy_warnings.clone(),
                             health_check: deploy_health_check.as_ref().map(|hc| hc.to_info()),
                             verification,
@@ -1174,7 +1216,9 @@ pub async fn run(
         .await;
     }
     if let Some(session) = build_log_session.as_mut() {
-        let success = if edge_build_handoff.is_some() {
+        let success = if skipped_by_ignored_build_step {
+            BuildLogSuccess::DeploymentSkipped
+        } else if edge_build_handoff.is_some() {
             BuildLogSuccess::EdgeHandoffPublished
         } else {
             BuildLogSuccess::ArtifactsUploaded
@@ -1182,6 +1226,68 @@ pub async fn run(
         session.finish(&deploy_result, success).await;
     }
     deploy_result
+}
+
+async fn mark_pre_source_skipped(
+    client: &ApiClient,
+    deployment_id: &str,
+    attempt: u32,
+    reason: &str,
+) -> anyhow::Result<()> {
+    let path = format!(
+        "/v1/deployments/{}/execution-context/skip-before-source",
+        path_segment(deployment_id)
+    );
+    let body = PreSourceSkipBody {
+        protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
+        attempt,
+        reason,
+    };
+    let started = Instant::now();
+    let mut delay = PRE_SOURCE_FAILURE_INITIAL_RETRY_DELAY;
+    loop {
+        let remaining = PRE_SOURCE_FAILURE_RETRY_BUDGET.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(
+            PRE_SOURCE_FAILURE_REQUEST_TIMEOUT.min(remaining),
+            client.post::<_, PreSourceSkipResponse>(&path, &body),
+        )
+        .await
+        {
+            Ok(Ok(response)) if response.accepted => return Ok(()),
+            Ok(Ok(_)) => {
+                return Err(output::coded_error(
+                    "IGNORED_BUILD_SKIP_REJECTED",
+                    "deployment state changed before Ignored Build Step could mark it skipped",
+                ));
+            }
+            Ok(Err(error)) => {
+                let Some(retry) = classify_api_retry(&error) else {
+                    return Err(error.context("failed to mark deployment skipped"));
+                };
+                let remaining = PRE_SOURCE_FAILURE_RETRY_BUDGET.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    break;
+                }
+                tokio::time::sleep(retry.retry_after.unwrap_or(delay).min(remaining)).await;
+                delay = (delay * 2).min(PRE_SOURCE_FAILURE_MAX_RETRY_DELAY);
+            }
+            Err(_) => {
+                let remaining = PRE_SOURCE_FAILURE_RETRY_BUDGET.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    break;
+                }
+                tokio::time::sleep(delay.min(remaining)).await;
+                delay = (delay * 2).min(PRE_SOURCE_FAILURE_MAX_RETRY_DELAY);
+            }
+        }
+    }
+    Err(output::coded_error(
+        "IGNORED_BUILD_SKIP_REPORT_FAILED",
+        "timed out while marking deployment skipped",
+    ))
 }
 
 async fn report_pre_source_failure(
@@ -1323,7 +1429,7 @@ fn sanitize_pre_source_failure_message(
         .expect("empty build-log redactor must compile");
     truncate_utf8(
         sanitize_message(message, redactor.unwrap_or(&fallback_redactor)),
-        MAX_UPLOAD_FAILURE_LOG_LENGTH,
+        MAX_PRE_SOURCE_FAILURE_LOG_LENGTH,
     )
 }
 
@@ -1377,6 +1483,7 @@ async fn sync_compute_config(
 struct ResumeDeployOutput {
     deployment_id: String,
     status: String,
+    runtime_artifact_files: crate::artifact::RuntimeArtifactFileBreakdown,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
 }
@@ -1514,6 +1621,7 @@ struct ResumeDeployRequest<'a> {
     project_id: &'a str,
     upload_plan: SourceBundlePlan,
     warnings: Vec<String>,
+    runtime_artifact_files: crate::artifact::RuntimeArtifactFileBreakdown,
     json: bool,
 }
 
@@ -1525,6 +1633,7 @@ async fn resume_deploy(request: ResumeDeployRequest<'_>) -> anyhow::Result<()> {
         project_id,
         upload_plan,
         warnings,
+        runtime_artifact_files,
         json,
     } = request;
 
@@ -1546,15 +1655,16 @@ async fn resume_deploy(request: ResumeDeployRequest<'_>) -> anyhow::Result<()> {
     );
     let deployment_attempt_id = Uuid::now_v7().to_string();
 
-    prepare_upload_and_complete(
+    prepare_upload_and_complete(PrepareUploadAndCompleteRequest {
         client,
         deployment_id,
         workspace_id,
         project_id,
-        &deployment_attempt_id,
+        deployment_attempt_id: &deployment_attempt_id,
         json,
-        &upload_plan,
-    )
+        plan: &upload_plan,
+        runtime_artifact_files: &runtime_artifact_files,
+    })
     .await?;
 
     // Output result (no polling in resume mode — builder handles status)
@@ -1562,6 +1672,7 @@ async fn resume_deploy(request: ResumeDeployRequest<'_>) -> anyhow::Result<()> {
         let data = ResumeDeployOutput {
             deployment_id: deployment_id.to_string(),
             status: "upload-complete".into(),
+            runtime_artifact_files,
             warnings,
         };
         output::json_output(&data);
