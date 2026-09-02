@@ -1,6 +1,7 @@
 // @generated vendored copy of platform crates/nrz-dependency-materializer/src/source_bundle.rs.
 // Do not edit; regenerate via 'NRZ_CLI_DIR=<path> moon run workspace:sync-nrz-cli-crates'.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -17,7 +18,7 @@ use thiserror::Error;
 
 use crate::{
     DependencyMaterializationKind, DependencyMaterializationRequest, DependencyMaterializerError,
-    DependencyTreeLimits, ErofsToolchain,
+    DependencySymlinkScope, DependencyTreeLimits, ErofsToolchain,
 };
 
 pub struct SourceBundleMaterializationPolicy {
@@ -75,10 +76,23 @@ pub fn materialize_source_bundle_runtime(
         })?;
     }
 
+    let allowed_mount_points_by_layer = trees.iter().fold(
+        BTreeMap::<String, Vec<String>>::new(),
+        |mut by_layer, tree| {
+            by_layer
+                .entry(tree.layer_name.clone())
+                .or_default()
+                .push(tree.mount_point.clone());
+            by_layer
+        },
+    );
     let mut total_files = 0_u64;
     let mut total_bytes = 0_u64;
     let mut dependencies = Vec::with_capacity(trees.len());
     for (index, tree) in trees.into_iter().enumerate() {
+        let allowed_mount_points = allowed_mount_points_by_layer
+            .get(&tree.layer_name)
+            .expect("every dependency tree has an allowed mount set");
         let image_path = image_root.join(format!("dependency-{index}.erofs"));
         let output = toolchain.materialize(DependencyMaterializationRequest {
             source_tree: &tree.path,
@@ -86,6 +100,10 @@ pub fn materialize_source_bundle_runtime(
             kind: request.policy.kind,
             compatibility: request.policy.compatibility.clone(),
             limits: request.policy.tree_limits,
+            symlink_scope: DependencySymlinkScope::RuntimeMounts {
+                mount_point: &tree.mount_point,
+                allowed_mount_points,
+            },
         })?;
         total_files = total_files
             .checked_add(output.tree.expanded_file_count)
