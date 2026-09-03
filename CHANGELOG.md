@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.0-beta.4] - 2026-09-03
+
+### ✨ Features
+
+- **deploy:** preserve Python build contract ([6b3efc8](https://github.com/ONREZA/nrz-cli/commit/6b3efc810ae96931ca1f28d0ae626607ebd39452))
+- **deploy:** add managed Python toolchain ([a33d537](https://github.com/ONREZA/nrz-cli/commit/a33d537d36b607c4e390ca29c3636d2b683e36fe))
+- **deploy:** add Python runtime support ([c4f8919](https://github.com/ONREZA/nrz-cli/commit/c4f8919a4db03697ce3e5efa6cbe8d30e5e346c4))
+
+### 🐛 Bug Fixes
+
+- **cli:** align deployment API contracts ([3446d83](https://github.com/ONREZA/nrz-cli/commit/3446d83e5f4e9cbddb90264ab9fcf9181e67775d))
+- **deps:** sync platform runtime crates ([b80bb2a](https://github.com/ONREZA/nrz-cli/commit/b80bb2a8593b720a21bf94c6ea039ea37af6230c))
+- **build:** sync dependency artifact contract ([fc79b8c](https://github.com/ONREZA/nrz-cli/commit/fc79b8ca2650e454bd53ae4e6353bd9a7dcc518d))
+
 ## [0.39.0-beta.3] - 2026-09-03
 
 ### 🐛 Bug Fixes
