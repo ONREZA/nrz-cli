@@ -16,6 +16,7 @@ use crate::{
 };
 
 const DEPENDENCY_FILE_ROLE: &str = "dependency";
+pub const PYTHON_314_SITE_PACKAGES_ROOT: &str = ".onreza/python/3.14/site-packages";
 #[cfg(unix)]
 const FILE_MODE: u32 = 0o644;
 #[cfg(unix)]
@@ -223,7 +224,7 @@ fn dependency_groups(
             normalize_source_path(&file.path).map_err(DependencySourceTreeError::Manifest)?;
         let source_root = dependency_source_root(&path).ok_or_else(|| {
             DependencySourceTreeError::Manifest(format!(
-                "dependency file is not inside node_modules: {path}"
+                "dependency file is not inside a supported dependency root: {path}"
             ))
         })?;
         if dependency_relative_path(&source_root, &path)?
@@ -272,6 +273,12 @@ fn expected_dependency_file<'a>(
 }
 
 fn dependency_source_root(path: &str) -> Option<String> {
+    if path
+        .strip_prefix(PYTHON_314_SITE_PACKAGES_ROOT)
+        .is_some_and(|suffix| suffix.starts_with('/'))
+    {
+        return Some(PYTHON_314_SITE_PACKAGES_ROOT.to_string());
+    }
     let mut parts = Vec::new();
     for segment in path.split('/') {
         parts.push(segment);

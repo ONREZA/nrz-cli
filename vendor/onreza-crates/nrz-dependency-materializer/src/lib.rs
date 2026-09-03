@@ -10,20 +10,24 @@
 //! data with `fsck.erofs`, and emits the shared runtime artifact contract.
 
 mod source_bundle;
+mod tool_executor;
 
 pub use source_bundle::{
     MaterializedRuntimeDependency, MaterializedSourceBundleRuntime,
     SourceBundleMaterializationError, SourceBundleMaterializationPolicy,
     SourceBundleMaterializationRequest, materialize_source_bundle_runtime,
 };
+pub use tool_executor::{
+    ErofsToolExecutionError, ErofsToolExecutor, ErofsToolInvocation, ErofsToolKind, ErofsToolOutput,
+};
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, Metadata, Permissions};
 use std::io::Read;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output};
+use std::sync::Arc;
 
 use nrz_runtime_artifact::{
     DEPENDENCY_EROFS_MEDIA_TYPE, DEPENDENCY_MATERIALIZATION_V1_SCHEMA_VERSION,
@@ -152,20 +156,33 @@ pub struct DependencyMaterializationOutput {
     pub manifest: VerifiedDependencyMaterializationManifest,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ErofsToolchain {
     mkfs_erofs: PathBuf,
     fsck_erofs: PathBuf,
+    executor: Arc<dyn ErofsToolExecutor>,
 }
 
 impl ErofsToolchain {
-    pub fn new(
+    /// Reference executor for tests and offline qualification only.
+    /// Production callers must inject an isolated executor with `with_executor`.
+    #[doc(hidden)]
+    pub fn new_direct_for_tests(
         mkfs_erofs: impl Into<PathBuf>,
         fsck_erofs: impl Into<PathBuf>,
+    ) -> Result<Self, DependencyMaterializerError> {
+        Self::with_executor(mkfs_erofs, fsck_erofs, tool_executor::direct_executor())
+    }
+
+    pub fn with_executor(
+        mkfs_erofs: impl Into<PathBuf>,
+        fsck_erofs: impl Into<PathBuf>,
+        executor: Arc<dyn ErofsToolExecutor>,
     ) -> Result<Self, DependencyMaterializerError> {
         let toolchain = Self {
             mkfs_erofs: mkfs_erofs.into(),
             fsck_erofs: fsck_erofs.into(),
+            executor,
         };
         for (name, path) in [
             ("mkfs.erofs", &toolchain.mkfs_erofs),
@@ -235,8 +252,10 @@ impl ErofsToolchain {
         }
         let partial = PartialImage::new(partial_path.clone());
 
-        let mkfs_output = Command::new(&self.mkfs_erofs)
-            .args([
+        let mkfs_output = self.executor.execute(ErofsToolInvocation {
+            kind: ErofsToolKind::Mkfs,
+            executable: &self.mkfs_erofs,
+            arguments: [
                 "-z",
                 "zstd,level=3",
                 "-C4096",
@@ -251,26 +270,28 @@ impl ErofsToolchain {
                 "-x",
                 "-1",
                 "--quiet",
+            ]
+            .into_iter()
+            .map(OsString::from)
+            .chain([
+                partial_path.as_os_str().to_os_string(),
+                source_tree.as_os_str().to_os_string(),
             ])
-            .arg(&partial_path)
-            .arg(&source_tree)
-            .output()
-            .map_err(|source| DependencyMaterializerError::Io {
-                operation: "execute mkfs.erofs",
-                path: self.mkfs_erofs.clone(),
-                source,
-            })?;
+            .collect(),
+            source_tree: Some(&source_tree),
+            image_path: &partial_path,
+            max_output_bytes: request.limits.max_expanded_bytes,
+        })?;
         require_tool_success("mkfs.erofs", &mkfs_output)?;
 
-        let fsck_output = Command::new(&self.fsck_erofs)
-            .arg("--extract")
-            .arg(&partial_path)
-            .output()
-            .map_err(|source| DependencyMaterializerError::Io {
-                operation: "execute fsck.erofs",
-                path: self.fsck_erofs.clone(),
-                source,
-            })?;
+        let fsck_output = self.executor.execute(ErofsToolInvocation {
+            kind: ErofsToolKind::Fsck,
+            executable: &self.fsck_erofs,
+            arguments: vec!["--extract".into(), partial_path.as_os_str().to_os_string()],
+            source_tree: None,
+            image_path: &partial_path,
+            max_output_bytes: request.limits.max_expanded_bytes,
+        })?;
         require_tool_success("fsck.erofs --extract", &fsck_output)?;
 
         let inspection_after_generation = inspect_dependency_tree_with_scope(
@@ -384,6 +405,8 @@ pub enum DependencyMaterializerError {
         status: String,
         stderr: String,
     },
+    #[error("EROFS tool execution failed: {0}")]
+    ToolExecution(#[from] ErofsToolExecutionError),
     #[error("generated materialization does not satisfy the runtime contract: {0}")]
     Contract(String),
     #[error("{operation} failed for {path}: {source}", path = .path.display())]
@@ -828,15 +851,15 @@ fn sha256_prefixed(bytes: &[u8]) -> String {
 
 fn require_tool_success(
     tool: &'static str,
-    output: &Output,
+    output: &ErofsToolOutput,
 ) -> Result<(), DependencyMaterializerError> {
-    if output.status.success() {
+    if output.success {
         return Ok(());
     }
     let stderr = &output.stderr[..output.stderr.len().min(TOOL_OUTPUT_LIMIT_BYTES)];
     Err(DependencyMaterializerError::Tool {
         tool,
-        status: output.status.to_string(),
+        status: output.status.clone(),
         stderr: String::from_utf8_lossy(stderr).trim().to_string(),
     })
 }

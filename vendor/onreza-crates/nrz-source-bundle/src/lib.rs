@@ -10,7 +10,7 @@ pub mod verifier;
 
 pub use dependency::{
     DependencySourceTree, DependencySourceTreeError, DependencySourceTreeSpec,
-    dependency_source_tree_specs, extract_dependency_source_trees,
+    PYTHON_314_SITE_PACKAGES_ROOT, dependency_source_tree_specs, extract_dependency_source_trees,
 };
 pub use handoff::{
     EDGE_BUILD_HANDOFF_V1_FILE, EDGE_BUILD_HANDOFF_V1_SCHEMA_VERSION,
