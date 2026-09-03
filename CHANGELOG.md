@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.0-beta.0] - 2026-09-03
+
+### ✨ Features
+
+- **deploy:** add Python runtime support ([c4f8919](https://github.com/ONREZA/nrz-cli/commit/c4f8919a4db03697ce3e5efa6cbe8d30e5e346c4))
+
+### 🐛 Bug Fixes
+
+- **build:** sync dependency artifact contract ([fc79b8c](https://github.com/ONREZA/nrz-cli/commit/fc79b8ca2650e454bd53ae4e6353bd9a7dcc518d))
+
 ## [0.38.2] - 2026-09-02
 
 ### 🐛 Bug Fixes
