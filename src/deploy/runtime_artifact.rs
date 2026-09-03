@@ -17,6 +17,11 @@ pub(super) fn resolve_runtime_artifact(
     detection: &crate::detect::types::DetectionResult,
     json: bool,
 ) -> anyhow::Result<RuntimeArtifact> {
+    if detection.metadata.runtime.runtime_type == RuntimeType::Python
+        && manifest_has_compute_layer(&manifest)
+    {
+        return resolve_python_runtime_artifact(project_dir, build_output_dir, manifest, json);
+    }
     let Some(plan) = plan_node_project_runtime_artifact(
         workspace_root_dir,
         project_dir,
@@ -70,6 +75,47 @@ pub(super) fn resolve_runtime_artifact(
             roots,
             symlink_roots,
         },
+    })
+}
+
+fn resolve_python_runtime_artifact(
+    project_dir: &Path,
+    build_output_dir: PathBuf,
+    manifest: build_manifest::Manifest,
+    json: bool,
+) -> anyhow::Result<RuntimeArtifact> {
+    let build_output_prefix = relative_runtime_artifact_path(project_dir, &build_output_dir)
+        .map_err(|_| {
+            output::coded_error(
+                "INVALID_BUILD_OUTPUT",
+                "Python output directory must be inside the project directory",
+            )
+        })?;
+    let manifest = if build_output_prefix == "." {
+        manifest
+    } else {
+        rewrite_manifest_for_node_project_runtime(manifest, &build_output_prefix)?
+    };
+    let dependency_root = project_dir.join(crate::artifact::PYTHON_SITE_PACKAGES_ROOT);
+    if crate::detect::python::dependency_manifest(&crate::detect::fs::LocalFs::new(project_dir))
+        .is_some()
+        && !dependency_root.is_dir()
+    {
+        return Err(output::coded_error(
+            "MISSING_RUNTIME_DEPENDENCIES",
+            "Python PROCESS runtime requires installed dependencies. Run the install step before deploy, or remove --skip-install.",
+        ));
+    }
+    output::status(
+        json,
+        "~",
+        "Runtime artifact: CPython 3.14 project root",
+        output::Phase::Deploy,
+    );
+    Ok(RuntimeArtifact {
+        root_dir: project_dir.to_path_buf(),
+        manifest,
+        scan: RuntimeArtifactScan::PythonRuntimeRoot,
     })
 }
 
@@ -940,7 +986,18 @@ pub(super) fn looks_like_shell_command_entry(entry: &str) -> bool {
     words.next().is_some()
         && matches!(
             first,
-            "node" | "bun" | "deno" | "tsx" | "ts-node" | "npm" | "pnpm" | "yarn" | "npx"
+            "node"
+                | "bun"
+                | "deno"
+                | "tsx"
+                | "ts-node"
+                | "npm"
+                | "pnpm"
+                | "yarn"
+                | "npx"
+                | "python"
+                | "python3"
+                | "python3.14"
         )
 }
 

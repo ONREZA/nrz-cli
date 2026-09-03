@@ -312,6 +312,15 @@ fn register_parent_dirs(path: &str, dirs: &mut HashSet<String>) {
 /// Files whose content the server should send in the manifest
 /// for accurate remote detection.
 pub const DETECTION_CONTENT_FILES: &[&str] = &[
+    "pyproject.toml",
+    "requirements.txt",
+    "setup.py",
+    "main.py",
+    "app.py",
+    "server.py",
+    "src/main.py",
+    "src/app.py",
+    "src/server.py",
     "package.json",
     "pnpm-workspace.yaml",
     "turbo.json",

@@ -10,20 +10,24 @@
 //! data with `fsck.erofs`, and emits the shared runtime artifact contract.
 
 mod source_bundle;
+mod tool_executor;
 
 pub use source_bundle::{
     MaterializedRuntimeDependency, MaterializedSourceBundleRuntime,
     SourceBundleMaterializationError, SourceBundleMaterializationPolicy,
     SourceBundleMaterializationRequest, materialize_source_bundle_runtime,
 };
+pub use tool_executor::{
+    ErofsToolExecutionError, ErofsToolExecutor, ErofsToolInvocation, ErofsToolKind, ErofsToolOutput,
+};
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, Metadata, Permissions};
 use std::io::Read;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output};
+use std::sync::Arc;
 
 use nrz_runtime_artifact::{
     DEPENDENCY_EROFS_MEDIA_TYPE, DEPENDENCY_MATERIALIZATION_V1_SCHEMA_VERSION,
@@ -48,6 +52,24 @@ pub const DEPENDENCY_EROFS_CANONICALIZATION_POLICY_V1: &str = concat!(
     "ONREZA_DEPENDENCY_EROFS_CANONICALIZATION_V1\n",
     "paths=utf8,lexicographic,relative\n",
     "entries=directory,regular-file,safe-relative-symlink\n",
+    "file-mode=0644-or-0755-by-executable-bit\n",
+    "directory-mode=0755\n",
+    "uid-gid=0:0\n",
+    "timestamps=unix-epoch\n",
+    "xattrs=disabled\n",
+    "hardlinks=dereferenced\n",
+    "block-size=4096\n",
+    "physical-cluster-size=4096\n",
+    "compression=zstd-level-3\n",
+    "workers=1\n",
+    "uuid=clear\n",
+);
+
+pub const DEPENDENCY_EROFS_CANONICALIZATION_POLICY_V2: &str = concat!(
+    "ONREZA_DEPENDENCY_EROFS_CANONICALIZATION_V2\n",
+    "paths=utf8,lexicographic,relative\n",
+    "entries=directory,regular-file,safe-relative-symlink\n",
+    "symlink-scope=closed-tree-or-manifest-owned-layer-mount\n",
     "file-mode=0644-or-0755-by-executable-bit\n",
     "directory-mode=0755\n",
     "uid-gid=0:0\n",
@@ -113,6 +135,16 @@ pub struct DependencyMaterializationRequest<'a> {
     pub kind: DependencyMaterializationKind,
     pub compatibility: Value,
     pub limits: DependencyTreeLimits,
+    pub symlink_scope: DependencySymlinkScope<'a>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DependencySymlinkScope<'a> {
+    ClosedTree,
+    RuntimeMounts {
+        mount_point: &'a str,
+        allowed_mount_points: &'a [String],
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -124,20 +156,33 @@ pub struct DependencyMaterializationOutput {
     pub manifest: VerifiedDependencyMaterializationManifest,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ErofsToolchain {
     mkfs_erofs: PathBuf,
     fsck_erofs: PathBuf,
+    executor: Arc<dyn ErofsToolExecutor>,
 }
 
 impl ErofsToolchain {
-    pub fn new(
+    /// Reference executor for tests and offline qualification only.
+    /// Production callers must inject an isolated executor with `with_executor`.
+    #[doc(hidden)]
+    pub fn new_direct_for_tests(
         mkfs_erofs: impl Into<PathBuf>,
         fsck_erofs: impl Into<PathBuf>,
+    ) -> Result<Self, DependencyMaterializerError> {
+        Self::with_executor(mkfs_erofs, fsck_erofs, tool_executor::direct_executor())
+    }
+
+    pub fn with_executor(
+        mkfs_erofs: impl Into<PathBuf>,
+        fsck_erofs: impl Into<PathBuf>,
+        executor: Arc<dyn ErofsToolExecutor>,
     ) -> Result<Self, DependencyMaterializerError> {
         let toolchain = Self {
             mkfs_erofs: mkfs_erofs.into(),
             fsck_erofs: fsck_erofs.into(),
+            executor,
         };
         for (name, path) in [
             ("mkfs.erofs", &toolchain.mkfs_erofs),
@@ -182,9 +227,15 @@ impl ErofsToolchain {
         }
 
         normalize_tree(&source_tree, request.limits)?;
-        let tree = inspect_dependency_tree(&source_tree, request.limits)?;
+        let inspection = inspect_dependency_tree_with_scope(
+            &source_tree,
+            request.limits,
+            request.symlink_scope,
+        )?;
+        let tree = inspection.summary;
         let generator_digest = sha256_file(&self.mkfs_erofs)?;
-        let policy_digest = sha256_prefixed(DEPENDENCY_EROFS_CANONICALIZATION_POLICY_V1.as_bytes());
+        let policy_digest =
+            canonicalization_policy_digest_for(inspection.uses_runtime_mount_symlink);
 
         let partial_path = output_image.with_file_name(format!(
             ".{}.partial-{}",
@@ -201,8 +252,10 @@ impl ErofsToolchain {
         }
         let partial = PartialImage::new(partial_path.clone());
 
-        let mkfs_output = Command::new(&self.mkfs_erofs)
-            .args([
+        let mkfs_output = self.executor.execute(ErofsToolInvocation {
+            kind: ErofsToolKind::Mkfs,
+            executable: &self.mkfs_erofs,
+            arguments: [
                 "-z",
                 "zstd,level=3",
                 "-C4096",
@@ -217,30 +270,39 @@ impl ErofsToolchain {
                 "-x",
                 "-1",
                 "--quiet",
+            ]
+            .into_iter()
+            .map(OsString::from)
+            .chain([
+                partial_path.as_os_str().to_os_string(),
+                source_tree.as_os_str().to_os_string(),
             ])
-            .arg(&partial_path)
-            .arg(&source_tree)
-            .output()
-            .map_err(|source| DependencyMaterializerError::Io {
-                operation: "execute mkfs.erofs",
-                path: self.mkfs_erofs.clone(),
-                source,
-            })?;
+            .collect(),
+            source_tree: Some(&source_tree),
+            image_path: &partial_path,
+            max_output_bytes: request.limits.max_expanded_bytes,
+        })?;
         require_tool_success("mkfs.erofs", &mkfs_output)?;
 
-        let fsck_output = Command::new(&self.fsck_erofs)
-            .arg("--extract")
-            .arg(&partial_path)
-            .output()
-            .map_err(|source| DependencyMaterializerError::Io {
-                operation: "execute fsck.erofs",
-                path: self.fsck_erofs.clone(),
-                source,
-            })?;
+        let fsck_output = self.executor.execute(ErofsToolInvocation {
+            kind: ErofsToolKind::Fsck,
+            executable: &self.fsck_erofs,
+            arguments: vec!["--extract".into(), partial_path.as_os_str().to_os_string()],
+            source_tree: None,
+            image_path: &partial_path,
+            max_output_bytes: request.limits.max_expanded_bytes,
+        })?;
         require_tool_success("fsck.erofs --extract", &fsck_output)?;
 
-        let tree_after_generation = inspect_dependency_tree(&source_tree, request.limits)?;
-        if tree_after_generation != tree {
+        let inspection_after_generation = inspect_dependency_tree_with_scope(
+            &source_tree,
+            request.limits,
+            request.symlink_scope,
+        )?;
+        if inspection_after_generation.summary != tree
+            || inspection_after_generation.uses_runtime_mount_symlink
+                != inspection.uses_runtime_mount_symlink
+        {
             return Err(DependencyMaterializerError::SourceTreeChanged);
         }
 
@@ -343,6 +405,8 @@ pub enum DependencyMaterializerError {
         status: String,
         stderr: String,
     },
+    #[error("EROFS tool execution failed: {0}")]
+    ToolExecution(#[from] ErofsToolExecutionError),
     #[error("generated materialization does not satisfy the runtime contract: {0}")]
     Contract(String),
     #[error("{operation} failed for {path}: {source}", path = .path.display())]
@@ -362,6 +426,21 @@ pub fn inspect_dependency_tree(
     root: &Path,
     limits: DependencyTreeLimits,
 ) -> Result<DependencyTreeSummary, DependencyMaterializerError> {
+    inspect_dependency_tree_with_scope(root, limits, DependencySymlinkScope::ClosedTree)
+        .map(|inspection| inspection.summary)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DependencyTreeInspection {
+    summary: DependencyTreeSummary,
+    uses_runtime_mount_symlink: bool,
+}
+
+fn inspect_dependency_tree_with_scope(
+    root: &Path,
+    limits: DependencyTreeLimits,
+    symlink_scope: DependencySymlinkScope<'_>,
+) -> Result<DependencyTreeInspection, DependencyMaterializerError> {
     limits.validate()?;
     let root = canonical_source_tree(root)?;
     let mut entries = Vec::new();
@@ -378,6 +457,7 @@ pub fn inspect_dependency_tree(
         symlink_count: 0,
         native_object_count: 0,
     };
+    let mut uses_runtime_mount_symlink = false;
 
     for entry in entries {
         update_field(&mut hasher, entry.relative.as_bytes());
@@ -423,7 +503,8 @@ pub fn inspect_dependency_tree(
                         source,
                     }
                 })?;
-                validate_symlink(&entry.relative, &target, &entry.path)?;
+                uses_runtime_mount_symlink |=
+                    validate_symlink(&entry.relative, &target, &entry.path, symlink_scope)?;
                 update_field(&mut hasher, target.as_os_str().as_bytes());
                 summary.symlink_count = summary.symlink_count.saturating_add(1);
                 summary.expanded_file_count = summary.expanded_file_count.saturating_add(1);
@@ -433,7 +514,10 @@ pub fn inspect_dependency_tree(
         }
     }
     summary.logical_tree_digest = hex::encode(hasher.finalize());
-    Ok(summary)
+    Ok(DependencyTreeInspection {
+        summary,
+        uses_runtime_mount_symlink,
+    })
 }
 
 #[derive(Debug)]
@@ -549,7 +633,8 @@ fn validate_symlink(
     relative: &str,
     target: &Path,
     source_path: &Path,
-) -> Result<(), DependencyMaterializerError> {
+    scope: DependencySymlinkScope<'_>,
+) -> Result<bool, DependencyMaterializerError> {
     if target.as_os_str().is_empty() || target.to_str().is_none() || target.is_absolute() {
         return Err(DependencyMaterializerError::UnsafeSymlink {
             path: source_path.to_path_buf(),
@@ -559,20 +644,84 @@ fn validate_symlink(
     let mut depth = Path::new(relative)
         .parent()
         .map_or(0, |parent| parent.components().count());
+    let mut stays_within_tree = true;
     for component in target.components() {
         match component {
             Component::CurDir => {}
             Component::Normal(_) => depth = depth.saturating_add(1),
             Component::ParentDir if depth > 0 => depth -= 1,
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(DependencyMaterializerError::UnsafeSymlink {
-                    path: source_path.to_path_buf(),
-                    target: target.to_path_buf(),
-                });
+            Component::ParentDir => stays_within_tree = false,
+            Component::RootDir | Component::Prefix(_) => {
+                unreachable!("absolute targets rejected above")
             }
         }
     }
-    Ok(())
+    if stays_within_tree {
+        return Ok(false);
+    }
+    if runtime_symlink_target_is_allowed(relative, target, scope) {
+        return Ok(true);
+    }
+    Err(DependencyMaterializerError::UnsafeSymlink {
+        path: source_path.to_path_buf(),
+        target: target.to_path_buf(),
+    })
+}
+
+fn canonicalization_policy_digest_for(uses_runtime_mount_symlink: bool) -> String {
+    let descriptor = if uses_runtime_mount_symlink {
+        DEPENDENCY_EROFS_CANONICALIZATION_POLICY_V2
+    } else {
+        DEPENDENCY_EROFS_CANONICALIZATION_POLICY_V1
+    };
+    sha256_prefixed(descriptor.as_bytes())
+}
+
+fn runtime_symlink_target_is_allowed(
+    relative: &str,
+    target: &Path,
+    scope: DependencySymlinkScope<'_>,
+) -> bool {
+    let DependencySymlinkScope::RuntimeMounts {
+        mount_point,
+        allowed_mount_points,
+    } = scope
+    else {
+        return false;
+    };
+    let Some(mut resolved) = canonical_absolute_path(mount_point) else {
+        return false;
+    };
+    if let Some(parent) = Path::new(relative).parent() {
+        resolved.push(parent);
+    }
+    for component in target.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => resolved.push(part),
+            Component::ParentDir if resolved.pop() => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return false,
+        }
+    }
+    allowed_mount_points.iter().any(|allowed| {
+        canonical_absolute_path(allowed)
+            .is_some_and(|allowed| resolved == allowed || resolved.starts_with(allowed))
+    })
+}
+
+fn canonical_absolute_path(path: &str) -> Option<PathBuf> {
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::RootDir | Component::Normal(_) => normalized.push(component),
+            Component::CurDir | Component::ParentDir | Component::Prefix(_) => return None,
+        }
+    }
+    Some(normalized)
 }
 
 fn hash_regular_file(path: &Path) -> Result<([u8; 32], bool), DependencyMaterializerError> {
@@ -702,15 +851,15 @@ fn sha256_prefixed(bytes: &[u8]) -> String {
 
 fn require_tool_success(
     tool: &'static str,
-    output: &Output,
+    output: &ErofsToolOutput,
 ) -> Result<(), DependencyMaterializerError> {
-    if output.status.success() {
+    if output.success {
         return Ok(());
     }
     let stderr = &output.stderr[..output.stderr.len().min(TOOL_OUTPUT_LIMIT_BYTES)];
     Err(DependencyMaterializerError::Tool {
         tool,
-        status: output.status.to_string(),
+        status: output.status.clone(),
         stderr: String::from_utf8_lossy(stderr).trim().to_string(),
     })
 }
@@ -842,6 +991,43 @@ mod tests {
     }
 
     #[test]
+    fn manifest_owned_runtime_mount_scope_allows_a_cross_tree_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        let prisma = root.path().join("@prisma");
+        fs::create_dir(&prisma).unwrap();
+        symlink(
+            "../../../node_modules/@prisma/client",
+            prisma.join("client-generated"),
+        )
+        .unwrap();
+        let allowed_mount_points = vec![
+            "/output/.next/node_modules".to_string(),
+            "/output/node_modules".to_string(),
+        ];
+
+        let tree = inspect_dependency_tree_with_scope(
+            root.path(),
+            LIMITS,
+            DependencySymlinkScope::RuntimeMounts {
+                mount_point: "/output/.next/node_modules",
+                allowed_mount_points: &allowed_mount_points,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(tree.summary.symlink_count, 1);
+        assert!(tree.uses_runtime_mount_symlink);
+        assert_eq!(
+            canonicalization_policy_digest_for(tree.uses_runtime_mount_symlink),
+            sha256_prefixed(DEPENDENCY_EROFS_CANONICALIZATION_POLICY_V2.as_bytes())
+        );
+        assert!(matches!(
+            inspect_dependency_tree(root.path(), LIMITS),
+            Err(DependencyMaterializerError::UnsafeSymlink { .. })
+        ));
+    }
+
+    #[test]
     fn expanded_limits_fail_before_image_generation() {
         let root = tempfile::tempdir().unwrap();
         fs::write(root.path().join("large"), vec![0u8; 32]).unwrap();
@@ -864,5 +1050,11 @@ mod tests {
         let digest = canonicalization_policy_digest();
         assert!(digest.starts_with("sha256:"));
         assert_eq!(digest.len(), "sha256:".len() + 64);
+        assert_eq!(
+            digest,
+            canonicalization_policy_digest_for(false),
+            "ordinary dependency trees must retain the V1 immutable identity"
+        );
+        assert_ne!(digest, canonicalization_policy_digest_for(true));
     }
 }

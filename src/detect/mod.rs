@@ -6,6 +6,7 @@ pub mod monorepo;
 pub mod package_json;
 pub mod package_manager;
 pub mod presets;
+pub mod python;
 pub mod ssr;
 pub mod static_html;
 pub mod types;
@@ -23,6 +24,8 @@ mod package_json_tests;
 mod package_manager_tests;
 #[cfg(test)]
 mod presets_tests;
+#[cfg(test)]
+mod python_tests;
 #[cfg(test)]
 mod ssr_tests;
 #[cfg(test)]
@@ -61,6 +64,9 @@ pub fn detect_with_framework_override(
 ///
 /// Used by `nrz detect --stdin` with a `VirtualFs` manifest.
 pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
+    if let Some(result) = python::detect_python(fs) {
+        return result;
+    }
     let pkg = PackageJson::load_from_fs(fs);
 
     // 1. Detect package manager
@@ -179,6 +185,10 @@ fn detect_with_fs_and_framework_override(
 
     if detected.framework == slug {
         return detected;
+    }
+
+    if slug == "python" {
+        return python::detect_configured_python(fs);
     }
 
     let Some(preset) = preset_for_slug(&slug) else {
@@ -675,6 +685,12 @@ fn infer_runtime(preset_runtime: RuntimeType, pm_info: &Option<PackageManagerInf
     {
         return RuntimeType::Bun;
     }
+    if pm_info
+        .as_ref()
+        .is_some_and(|pm| pm.pm_type == PackageManagerType::Pip)
+    {
+        return RuntimeType::Python;
+    }
     preset_runtime
 }
 
@@ -841,6 +857,7 @@ pub enum EntryPointSource {
     BunIndexDefault,
     RootPattern,
     HeuristicScan,
+    PythonConvention,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1510,6 +1527,15 @@ pub fn resolve_entry_point_detailed(
     output_dir: &Path,
     project_dir: &Path,
 ) -> EntryPointResolution {
+    if framework == "python" {
+        return match python::resolve_entry_point(output_dir) {
+            Some(path) => EntryPointResolution::Found(ResolvedEntryPoint {
+                path,
+                source: EntryPointSource::PythonConvention,
+            }),
+            None => EntryPointResolution::NotFound,
+        };
+    }
     // 1. Framework-specific hint
     if let Some(entry) = framework_entry_point(framework)
         && output_dir.join(&entry).is_file()

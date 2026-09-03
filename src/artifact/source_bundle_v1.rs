@@ -70,6 +70,12 @@ impl Drop for SourceBundlePlan {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RuntimeReadinessContract<'a> {
+    Tcp,
+    Http(&'a str),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SourceLogicalManifest {
@@ -222,6 +228,7 @@ pub(crate) fn build_source_bundle_plan(
         files,
         &RuntimeArtifactScan::All,
         RuntimeDependencyPackaging::Embedded,
+        None,
     )
 }
 
@@ -231,9 +238,11 @@ pub(crate) fn build_source_bundle_plan_with_scan(
     files: &[FileEntry],
     scan: &RuntimeArtifactScan,
     dependency_packaging: RuntimeDependencyPackaging,
+    readiness: Option<RuntimeReadinessContract<'_>>,
 ) -> anyhow::Result<SourceBundlePlan> {
     let entries = source_entries(output_dir, files, scan)?;
-    let logical_manifest = build_logical_manifest(manifest, &entries, scan, dependency_packaging)?;
+    let logical_manifest =
+        build_logical_manifest(manifest, &entries, scan, dependency_packaging, readiness)?;
     ensure_manifest_covers_entries(&logical_manifest, &entries)?;
     let logical_manifest_json = canonical_logical_manifest_json(&logical_manifest)?;
     let logical_manifest_sha256 = sha256_hex(logical_manifest_json.as_bytes());
@@ -564,6 +573,7 @@ fn build_logical_manifest(
     entries: &[SourceBundleEntry],
     scan: &RuntimeArtifactScan,
     dependency_packaging: RuntimeDependencyPackaging,
+    readiness: Option<RuntimeReadinessContract<'_>>,
 ) -> anyhow::Result<SourceLogicalManifest> {
     if manifest.middleware.is_some() {
         bail!(
@@ -608,7 +618,7 @@ fn build_logical_manifest(
     let layers = manifest
         .layers
         .iter()
-        .map(source_layer_from_manifest)
+        .map(|layer| source_layer_from_manifest(layer, scan, readiness))
         .collect::<anyhow::Result<Vec<_>>>()?;
     let entrypoints = layers
         .iter()
@@ -758,6 +768,8 @@ fn file_role(
 
 fn source_layer_from_manifest(
     layer: &crate::build::manifest::Layer,
+    scan: &RuntimeArtifactScan,
+    readiness: Option<RuntimeReadinessContract<'_>>,
 ) -> anyhow::Result<SourceLogicalManifestLayer> {
     let root_path = normalize_layer_root(&layer.directory)?;
     let entrypoint = layer
@@ -765,7 +777,7 @@ fn source_layer_from_manifest(
         .as_deref()
         .map(|entry| join_entrypoint(&root_path, entry))
         .transpose()?;
-    let runtime_config = runtime_config_value(layer);
+    let runtime_config = runtime_config_value(layer, scan, readiness);
     Ok(SourceLogicalManifestLayer {
         name: layer.name.clone(),
         target: match layer.target {
@@ -778,17 +790,41 @@ fn source_layer_from_manifest(
     })
 }
 
-fn runtime_config_value(layer: &crate::build::manifest::Layer) -> Option<serde_json::Value> {
-    let runtime = layer.runtime.as_ref()?;
+fn runtime_config_value(
+    layer: &crate::build::manifest::Layer,
+    scan: &RuntimeArtifactScan,
+    readiness: Option<RuntimeReadinessContract<'_>>,
+) -> Option<serde_json::Value> {
     let mut object = serde_json::Map::new();
-    if let Some(value) = runtime.timeout_ms {
-        object.insert("timeoutMs".to_string(), serde_json::json!(value));
+    if let Some(runtime) = layer.runtime.as_ref() {
+        if let Some(value) = runtime.timeout_ms {
+            object.insert("timeoutMs".to_string(), serde_json::json!(value));
+        }
+        if let Some(value) = runtime.memory_mb {
+            object.insert("memoryMb".to_string(), serde_json::json!(value));
+        }
+        if let Some(value) = runtime.max_concurrency {
+            object.insert("maxConcurrency".to_string(), serde_json::json!(value));
+        }
     }
-    if let Some(value) = runtime.memory_mb {
-        object.insert("memoryMb".to_string(), serde_json::json!(value));
+    if layer.target == LayerTarget::Compute
+        && matches!(scan, RuntimeArtifactScan::PythonRuntimeRoot)
+    {
+        object.insert("runtimeFamily".to_string(), serde_json::json!("PYTHON"));
     }
-    if let Some(value) = runtime.max_concurrency {
-        object.insert("maxConcurrency".to_string(), serde_json::json!(value));
+    if layer.target == LayerTarget::Compute
+        && let Some(readiness) = readiness
+    {
+        let readiness = match readiness {
+            RuntimeReadinessContract::Tcp => serde_json::json!({ "protocol": "TCP" }),
+            RuntimeReadinessContract::Http(path) => {
+                serde_json::json!({ "protocol": "HTTP", "path": path })
+            }
+        };
+        object.insert(
+            nrz_source_bundle::RUNTIME_READINESS_CONFIG_KEY.to_string(),
+            readiness,
+        );
     }
     (!object.is_empty()).then_some(serde_json::Value::Object(object))
 }

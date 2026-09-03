@@ -34,6 +34,7 @@ pub enum PackageManagerType {
     Yarn,
     Pnpm,
     Bun,
+    Pip,
 }
 
 impl PackageManagerType {
@@ -43,6 +44,7 @@ impl PackageManagerType {
             Self::Yarn => "yarn",
             Self::Pnpm => "pnpm",
             Self::Bun => "bun",
+            Self::Pip => "pip",
         }
     }
 }

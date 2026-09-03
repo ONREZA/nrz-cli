@@ -2,18 +2,22 @@ use std::time::Duration;
 
 use anyhow::Context;
 use reqwest::header::{HeaderName, HeaderValue, LOCATION};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, path_segment};
 use crate::errors::CliError;
 use crate::output;
 
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(20);
+const PRODUCTION_ALIAS_LOOKUP_ATTEMPTS: u8 = 20;
+const PRODUCTION_ALIAS_LOOKUP_INTERVAL: Duration = Duration::from_millis(250);
 
 pub(super) struct DeployVerificationRequest<'a> {
     pub(super) api_client: &'a ApiClient,
+    pub(super) deployment_id: &'a str,
     pub(super) project_id: &'a str,
     pub(super) url: &'a str,
+    pub(super) production: bool,
     pub(super) health_check: Option<&'a super::ResolvedHealthCheck>,
     pub(super) json: bool,
 }
@@ -40,11 +44,25 @@ struct VerificationResponse {
     location: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeploymentUrlsResponse {
+    deployment_urls: Vec<DeploymentUrl>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeploymentUrl {
+    full_url: String,
+    alias_type: String,
+}
+
 pub(super) async fn verify_deployment(
     request: DeployVerificationRequest<'_>,
 ) -> anyhow::Result<DeployVerificationOutput> {
     let path = verification_path(request.health_check);
-    let url = verification_url(request.url, &path)?;
+    let base_url = resolve_verification_base_url(&request).await?;
+    let url = verification_url(&base_url, &path)?;
 
     output::status(
         request.json,
@@ -152,6 +170,45 @@ pub(super) async fn verify_deployment(
         used_preview_bypass,
         preview_access_revoked: used_preview_bypass.then_some(true),
     })
+}
+
+async fn resolve_verification_base_url(
+    request: &DeployVerificationRequest<'_>,
+) -> anyhow::Result<String> {
+    if !request.production {
+        return Ok(request.url.to_string());
+    }
+
+    for attempt in 0..PRODUCTION_ALIAS_LOOKUP_ATTEMPTS {
+        let response: DeploymentUrlsResponse = request
+            .api_client
+            .get(&format!(
+                "/v1/deployments/{}",
+                path_segment(request.deployment_id)
+            ))
+            .await
+            .context("failed to resolve production deployment URL")?;
+        if let Some(url) = production_alias_url(&response.deployment_urls) {
+            return Ok(url.to_string());
+        }
+        if attempt + 1 < PRODUCTION_ALIAS_LOOKUP_ATTEMPTS {
+            tokio::time::sleep(PRODUCTION_ALIAS_LOOKUP_INTERVAL).await;
+        }
+    }
+
+    Ok(request.url.to_string())
+}
+
+fn production_alias_url(urls: &[DeploymentUrl]) -> Option<&str> {
+    urls.iter()
+        .find(|url| url.alias_type == "PRODUCTION_ALIAS")
+        .map(|url| url.full_url.as_str())
+}
+
+#[cfg(test)]
+pub(super) fn production_alias_url_from_response(response: &str) -> anyhow::Result<Option<String>> {
+    let response: DeploymentUrlsResponse = serde_json::from_str(response)?;
+    Ok(production_alias_url(&response.deployment_urls).map(str::to_string))
 }
 
 fn verification_path(health_check: Option<&super::ResolvedHealthCheck>) -> String {

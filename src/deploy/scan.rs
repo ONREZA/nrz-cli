@@ -30,7 +30,9 @@ pub(super) fn scan_runtime_artifact(
     scan: &RuntimeArtifactScan,
 ) -> anyhow::Result<Vec<FileEntry>> {
     match scan {
-        RuntimeArtifactScan::All | RuntimeArtifactScan::NodeRuntimeRoot => scan_dir(root_dir),
+        RuntimeArtifactScan::All
+        | RuntimeArtifactScan::NodeRuntimeRoot
+        | RuntimeArtifactScan::PythonRuntimeRoot => scan_dir(root_dir),
         RuntimeArtifactScan::Selected {
             roots,
             symlink_roots,

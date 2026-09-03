@@ -26,6 +26,9 @@ mod ignored_build;
 #[cfg(test)]
 mod ignored_build_tests;
 mod plan;
+mod python_toolchain;
+#[cfg(test)]
+mod python_toolchain_tests;
 mod runtime_artifact;
 mod scan;
 mod source_upload;
@@ -711,6 +714,7 @@ pub async fn run(
             build_logs: None,
             execution_env: &[],
             target_production: args.prod.then_some(true),
+            platform_runner: edge_build_handoff.is_some(),
         })
         .await?;
         let source_bundle = deploy_plan.materialize_source_bundle(json, dependency_packaging)?;
@@ -986,6 +990,7 @@ pub async fn run(
                 .and_then(BuildLogSession::emitter),
             execution_env: &execution_env,
             target_production,
+            platform_runner: edge_build_handoff.is_some(),
         })
         .await?;
         if let Some(emitter) = build_log_session
@@ -1135,8 +1140,10 @@ pub async fn run(
                         Some(
                             verify::verify_deployment(verify::DeployVerificationRequest {
                                 api_client: &client,
+                                deployment_id: &deployment.id,
                                 project_id: &project_id,
                                 url,
+                                production: deploy_production == Some(true),
                                 health_check: deploy_health_check.as_ref(),
                                 json,
                             })

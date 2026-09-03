@@ -79,6 +79,7 @@ fn source_bundle_assigns_dependency_ownership_only_for_trusted_materialization()
         &files,
         &RuntimeArtifactScan::NodeRuntimeRoot,
         RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
     )
     .unwrap();
     let embedded = build_source_bundle_plan_with_scan(
@@ -87,6 +88,7 @@ fn source_bundle_assigns_dependency_ownership_only_for_trusted_materialization()
         &files,
         &RuntimeArtifactScan::NodeRuntimeRoot,
         RuntimeDependencyPackaging::Embedded,
+        None,
     )
     .unwrap();
 
@@ -116,6 +118,57 @@ fn source_bundle_assigns_dependency_ownership_only_for_trusted_materialization()
         SourceLogicalManifestFileRole::Compute
     );
     assert_eq!(embedded_dependency.layer_name.as_deref(), Some("server"));
+}
+
+#[test]
+fn python_bundle_separates_site_packages_and_declares_runtime_family() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".onreza/python/3.14/site-packages/orjson")).unwrap();
+    fs::write(dir.path().join("main.py"), b"import orjson").unwrap();
+    fs::write(
+        dir.path()
+            .join(".onreza/python/3.14/site-packages/orjson/__init__.py"),
+        b"loads = lambda value: value",
+    )
+    .unwrap();
+    let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "layers": [
+            { "name": "server", "target": "COMPUTE", "directory": ".", "entry": "main.py" }
+        ],
+        "routes": []
+    }))
+    .unwrap();
+    let files = scan_dir(dir.path()).unwrap();
+
+    let plan = build_source_bundle_plan_with_scan(
+        dir.path(),
+        &manifest,
+        &files,
+        &RuntimeArtifactScan::PythonRuntimeRoot,
+        RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap();
+
+    let source = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "main.py")
+        .unwrap();
+    let dependency = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path.ends_with("orjson/__init__.py"))
+        .unwrap();
+    assert_eq!(source.role, SourceLogicalManifestFileRole::Compute);
+    assert_eq!(dependency.role, SourceLogicalManifestFileRole::Dependency);
+    assert_eq!(
+        plan.logical_manifest.layers[0].runtime_config,
+        Some(serde_json::json!({"runtimeFamily": "PYTHON"}))
+    );
 }
 
 #[cfg(unix)]
@@ -159,6 +212,7 @@ async fn source_bundle_projects_workspace_packages_into_dependency_root() {
         &files,
         &scan,
         RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
     )
     .unwrap();
 

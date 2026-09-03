@@ -19,7 +19,8 @@ use crate::manifest::{
     SOURCE_BUNDLE_V1_SCHEMA_VERSION, SourceBundleSummary, SourceLogicalManifest,
     SourceLogicalManifestEntryType, SourceLogicalManifestFile,
     canonical_source_logical_manifest_json, compute_logical_manifest_sha256,
-    compute_source_artifact_id, normalize_source_path, sha256_hex, summarize_logical_manifest,
+    compute_source_artifact_id, normalize_source_path, sha256_hex, source_runtime_readiness,
+    summarize_logical_manifest,
 };
 
 const TAR_BLOCK_SIZE: usize = 512;
@@ -185,6 +186,12 @@ fn prepare_verification(
             ),
         ));
     }
+    source_runtime_readiness(&manifest).map_err(|message| {
+        failure(
+            "SOURCE_RUNTIME_READINESS_INVALID",
+            format!("Logical manifest runtime readiness is invalid: {message}"),
+        )
+    })?;
     let computed_source_artifact_id = compute_source_artifact_id(
         &input.owner_workspace_id,
         &input.logical_manifest_sha256,

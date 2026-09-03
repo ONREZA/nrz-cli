@@ -14,13 +14,21 @@ fn logs_response_accepts_new_entries_contract() {
               "functionName": "stage-smoke-hello"
             }
           ],
-          "pagination": { "limit": 50, "offset": 0, "hasMore": false },
-          "filters": { "stream": "access" }
+          "pagination": { "limit": 50, "hasMore": false, "nextCursor": null },
+          "filters": {
+            "stream": "access",
+            "startTime": "2026-06-07T19:06:36.000Z",
+            "endTime": "2026-06-07T20:06:36.000Z"
+          }
         }"#,
     )
     .unwrap();
 
     assert_eq!(response.entries.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&response).unwrap()["pagination"],
+        serde_json::json!({ "limit": 50, "hasMore": false, "nextCursor": null })
+    );
     assert_eq!(
         format_log_entry(&response.entries[0]),
         "[2026-06-07T20:06:36.000Z] [200] GET /api/hello 12.5ms function=stage-smoke-hello"

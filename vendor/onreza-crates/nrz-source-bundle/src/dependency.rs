@@ -16,6 +16,7 @@ use crate::{
 };
 
 const DEPENDENCY_FILE_ROLE: &str = "dependency";
+pub const PYTHON_314_SITE_PACKAGES_ROOT: &str = ".onreza/python/3.14/site-packages";
 #[cfg(unix)]
 const FILE_MODE: u32 = 0o644;
 #[cfg(unix)]
@@ -172,9 +173,9 @@ pub fn extract_dependency_source_trees(
                     )));
                 }
                 let resolved = resolve_symlink_target(&path, &link_target)?;
-                if !path_is_within(&resolved, &source_root) {
+                if !dependency_symlink_target_is_allowed(&groups, &source_root, &resolved) {
                     return Err(DependencySourceTreeError::Manifest(format!(
-                        "dependency symlink escapes its source root: {path} -> {link_target}"
+                        "dependency symlink escapes its allowed layer roots: {path} -> {link_target}"
                     )));
                 }
                 create_dependency_symlink(&link_target, &output)
@@ -223,7 +224,7 @@ fn dependency_groups(
             normalize_source_path(&file.path).map_err(DependencySourceTreeError::Manifest)?;
         let source_root = dependency_source_root(&path).ok_or_else(|| {
             DependencySourceTreeError::Manifest(format!(
-                "dependency file is not inside node_modules: {path}"
+                "dependency file is not inside a supported dependency root: {path}"
             ))
         })?;
         if dependency_relative_path(&source_root, &path)?
@@ -272,6 +273,12 @@ fn expected_dependency_file<'a>(
 }
 
 fn dependency_source_root(path: &str) -> Option<String> {
+    if path
+        .strip_prefix(PYTHON_314_SITE_PACKAGES_ROOT)
+        .is_some_and(|suffix| suffix.starts_with('/'))
+    {
+        return Some(PYTHON_314_SITE_PACKAGES_ROOT.to_string());
+    }
     let mut parts = Vec::new();
     for segment in path.split('/') {
         parts.push(segment);
@@ -466,6 +473,34 @@ fn path_is_within(path: &str, root: &str) -> bool {
     path == root || path.starts_with(&format!("{root}/"))
 }
 
+fn dependency_symlink_target_is_allowed(
+    groups: &BTreeMap<String, DependencyGroup<'_>>,
+    source_root: &str,
+    resolved: &str,
+) -> bool {
+    if path_is_within(resolved, source_root) {
+        return true;
+    }
+
+    let Some(source_group) = groups.get(source_root) else {
+        return false;
+    };
+    let Some(target_root) = dependency_source_root(resolved) else {
+        return false;
+    };
+    let Some(target_group) = groups.get(&target_root) else {
+        return false;
+    };
+    if source_group.layer_name != target_group.layer_name {
+        return false;
+    }
+
+    target_group
+        .files
+        .keys()
+        .any(|path| path_is_within(path, resolved))
+}
+
 fn io_error(
     operation: &'static str,
     path: &Path,
@@ -591,6 +626,74 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("executable mode mismatch"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn extracts_a_dependency_symlink_into_another_tree_of_the_same_layer() {
+        let directory = tempdir().unwrap();
+        let bundle_path = directory.path().join("source.tar.zst");
+        let destination = directory.path().join("dependencies");
+        fs::create_dir(&destination).unwrap();
+        let client = b"module.exports = {}\n";
+        let files = vec![
+            dependency_file(
+                "node_modules/@prisma/client/index.js",
+                client,
+                false,
+                SourceLogicalManifestEntryType::File,
+                None,
+            ),
+            dependency_file(
+                ".next/node_modules/@prisma/client-generated",
+                b"",
+                false,
+                SourceLogicalManifestEntryType::Symlink,
+                Some("../../../node_modules/@prisma/client"),
+            ),
+        ];
+        write_bundle(
+            &bundle_path,
+            &files,
+            &[(files[0].path.as_str(), client, 0o644)],
+        );
+
+        let trees =
+            extract_dependency_source_trees(&bundle_path, &manifest(files), &destination).unwrap();
+
+        let next_tree = trees
+            .iter()
+            .find(|tree| tree.source_root == ".next/node_modules")
+            .unwrap();
+        assert_eq!(
+            fs::read_link(next_tree.path.join("@prisma/client-generated")).unwrap(),
+            PathBuf::from("../../../node_modules/@prisma/client")
+        );
+    }
+
+    #[test]
+    fn rejects_a_dependency_symlink_to_an_unowned_layer_path() {
+        let directory = tempdir().unwrap();
+        let bundle_path = directory.path().join("source.tar.zst");
+        let destination = directory.path().join("dependencies");
+        fs::create_dir(&destination).unwrap();
+        let files = vec![dependency_file(
+            ".next/node_modules/@prisma/client-generated",
+            b"",
+            false,
+            SourceLogicalManifestEntryType::Symlink,
+            Some("../../../node_modules/@prisma/client"),
+        )];
+        write_bundle(&bundle_path, &files, &[]);
+
+        let error = extract_dependency_source_trees(&bundle_path, &manifest(files), &destination)
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("escapes its allowed layer roots")
+        );
     }
 
     fn dependency_file(

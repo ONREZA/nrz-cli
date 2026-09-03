@@ -52,5 +52,6 @@ pub(crate) fn detection_package_manager_to_platform(pm: PackageManagerType) -> &
         PackageManagerType::Yarn => "YARN",
         PackageManagerType::Pnpm => "PNPM",
         PackageManagerType::Bun => "BUN",
+        PackageManagerType::Pip => "PIP",
     }
 }
