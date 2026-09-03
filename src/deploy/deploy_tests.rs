@@ -543,8 +543,8 @@ fn recursive_deploy_build_commands_are_classified_as_invalid_config() {
     assert!(error.to_string().contains("npm run build"));
 }
 
-#[test]
-fn recursive_deploy_install_commands_are_classified_as_invalid_config() {
+#[tokio::test]
+async fn recursive_deploy_install_commands_are_classified_as_invalid_config() {
     let dir = tempdir().unwrap();
     let effective = effective_with_server_settings(
         dir.path(),
@@ -556,6 +556,7 @@ fn recursive_deploy_install_commands_are_classified_as_invalid_config() {
     );
 
     let error = run_install_step(dir.path(), true, &effective, &[], None)
+        .await
         .expect_err("recursive deploy must be rejected before the install child starts");
 
     expect_code(&error, "INVALID_CONFIG");
@@ -896,8 +897,8 @@ fn configured_python_non_conventional_entry_uses_versioned_install_target() {
     assert!(result.ends_with(" ."));
 }
 
-#[test]
-fn dependency_free_python_install_step_removes_stale_site_packages() {
+#[tokio::test]
+async fn dependency_free_python_install_step_removes_stale_site_packages() {
     let dir = tempdir().unwrap();
     let stale = dir
         .path()
@@ -907,7 +908,9 @@ fn dependency_free_python_install_step_removes_stale_site_packages() {
     fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
     let effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
 
-    run_install_step(dir.path(), true, &effective, &[], None).unwrap();
+    run_install_step(dir.path(), true, &effective, &[], None)
+        .await
+        .unwrap();
 
     assert!(
         !dir.path()

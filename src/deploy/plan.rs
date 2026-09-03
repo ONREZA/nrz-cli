@@ -274,7 +274,8 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             effective,
             request.execution_env,
             request.build_logs,
-        )?;
+        )
+        .await?;
     }
 
     let build_preparation = crate::frameworks::prepare_build(project_dir)?;

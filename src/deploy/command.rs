@@ -87,29 +87,74 @@ pub(super) fn run_command_streaming(
     #[cfg(windows)]
     let (shell, shell_args) = ("cmd", ["/C", cmd]);
 
-    if !json && build_logs.is_none() {
-        let mut command = std::process::Command::new(shell);
-        command.args(shell_args).current_dir(project_dir).envs(
-            extra_env
-                .iter()
-                .map(|(key, value)| (key.as_str(), value.as_str())),
-        );
-        remove_private_cli_environment(&mut command);
+    let mut command = std::process::Command::new(shell);
+    command.args(shell_args);
+    run_process_streaming(
+        command,
+        cmd,
+        StreamingCommandContext {
+            project_dir,
+            json,
+            phase,
+            child_stream,
+            extra_env,
+            build_logs,
+        },
+    )
+}
+
+pub(super) fn run_program_streaming(
+    program: &Path,
+    args: &[std::ffi::OsString],
+    display: &str,
+    context: StreamingCommandContext<'_>,
+) -> anyhow::Result<()> {
+    let mut command = std::process::Command::new(program);
+    command.args(args);
+    run_process_streaming(command, display, context)
+}
+
+pub(super) struct StreamingCommandContext<'a> {
+    project_dir: &'a Path,
+    json: bool,
+    phase: output::Phase,
+    child_stream: &'a str,
+    extra_env: &'a [(String, String)],
+    build_logs: Option<&'a BuildLogEmitter>,
+}
+
+fn run_process_streaming(
+    mut command: std::process::Command,
+    display: &str,
+    context: StreamingCommandContext<'_>,
+) -> anyhow::Result<()> {
+    command.current_dir(context.project_dir).envs(
+        context
+            .extra_env
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    );
+    remove_private_cli_environment(&mut command);
+
+    if !context.json && context.build_logs.is_none() {
         let status = command
             .status()
-            .with_context(|| format!("failed to start command: {cmd}"))?;
+            .with_context(|| format!("failed to start command: {display}"))?;
         if !status.success() {
             match status.code() {
                 Some(code) => {
                     return Err(output::coded_error(
-                        format!("{}_EXIT_CODE", phase.as_str().to_uppercase()),
-                        format!("{phase} command `{cmd}` failed with exit code {code}"),
+                        format!("{}_EXIT_CODE", context.phase.as_str().to_uppercase()),
+                        format!(
+                            "{} command `{display}` failed with exit code {code}",
+                            context.phase
+                        ),
                     ));
                 }
                 None => {
                     return Err(output::coded_error(
-                        format!("{}_SIGNAL_KILLED", phase.as_str().to_uppercase()),
-                        format!("{phase} process `{cmd}` was killed by signal"),
+                        format!("{}_SIGNAL_KILLED", context.phase.as_str().to_uppercase()),
+                        format!("{} process `{display}` was killed by signal", context.phase),
                     ));
                 }
             }
@@ -118,18 +163,9 @@ pub(super) fn run_command_streaming(
     }
 
     // Capture when JSON framing or centralized upload needs the child streams.
-    let mut command = std::process::Command::new(shell);
     command
-        .args(shell_args)
-        .current_dir(project_dir)
-        .envs(
-            extra_env
-                .iter()
-                .map(|(key, value)| (key.as_str(), value.as_str())),
-        )
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    remove_private_cli_environment(&mut command);
 
     // Run the build in its own process group. Build tools spawn long-lived
     // grandchildren (jest/SWC workers, an OG-image headless Chromium, dev
@@ -146,7 +182,7 @@ pub(super) fn run_command_streaming(
 
     let mut child = command
         .spawn()
-        .with_context(|| format!("failed to start command: {cmd}"))?;
+        .with_context(|| format!("failed to start command: {display}"))?;
 
     #[cfg(unix)]
     let child_pid = child.id() as libc::pid_t;
@@ -160,28 +196,28 @@ pub(super) fn run_command_streaming(
         .take()
         .context("expected piped stderr on child process")?;
 
-    let phase_out = phase.to_string();
-    let stream_out = child_stream.to_string();
-    let build_stream_out = if child_stream == "debug" {
+    let phase_out = context.phase.to_string();
+    let stream_out = context.child_stream.to_string();
+    let build_stream_out = if context.child_stream == "debug" {
         BuildLogStream::Debug
     } else {
         BuildLogStream::User
     };
-    let build_level_out = if child_stream == "debug" {
+    let build_level_out = if context.child_stream == "debug" {
         BuildLogLevel::Debug
     } else {
         BuildLogLevel::Info
     };
-    let build_logs_out = build_logs.cloned();
+    let build_logs_out = context.build_logs.cloned();
     let stdout_handle = std::thread::spawn(move || {
         forward_child_stream(ChildStreamRequest {
             reader: stdout,
             terminal: ChildTerminal::Stdout,
-            json,
+            json: context.json,
             frame_stream: stream_out,
             frame_level: "info",
             phase_name: phase_out,
-            build_phase: build_log_phase(phase),
+            build_phase: build_log_phase(context.phase),
             build_stream: build_stream_out,
             build_level: build_level_out,
             origin: BuildLogOrigin::ChildStdout,
@@ -189,28 +225,28 @@ pub(super) fn run_command_streaming(
         });
     });
 
-    let phase_err = phase.to_string();
+    let phase_err = context.phase.to_string();
     // Install stderr → "user" stream (errors visible to user), other phases follow child_stream
-    let stream_err = if phase == output::Phase::Install {
+    let stream_err = if context.phase == output::Phase::Install {
         "user".to_string()
     } else {
-        child_stream.to_string()
+        context.child_stream.to_string()
     };
     let build_stream_err = if stream_err == "debug" {
         BuildLogStream::Debug
     } else {
         BuildLogStream::User
     };
-    let build_logs_err = build_logs.cloned();
+    let build_logs_err = context.build_logs.cloned();
     let stderr_handle = std::thread::spawn(move || {
         forward_child_stream(ChildStreamRequest {
             reader: stderr,
             terminal: ChildTerminal::Stderr,
-            json,
+            json: context.json,
             frame_stream: stream_err,
             frame_level: "warn",
             phase_name: phase_err,
-            build_phase: build_log_phase(phase),
+            build_phase: build_log_phase(context.phase),
             build_stream: build_stream_err,
             build_level: BuildLogLevel::Warn,
             origin: BuildLogOrigin::ChildStderr,
@@ -220,7 +256,7 @@ pub(super) fn run_command_streaming(
 
     let status = child
         .wait()
-        .with_context(|| format!("failed to wait for command: {cmd}"))?;
+        .with_context(|| format!("failed to wait for command: {display}"))?;
 
     // The command has exited; reap any orphaned grandchildren still holding the
     // pipe write-ends open in its process group. Without this the joins below
@@ -245,14 +281,14 @@ pub(super) fn run_command_streaming(
         match status.code() {
             Some(code) => {
                 return Err(output::coded_error(
-                    format!("{}_EXIT_CODE", phase.as_str().to_uppercase()),
-                    format!("{phase} command failed with exit code {code}"),
+                    format!("{}_EXIT_CODE", context.phase.as_str().to_uppercase()),
+                    format!("{} command failed with exit code {code}", context.phase),
                 ));
             }
             None => {
                 return Err(output::coded_error(
-                    format!("{}_SIGNAL_KILLED", phase.as_str().to_uppercase()),
-                    format!("{phase} process was killed by signal"),
+                    format!("{}_SIGNAL_KILLED", context.phase.as_str().to_uppercase()),
+                    format!("{} process was killed by signal", context.phase),
                 ));
             }
         }
@@ -344,7 +380,7 @@ fn build_log_phase(phase: output::Phase) -> BuildLogPhase {
     }
 }
 
-pub(super) fn run_install_step(
+pub(super) async fn run_install_step(
     project_dir: &Path,
     json: bool,
     effective: &EffectiveProjectConfig,
@@ -372,6 +408,52 @@ pub(super) fn run_install_step(
             }
         }
     }
+    let python_manifest = is_python.then(|| {
+        crate::detect::python::dependency_manifest(&crate::detect::fs::LocalFs::new(project_dir))
+    });
+    if effective.install_command().is_none()
+        && let Some(Some(manifest)) = python_manifest
+    {
+        let display = super::python_toolchain::install_display(manifest);
+        output::status(
+            json,
+            ">",
+            format!("Installing dependencies: {display}"),
+            output::Phase::Deploy,
+        );
+        if let Some(build_logs) = build_logs {
+            build_logs.info(
+                BuildLogPhase::Install,
+                &format!("Installing dependencies: {display}"),
+            );
+        }
+        let uv = super::python_toolchain::resolve().await.map_err(|error| {
+            output::coded_error(
+                "PYTHON_TOOLCHAIN_UNAVAILABLE",
+                format!("failed to prepare managed Python toolchain: {error:#}"),
+            )
+        })?;
+        let arguments = super::python_toolchain::install_arguments(manifest);
+        run_program_streaming(
+            &uv,
+            &arguments,
+            &display,
+            StreamingCommandContext {
+                project_dir,
+                json,
+                phase: output::Phase::Install,
+                child_stream: "debug",
+                extra_env: execution_env,
+                build_logs,
+            },
+        )?;
+        output::success(json, "Dependencies installed", output::Phase::Deploy);
+        if let Some(build_logs) = build_logs {
+            build_logs.info(BuildLogPhase::Install, "Dependencies installed");
+        }
+        return Ok(());
+    }
+
     let Some(cmd) = resolve_install_command(project_dir, effective) else {
         return Ok(());
     };

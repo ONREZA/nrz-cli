@@ -16172,6 +16172,13 @@ pub mod runtime_artifact_graph {
     ///                    "maximum": 8192.0,
     ///                    "minimum": 32.0
     ///                  },
+    ///                  "runtimeFamily": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "JAVASCRIPT",
+    ///                      "PYTHON"
+    ///                    ]
+    ///                  },
     ///                  "timeoutMs": {
     ///                    "type": "integer",
     ///                    "maximum": 9007199254740991.0,
@@ -17919,6 +17926,13 @@ pub mod runtime_artifact_graph {
     ///                "type": "integer",
     ///                "maximum": 8192.0,
     ///                "minimum": 32.0
+    ///              },
+    ///              "runtimeFamily": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "JAVASCRIPT",
+    ///                  "PYTHON"
+    ///                ]
     ///              },
     ///              "timeoutMs": {
     ///                "type": "integer",
@@ -19877,6 +19891,13 @@ pub mod runtime_artifact_graph {
     ///          "maximum": 8192.0,
     ///          "minimum": 32.0
     ///        },
+    ///        "runtimeFamily": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "JAVASCRIPT",
+    ///            "PYTHON"
+    ///          ]
+    ///        },
     ///        "timeoutMs": {
     ///          "type": "integer",
     ///          "maximum": 9007199254740991.0,
@@ -20285,6 +20306,13 @@ pub mod runtime_artifact_graph {
     ///      "maximum": 8192.0,
     ///      "minimum": 32.0
     ///    },
+    ///    "runtimeFamily": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "JAVASCRIPT",
+    ///        "PYTHON"
+    ///      ]
+    ///    },
     ///    "timeoutMs": {
     ///      "type": "integer",
     ///      "maximum": 9007199254740991.0,
@@ -20311,6 +20339,14 @@ pub mod runtime_artifact_graph {
         )]
         pub memory_mb: ::std::option::Option<i64>,
         #[serde(
+            rename = "runtimeFamily",
+            default,
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub runtime_family: ::std::option::Option<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimeFamily,
+        >,
+        #[serde(
             rename = "timeoutMs",
             default,
             skip_serializing_if = "::std::option::Option::is_none"
@@ -20324,8 +20360,91 @@ pub mod runtime_artifact_graph {
             Self {
                 max_concurrency: Default::default(),
                 memory_mb: Default::default(),
+                runtime_family: Default::default(),
                 timeout_ms: Default::default(),
             }
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimeFamily`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "JAVASCRIPT",
+    ///    "PYTHON"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimeFamily
+    {
+        #[serde(rename = "JAVASCRIPT")]
+        Javascript,
+        #[serde(rename = "PYTHON")]
+        Python,
+    }
+    impl ::std::fmt::Display
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimeFamily {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Javascript => f.write_str("JAVASCRIPT"),
+                Self::Python => f.write_str("PYTHON"),
+            }
+        }
+    }
+    impl ::std::str::FromStr
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimeFamily {
+        type Err = self::error::ConversionError;
+        fn from_str(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "JAVASCRIPT" => Ok(Self::Javascript),
+                "PYTHON" => Ok(Self::Python),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimeFamily {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimeFamily {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimeFamily {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
         }
     }
 }

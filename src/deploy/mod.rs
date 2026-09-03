@@ -26,6 +26,9 @@ mod ignored_build;
 #[cfg(test)]
 mod ignored_build_tests;
 mod plan;
+mod python_toolchain;
+#[cfg(test)]
+mod python_toolchain_tests;
 mod runtime_artifact;
 mod scan;
 mod source_upload;
