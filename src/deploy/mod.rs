@@ -1138,8 +1138,10 @@ pub async fn run(
                         Some(
                             verify::verify_deployment(verify::DeployVerificationRequest {
                                 api_client: &client,
+                                deployment_id: &deployment.id,
                                 project_id: &project_id,
                                 url,
+                                production: deploy_production == Some(true),
                                 health_check: deploy_health_check.as_ref(),
                                 json,
                             })

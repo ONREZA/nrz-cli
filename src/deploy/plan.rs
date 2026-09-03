@@ -548,7 +548,7 @@ fn emit_runtime_artifact_file_breakdown(
         build_logs.info(super::BuildLogPhase::Detect, &summary);
     }
     if breakdown.includes_installed_dependencies() {
-        const DEPENDENCY_EXPLANATION: &str = "PROCESS runtime includes installed Node.js dependencies because the server entry resolves packages at runtime; Output Directory only selects the build output.";
+        const DEPENDENCY_EXPLANATION: &str = "PROCESS runtime includes installed dependencies because the application entry resolves packages at runtime; Output Directory only selects the build output.";
         output::status(json, "~", DEPENDENCY_EXPLANATION, output::Phase::Deploy);
         if let Some(build_logs) = build_logs {
             build_logs.info(super::BuildLogPhase::Detect, DEPENDENCY_EXPLANATION);

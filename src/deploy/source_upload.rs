@@ -181,10 +181,10 @@ fn runtime_artifact_file_limit_message(
     );
     if breakdown.includes_installed_dependencies() {
         guidance.push_str(
-            "\nFor PROCESS/SSR deployments, installed Node.js dependencies are part of the runtime artifact even when Output Directory is build or dist.",
+            "\nFor PROCESS/SSR deployments, installed runtime dependencies are part of the runtime artifact even when Output Directory selects a build directory.",
         );
         guidance.push_str(
-            "\nReduce the runtime closure by pruning development dependencies after the build (for example, npm prune --omit=dev) or by producing a self-contained server bundle. Use a static adapter only when SSR is not required.",
+            "\nReduce the runtime closure by removing unused dependencies after the build or by producing a self-contained application artifact. Use a static adapter only when server-side execution is not required.",
         );
     } else {
         guidance.push_str(

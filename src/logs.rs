@@ -20,8 +20,8 @@ pub(crate) struct LogsResponse {
 #[serde(rename_all = "camelCase")]
 struct LogsPagination {
     limit: u32,
-    offset: u32,
     has_more: bool,
+    next_cursor: Option<String>,
 }
 
 pub async fn run(

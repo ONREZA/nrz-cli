@@ -2400,7 +2400,7 @@ fn publication_limit_error_in_human_mode_is_actionable() {
     assert!(
         mapped
             .to_string()
-            .contains("static adapter only when SSR is not required")
+            .contains("static adapter only when server-side execution is not required")
     );
 }
 
