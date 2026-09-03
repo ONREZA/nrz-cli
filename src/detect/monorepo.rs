@@ -145,6 +145,7 @@ fn detect_workspace_patterns(
             Some(PackageManagerType::Yarn) => MonorepoTool::Yarn,
             Some(PackageManagerType::Pnpm) => MonorepoTool::Pnpm,
             Some(PackageManagerType::Bun) => MonorepoTool::Bun,
+            Some(PackageManagerType::Pip) => return None,
             _ => MonorepoTool::Npm,
         };
         return Some((tool, pkg.workspaces.to_vec()));

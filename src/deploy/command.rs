@@ -351,6 +351,27 @@ pub(super) fn run_install_step(
     execution_env: &[(String, String)],
     build_logs: Option<&BuildLogEmitter>,
 ) -> anyhow::Result<()> {
+    let is_python =
+        crate::detect::detect_with_framework_override(project_dir, effective.framework_override())
+            .metadata
+            .runtime
+            .runtime_type
+            == crate::detect::types::RuntimeType::Python;
+    if is_python {
+        let target = project_dir.join(crate::artifact::PYTHON_SITE_PACKAGES_ROOT);
+        match std::fs::remove_dir_all(&target) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "failed to clean generated Python dependencies at {}",
+                        target.display()
+                    )
+                });
+            }
+        }
+    }
     let Some(cmd) = resolve_install_command(project_dir, effective) else {
         return Ok(());
     };
@@ -424,6 +445,16 @@ pub(super) fn resolve_install_command(
     // PRESET server commands are filtered out while building EffectiveProjectConfig.
     if let Some(setting) = effective.install_command() {
         return setting.value().map(str::to_string);
+    }
+    if crate::detect::detect_with_framework_override(project_dir, effective.framework_override())
+        .metadata
+        .runtime
+        .runtime_type
+        == crate::detect::types::RuntimeType::Python
+    {
+        let fs = crate::detect::fs::LocalFs::new(project_dir);
+        return crate::detect::python::dependency_manifest(&fs)
+            .map(crate::detect::python::install_command);
     }
     if !project_dir.join("package.json").exists() {
         return None;

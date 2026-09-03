@@ -115,6 +115,18 @@ fn no_package_json_returns_none() {
 }
 
 #[test]
+fn python_entry_and_requirements_use_pip() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
+    std::fs::write(dir.path().join("requirements.txt"), "httpx==0.28.1\n").unwrap();
+
+    let pm = detect_package_manager(&LocalFs::new(dir.path()), None).unwrap();
+
+    assert_eq!(pm.pm_type, PackageManagerType::Pip);
+    assert_eq!(pm.lockfile.as_deref(), Some("requirements.txt"));
+}
+
+#[test]
 fn package_manager_field_takes_priority_over_lockfile() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -134,6 +146,10 @@ fn install_command_variants() {
     assert_eq!(install_command(PackageManagerType::Yarn), "yarn install");
     assert_eq!(install_command(PackageManagerType::Pnpm), "pnpm install");
     assert_eq!(install_command(PackageManagerType::Bun), "bun install");
+    assert_eq!(
+        install_command(PackageManagerType::Pip),
+        "python3.14 -m pip install ."
+    );
 }
 
 #[test]

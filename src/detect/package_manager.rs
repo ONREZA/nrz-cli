@@ -9,6 +9,15 @@ pub fn detect_package_manager(
     fs: &dyn Fs,
     pkg: Option<&PackageJson>,
 ) -> Option<PackageManagerInfo> {
+    if super::python::has_entry(fs)
+        && let Some(lockfile) = super::python::dependency_manifest(fs)
+    {
+        return Some(PackageManagerInfo {
+            pm_type: PackageManagerType::Pip,
+            version: None,
+            lockfile: Some(lockfile.to_string()),
+        });
+    }
     // 1. Check packageManager field in package.json (e.g. "pnpm@9.0.0")
     if let Some(pkg) = pkg
         && let Some(ref pm_field) = pkg.package_manager
@@ -96,6 +105,7 @@ pub fn install_command(pm: PackageManagerType) -> &'static str {
         PackageManagerType::Yarn => "yarn install",
         PackageManagerType::Pnpm => "pnpm install",
         PackageManagerType::Bun => "bun install",
+        PackageManagerType::Pip => "python3.14 -m pip install .",
     }
 }
 
@@ -109,5 +119,6 @@ pub fn build_command(pm: PackageManagerType, script: &str) -> String {
         PackageManagerType::Yarn => format!("yarn {script}"),
         PackageManagerType::Pnpm => format!("pnpm {script}"),
         PackageManagerType::Bun => format!("bun run {script}"),
+        PackageManagerType::Pip => script.to_string(),
     }
 }

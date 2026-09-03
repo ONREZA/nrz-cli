@@ -841,6 +841,133 @@ fn install_command_user_source_used_without_package_json() {
 }
 
 #[test]
+fn install_command_python_requirements_targets_versioned_site_packages() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
+    fs::write(dir.path().join("requirements.txt"), "orjson==3.11.3\n").unwrap();
+    let effective = effective_with_server_settings(
+        dir.path(),
+        nrz::config::ProjectConfig::default(),
+        server_install_settings(None, None),
+    );
+
+    let result = resolve_install_command(dir.path(), &effective).unwrap();
+
+    assert!(result.starts_with("python3.14 -m pip install"));
+    assert!(result.contains("--target .onreza/python/3.14/site-packages"));
+    assert!(result.ends_with("--requirement requirements.txt"));
+}
+
+#[test]
+fn install_command_python_is_not_replaced_by_javascript_metadata() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
+    fs::write(dir.path().join("requirements.txt"), "orjson==3.11.3\n").unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
+    let effective = effective_with_server_settings(
+        dir.path(),
+        nrz::config::ProjectConfig::default(),
+        server_install_settings(None, None),
+    );
+
+    let result = resolve_install_command(dir.path(), &effective).unwrap();
+
+    assert!(result.starts_with("python3.14 -m pip install"));
+    assert!(result.ends_with("--requirement requirements.txt"));
+}
+
+#[test]
+fn configured_python_non_conventional_entry_uses_versioned_install_target() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("run.py"), "print('ready')").unwrap();
+    fs::write(dir.path().join("pyproject.toml"), "[project]\nname='app'").unwrap();
+    let mut config = nrz::config::ProjectConfig::default();
+    config.project.framework = Some("python".to_string());
+    let effective = effective_config(dir.path(), config);
+
+    let result = resolve_install_command(dir.path(), &effective).unwrap();
+
+    assert!(result.starts_with("python3.14 -m pip install"));
+    assert!(result.contains("--target .onreza/python/3.14/site-packages"));
+    assert!(result.ends_with(" ."));
+}
+
+#[test]
+fn dependency_free_python_install_step_removes_stale_site_packages() {
+    let dir = tempdir().unwrap();
+    let stale = dir
+        .path()
+        .join(".onreza/python/3.14/site-packages/stale.py");
+    fs::create_dir_all(stale.parent().unwrap()).unwrap();
+    fs::write(&stale, "stale = True").unwrap();
+    fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
+    let effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
+
+    run_install_step(dir.path(), true, &effective, &[], None).unwrap();
+
+    assert!(
+        !dir.path()
+            .join(".onreza/python/3.14/site-packages")
+            .exists()
+    );
+}
+
+#[test]
+fn prepare_deploy_files_keeps_python_dependencies_and_prunes_platform_metadata() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".onreza/python/3.14/site-packages/orjson")).unwrap();
+    fs::write(dir.path().join("main.py"), "import orjson").unwrap();
+    fs::write(
+        dir.path()
+            .join(".onreza/python/3.14/site-packages/orjson/__init__.py"),
+        "loads = lambda value: value",
+    )
+    .unwrap();
+    fs::write(dir.path().join(".onreza/manifest.json"), "{}").unwrap();
+
+    let detection = crate::detect::detect_with_framework_override(dir.path(), None);
+    let manifest = build_manifest::generate_compute_manifest("main.py");
+    let scanned =
+        scan_runtime_artifact(dir.path(), &RuntimeArtifactScan::PythonRuntimeRoot).unwrap();
+    let collection = prepare_artifact_files(
+        &manifest,
+        scanned,
+        &detection,
+        crate::artifact::ArtifactRootScope::ProjectRoot,
+        true,
+    );
+    let deployable = collection.deployable_entries();
+    let paths = deployable
+        .iter()
+        .map(|file| file.path.clone())
+        .collect::<Vec<_>>();
+
+    assert_eq!(detection.metadata.runtime.runtime_type, RuntimeType::Python);
+    assert!(paths.contains(&"main.py".to_string()));
+    assert!(paths.contains(&".onreza/python/3.14/site-packages/orjson/__init__.py".to_string()));
+    assert!(!paths.contains(&".onreza/manifest.json".to_string()));
+    assert_eq!(collection.summary.deployable_files, 2);
+    assert_eq!(collection.summary.pruned_files, 1);
+
+    let plan = source_bundle_v1::build_source_bundle_plan_with_scan(
+        dir.path(),
+        &manifest,
+        &deployable,
+        &RuntimeArtifactScan::PythonRuntimeRoot,
+        crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+    )
+    .unwrap();
+    assert_eq!(
+        plan.logical_manifest.layers[0].runtime_config,
+        Some(serde_json::json!({"runtimeFamily": "PYTHON"}))
+    );
+}
+
+#[test]
 fn pnpm_install_preserves_project_build_script_policy() {
     let dir = tempdir().unwrap();
 
@@ -955,6 +1082,7 @@ fn prepare_deploy_files_keeps_static_build_output_node_modules_assets() {
         crate::artifact::RuntimeArtifactFileBreakdown {
             build_output: 2,
             node_modules: 0,
+            python_site_packages: 0,
             metadata: 0,
             workspace_packages: 0,
             other: 0,
@@ -1003,6 +1131,59 @@ fn prepare_deploy_files_keeps_package_json_for_compute_runtime() {
         .collect::<Vec<_>>();
 
     assert_eq!(paths, vec!["package.json", "server.js"]);
+}
+
+#[test]
+fn python_process_runtime_uses_project_root_with_versioned_dependencies() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".onreza/python/3.14/site-packages/orjson")).unwrap();
+    fs::write(dir.path().join("main.py"), "import orjson").unwrap();
+    fs::write(dir.path().join("requirements.txt"), "orjson==3.11.3\n").unwrap();
+    fs::write(
+        dir.path()
+            .join(".onreza/python/3.14/site-packages/orjson/__init__.py"),
+        "loads = lambda value: value",
+    )
+    .unwrap();
+    let detection = crate::detect::detect(dir.path());
+    let manifest = build_manifest::generate_compute_manifest("main.py");
+
+    let artifact = resolve_runtime_artifact(
+        dir.path(),
+        dir.path(),
+        dir.path().to_path_buf(),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+    let files = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let breakdown = artifact.scan.file_breakdown(&files);
+
+    assert_eq!(artifact.root_dir, dir.path());
+    assert_eq!(breakdown.python_site_packages, 1);
+    assert!(files.iter().any(|file| file.path == "main.py"));
+}
+
+#[test]
+fn python_process_runtime_rejects_missing_installed_dependencies() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("main.py"), "import orjson").unwrap();
+    fs::write(dir.path().join("requirements.txt"), "orjson==3.11.3\n").unwrap();
+    let detection = crate::detect::detect(dir.path());
+    let manifest = build_manifest::generate_compute_manifest("main.py");
+
+    let error = resolve_runtime_artifact(
+        dir.path(),
+        dir.path(),
+        dir.path().to_path_buf(),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("installed dependencies"));
 }
 
 #[test]
@@ -1117,6 +1298,7 @@ fn process_root_output_keeps_dependency_categories_distinct() {
         crate::artifact::RuntimeArtifactFileBreakdown {
             build_output: 1,
             node_modules: 1,
+            python_site_packages: 0,
             metadata: 1,
             workspace_packages: 0,
             other: 0,
@@ -1268,6 +1450,7 @@ fn adapter_node_runtimes_include_project_dependencies() {
             crate::artifact::RuntimeArtifactFileBreakdown {
                 build_output: 1,
                 node_modules: 1,
+                python_site_packages: 0,
                 metadata: 1,
                 workspace_packages: 0,
                 other: 0,
@@ -2168,6 +2351,7 @@ fn file_breakdown() -> crate::artifact::RuntimeArtifactFileBreakdown {
     crate::artifact::RuntimeArtifactFileBreakdown {
         build_output: 1_055,
         node_modules: 19_620,
+        python_site_packages: 0,
         metadata: 4,
         workspace_packages: 0,
         other: 0,
@@ -2796,20 +2980,16 @@ fn ensure_process_entry_config_entry_rejects_shell_command() {
     fs::write(dir.path().join("index.js"), "console.log('ok')").unwrap();
 
     let detection = make_detection("other", None);
-    let err = ensure_process_entry(
-        dir.path(),
-        dir.path(),
-        Some("node index.js"),
-        &detection,
-        true,
-    )
-    .expect_err("shell command entry should fail");
-    let msg = err.to_string();
-    assert!(
-        msg.contains("not a shell command"),
-        "unexpected error: {msg}"
-    );
-    expect_code(&err, "INVALID_DEPLOY_ENTRY");
+    for entry in ["node index.js", "python3.14 main.py"] {
+        let err = ensure_process_entry(dir.path(), dir.path(), Some(entry), &detection, true)
+            .expect_err("shell command entry should fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not a shell command"),
+            "unexpected error: {msg}"
+        );
+        expect_code(&err, "INVALID_DEPLOY_ENTRY");
+    }
 }
 
 #[test]

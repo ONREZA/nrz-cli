@@ -43,6 +43,8 @@ pub(crate) struct RuntimeArtifact {
     pub(crate) scan: RuntimeArtifactScan,
 }
 
+pub(crate) use crate::detect::python::PYTHON_SITE_PACKAGES_ROOT;
+
 pub(crate) const NODE_RUNTIME_METADATA_FILES: &[&str] = &[
     "package.json",
     "package-lock.json",
@@ -57,6 +59,7 @@ pub(crate) const NODE_RUNTIME_METADATA_FILES: &[&str] = &[
 pub(crate) enum RuntimeArtifactScan {
     All,
     NodeRuntimeRoot,
+    PythonRuntimeRoot,
     Selected {
         roots: Vec<RuntimeArtifactScanRoot>,
         symlink_roots: Vec<String>,
@@ -81,6 +84,7 @@ pub(crate) struct RuntimeArtifactScanRoot {
 pub(crate) struct RuntimeArtifactFileBreakdown {
     pub(crate) build_output: usize,
     pub(crate) node_modules: usize,
+    pub(crate) python_site_packages: usize,
     pub(crate) metadata: usize,
     pub(crate) workspace_packages: usize,
     pub(crate) other: usize,
@@ -92,6 +96,7 @@ impl RuntimeArtifactFileBreakdown {
         [
             ("build output", self.build_output),
             ("node_modules", self.node_modules),
+            ("Python site-packages", self.python_site_packages),
             ("metadata", self.metadata),
             ("workspace packages", self.workspace_packages),
             ("other runtime files", self.other),
@@ -101,14 +106,16 @@ impl RuntimeArtifactFileBreakdown {
     }
 
     pub(crate) fn includes_installed_dependencies(&self) -> bool {
-        self.node_modules > 0 || self.workspace_packages > 0
+        self.node_modules > 0 || self.python_site_packages > 0 || self.workspace_packages > 0
     }
 }
 
 impl RuntimeArtifactScan {
     pub(crate) fn explain(&self) -> serde_json::Value {
         match self {
-            Self::All | Self::NodeRuntimeRoot => serde_json::json!({ "mode": "all" }),
+            Self::All | Self::NodeRuntimeRoot | Self::PythonRuntimeRoot => {
+                serde_json::json!({ "mode": "all" })
+            }
             Self::Selected {
                 roots,
                 symlink_roots,
@@ -126,6 +133,9 @@ impl RuntimeArtifactScan {
             match self.file_category(&file.path) {
                 RuntimeArtifactFileCategory::BuildOutput => breakdown.build_output += 1,
                 RuntimeArtifactFileCategory::NodeModules => breakdown.node_modules += 1,
+                RuntimeArtifactFileCategory::PythonSitePackages => {
+                    breakdown.python_site_packages += 1
+                }
                 RuntimeArtifactFileCategory::Metadata => breakdown.metadata += 1,
                 RuntimeArtifactFileCategory::WorkspacePackage => breakdown.workspace_packages += 1,
                 RuntimeArtifactFileCategory::Other => breakdown.other += 1,
@@ -139,6 +149,7 @@ impl RuntimeArtifactScan {
         matches!(
             self.file_category(path),
             RuntimeArtifactFileCategory::NodeModules
+                | RuntimeArtifactFileCategory::PythonSitePackages
                 | RuntimeArtifactFileCategory::WorkspacePackage
         )
     }
@@ -147,6 +158,7 @@ impl RuntimeArtifactScan {
         let (roots, symlink_roots) = match self {
             Self::All => return RuntimeArtifactFileCategory::BuildOutput,
             Self::NodeRuntimeRoot => return node_runtime_root_file_category(path),
+            Self::PythonRuntimeRoot => return python_runtime_root_file_category(path),
             Self::Selected {
                 roots,
                 symlink_roots,
@@ -183,6 +195,7 @@ impl RuntimeArtifactScan {
 enum RuntimeArtifactFileCategory {
     BuildOutput,
     NodeModules,
+    PythonSitePackages,
     Metadata,
     WorkspacePackage,
     Other,
@@ -206,6 +219,14 @@ fn node_runtime_root_file_category(path: &str) -> RuntimeArtifactFileCategory {
     }
     if last.is_some_and(|name| NODE_RUNTIME_METADATA_FILES.contains(&name)) {
         RuntimeArtifactFileCategory::Metadata
+    } else {
+        RuntimeArtifactFileCategory::BuildOutput
+    }
+}
+
+fn python_runtime_root_file_category(path: &str) -> RuntimeArtifactFileCategory {
+    if runtime_path_is_covered(path, PYTHON_SITE_PACKAGES_ROOT) {
+        RuntimeArtifactFileCategory::PythonSitePackages
     } else {
         RuntimeArtifactFileCategory::BuildOutput
     }
@@ -408,7 +429,7 @@ fn classify_file_role(
     path: &str,
     prerender_paths: &HashSet<String>,
 ) -> (ArtifactFileRole, Option<String>, String) {
-    if is_platform_build_only_path(path) {
+    if is_platform_build_only_path(detection, path) {
         return (
             ArtifactFileRole::Platform,
             None,
@@ -544,7 +565,16 @@ fn manifest_is_static_root_only(manifest: &Manifest) -> bool {
         })
 }
 
-fn is_platform_build_only_path(path: &str) -> bool {
+fn is_platform_build_only_path(
+    detection: &crate::detect::types::DetectionResult,
+    path: &str,
+) -> bool {
+    if detection.metadata.runtime.runtime_type == crate::detect::types::RuntimeType::Python
+        && runtime_path_is_covered(path, PYTHON_SITE_PACKAGES_ROOT)
+    {
+        return false;
+    }
+
     path == ".onreza" || path.starts_with(".onreza/")
 }
 
