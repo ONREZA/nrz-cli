@@ -2,7 +2,8 @@
 // Do not edit; regenerate via 'NRZ_CLI_DIR=<path> moon run workspace:sync-nrz-cli-crates'.
 
 use nrz_source_bundle::{
-    SOURCE_BUNDLE_V1_SCHEMA_VERSION, SourceLogicalManifest, SourceLogicalManifestLayer,
+    RUNTIME_READINESS_CONFIG_KEY, SOURCE_BUNDLE_V1_SCHEMA_VERSION, SourceLogicalManifest,
+    SourceLogicalManifestLayer,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -254,12 +255,16 @@ fn runtime_layer(
                 ))
             })?
     };
+    let mut runtime_config = layer.runtime_config.clone().unwrap_or_else(|| json!({}));
+    if let Some(config) = runtime_config.as_object_mut() {
+        config.remove(RUNTIME_READINESS_CONFIG_KEY);
+    }
     Ok(json!({
         "layerName": layer.name,
         "applicationRoot": application_root,
         "dependencyMaterializationIds": dependency_materialization_ids,
         "entrypoint": relative_entrypoint,
-        "runtimeConfig": layer.runtime_config.clone().unwrap_or_else(|| json!({}))
+        "runtimeConfig": runtime_config
     }))
 }
 
@@ -291,7 +296,10 @@ mod tests {
                 target: "COMPUTE".to_string(),
                 root_path: Some("server".to_string()),
                 entrypoint: Some("server/server.js".to_string()),
-                runtime_config: Some(json!({ "memoryMb": 256 })),
+                runtime_config: Some(json!({
+                    "memoryMb": 256,
+                    "readiness": { "protocol": "HTTP", "path": "/healthz" }
+                })),
             }],
             capabilities: Vec::new(),
             routes: Vec::new(),
@@ -372,6 +380,9 @@ mod tests {
             graph.wire().runtime_layers[0].entrypoint.as_str(),
             "server.js"
         );
+        let runtime_config = serde_json::to_value(&graph.wire().runtime_layers[0].runtime_config)
+            .expect("serialize runtime config");
+        assert_eq!(runtime_config, json!({ "memoryMb": 256 }));
     }
 
     #[test]

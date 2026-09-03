@@ -12,12 +12,28 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
-use crate::detect::python::{PYTHON_RUNTIME_VERSION, PYTHON_SITE_PACKAGES_ROOT};
+use crate::detect::python::{
+    PYTHON_INTERPRETER, PYTHON_RUNTIME_VERSION, PYTHON_SITE_PACKAGES_ROOT,
+};
 
 const UV_VERSION: &str = "0.10.0";
 const UV_RELEASE_ORIGIN: &str = "https://github.com";
 const MAX_UV_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_UV_BINARY_BYTES: u64 = 96 * 1024 * 1024;
+const PLATFORM_PYTHON_TARGET: &str = "x86_64-manylinux_2_39";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum PythonInstallMode {
+    ManagedLocal,
+    PinnedPlatform,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(super) struct PythonInstallCommand {
+    pub(super) program: PathBuf,
+    pub(super) arguments: Vec<OsString>,
+    pub(super) display: String,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ArchiveFormat {
@@ -58,7 +74,42 @@ pub(super) async fn resolve() -> anyhow::Result<PathBuf> {
     Ok(cached_path)
 }
 
-pub(super) fn install_arguments(manifest: &str) -> Vec<OsString> {
+pub(super) fn install_command(
+    manifest: &str,
+    mode: PythonInstallMode,
+    host_os: &str,
+    host_arch: &str,
+) -> anyhow::Result<PythonInstallCommand> {
+    match mode {
+        PythonInstallMode::PinnedPlatform => Ok(PythonInstallCommand {
+            program: PathBuf::from(PYTHON_INTERPRETER),
+            arguments: platform_pip_arguments(manifest),
+            display: format!(
+                "pinned {PYTHON_INTERPRETER} / pip: install {} into {PYTHON_SITE_PACKAGES_ROOT}",
+                platform_install_source(manifest)
+            ),
+        }),
+        PythonInstallMode::ManagedLocal => Ok(PythonInstallCommand {
+            program: PathBuf::new(),
+            arguments: managed_uv_arguments(manifest, host_os, host_arch)?,
+            display: format!(
+                "managed uv {UV_VERSION} / CPython {PYTHON_RUNTIME_VERSION}: install {} into {PYTHON_SITE_PACKAGES_ROOT}",
+                manifest
+            ),
+        }),
+    }
+}
+
+fn managed_uv_arguments(
+    manifest: &str,
+    host_os: &str,
+    host_arch: &str,
+) -> anyhow::Result<Vec<OsString>> {
+    if manifest == "setup.py" {
+        bail!(
+            "setup.py cannot be safely materialized for the Linux x86_64 runtime from {host_os}/{host_arch}; use requirements.txt or pyproject.toml, or deploy through ONREZA Cloud Builder"
+        );
+    }
     let mut arguments = vec![
         OsString::from("pip"),
         OsString::from("install"),
@@ -69,9 +120,33 @@ pub(super) fn install_arguments(manifest: &str) -> Vec<OsString> {
         OsString::from("copy"),
         OsString::from("--target"),
         OsString::from(PYTHON_SITE_PACKAGES_ROOT),
+        OsString::from("--python-platform"),
+        OsString::from(PLATFORM_PYTHON_TARGET),
+        OsString::from("--only-binary"),
+        OsString::from(":all:"),
+    ];
+    match manifest {
+        "requirements.txt" | "pyproject.toml" => {
+            arguments.push(OsString::from("--requirements"));
+            arguments.push(OsString::from(manifest));
+        }
+        _ => bail!("unsupported Python dependency manifest: {manifest}"),
+    }
+    Ok(arguments)
+}
+
+fn platform_pip_arguments(manifest: &str) -> Vec<OsString> {
+    let mut arguments = vec![
+        OsString::from("-m"),
+        OsString::from("pip"),
+        OsString::from("install"),
+        OsString::from("--disable-pip-version-check"),
+        OsString::from("--no-compile"),
+        OsString::from("--target"),
+        OsString::from(PYTHON_SITE_PACKAGES_ROOT),
     ];
     if manifest == "requirements.txt" {
-        arguments.push(OsString::from("--requirements"));
+        arguments.push(OsString::from("--requirement"));
         arguments.push(OsString::from(manifest));
     } else {
         arguments.push(OsString::from("."));
@@ -79,15 +154,12 @@ pub(super) fn install_arguments(manifest: &str) -> Vec<OsString> {
     arguments
 }
 
-pub(super) fn install_display(manifest: &str) -> String {
-    let source = if manifest == "requirements.txt" {
-        "requirements.txt"
+fn platform_install_source(manifest: &str) -> &str {
+    if manifest == "requirements.txt" {
+        manifest
     } else {
         "."
-    };
-    format!(
-        "managed uv {UV_VERSION} / CPython {PYTHON_RUNTIME_VERSION}: install {source} into {PYTHON_SITE_PACKAGES_ROOT}"
-    )
+    }
 }
 
 pub(super) fn artifact_for(os: &str, arch: &str) -> anyhow::Result<UvArtifact> {

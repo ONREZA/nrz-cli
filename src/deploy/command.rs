@@ -386,6 +386,7 @@ pub(super) async fn run_install_step(
     effective: &EffectiveProjectConfig,
     execution_env: &[(String, String)],
     build_logs: Option<&BuildLogEmitter>,
+    platform_runner: bool,
 ) -> anyhow::Result<()> {
     let is_python =
         crate::detect::detect_with_framework_override(project_dir, effective.framework_override())
@@ -414,7 +415,32 @@ pub(super) async fn run_install_step(
     if effective.install_command().is_none()
         && let Some(Some(manifest)) = python_manifest
     {
-        let display = super::python_toolchain::install_display(manifest);
+        let mode = if platform_runner {
+            super::python_toolchain::PythonInstallMode::PinnedPlatform
+        } else {
+            super::python_toolchain::PythonInstallMode::ManagedLocal
+        };
+        let mut install = super::python_toolchain::install_command(
+            manifest,
+            mode,
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        )
+        .map_err(|error| {
+            output::coded_error(
+                "PYTHON_PLATFORM_UNSUPPORTED",
+                format!("cannot prepare Python dependencies: {error:#}"),
+            )
+        })?;
+        if mode == super::python_toolchain::PythonInstallMode::ManagedLocal {
+            install.program = super::python_toolchain::resolve().await.map_err(|error| {
+                output::coded_error(
+                    "PYTHON_TOOLCHAIN_UNAVAILABLE",
+                    format!("failed to prepare managed Python toolchain: {error:#}"),
+                )
+            })?;
+        }
+        let display = install.display;
         output::status(
             json,
             ">",
@@ -427,16 +453,9 @@ pub(super) async fn run_install_step(
                 &format!("Installing dependencies: {display}"),
             );
         }
-        let uv = super::python_toolchain::resolve().await.map_err(|error| {
-            output::coded_error(
-                "PYTHON_TOOLCHAIN_UNAVAILABLE",
-                format!("failed to prepare managed Python toolchain: {error:#}"),
-            )
-        })?;
-        let arguments = super::python_toolchain::install_arguments(manifest);
         run_program_streaming(
-            &uv,
-            &arguments,
+            &install.program,
+            &install.arguments,
             &display,
             StreamingCommandContext {
                 project_dir,

@@ -79,6 +79,7 @@ fn source_bundle_assigns_dependency_ownership_only_for_trusted_materialization()
         &files,
         &RuntimeArtifactScan::NodeRuntimeRoot,
         RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
     )
     .unwrap();
     let embedded = build_source_bundle_plan_with_scan(
@@ -87,6 +88,7 @@ fn source_bundle_assigns_dependency_ownership_only_for_trusted_materialization()
         &files,
         &RuntimeArtifactScan::NodeRuntimeRoot,
         RuntimeDependencyPackaging::Embedded,
+        None,
     )
     .unwrap();
 
@@ -145,6 +147,7 @@ fn python_bundle_separates_site_packages_and_declares_runtime_family() {
         &files,
         &RuntimeArtifactScan::PythonRuntimeRoot,
         RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
     )
     .unwrap();
 
@@ -209,6 +212,7 @@ async fn source_bundle_projects_workspace_packages_into_dependency_root() {
         &files,
         &scan,
         RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
     )
     .unwrap();
 

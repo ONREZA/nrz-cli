@@ -714,6 +714,7 @@ pub async fn run(
             build_logs: None,
             execution_env: &[],
             target_production: args.prod.then_some(true),
+            platform_runner: edge_build_handoff.is_some(),
         })
         .await?;
         let source_bundle = deploy_plan.materialize_source_bundle(json, dependency_packaging)?;
@@ -989,6 +990,7 @@ pub async fn run(
                 .and_then(BuildLogSession::emitter),
             execution_env: &execution_env,
             target_production,
+            platform_runner: edge_build_handoff.is_some(),
         })
         .await?;
         if let Some(emitter) = build_log_session

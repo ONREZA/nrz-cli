@@ -6,6 +6,8 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 pub const SOURCE_BUNDLE_V1_SCHEMA_VERSION: &str = "SOURCE_BUNDLE_V1.0";
+pub const RUNTIME_READINESS_CONFIG_KEY: &str = "readiness";
+const MAX_HEALTH_CHECK_PATH_CHARACTERS: usize = 255;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +88,95 @@ pub struct SourceLogicalManifestRoute {
     pub methods: Option<Vec<String>>,
     #[serde(default)]
     pub fallthrough_when: Option<Vec<RouteFallthroughCondition>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceRuntimeReadiness {
+    Tcp,
+    Http { path: String },
+}
+
+impl SourceRuntimeReadiness {
+    #[must_use]
+    pub fn health_check_path(&self) -> Option<&str> {
+        match self {
+            Self::Tcp => None,
+            Self::Http { path } => Some(path),
+        }
+    }
+}
+
+pub fn source_runtime_readiness(
+    manifest: &SourceLogicalManifest,
+) -> Result<Option<SourceRuntimeReadiness>, String> {
+    let mut resolved: Option<Option<SourceRuntimeReadiness>> = None;
+    for layer in &manifest.layers {
+        let config = match layer.runtime_config.as_ref() {
+            None => None,
+            Some(Value::Object(config)) => Some(config),
+            Some(_) => {
+                return Err(format!(
+                    "source layer '{}' runtimeConfig must be an object",
+                    layer.name
+                ));
+            }
+        };
+        let readiness = config
+            .and_then(|config| config.get(RUNTIME_READINESS_CONFIG_KEY))
+            .map(parse_runtime_readiness)
+            .transpose()?;
+        if layer.target != "COMPUTE" {
+            if readiness.is_some() {
+                return Err(format!(
+                    "non-COMPUTE source layer '{}' declares runtime readiness",
+                    layer.name
+                ));
+            }
+            continue;
+        }
+        match &resolved {
+            None => resolved = Some(readiness),
+            Some(expected) if expected == &readiness => {}
+            Some(_) => {
+                return Err(
+                    "COMPUTE source layers declare inconsistent runtime readiness".to_string(),
+                );
+            }
+        }
+    }
+    Ok(resolved.flatten())
+}
+
+fn parse_runtime_readiness(value: &Value) -> Result<SourceRuntimeReadiness, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "runtimeConfig.readiness must be an object".to_string())?;
+    if object.keys().any(|key| key != "protocol" && key != "path") {
+        return Err("runtimeConfig.readiness contains an unknown field".to_string());
+    }
+    match object.get("protocol").and_then(Value::as_str) {
+        Some("TCP") if object.get("path").is_none() => Ok(SourceRuntimeReadiness::Tcp),
+        Some("HTTP") => {
+            let path = object
+                .get("path")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "HTTP runtimeConfig.readiness requires path".to_string())?;
+            if path.is_empty()
+                || path.chars().count() > MAX_HEALTH_CHECK_PATH_CHARACTERS
+                || !path.starts_with('/')
+                || path.contains("..")
+                || path.contains('?')
+                || path.contains('#')
+            {
+                return Err("runtimeConfig.readiness HTTP path is invalid".to_string());
+            }
+            Ok(SourceRuntimeReadiness::Http {
+                path: path.to_string(),
+            })
+        }
+        Some("TCP") => Err("TCP runtimeConfig.readiness must not declare path".to_string()),
+        _ => Err("runtimeConfig.readiness protocol must be TCP or HTTP".to_string()),
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -223,5 +314,68 @@ mod tests {
         assert!(normalize_source_path("dist/../secret").is_err());
         assert!(normalize_source_path("dist//index.html").is_err());
         assert!(normalize_source_path("dist\\index.html").is_err());
+    }
+
+    #[test]
+    fn resolves_one_immutable_readiness_contract_for_compute_layers() {
+        let manifest = SourceLogicalManifest {
+            schema_version: SOURCE_BUNDLE_V1_SCHEMA_VERSION.to_string(),
+            capabilities: Vec::new(),
+            files: Vec::new(),
+            layers: vec![SourceLogicalManifestLayer {
+                name: "server".to_string(),
+                target: "COMPUTE".to_string(),
+                root_path: None,
+                entrypoint: Some("main.py".to_string()),
+                runtime_config: Some(serde_json::json!({
+                    "readiness": { "protocol": "HTTP", "path": "/healthz" },
+                    "runtimeFamily": "PYTHON"
+                })),
+            }],
+            routes: Vec::new(),
+            entrypoints: Vec::new(),
+        };
+
+        assert_eq!(
+            source_runtime_readiness(&manifest).unwrap(),
+            Some(SourceRuntimeReadiness::Http {
+                path: "/healthz".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_invalid_runtime_readiness() {
+        let layer = |name: &str, readiness: Option<Value>| SourceLogicalManifestLayer {
+            name: name.to_string(),
+            target: "COMPUTE".to_string(),
+            root_path: None,
+            entrypoint: Some("main.py".to_string()),
+            runtime_config: readiness
+                .map(|readiness| serde_json::json!({ "readiness": readiness })),
+        };
+        let manifest = |layers| SourceLogicalManifest {
+            schema_version: SOURCE_BUNDLE_V1_SCHEMA_VERSION.to_string(),
+            capabilities: Vec::new(),
+            files: Vec::new(),
+            layers,
+            routes: Vec::new(),
+            entrypoints: Vec::new(),
+        };
+
+        assert!(
+            source_runtime_readiness(&manifest(vec![
+                layer("one", Some(serde_json::json!({ "protocol": "TCP" }))),
+                layer("two", None),
+            ]))
+            .is_err()
+        );
+        assert!(
+            source_runtime_readiness(&manifest(vec![layer(
+                "server",
+                Some(serde_json::json!({ "protocol": "HTTP", "path": "health" })),
+            )]))
+            .is_err()
+        );
     }
 }

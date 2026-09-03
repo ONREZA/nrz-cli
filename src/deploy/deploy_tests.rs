@@ -555,7 +555,7 @@ async fn recursive_deploy_install_commands_are_classified_as_invalid_config() {
         ),
     );
 
-    let error = run_install_step(dir.path(), true, &effective, &[], None)
+    let error = run_install_step(dir.path(), true, &effective, &[], None, false)
         .await
         .expect_err("recursive deploy must be rejected before the install child starts");
 
@@ -908,7 +908,7 @@ async fn dependency_free_python_install_step_removes_stale_site_packages() {
     fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
     let effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
 
-    run_install_step(dir.path(), true, &effective, &[], None)
+    run_install_step(dir.path(), true, &effective, &[], None, false)
         .await
         .unwrap();
 
@@ -962,11 +962,15 @@ fn prepare_deploy_files_keeps_python_dependencies_and_prunes_platform_metadata()
         &deployable,
         &RuntimeArtifactScan::PythonRuntimeRoot,
         crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+        Some(crate::artifact::source_bundle_v1::RuntimeReadinessContract::Http("/healthz")),
     )
     .unwrap();
     assert_eq!(
         plan.logical_manifest.layers[0].runtime_config,
-        Some(serde_json::json!({"runtimeFamily": "PYTHON"}))
+        Some(serde_json::json!({
+            "readiness": {"path": "/healthz", "protocol": "HTTP"},
+            "runtimeFamily": "PYTHON"
+        }))
     );
 }
 

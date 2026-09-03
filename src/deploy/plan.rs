@@ -4,7 +4,7 @@ use anyhow::Context;
 use serde::Serialize;
 
 use crate::artifact::source_bundle_v1::{
-    RuntimeDependencyPackaging, SOURCE_BUNDLE_FORMAT, SourceBundlePlan,
+    RuntimeDependencyPackaging, RuntimeReadinessContract, SOURCE_BUNDLE_FORMAT, SourceBundlePlan,
     build_source_bundle_plan_with_scan,
 };
 use crate::artifact::{
@@ -24,6 +24,7 @@ pub(super) struct DeployPlanRequest<'a> {
     pub(super) build_logs: Option<&'a super::BuildLogEmitter>,
     pub(super) execution_env: &'a [(String, String)],
     pub(super) target_production: Option<bool>,
+    pub(super) platform_runner: bool,
 }
 
 pub(super) async fn scan_runtime_artifact_for_plan(
@@ -166,6 +167,12 @@ impl DeployPlan {
             &self.files,
             &self.artifact.runtime.scan,
             dependency_packaging,
+            self.health_check.as_ref().map(|health_check| {
+                health_check.path.as_deref().map_or(
+                    RuntimeReadinessContract::Tcp,
+                    RuntimeReadinessContract::Http,
+                )
+            }),
         )
         .context("failed to prepare SOURCE_BUNDLE_V1 upload plan")
     }
@@ -274,6 +281,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             effective,
             request.execution_env,
             request.build_logs,
+            request.platform_runner,
         )
         .await?;
     }
