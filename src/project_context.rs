@@ -92,6 +92,49 @@ pub(crate) fn resolve(
     })
 }
 
+pub(crate) fn resolve_platform_project_dir(
+    root_dir: &Path,
+    root_directory: &str,
+) -> anyhow::Result<PathBuf> {
+    let requested = root_directory.trim();
+    let relative = Path::new(requested);
+    if requested.is_empty()
+        || relative.is_absolute()
+        || relative.components().any(|component| {
+            !matches!(
+                component,
+                std::path::Component::CurDir | std::path::Component::Normal(_)
+            )
+        })
+    {
+        return Err(output::coded_error(
+            "INVALID_ROOT_DIRECTORY",
+            format!(
+                "rootDirectory must be a relative path inside the source checkout: {requested}"
+            ),
+        ));
+    }
+
+    let root_dir = root_dir
+        .canonicalize()
+        .with_context(|| format!("project directory not found: {}", root_dir.display()))?;
+    let project_dir = root_dir.join(relative).canonicalize().map_err(|error| {
+        output::coded_error(
+            "INVALID_ROOT_DIRECTORY",
+            format!(
+                "rootDirectory does not resolve to a directory in the source checkout: {requested} ({error})"
+            ),
+        )
+    })?;
+    if !project_dir.is_dir() || !project_dir.starts_with(&root_dir) {
+        return Err(output::coded_error(
+            "INVALID_ROOT_DIRECTORY",
+            format!("rootDirectory escapes the source checkout or is not a directory: {requested}"),
+        ));
+    }
+    Ok(project_dir)
+}
+
 fn resolve_monorepo_app_path(root_dir: &Path, app_name: &str) -> anyhow::Result<String> {
     let mono_fs = crate::detect::fs::LocalFs::new(root_dir);
     let mono_pkg = crate::detect::package_json::PackageJson::load_from_fs(&mono_fs);

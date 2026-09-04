@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::artifact::source_bundle_v1::SourceBundlePlan;
+use crate::cli::DeployArgs;
 use crate::deploy::hash::sha256_finalize_hex;
 
 pub(super) const EDGE_BUILD_HANDOFF_MODE_ENV: &str = "NRZ_EDGE_BUILD_HANDOFF";
@@ -23,6 +24,44 @@ const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
 pub(super) struct EdgeBuildHandoffOutput {
     root: PathBuf,
+}
+
+pub(super) fn validate_resume_arguments(args: &DeployArgs) -> anyhow::Result<()> {
+    if args.resume_deployment.is_none() {
+        return Ok(());
+    }
+
+    let overrides = [
+        (args.prod, "--prod"),
+        (args.dry, "--dry"),
+        (args.verify, "--verify"),
+        (args.environment.is_some(), "--environment"),
+        (args.project_id.is_some(), "--project-id"),
+        (args.skip_build, "--skip-build"),
+        (args.skip_install, "--skip-install"),
+        (args.no_log_upload, "--no-log-upload"),
+        (args.log_upload_debug, "--log-upload-debug"),
+        (args.build_command.is_some(), "--build-command"),
+        (args.skip_env_check, "--skip-env-check"),
+        (args.compute.is_some(), "--compute"),
+        (args.health_check_path.is_some(), "--health-check-path"),
+        (args.app.is_some(), "--app"),
+        (args.force_rules, "--force-rules"),
+    ]
+    .into_iter()
+    .filter_map(|(present, flag)| present.then_some(flag))
+    .collect::<Vec<_>>();
+
+    if overrides.is_empty() {
+        return Ok(());
+    }
+    Err(crate::output::coded_error(
+        "INVALID_ARGUMENT",
+        format!(
+            "--resume-deployment uses immutable deployment-scoped settings and forbids overrides: {}",
+            overrides.join(", ")
+        ),
+    ))
 }
 
 impl EdgeBuildHandoffOutput {
@@ -91,6 +130,10 @@ impl EdgeBuildHandoffOutput {
         resume_deployment_id: Option<Uuid>,
     ) -> anyhow::Result<Option<Self>> {
         let Some(mode) = mode else {
+            ensure!(
+                resume_deployment_id.is_none(),
+                "--resume-deployment requires {EDGE_BUILD_HANDOFF_MODE_ENV}={EDGE_BUILD_HANDOFF_MODE_V1}"
+            );
             return Ok(None);
         };
         if mode != EDGE_BUILD_HANDOFF_MODE_V1 {

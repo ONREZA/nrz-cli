@@ -191,6 +191,87 @@ fn effective_config_local_build_command_wins_over_server() {
 }
 
 #[test]
+fn platform_runner_snapshot_overrides_local_and_preserves_detected_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = ProjectConfig::default();
+    config.build.install_command = Some("pnpm install".to_string());
+    config.build.command = Some("pnpm build".to_string());
+    let mut effective =
+        EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+
+    effective.apply_platform_runner_settings(&ProjectBuildSettings {
+        package_manager: "NPM".to_string(),
+        install_command: Some("npm ci".to_string()),
+        install_command_source: Some(BuildSettingSource::Preset),
+        build_command: Some("npm run build".to_string()),
+        build_command_source: Some(BuildSettingSource::Detected),
+        ..Default::default()
+    });
+
+    assert_eq!(
+        effective
+            .install_command()
+            .and_then(SourceAwareSetting::value),
+        Some("npm ci")
+    );
+    assert_eq!(
+        effective
+            .build_command()
+            .and_then(SourceAwareSetting::value),
+        Some("npm run build")
+    );
+    assert_eq!(
+        effective
+            .build_command()
+            .map(SourceAwareSetting::source_or_preset),
+        Some(BuildSettingSource::Detected)
+    );
+}
+
+#[test]
+fn project_build_settings_requires_platform_snapshot_identity() {
+    let missing_root = serde_json::from_value::<ProjectBuildSettings>(serde_json::json!({
+        "packageManager": "NPM"
+    }));
+    assert!(missing_root.is_err());
+
+    let missing_package_manager =
+        serde_json::from_value::<ProjectBuildSettings>(serde_json::json!({
+            "rootDirectory": "."
+        }));
+    assert!(missing_package_manager.is_err());
+
+    let settings = serde_json::from_value::<ProjectBuildSettings>(serde_json::json!({
+        "rootDirectory": ".",
+        "packageManager": "NPM"
+    }))
+    .unwrap();
+    assert_eq!(settings.root_directory, ".");
+    assert_eq!(settings.package_manager, "NPM");
+}
+
+#[test]
+fn platform_runner_snapshot_preserves_authoritative_command_absence() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = ProjectConfig::default();
+    config.build.command = Some("pnpm build".to_string());
+    let mut effective =
+        EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+
+    effective.apply_platform_runner_settings(&ProjectBuildSettings {
+        build_command: None,
+        build_command_source: Some(BuildSettingSource::Detected),
+        ..Default::default()
+    });
+
+    assert!(
+        effective
+            .build_command()
+            .is_some_and(|setting| setting.value().is_none())
+    );
+}
+
+#[test]
 fn effective_config_local_framework_wins_over_server() {
     let dir = tempfile::tempdir().unwrap();
     let mut config = ProjectConfig::default();

@@ -85,3 +85,37 @@ fn selected_app_must_resolve_inside_monorepo_root() {
             || error.to_string().contains("escapes the monorepo root")
     );
 }
+
+#[test]
+fn platform_project_root_resolves_an_immutable_subdirectory() {
+    let root = tempfile::tempdir().unwrap();
+    let app = root.path().join("apps/web");
+    std::fs::create_dir_all(&app).unwrap();
+
+    assert_eq!(
+        project_context::resolve_platform_project_dir(root.path(), "apps/web").unwrap(),
+        app.canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn platform_project_root_rejects_parent_traversal() {
+    let root = tempfile::tempdir().unwrap();
+
+    let error =
+        project_context::resolve_platform_project_dir(root.path(), "../escaped").unwrap_err();
+
+    assert!(error.to_string().contains("relative path inside"));
+}
+
+#[cfg(unix)]
+#[test]
+fn platform_project_root_rejects_a_symlink_escape() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("escaped")).unwrap();
+
+    let error = project_context::resolve_platform_project_dir(root.path(), "escaped").unwrap_err();
+
+    assert!(error.to_string().contains("escapes the source checkout"));
+}

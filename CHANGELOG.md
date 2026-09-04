@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.0-beta.6] - 2026-09-04
+
+### 🐛 Bug Fixes
+
+- **deploy:** fence platform resume inputs ([c32d777](https://github.com/ONREZA/nrz-cli/commit/c32d777bb352bb403b736b7e0ad1123c430a639d))
+- **deploy:** harden edge runner contract ([8d44d7a](https://github.com/ONREZA/nrz-cli/commit/8d44d7ae0af15d9b9c1863572ff196b6294e7a2c))
+
+### ✨ Features
+
+- **deploy:** qualify Python runtime ([596d8e9](https://github.com/ONREZA/nrz-cli/commit/596d8e92337bc83faf0efc539bb84c04850cb1fa))
+
+## [0.39.0-beta.5] - 2026-09-04
+
+### 🐛 Bug Fixes
+
+- **deploy:** harden edge runner contract ([8d44d7a](https://github.com/ONREZA/nrz-cli/commit/8d44d7ae0af15d9b9c1863572ff196b6294e7a2c))
+
+### ✨ Features
+
+- **deploy:** qualify Python runtime ([596d8e9](https://github.com/ONREZA/nrz-cli/commit/596d8e92337bc83faf0efc539bb84c04850cb1fa))
+
 ## [0.39.0-beta.4] - 2026-09-03
 
 ### ✨ Features

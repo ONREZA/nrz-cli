@@ -40,7 +40,7 @@ async fn edge_build_runner_context(
 ) -> Json<serde_json::Value> {
     state.record(Method::GET, &uri);
     Json(json!({
-        "protocolVersion": "runner-context-v2",
+        "protocolVersion": "runner-context-v3",
         "context": {
             "workspaceId": "workspace-edge",
             "workspaceSlug": "edge",
@@ -60,7 +60,9 @@ async fn edge_build_runner_context(
         },
         "settings": {
             "frameworkPreset": null,
+            "rootDirectory": ".",
             "gitLfsEnabled": false,
+            "packageManager": "NPM",
             "installCommand": null,
             "installCommandSource": "PRESET",
             "buildCommand": null,
@@ -144,6 +146,8 @@ fn spawn_project_settings_mock() -> String {
             |axum::extract::Path(_project_id): axum::extract::Path<String>| async {
                 Json(json!({
                     "frameworkPreset": "vite",
+                    "rootDirectory": ".",
+                    "packageManager": "NPM",
                     "buildCommand": "npm run server-build",
                     "buildCommandSource": "USER",
                     "outputDirectory": "server-dist",
@@ -300,19 +304,15 @@ fn edge_build_publishes_local_handoff_without_legacy_source_mutations() {
         .env("NRZ_API_URL", api_url)
         .env("NRZ_RUNNER", "PLATFORM")
         .env("NRZ_EDGE_BUILD_HANDOFF", "V1")
+        .env("NRZ_LOG_UPLOAD", "0")
         .env("ONREZA_OUTPUT_DIR", output_dir.path())
         .args([
             "--token",
             "runner-token",
             "deploy",
+            project.path().to_str().unwrap(),
             "--resume-deployment",
             deployment_id,
-            "--skip-build",
-            "--skip-install",
-            "--skip-env-check",
-            "--no-log-upload",
-            "--compute",
-            "static",
         ])
         .output()
         .unwrap();

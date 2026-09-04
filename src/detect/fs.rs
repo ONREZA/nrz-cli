@@ -22,6 +22,16 @@ pub trait Fs {
     fn exists(&self, path: &str) -> bool;
     fn is_dir(&self, path: &str) -> bool;
     fn read_file(&self, path: &str) -> Option<String>;
+    fn read_file_prefix(&self, path: &str, max_bytes: usize) -> Option<String> {
+        let content = self.read_file(path)?;
+        if content.len() <= max_bytes {
+            return Some(content);
+        }
+        let end = (0..=max_bytes)
+            .rev()
+            .find(|offset| content.is_char_boundary(*offset))?;
+        Some(content[..end].to_string())
+    }
     fn list_dir(&self, path: &str) -> Vec<String>;
 }
 
@@ -86,6 +96,20 @@ impl Fs for LocalFs {
             .take(MAX_DETECTION_FILE_CONTENT_BYTES as u64 + 1);
         file.read_to_string(&mut content).ok()?;
         (content.len() <= MAX_DETECTION_FILE_CONTENT_BYTES).then_some(content)
+    }
+
+    fn read_file_prefix(&self, path: &str, max_bytes: usize) -> Option<String> {
+        let full = self.resolve_existing(path)?;
+        if !std::fs::metadata(&full).ok()?.is_file() {
+            return None;
+        }
+        let mut bytes = Vec::with_capacity(max_bytes);
+        std::fs::File::open(&full)
+            .ok()?
+            .take(max_bytes as u64)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        Some(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     fn list_dir(&self, path: &str) -> Vec<String> {

@@ -25,6 +25,9 @@ mod health_check_tests;
 mod ignored_build;
 #[cfg(test)]
 mod ignored_build_tests;
+mod package_manager_toolchain;
+#[cfg(test)]
+mod package_manager_toolchain_tests;
 mod plan;
 mod python_toolchain;
 #[cfg(test)]
@@ -214,6 +217,19 @@ struct RunnerContextResponse {
     context: crate::execution_context::ExecutionContext,
     deployment: RunnerDeploymentContext,
     settings: ProjectBuildSettings,
+}
+
+fn require_runner_context_protocol(protocol: &str) -> anyhow::Result<()> {
+    if protocol == crate::execution_context::RUNNER_CONTEXT_PROTOCOL {
+        return Ok(());
+    }
+    Err(output::coded_error(
+        "CLI_UPDATE_REQUIRED",
+        format!(
+            "unsupported runner context protocol {protocol}; expected {}",
+            crate::execution_context::RUNNER_CONTEXT_PROTOCOL
+        ),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -566,23 +582,6 @@ pub async fn run(
     workspace: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
-    let mut command_context =
-        crate::context::CommandContext::resolve(&args.dir, config, args.app.as_deref(), json)?;
-    if let Some(app) = &command_context.selected_app {
-        output::status(
-            json,
-            "~",
-            format!(
-                "Monorepo: deploying app \"{}\" from {}/",
-                app.requested, app.path
-            ),
-            output::Phase::Deploy,
-        );
-    }
-
-    // Verify auth early to avoid wasting time on build if token is invalid
-    let tok = auth::resolve_token(token, workspace)?;
-    let client = ApiClient::authenticated(&tok)?;
     let resume_deployment_id = args
         .resume_deployment
         .as_deref()
@@ -600,6 +599,27 @@ pub async fn run(
             })
         })
         .transpose()?;
+    edge_handoff::validate_resume_arguments(&args)?;
+    let mut command_context = if resume_deployment_id.is_some() {
+        crate::context::CommandContext::resolve_platform_root(&args.dir, config, json)?
+    } else {
+        crate::context::CommandContext::resolve(&args.dir, config, args.app.as_deref(), json)?
+    };
+    if let Some(app) = &command_context.selected_app {
+        output::status(
+            json,
+            "~",
+            format!(
+                "Monorepo: deploying app \"{}\" from {}/",
+                app.requested, app.path
+            ),
+            output::Phase::Deploy,
+        );
+    }
+
+    // Verify auth early to avoid wasting time on build if token is invalid
+    let tok = auth::resolve_token(token, workspace)?;
+    let client = ApiClient::authenticated(&tok)?;
     let edge_build_handoff =
         edge_handoff::EdgeBuildHandoffOutput::from_process_environment(resume_deployment_id)?;
     let dependency_packaging = if edge_build_handoff.is_some() {
@@ -615,13 +635,7 @@ pub async fn run(
             .get(&format!("/v1/deployments/{deployment_id}/runner-context"))
             .await
             .context("failed to fetch exact deployment runner context")?;
-        if context.protocol_version != crate::execution_context::RUNNER_CONTEXT_PROTOCOL {
-            bail!(
-                "unsupported runner context protocol {}; expected {}",
-                context.protocol_version,
-                crate::execution_context::RUNNER_CONTEXT_PROTOCOL
-            );
-        }
+        require_runner_context_protocol(&context.protocol_version)?;
         Some(context)
     } else {
         None
@@ -629,7 +643,11 @@ pub async fn run(
 
     // Resolve project settings before build. Platform runners use only their
     // exact deployment-scoped context and never need project-wide API access.
-    command_context.apply_project_id_override(args.project_id.as_deref())?;
+    if let Some(runner) = &runner_context {
+        command_context.apply_platform_runner_settings(&runner.settings)?;
+    } else {
+        command_context.apply_project_id_override(args.project_id.as_deref())?;
+    }
     let mut early_project_id = runner_context
         .as_ref()
         .map(|runner| runner.context.project_id.clone())
@@ -697,7 +715,9 @@ pub async fn run(
         None
     };
 
-    command_context.apply_server_settings(server_settings.as_ref());
+    if runner_context.is_none() {
+        command_context.apply_server_settings(server_settings.as_ref());
+    }
 
     // Explicit compute intent is safe to resolve before build because it comes
     // only from CLI/config. Framework detection stays post-build: generated
@@ -909,6 +929,20 @@ pub async fn run(
     let mut execution_env = crate::execution_context::execution_environment(&materialized)
         .into_iter()
         .collect::<Vec<_>>();
+    if let Some(runner) = &runner_context {
+        let toolchain_environment = package_manager_toolchain::environment_from_process(
+            &runner.settings.package_manager,
+            &command_context.project_dir,
+            &command_context.root_dir,
+        )
+        .map_err(|error| {
+            output::coded_error(
+                "PLATFORM_TOOLCHAIN_UNAVAILABLE",
+                format!("failed to select the platform package-manager toolchain: {error:#}"),
+            )
+        })?;
+        execution_env = merge_command_environment(&execution_env, &toolchain_environment);
+    }
     execution_env.sort_by(|left, right| left.0.cmp(&right.0));
     let mut build_log_secret_values = crate::execution_context::secret_values(&materialized);
     build_log_secret_values.push(tok.clone());

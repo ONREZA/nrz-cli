@@ -637,8 +637,11 @@ pub(crate) fn validate_materialized_env_for_deploy(
         ),
         output::Phase::Env,
     );
-    anyhow::bail!(
-        "{} required environment variable(s) missing from deployment snapshot",
-        missing.len()
-    )
+    Err(crate::output::coded_error(
+        "INVALID_CONFIG",
+        format!(
+            "{} required environment variable(s) missing from deployment snapshot",
+            missing.len()
+        ),
+    ))
 }

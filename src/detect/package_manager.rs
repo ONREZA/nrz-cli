@@ -4,6 +4,14 @@ use super::fs::Fs;
 use super::package_json::PackageJson;
 use super::types::{PackageManagerInfo, PackageManagerType};
 
+const YARN_LOCK_HEADER_BYTES: usize = 4 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum YarnGeneration {
+    Classic,
+    Modern,
+}
+
 /// Detect package manager from package.json and lock files.
 pub fn detect_package_manager(
     fs: &dyn Fs,
@@ -96,6 +104,48 @@ fn detect_from_lockfile(fs: &dyn Fs) -> Option<PackageManagerInfo> {
     }
 
     None
+}
+
+pub fn detect_yarn_generation_if_configured(
+    fs: &dyn Fs,
+    pkg: Option<&PackageJson>,
+) -> Option<YarnGeneration> {
+    if let Some(version) = pkg
+        .and_then(|package| package.package_manager.as_deref())
+        .and_then(|field| field.trim().strip_prefix("yarn@"))
+    {
+        return Some(if version_major(version) == Some(1) {
+            YarnGeneration::Classic
+        } else {
+            YarnGeneration::Modern
+        });
+    }
+    if fs.exists(".yarnrc.yml") {
+        return Some(YarnGeneration::Modern);
+    }
+    if let Some(lockfile) = fs.read_file_prefix("yarn.lock", YARN_LOCK_HEADER_BYTES) {
+        if lockfile
+            .lines()
+            .any(|line| line.trim_start().starts_with("__metadata:"))
+        {
+            return Some(YarnGeneration::Modern);
+        }
+        if lockfile
+            .lines()
+            .take(16)
+            .any(|line| line.trim() == "# yarn lockfile v1")
+        {
+            return Some(YarnGeneration::Classic);
+        }
+    }
+    None
+}
+
+fn version_major(version: &str) -> Option<u64> {
+    version
+        .split(['.', '-', '+'])
+        .next()
+        .and_then(|major| major.parse().ok())
 }
 
 /// Get the install command for a package manager type.
