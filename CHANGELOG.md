@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.1] - 2026-09-04
+
+### 🐛 Bug Fixes
+
+- **deploy:** restore Next 16 traces ([9e5235a](https://github.com/ONREZA/nrz-cli/commit/9e5235a2951ead4bc14dddb1ace7d4e6cc236fde))
+
 ## [0.39.0] - 2026-09-04
 
 ### 🐛 Bug Fixes
