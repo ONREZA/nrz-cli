@@ -741,6 +741,27 @@ fn build_command_detected_source_uses_local_package_manager() {
 }
 
 #[test]
+fn platform_runner_build_command_uses_the_immutable_snapshot() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+    let mut effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
+    effective.apply_platform_runner_settings(&server_build_settings(
+        Some("npm run build"),
+        Some(nrz::config::BuildSettingSource::Detected),
+    ));
+
+    assert_eq!(
+        resolve_build_command(None, dir.path(), &effective).as_deref(),
+        Some("npm run build")
+    );
+}
+
+#[test]
 fn build_command_preset_empty_keeps_auto_detect_fallback() {
     let dir = tempdir().unwrap();
     fs::write(
@@ -810,6 +831,23 @@ fn install_command_detected_source_uses_local_package_manager() {
     );
     let result = resolve_install_command(dir.path(), &effective);
     assert_eq!(result.unwrap(), "pnpm install");
+}
+
+#[test]
+fn platform_runner_install_command_uses_the_immutable_snapshot() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+    let mut effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
+    effective.apply_platform_runner_settings(&server_install_settings(
+        Some("npm ci"),
+        Some(nrz::config::BuildSettingSource::Preset),
+    ));
+
+    assert_eq!(
+        resolve_install_command(dir.path(), &effective).as_deref(),
+        Some("npm ci")
+    );
 }
 
 #[test]
@@ -1978,6 +2016,8 @@ fn project_info_deserializes_camel_case() {
     let json = r#"{
         "id": "proj_123",
         "frameworkPreset": "vite",
+        "rootDirectory": ".",
+        "packageManager": "NPM",
         "installCommand": "npm ci",
         "installCommandSource": "DETECTED",
         "buildCommand": "npm run build",
@@ -1987,6 +2027,8 @@ fn project_info_deserializes_camel_case() {
     }"#;
     let info: ProjectInfo = serde_json::from_str(json).unwrap();
     assert_eq!(info.framework_preset.unwrap(), "vite");
+    assert_eq!(info.root_directory, ".");
+    assert_eq!(info.package_manager, "NPM");
     assert_eq!(info.install_command.unwrap(), "npm ci");
     assert_eq!(
         info.install_command_source.unwrap(),
@@ -2005,8 +2047,8 @@ fn project_info_deserializes_camel_case() {
 }
 
 #[test]
-fn project_info_optional_fields_default_to_none() {
-    let json = r#"{"id": "proj_123"}"#;
+fn project_info_optional_fields_default_to_none_when_snapshot_identity_is_present() {
+    let json = r#"{"id":"proj_123","rootDirectory":".","packageManager":"NPM"}"#;
     let info: ProjectInfo = serde_json::from_str(json).unwrap();
     assert!(info.install_command.is_none());
     assert!(info.install_command_source.is_none());
@@ -4265,7 +4307,7 @@ fn wire_functions_contract_accepts_generated_edge_rule_contributions() {
 fn pre_source_mutations_use_the_stable_execution_contract() {
     assert_eq!(
         crate::execution_context::RUNNER_CONTEXT_PROTOCOL,
-        "runner-context-v2"
+        "runner-context-v3"
     );
     let body = PreSourceFailureBody {
         protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
@@ -4293,4 +4335,15 @@ fn pre_source_mutations_use_the_stable_execution_contract() {
         source_value["operationId"],
         "019b8952-ca22-76f0-b134-88becec7c629"
     );
+}
+
+#[test]
+fn runner_protocol_mismatch_requires_a_cli_update() {
+    let error = require_runner_context_protocol("runner-context-v2").unwrap_err();
+    let coded = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<crate::output::CodedError>())
+        .unwrap();
+
+    assert_eq!(coded.code, "CLI_UPDATE_REQUIRED");
 }

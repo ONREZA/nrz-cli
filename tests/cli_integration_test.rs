@@ -40,7 +40,7 @@ async fn edge_build_runner_context(
 ) -> Json<serde_json::Value> {
     state.record(Method::GET, &uri);
     Json(json!({
-        "protocolVersion": "runner-context-v2",
+        "protocolVersion": "runner-context-v3",
         "context": {
             "workspaceId": "workspace-edge",
             "workspaceSlug": "edge",
@@ -60,7 +60,9 @@ async fn edge_build_runner_context(
         },
         "settings": {
             "frameworkPreset": null,
+            "rootDirectory": ".",
             "gitLfsEnabled": false,
+            "packageManager": "NPM",
             "installCommand": null,
             "installCommandSource": "PRESET",
             "buildCommand": null,
@@ -144,6 +146,8 @@ fn spawn_project_settings_mock() -> String {
             |axum::extract::Path(_project_id): axum::extract::Path<String>| async {
                 Json(json!({
                     "frameworkPreset": "vite",
+                    "rootDirectory": ".",
+                    "packageManager": "NPM",
                     "buildCommand": "npm run server-build",
                     "buildCommandSource": "USER",
                     "outputDirectory": "server-dist",

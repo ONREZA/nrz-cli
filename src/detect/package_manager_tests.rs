@@ -88,6 +88,72 @@ fn detect_from_yarn_lock() {
 }
 
 #[test]
+fn yarn_classic_is_selected_from_package_manager_major() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"packageManager":"yarn@1.22.22"}"#,
+    )
+    .unwrap();
+    let pkg = PackageJson::load(dir.path()).unwrap();
+
+    assert_eq!(
+        detect_yarn_generation_if_configured(&LocalFs::new(dir.path()), Some(&pkg)),
+        Some(YarnGeneration::Classic)
+    );
+}
+
+#[test]
+fn yarn_classic_is_selected_from_v1_lockfile() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
+
+    assert_eq!(
+        detect_yarn_generation_if_configured(&LocalFs::new(dir.path()), None),
+        Some(YarnGeneration::Classic)
+    );
+}
+
+#[test]
+fn yarn_classic_is_selected_from_a_large_v1_lockfile() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut lockfile = "# yarn lockfile v1\n".to_string();
+    lockfile.push_str(&"entry:\n  version 1.0.0\n".repeat(30_000));
+    std::fs::write(dir.path().join("yarn.lock"), lockfile).unwrap();
+
+    assert_eq!(
+        detect_yarn_generation_if_configured(&LocalFs::new(dir.path()), None),
+        Some(YarnGeneration::Classic)
+    );
+}
+
+#[test]
+fn yarn_modern_metadata_takes_precedence_over_legacy_header() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("yarn.lock"),
+        "# yarn lockfile v1\n__metadata:\n  version: 8\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        detect_yarn_generation_if_configured(&LocalFs::new(dir.path()), None),
+        Some(YarnGeneration::Modern)
+    );
+}
+
+#[test]
+fn yarn_modern_is_the_compatible_default() {
+    let dir = tempfile::tempdir().unwrap();
+
+    assert_eq!(
+        detect_yarn_generation_if_configured(&LocalFs::new(dir.path()), None)
+            .unwrap_or(YarnGeneration::Modern),
+        YarnGeneration::Modern
+    );
+}
+
+#[test]
 fn detect_from_package_lock_json() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("package.json"), r#"{"name":"t"}"#).unwrap();

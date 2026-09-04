@@ -11,7 +11,7 @@ use crate::output;
 use nrz::config::{self, ProjectConfig};
 
 pub const EXECUTION_CONTEXT_PROTOCOL: &str = "execution-context-v1";
-pub const RUNNER_CONTEXT_PROTOCOL: &str = "runner-context-v2";
+pub const RUNNER_CONTEXT_PROTOCOL: &str = "runner-context-v3";
 const SAVED_CONTEXT_VERSION: u8 = 1;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

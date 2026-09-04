@@ -16,6 +16,27 @@ pub(crate) struct CommandContext {
 }
 
 impl CommandContext {
+    pub(crate) fn resolve_platform_root(
+        dir: impl AsRef<Path>,
+        config: &ProjectConfig,
+        json: bool,
+    ) -> anyhow::Result<Self> {
+        let root_dir = dir
+            .as_ref()
+            .canonicalize()
+            .with_context(|| format!("project directory not found: {}", dir.as_ref().display()))?;
+        let effective =
+            EffectiveProjectConfig::from_project_config(root_dir.clone(), config.clone());
+        Ok(Self {
+            root_dir: root_dir.clone(),
+            project_dir: root_dir,
+            config: config.clone(),
+            selected_app: None,
+            effective,
+            json,
+        })
+    }
+
     pub(crate) fn resolve(
         dir: impl AsRef<Path>,
         root_config: &ProjectConfig,
@@ -63,5 +84,25 @@ impl CommandContext {
         settings: Option<&nrz::config::ProjectBuildSettings>,
     ) {
         self.effective.apply_server_settings(settings);
+    }
+
+    pub(crate) fn apply_platform_runner_settings(
+        &mut self,
+        settings: &nrz::config::ProjectBuildSettings,
+    ) -> anyhow::Result<()> {
+        let project_dir = crate::project_context::resolve_platform_project_dir(
+            &self.root_dir,
+            &settings.root_directory,
+        )?;
+        let config = nrz::config::load(&project_dir)
+            .map_err(|error| crate::output::coded_error("INVALID_CONFIG", format!("{error:#}")))?;
+        let mut effective =
+            EffectiveProjectConfig::from_project_config(project_dir.clone(), config.clone());
+        effective.apply_platform_runner_settings(settings);
+        self.project_dir = project_dir;
+        self.config = config;
+        self.selected_app = None;
+        self.effective = effective;
+        Ok(())
     }
 }

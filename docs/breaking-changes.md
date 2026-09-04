@@ -6,11 +6,44 @@ required user actions. Sections marked `UNRELEASED` describe implemented but
 unpublished behavior
 and must receive exact `from`/`to` versions before release.
 
-## UNRELEASED: execution-context-v1
+## 0.39.0-beta.5: runner-context-v3
 
 | Field | Value |
 | --- | --- |
-| Status | `IMPLEMENTED_UNRELEASED` |
+| Status | `RELEASED` |
+| From version | `<=0.39.0-beta.4` |
+| To version | `0.39.0-beta.5` |
+| Required action | Upgrade `nrz-cli` before using the updated build plane |
+| Compatibility error | `CLI_UPDATE_REQUIRED` |
+| Platform rollout | Publish CLI, pin the exact archive digest, then activate Server and Builder together |
+
+`runner-context-v3` makes `rootDirectory` and `packageManager` mandatory parts
+of the deployment-scoped build snapshot. A platform runner no longer reads the
+checkout-root `onreza.toml` before it knows the immutable root, and it does not
+fall back to mutable local package-manager detection.
+
+For Yarn builds, the platform image contains both Yarn Classic 1.x and modern
+Yarn 4. The runner selects Classic only from explicit project evidence
+(`packageManager: yarn@1` or a v1 lockfile); `.yarnrc.yml`, a modern lockfile or
+an explicit newer Yarn version selects Yarn 4. In a nested workspace, project
+evidence takes precedence and the checkout-root lockfile is the fallback.
+Corepack network downloads are disabled, so a missing bundled toolchain fails
+before executing user commands.
+
+There is no v2 compatibility mode. Existing installations must upgrade:
+
+```bash
+nrz upgrade --channel beta --version 0.39.0-beta.5
+```
+
+The public execution-context protocol remains `execution-context-v1`; this
+cutover changes the deployment-scoped platform runner contract only.
+
+## 0.36.0-beta.2: execution-context-v1
+
+| Field | Value |
+| --- | --- |
+| Status | `RELEASED` |
 | From version | `<=0.36.0-beta.1` |
 | To version | `0.36.0-beta.2` |
 | Required action | Upgrade `nrz-cli` and select an Environment context |

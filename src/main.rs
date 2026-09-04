@@ -4,6 +4,8 @@ mod auth;
 mod build;
 mod cli;
 mod context;
+#[cfg(test)]
+mod context_tests;
 mod deploy;
 mod deployments;
 #[cfg(test)]
@@ -23,6 +25,8 @@ mod link;
 mod logs;
 #[cfg(test)]
 mod logs_tests;
+#[cfg(test)]
+mod main_tests;
 mod nextjs_adapter;
 mod output;
 #[cfg(test)]
@@ -69,8 +73,7 @@ async fn main() {
     };
     let workspace = cli.workspace.clone();
 
-    let config_dir = config_dir_for_command(&cli.command);
-    let config = match nrz::config::load(&config_dir) {
+    let config = match load_initial_config(&cli.command) {
         Ok(c) => c,
         Err(e) => {
             let coded = output::coded_error("INVALID_CONFIG", format!("{e:#}"));
@@ -92,6 +95,18 @@ async fn main() {
         emit_terminal_error(json, e);
         std::process::exit(1);
     }
+}
+
+fn load_initial_config(command: &Command) -> anyhow::Result<ProjectConfig> {
+    if matches!(
+        command,
+        Command::Deploy(args) if args.resume_deployment.is_some()
+    ) {
+        // The platform runner must not read mutable checkout-root settings before
+        // the deployment-scoped runner context selects the immutable rootDirectory.
+        return Ok(ProjectConfig::default());
+    }
+    nrz::config::load(&config_dir_for_command(command))
 }
 
 fn config_dir_for_command(command: &Command) -> PathBuf {

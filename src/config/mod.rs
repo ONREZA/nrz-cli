@@ -459,7 +459,9 @@ impl IgnoredBuildBehavior {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectBuildSettings {
     pub framework_preset: Option<String>,
+    pub root_directory: String,
     pub git_lfs_enabled: Option<bool>,
+    pub package_manager: String,
     pub install_command: Option<String>,
     pub install_command_source: Option<BuildSettingSource>,
     pub build_command: Option<String>,
@@ -512,6 +514,21 @@ impl SourceAwareSetting {
                 origin: EffectiveSettingOrigin::ServerSettings,
             }),
         }
+    }
+
+    fn from_platform_runner(
+        value: Option<String>,
+        source: Option<BuildSettingSource>,
+    ) -> Option<Self> {
+        let value = normalize_optional_string(value);
+        if value.is_none() && source.is_none() {
+            return None;
+        }
+        Some(Self {
+            value,
+            source,
+            origin: EffectiveSettingOrigin::ServerSettings,
+        })
     }
 
     fn from_server_output(
@@ -703,6 +720,29 @@ impl EffectiveProjectConfig {
         if self.git_lfs_enabled.is_none() {
             self.git_lfs_enabled = settings.git_lfs_enabled;
         }
+    }
+
+    pub fn apply_platform_runner_settings(&mut self, settings: &ProjectBuildSettings) {
+        self.framework_override =
+            normalize_authoritative_framework(settings.framework_preset.as_deref())
+                .map(str::to_string);
+        self.framework_override_source = self
+            .framework_override
+            .as_ref()
+            .map(|_| EffectiveSettingOrigin::ServerSettings);
+        self.install_command = SourceAwareSetting::from_platform_runner(
+            settings.install_command.clone(),
+            settings.install_command_source,
+        );
+        self.build_command = SourceAwareSetting::from_platform_runner(
+            settings.build_command.clone(),
+            settings.build_command_source,
+        );
+        self.output_directory = SourceAwareSetting::from_platform_runner(
+            settings.output_directory.clone(),
+            settings.output_directory_source,
+        );
+        self.git_lfs_enabled = settings.git_lfs_enabled;
     }
 
     pub fn project_dir(&self) -> &Path {
