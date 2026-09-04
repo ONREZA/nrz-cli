@@ -7,6 +7,10 @@ const OUTPUT_RELATIVE_PATH =
 const ONREZA_IMAGE_OPTIMIZER_PATH = '/_onreza/image'
 const ONREZA_IMAGE_LOADER_RELATIVE_PATH =
   './.onreza/cache/next-adapter/onreza-image-loader.mjs'
+const STANDALONE_SERVER_TRACE_FILES = Object.freeze([
+  'next-server.js.nft.json',
+  'next-minimal-server.js.nft.json',
+])
 const MAX_REMOTE_IMAGE_SOURCES = 128
 const MAX_REMOTE_IMAGE_PATHNAME_LENGTH = 1024
 const MAX_REMOTE_IMAGE_SEARCH_LENGTH = 2048
@@ -539,6 +543,39 @@ function writeDescriptor(ctx) {
   fs.writeFileSync(outputPath, `${JSON.stringify(payload, jsonReplacer, 2)}\n`)
 }
 
+function ensureStandaloneServerTraces(ctx) {
+  if (!ctx.config || ctx.config.output !== 'standalone') {
+    return
+  }
+
+  const distDir = path.isAbsolute(ctx.distDir)
+    ? ctx.distDir
+    : path.resolve(ctx.projectDir, ctx.distDir)
+  fs.mkdirSync(distDir, { recursive: true })
+
+  for (const fileName of STANDALONE_SERVER_TRACE_FILES) {
+    const tracePath = path.join(distDir, fileName)
+    if (fs.existsSync(tracePath)) {
+      continue
+    }
+
+    // Next.js adapter endpoints already carry the additional traced modules,
+    // but affected Next 16 releases suppress these whole-app files while the
+    // standalone copier still reads them unconditionally (vercel/next.js#96646).
+    // Materialize only the missing compatibility inputs and never replace a
+    // trace emitted by Next itself.
+    try {
+      fs.writeFileSync(tracePath, '{"version":1,"files":[]}\n', {
+        flag: 'wx',
+      })
+    } catch (error) {
+      if (!error || error.code !== 'EEXIST') {
+        throw error
+      }
+    }
+  }
+}
+
 /** @type {import('next').NextAdapter} */
 const adapter = {
   name: ADAPTER_NAME,
@@ -577,6 +614,7 @@ const adapter = {
   },
 
   onBuildComplete(ctx) {
+    ensureStandaloneServerTraces(ctx)
     writeDescriptor(ctx)
   },
 }
@@ -584,6 +622,7 @@ const adapter = {
 module.exports = adapter
 module.exports.__test = {
   buildRemoteImageSources,
+  ensureStandaloneServerTraces,
   imageLoaderSource,
   imageOptimizerDecision,
 }

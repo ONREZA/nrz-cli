@@ -135,6 +135,59 @@ fn clear_descriptor_removes_stale_adapter_output() {
 }
 
 #[test]
+fn adapter_materializes_only_missing_standalone_server_traces() {
+    let dir = tempfile::tempdir().unwrap();
+    let existing_trace = dir.path().join(".next/next-server.js.nft.json");
+    std::fs::create_dir_all(existing_trace.parent().unwrap()).unwrap();
+    std::fs::write(&existing_trace, r#"{"version":1,"files":["kept.js"]}"#).unwrap();
+
+    let script = format!(
+        r#"
+const fs = require('fs');
+const path = require('path');
+const adapter = require({adapter_path});
+const projectDir = {project_dir};
+const distDir = path.join(projectDir, '.next');
+adapter.onBuildComplete({{
+  projectDir,
+  repoRoot: projectDir,
+  distDir,
+  nextVersion: '16.3.3',
+  buildId: 'build-id',
+  config: {{ output: 'standalone' }},
+  routing: {{}},
+  outputs: {{ staticFiles: [] }},
+}});
+const existing = JSON.parse(fs.readFileSync(path.join(distDir, 'next-server.js.nft.json'), 'utf8'));
+const synthesized = JSON.parse(fs.readFileSync(path.join(distDir, 'next-minimal-server.js.nft.json'), 'utf8'));
+process.stdout.write(JSON.stringify({{ existing, synthesized }}));
+"#,
+        adapter_path = serde_json::to_string(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("assets/next-adapter/onreza-next-adapter.cjs")
+                .display()
+                .to_string()
+        )
+        .unwrap(),
+        project_dir = serde_json::to_string(&dir.path().display().to_string()).unwrap(),
+    );
+    let output = std::process::Command::new("node")
+        .args(["-e", &script])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(result["existing"]["files"][0], "kept.js");
+    assert_eq!(result["synthesized"]["version"], 1);
+    assert_eq!(result["synthesized"]["files"], serde_json::json!([]));
+}
+
+#[test]
 fn adapter_normalizes_remote_patterns_without_widening_next_semantics() {
     let script = format!(
         r#"
