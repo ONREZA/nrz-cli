@@ -304,19 +304,15 @@ fn edge_build_publishes_local_handoff_without_legacy_source_mutations() {
         .env("NRZ_API_URL", api_url)
         .env("NRZ_RUNNER", "PLATFORM")
         .env("NRZ_EDGE_BUILD_HANDOFF", "V1")
+        .env("NRZ_LOG_UPLOAD", "0")
         .env("ONREZA_OUTPUT_DIR", output_dir.path())
         .args([
             "--token",
             "runner-token",
             "deploy",
+            project.path().to_str().unwrap(),
             "--resume-deployment",
             deployment_id,
-            "--skip-build",
-            "--skip-install",
-            "--skip-env-check",
-            "--no-log-upload",
-            "--compute",
-            "static",
         ])
         .output()
         .unwrap();

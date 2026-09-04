@@ -4,6 +4,7 @@ use nrz::config::EnvVisibility;
 
 use super::env_handler::{
     EnvVar, env_var_matches_environment, normalize_stdin_value, read_set_value, resolve_category,
+    validate_materialized_env_for_deploy,
 };
 
 #[test]
@@ -95,4 +96,21 @@ fn stdin_value_removes_exactly_one_terminal_newline() {
         "value"
     );
     assert!(normalize_stdin_value(vec![0xff]).is_err());
+}
+
+#[test]
+fn deployment_snapshot_missing_required_env_is_invalid_config() {
+    let config: nrz::config::ProjectConfig = toml::from_str(
+        "[env.declarations]\nDATABASE_URL = { visibility = \"sensitive\", required = true }\n",
+    )
+    .expect("valid project config");
+
+    let error =
+        validate_materialized_env_for_deploy(&std::collections::HashMap::new(), true, &config)
+            .expect_err("missing required variable must fail");
+    let coded = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<crate::output::CodedError>())
+        .expect("deployment validation must preserve a machine-readable code");
+    assert_eq!(coded.code, "INVALID_CONFIG");
 }

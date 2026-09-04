@@ -599,6 +599,7 @@ pub async fn run(
             })
         })
         .transpose()?;
+    edge_handoff::validate_resume_arguments(&args)?;
     let mut command_context = if resume_deployment_id.is_some() {
         crate::context::CommandContext::resolve_platform_root(&args.dir, config, json)?
     } else {
@@ -644,8 +645,9 @@ pub async fn run(
     // exact deployment-scoped context and never need project-wide API access.
     if let Some(runner) = &runner_context {
         command_context.apply_platform_runner_settings(&runner.settings)?;
+    } else {
+        command_context.apply_project_id_override(args.project_id.as_deref())?;
     }
-    command_context.apply_project_id_override(args.project_id.as_deref())?;
     let mut early_project_id = runner_context
         .as_ref()
         .map(|runner| runner.context.project_id.clone())
