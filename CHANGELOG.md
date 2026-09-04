@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.0] - 2026-09-04
+
+### 🐛 Bug Fixes
+
+- **deploy:** harden edge runner contract ([a76c7ee](https://github.com/ONREZA/nrz-cli/commit/a76c7ee2aa76d2227bb4e6d5ed447b2c24d497de))
+
+### ✨ Features
+
+- **deploy:** qualify Python runtime ([596d8e9](https://github.com/ONREZA/nrz-cli/commit/596d8e92337bc83faf0efc539bb84c04850cb1fa))
+
 ## [0.39.0-beta.6] - 2026-09-04
 
 ### 🐛 Bug Fixes
