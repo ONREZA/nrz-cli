@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.2] - 2026-09-05
+
+### 🐛 Bug Fixes
+
+- **deploy:** materialize python dependencies ([e2e1299](https://github.com/ONREZA/nrz-cli/commit/e2e1299c7a6f9e7e909150c5724718009dacf17a))
+
 ## [0.39.1] - 2026-09-04
 
 ### 🐛 Bug Fixes
