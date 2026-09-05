@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.39.3] - 2026-09-05
+
+### 🐛 Bug Fixes
+
+- **build:** trace executable next closure ([ad11954](https://github.com/ONREZA/nrz-cli/commit/ad119549734cdde8ab6b237da7f6bf0e6463817d))
+
+### 🔧 Changed
+
+- **deps:** update deps ([61a930f](https://github.com/ONREZA/nrz-cli/commit/61a930f25c3a07860ecf783d23fbf50130e02bbc))
+
 ## [0.39.2] - 2026-09-05
 
 ### 🐛 Bug Fixes
