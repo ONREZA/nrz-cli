@@ -1,6 +1,10 @@
 use std::fs;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::Path;
-use std::process::Command as ProcessCommand;
+use std::process::{Command as ProcessCommand, Stdio};
+use std::thread;
+use std::time::Duration;
 
 use assert_cmd::Command as AssertCommand;
 
@@ -92,6 +96,59 @@ fn run_nrz_build_json(project: &Path) -> serde_json::Value {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     serde_json::from_str(stdout.trim()).unwrap()
+}
+
+fn request_standalone_server(server_dir: &Path, request_path: &str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let mut child = ProcessCommand::new("node")
+        .arg("server.js")
+        .current_dir(server_dir)
+        .env("HOSTNAME", "127.0.0.1")
+        .env("PORT", port.to_string())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut response = None;
+
+    for _ in 0..100 {
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+
+        if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            write!(
+                stream,
+                "GET {request_path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+            let mut received = String::new();
+            if stream.read_to_string(&mut received).is_ok() && received.starts_with("HTTP/1.1 200")
+            {
+                response = Some(received);
+                break;
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    if child.try_wait().unwrap().is_none() {
+        child.kill().unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    response.unwrap_or_else(|| {
+        panic!(
+            "standalone server did not answer successfully\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
 }
 
 fn read_descriptor(project: &Path) -> serde_json::Value {
@@ -499,6 +556,60 @@ export const config = {
         &project.path().join(".next/standalone"),
         "sitemap.xml"
     ));
+}
+
+#[test]
+fn nextjs_16_2_monorepo_standalone_contains_executable_closure() {
+    if !conformance_enabled() {
+        eprintln!("skipping Next.js conformance test; set NRZ_NEXTJS_CONFORMANCE=1 to run it");
+        return;
+    }
+
+    let repository = tempfile::tempdir().unwrap();
+    let project = repository.path().join("horse-website");
+    let next_version = next16_version();
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let adapter_path = manifest_dir.join("assets/next-adapter/onreza-next-adapter.cjs");
+
+    write(
+        &repository.path().join("yarn.lock"),
+        "# workspace root marker\n",
+    );
+    write_next16_package(&project, &next_version, true);
+    write(
+        &project.join("next.config.mjs"),
+        "export default { output: 'standalone' }\n",
+    );
+    write(
+        &project.join("app/layout.js"),
+        r#"
+export default function RootLayout({ children }) {
+  return <html><body>{children}</body></html>
+}
+"#,
+    );
+    write(
+        &project.join("app/page.js"),
+        r#"
+export default function Page() {
+  return <main>standalone closure is executable</main>
+}
+"#,
+    );
+
+    npm_install(&project);
+    run_next_build_with_adapter(&project, &adapter_path);
+
+    let server_dir = project.join(".next/standalone/horse-website");
+    assert!(server_dir.join("server.js").is_file());
+    assert!(
+        server_dir
+            .join("node_modules/next/dist/server/next.js")
+            .is_file(),
+        "standalone closure must contain the entry declared by next/package.json"
+    );
+    let response = request_standalone_server(&server_dir, "/");
+    assert!(response.contains("standalone closure is executable"));
 }
 
 #[test]

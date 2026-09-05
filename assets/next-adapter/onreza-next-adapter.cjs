@@ -543,7 +543,7 @@ function writeDescriptor(ctx) {
   fs.writeFileSync(outputPath, `${JSON.stringify(payload, jsonReplacer, 2)}\n`)
 }
 
-function ensureStandaloneServerTraces(ctx) {
+async function ensureStandaloneServerTraces(ctx) {
   if (!ctx.config || ctx.config.output !== 'standalone') {
     return
   }
@@ -553,26 +553,49 @@ function ensureStandaloneServerTraces(ctx) {
     : path.resolve(ctx.projectDir, ctx.distDir)
   fs.mkdirSync(distDir, { recursive: true })
 
-  for (const fileName of STANDALONE_SERVER_TRACE_FILES) {
-    const tracePath = path.join(distDir, fileName)
-    if (fs.existsSync(tracePath)) {
-      continue
-    }
+  if (
+    STANDALONE_SERVER_TRACE_FILES.every((fileName) =>
+      fs.existsSync(path.join(distDir, fileName)),
+    )
+  ) {
+    return
+  }
 
-    // Next.js adapter endpoints already carry the additional traced modules,
-    // but affected Next 16 releases suppress these whole-app files while the
-    // standalone copier still reads them unconditionally (vercel/next.js#96646).
-    // Materialize only the missing compatibility inputs and never replace a
-    // trace emitted by Next itself.
-    try {
-      fs.writeFileSync(tracePath, '{"version":1,"files":[]}\n', {
-        flag: 'wx',
-      })
-    } catch (error) {
-      if (!error || error.code !== 'EEXIST') {
-        throw error
-      }
-    }
+  // Next owns the executable server closure. Some adapter/Turbopack builds do
+  // not run its whole-server trace phase, although the standalone copier still
+  // consumes those traces. Delegate to the installed Next version instead of
+  // fabricating structurally valid but incomplete trace files.
+  const nextPackagePath = require.resolve('next/package.json', {
+    paths: [ctx.projectDir],
+  })
+  const traceModulePath = path.join(
+    path.dirname(nextPackagePath),
+    'dist/build/collect-build-traces.js',
+  )
+  const { collectBuildTraces } = require(traceModulePath)
+  if (typeof collectBuildTraces !== 'function') {
+    throw new TypeError(
+      `Installed Next.js does not expose collectBuildTraces at ${traceModulePath}`,
+    )
+  }
+
+  await collectBuildTraces({
+    dir: ctx.projectDir,
+    config: ctx.config,
+    distDir,
+    edgeRuntimeRoutes: {},
+    staticPages: [],
+    outputFileTracingRoot:
+      ctx.config.outputFileTracingRoot || ctx.repoRoot || ctx.projectDir,
+  })
+
+  const missing = STANDALONE_SERVER_TRACE_FILES.filter(
+    (fileName) => !fs.existsSync(path.join(distDir, fileName)),
+  )
+  if (missing.length > 0) {
+    throw new Error(
+      `Next.js did not materialize required standalone traces: ${missing.join(', ')}`,
+    )
   }
 }
 
@@ -613,8 +636,8 @@ const adapter = {
     return nextConfig
   },
 
-  onBuildComplete(ctx) {
-    ensureStandaloneServerTraces(ctx)
+  async onBuildComplete(ctx) {
+    await ensureStandaloneServerTraces(ctx)
     writeDescriptor(ctx)
   },
 }

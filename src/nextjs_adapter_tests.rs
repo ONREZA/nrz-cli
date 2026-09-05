@@ -135,11 +135,30 @@ fn clear_descriptor_removes_stale_adapter_output() {
 }
 
 #[test]
-fn adapter_materializes_only_missing_standalone_server_traces() {
+fn adapter_delegates_missing_standalone_traces_to_installed_next() {
     let dir = tempfile::tempdir().unwrap();
-    let existing_trace = dir.path().join(".next/next-server.js.nft.json");
-    std::fs::create_dir_all(existing_trace.parent().unwrap()).unwrap();
-    std::fs::write(&existing_trace, r#"{"version":1,"files":["kept.js"]}"#).unwrap();
+    let trace_module = dir
+        .path()
+        .join("node_modules/next/dist/build/collect-build-traces.js");
+    std::fs::create_dir_all(trace_module.parent().unwrap()).unwrap();
+    std::fs::write(
+        dir.path().join("node_modules/next/package.json"),
+        r#"{"name":"next","version":"16.3.3"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        trace_module,
+        r#"
+const fs = require('fs');
+const path = require('path');
+exports.collectBuildTraces = async function collectBuildTraces(options) {
+  const payload = JSON.stringify({ version: 1, files: ['../node_modules/next/dist/server/next.js'] });
+  fs.writeFileSync(path.join(options.distDir, 'next-server.js.nft.json'), payload);
+  fs.writeFileSync(path.join(options.distDir, 'next-minimal-server.js.nft.json'), payload);
+};
+"#,
+    )
+    .unwrap();
 
     let script = format!(
         r#"
@@ -148,19 +167,24 @@ const path = require('path');
 const adapter = require({adapter_path});
 const projectDir = {project_dir};
 const distDir = path.join(projectDir, '.next');
-adapter.onBuildComplete({{
-  projectDir,
-  repoRoot: projectDir,
-  distDir,
-  nextVersion: '16.3.3',
-  buildId: 'build-id',
-  config: {{ output: 'standalone' }},
-  routing: {{}},
-  outputs: {{ staticFiles: [] }},
+(async () => {{
+  await adapter.onBuildComplete({{
+    projectDir,
+    repoRoot: projectDir,
+    distDir,
+    nextVersion: '16.3.3',
+    buildId: 'build-id',
+    config: {{ output: 'standalone' }},
+    routing: {{}},
+    outputs: {{ staticFiles: [] }},
+  }});
+  const server = JSON.parse(fs.readFileSync(path.join(distDir, 'next-server.js.nft.json'), 'utf8'));
+  const minimal = JSON.parse(fs.readFileSync(path.join(distDir, 'next-minimal-server.js.nft.json'), 'utf8'));
+  process.stdout.write(JSON.stringify({{ server, minimal }}));
+}})().catch((error) => {{
+  console.error(error);
+  process.exitCode = 1;
 }});
-const existing = JSON.parse(fs.readFileSync(path.join(distDir, 'next-server.js.nft.json'), 'utf8'));
-const synthesized = JSON.parse(fs.readFileSync(path.join(distDir, 'next-minimal-server.js.nft.json'), 'utf8'));
-process.stdout.write(JSON.stringify({{ existing, synthesized }}));
 "#,
         adapter_path = serde_json::to_string(
             &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -182,9 +206,12 @@ process.stdout.write(JSON.stringify({{ existing, synthesized }}));
     );
     let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
 
-    assert_eq!(result["existing"]["files"][0], "kept.js");
-    assert_eq!(result["synthesized"]["version"], 1);
-    assert_eq!(result["synthesized"]["files"], serde_json::json!([]));
+    assert_eq!(result["server"]["version"], 1);
+    assert_eq!(
+        result["server"]["files"][0],
+        "../node_modules/next/dist/server/next.js"
+    );
+    assert_eq!(result["minimal"], result["server"]);
 }
 
 #[test]
