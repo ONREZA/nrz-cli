@@ -409,12 +409,12 @@ pub(super) async fn run_install_step(
             }
         }
     }
-    let python_manifest = is_python.then(|| {
-        crate::detect::python::dependency_manifest(&crate::detect::fs::LocalFs::new(project_dir))
-    });
-    if effective.install_command().is_none()
-        && let Some(Some(manifest)) = python_manifest
-    {
+    if is_python {
+        let Some(manifest) = crate::detect::python::dependency_manifest(
+            &crate::detect::fs::LocalFs::new(project_dir),
+        ) else {
+            return Ok(());
+        };
         let mode = if platform_runner {
             super::python_toolchain::PythonInstallMode::PinnedPlatform
         } else {
@@ -542,11 +542,6 @@ pub(super) fn resolve_install_command(
     project_dir: &Path,
     effective: &EffectiveProjectConfig,
 ) -> Option<String> {
-    // Priority: effective config command > auto-detect from package manager.
-    // PRESET server commands are filtered out while building EffectiveProjectConfig.
-    if let Some(setting) = effective.install_command() {
-        return setting.value().map(str::to_string);
-    }
     if crate::detect::detect_with_framework_override(project_dir, effective.framework_override())
         .metadata
         .runtime
@@ -556,6 +551,12 @@ pub(super) fn resolve_install_command(
         let fs = crate::detect::fs::LocalFs::new(project_dir);
         return crate::detect::python::dependency_manifest(&fs)
             .map(crate::detect::python::install_command);
+    }
+    // Priority for shell-driven runtimes: effective config command > auto-detect
+    // from package manager. Python dependencies are always owned by the
+    // manifest/materializer boundary above and never by a retained shell command.
+    if let Some(setting) = effective.install_command() {
+        return setting.value().map(str::to_string);
     }
     if !project_dir.join("package.json").exists() {
         return None;

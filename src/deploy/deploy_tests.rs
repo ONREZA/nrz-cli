@@ -936,7 +936,7 @@ fn configured_python_non_conventional_entry_uses_versioned_install_target() {
 }
 
 #[tokio::test]
-async fn dependency_free_python_install_step_removes_stale_site_packages() {
+async fn python_install_step_ignores_retained_shell_command_without_manifest() {
     let dir = tempdir().unwrap();
     let stale = dir
         .path()
@@ -944,9 +944,13 @@ async fn dependency_free_python_install_step_removes_stale_site_packages() {
     fs::create_dir_all(stale.parent().unwrap()).unwrap();
     fs::write(&stale, "stale = True").unwrap();
     fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
-    let effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
+    let mut effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
+    effective.apply_platform_runner_settings(&server_install_settings(
+        Some("exit 97"),
+        Some(nrz::config::BuildSettingSource::Preset),
+    ));
 
-    run_install_step(dir.path(), true, &effective, &[], None, false)
+    run_install_step(dir.path(), true, &effective, &[], None, true)
         .await
         .unwrap();
 
