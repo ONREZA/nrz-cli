@@ -313,13 +313,13 @@ mod tests {
             "kind": "JAVASCRIPT_NODE_MODULES",
             "compatibility": {
                 "runtimeFamily": "bun",
-                "runtimeVersion": "1.4.0",
+                "runtimeVersion": "1.4.2",
                 "os": "linux",
                 "architecture": "x86_64",
                 "libc": "glibc",
                 "abi": "glibc-2.42",
                 "packageManager": "bun",
-                "packageManagerVersion": "1.4.0",
+                "packageManagerVersion": "1.4.2",
                 "runnerRootfsDigest": format!("sha256:{}", "d".repeat(64)),
                 "buildPolicyGeneration": 1
             },
