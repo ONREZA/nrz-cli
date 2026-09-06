@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.40.0] - 2026-09-06
+
+### ✨ Features
+
+- **build:** publish compute launch profiles ([d709194](https://github.com/ONREZA/nrz-cli/commit/d709194817d5c55d89d71442a7db9f99bf8b982b))
+
 ## [0.39.3] - 2026-09-05
 
 ### 🐛 Bug Fixes
