@@ -256,14 +256,17 @@ fn runtime_layer(
             })?
     };
     let mut runtime_config = layer.runtime_config.clone().unwrap_or_else(|| json!({}));
+    let launch = crate::source_layer_launch(layer.runtime_config.as_ref())?;
     if let Some(config) = runtime_config.as_object_mut() {
         config.remove(RUNTIME_READINESS_CONFIG_KEY);
+        config.remove("isBinaryEntry");
     }
     Ok(json!({
         "layerName": layer.name,
         "applicationRoot": application_root,
         "dependencyMaterializationIds": dependency_materialization_ids,
         "entrypoint": relative_entrypoint,
+        "launch": launch,
         "runtimeConfig": runtime_config
     }))
 }
@@ -354,6 +357,50 @@ mod tests {
             executable: false,
         });
         manifest
+    }
+
+    #[test]
+    fn source_graph_compiles_all_profiles_and_retains_immutable_readiness() {
+        for (config, profile) in [
+            (json!({}), "BUN"),
+            (json!({ "runtimeFamily": "PYTHON" }), "CPYTHON_3_14"),
+            (json!({ "isBinaryEntry": true }), "EXECUTABLE"),
+        ] {
+            let mut manifest = manifest();
+            manifest.layers[0].runtime_config = Some(config);
+            let graph = finalize_source_bundle_runtime_graph(
+                &"a".repeat(64),
+                &"b".repeat(64),
+                1024,
+                &manifest,
+            )
+            .unwrap();
+            let launch = graph.wire().runtime_layers[0].launch.as_ref().unwrap();
+            assert_eq!(launch.profile.to_string(), profile);
+            assert!(launch.args.is_empty());
+            assert_eq!(launch.cwd.as_str(), ".");
+        }
+        let graph = finalize_source_bundle_runtime_graph(
+            &"a".repeat(64),
+            &"b".repeat(64),
+            1024,
+            &manifest(),
+        )
+        .unwrap();
+        assert_eq!(
+            graph.wire().runtime_layers[0]
+                .launch
+                .as_ref()
+                .unwrap()
+                .readiness
+                .as_ref()
+                .unwrap()
+                .path
+                .as_ref()
+                .unwrap()
+                .as_str(),
+            "/healthz"
+        );
     }
 
     #[test]

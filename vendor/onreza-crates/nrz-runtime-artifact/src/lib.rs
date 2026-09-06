@@ -8,7 +8,12 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod launch;
 mod source_graph;
+pub use launch::{source_layer_launch, verify_runtime_launch};
+pub use nrz_contract::{
+    RuntimeLaunchWire, RuntimeLayerWire, RuntimeProfile, RuntimeReadinessProtocol,
+};
 
 pub use source_graph::{
     SourceDependencyMaterialization, compute_logical_artifact_id,
@@ -229,6 +234,17 @@ pub fn verify_runtime_artifact_graph(
             layer.application_root.as_str(),
         )?;
         verify_safe_relative_path("runtime layer entrypoint", layer.entrypoint.as_str())?;
+        if let Some(launch) = &layer.launch {
+            verify_runtime_launch(launch)?;
+            if let Some(family) = &layer.runtime_config.runtime_family {
+                let family = family.to_string();
+                if (launch.profile == RuntimeProfile::Bun && family != "JAVASCRIPT")
+                    || (launch.profile == RuntimeProfile::Cpython314 && family != "PYTHON")
+                {
+                    return invariant("runtime profile conflicts with runtimeFamily");
+                }
+            }
+        }
         if layer.dependency_materialization_ids.len() > MAX_LAYER_DEPENDENCIES {
             return invariant(format!(
                 "runtime layer '{layer_name}' exceeds {MAX_LAYER_DEPENDENCIES} dependencies"

@@ -26,4 +26,8 @@ pub use edge_rules::OnrezaEdgeRuleSetV1 as EdgeRuleSetAuthoring;
 pub use runtime_artifact_graph::{
     OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifest as DependencyMaterializationManifestV1Wire,
     OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraph as RuntimeArtifactGraphV2Wire,
+    OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItem as RuntimeLayerWire,
+    OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunch as RuntimeLaunchWire,
+    OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile as RuntimeProfile,
+    OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol as RuntimeReadinessProtocol,
 };

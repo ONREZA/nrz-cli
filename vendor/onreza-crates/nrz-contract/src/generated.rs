@@ -16154,6 +16154,59 @@ pub mod runtime_artifact_graph {
     ///                "maxLength": 512,
     ///                "minLength": 1
     ///              },
+    ///              "launch": {
+    ///                "type": "object",
+    ///                "required": [
+    ///                  "args",
+    ///                  "cwd",
+    ///                  "profile"
+    ///                ],
+    ///                "properties": {
+    ///                  "args": {
+    ///                    "type": "array",
+    ///                    "items": {
+    ///                      "type": "string",
+    ///                      "maxLength": 4096
+    ///                    },
+    ///                    "maxItems": 64
+    ///                  },
+    ///                  "cwd": {
+    ///                    "type": "string",
+    ///                    "maxLength": 512,
+    ///                    "minLength": 1
+    ///                  },
+    ///                  "profile": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "BUN",
+    ///                      "CPYTHON_3_14",
+    ///                      "EXECUTABLE"
+    ///                    ]
+    ///                  },
+    ///                  "readiness": {
+    ///                    "type": "object",
+    ///                    "required": [
+    ///                      "protocol"
+    ///                    ],
+    ///                    "properties": {
+    ///                      "path": {
+    ///                        "type": "string",
+    ///                        "maxLength": 2048,
+    ///                        "minLength": 1
+    ///                      },
+    ///                      "protocol": {
+    ///                        "type": "string",
+    ///                        "enum": [
+    ///                          "TCP",
+    ///                          "HTTP"
+    ///                        ]
+    ///                      }
+    ///                    },
+    ///                    "additionalProperties": false
+    ///                  }
+    ///                },
+    ///                "additionalProperties": false
+    ///              },
     ///              "layerName": {
     ///                "type": "string",
     ///                "maxLength": 64,
@@ -17908,6 +17961,59 @@ pub mod runtime_artifact_graph {
     ///            "type": "string",
     ///            "maxLength": 512,
     ///            "minLength": 1
+    ///          },
+    ///          "launch": {
+    ///            "type": "object",
+    ///            "required": [
+    ///              "args",
+    ///              "cwd",
+    ///              "profile"
+    ///            ],
+    ///            "properties": {
+    ///              "args": {
+    ///                "type": "array",
+    ///                "items": {
+    ///                  "type": "string",
+    ///                  "maxLength": 4096
+    ///                },
+    ///                "maxItems": 64
+    ///              },
+    ///              "cwd": {
+    ///                "type": "string",
+    ///                "maxLength": 512,
+    ///                "minLength": 1
+    ///              },
+    ///              "profile": {
+    ///                "type": "string",
+    ///                "enum": [
+    ///                  "BUN",
+    ///                  "CPYTHON_3_14",
+    ///                  "EXECUTABLE"
+    ///                ]
+    ///              },
+    ///              "readiness": {
+    ///                "type": "object",
+    ///                "required": [
+    ///                  "protocol"
+    ///                ],
+    ///                "properties": {
+    ///                  "path": {
+    ///                    "type": "string",
+    ///                    "maxLength": 2048,
+    ///                    "minLength": 1
+    ///                  },
+    ///                  "protocol": {
+    ///                    "type": "string",
+    ///                    "enum": [
+    ///                      "TCP",
+    ///                      "HTTP"
+    ///                    ]
+    ///                  }
+    ///                },
+    ///                "additionalProperties": false
+    ///              }
+    ///            },
+    ///            "additionalProperties": false
     ///          },
     ///          "layerName": {
     ///            "type": "string",
@@ -19873,6 +19979,59 @@ pub mod runtime_artifact_graph {
     ///      "maxLength": 512,
     ///      "minLength": 1
     ///    },
+    ///    "launch": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "args",
+    ///        "cwd",
+    ///        "profile"
+    ///      ],
+    ///      "properties": {
+    ///        "args": {
+    ///          "type": "array",
+    ///          "items": {
+    ///            "type": "string",
+    ///            "maxLength": 4096
+    ///          },
+    ///          "maxItems": 64
+    ///        },
+    ///        "cwd": {
+    ///          "type": "string",
+    ///          "maxLength": 512,
+    ///          "minLength": 1
+    ///        },
+    ///        "profile": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "BUN",
+    ///            "CPYTHON_3_14",
+    ///            "EXECUTABLE"
+    ///          ]
+    ///        },
+    ///        "readiness": {
+    ///          "type": "object",
+    ///          "required": [
+    ///            "protocol"
+    ///          ],
+    ///          "properties": {
+    ///            "path": {
+    ///              "type": "string",
+    ///              "maxLength": 2048,
+    ///              "minLength": 1
+    ///            },
+    ///            "protocol": {
+    ///              "type": "string",
+    ///              "enum": [
+    ///                "TCP",
+    ///                "HTTP"
+    ///              ]
+    ///            }
+    ///          },
+    ///          "additionalProperties": false
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    },
     ///    "layerName": {
     ///      "type": "string",
     ///      "maxLength": 64,
@@ -19921,6 +20080,10 @@ pub mod runtime_artifact_graph {
             OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem,
         >,
         pub entrypoint: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub launch: ::std::option::Option<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunch,
+        >,
         #[serde(rename = "layerName")]
         pub layer_name: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName,
         #[serde(rename = "runtimeConfig")]
@@ -20194,6 +20357,557 @@ pub mod runtime_artifact_graph {
                 .map_err(|e: self::error::ConversionError| {
                     <D::Error as ::serde::de::Error>::custom(e.to_string())
                 })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunch`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "args",
+    ///    "cwd",
+    ///    "profile"
+    ///  ],
+    ///  "properties": {
+    ///    "args": {
+    ///      "type": "array",
+    ///      "items": {
+    ///        "type": "string",
+    ///        "maxLength": 4096
+    ///      },
+    ///      "maxItems": 64
+    ///    },
+    ///    "cwd": {
+    ///      "type": "string",
+    ///      "maxLength": 512,
+    ///      "minLength": 1
+    ///    },
+    ///    "profile": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "BUN",
+    ///        "CPYTHON_3_14",
+    ///        "EXECUTABLE"
+    ///      ]
+    ///    },
+    ///    "readiness": {
+    ///      "type": "object",
+    ///      "required": [
+    ///        "protocol"
+    ///      ],
+    ///      "properties": {
+    ///        "path": {
+    ///          "type": "string",
+    ///          "maxLength": 2048,
+    ///          "minLength": 1
+    ///        },
+    ///        "protocol": {
+    ///          "type": "string",
+    ///          "enum": [
+    ///            "TCP",
+    ///            "HTTP"
+    ///          ]
+    ///        }
+    ///      },
+    ///      "additionalProperties": false
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunch {
+        pub args: ::std::vec::Vec<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem,
+        >,
+        pub cwd: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd,
+        pub profile: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile,
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub readiness: ::std::option::Option<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadiness,
+        >,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 4096
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 4096usize {
+                return Err("longer than 4096 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 512,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 512usize {
+                return Err("longer than 512 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "BUN",
+    ///    "CPYTHON_3_14",
+    ///    "EXECUTABLE"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile {
+        #[serde(rename = "BUN")]
+        Bun,
+        #[serde(rename = "CPYTHON_3_14")]
+        Cpython314,
+        #[serde(rename = "EXECUTABLE")]
+        Executable,
+    }
+    impl ::std::fmt::Display
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile
+    {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Bun => f.write_str("BUN"),
+                Self::Cpython314 => f.write_str("CPYTHON_3_14"),
+                Self::Executable => f.write_str("EXECUTABLE"),
+            }
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "BUN" => Ok(Self::Bun),
+                "CPYTHON_3_14" => Ok(Self::Cpython314),
+                "EXECUTABLE" => Ok(Self::Executable),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadiness`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "object",
+    ///  "required": [
+    ///    "protocol"
+    ///  ],
+    ///  "properties": {
+    ///    "path": {
+    ///      "type": "string",
+    ///      "maxLength": 2048,
+    ///      "minLength": 1
+    ///    },
+    ///    "protocol": {
+    ///      "type": "string",
+    ///      "enum": [
+    ///        "TCP",
+    ///        "HTTP"
+    ///      ]
+    ///    }
+    ///  },
+    ///  "additionalProperties": false
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadiness {
+        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        pub path: ::std::option::Option<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath,
+        >,
+        pub protocol: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol,
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "maxLength": 2048,
+    ///  "minLength": 1
+    ///}
+    /// ```
+    /// </details>
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath
+    {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl
+        ::std::convert::From<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath,
+        > for ::std::string::String
+    {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 2048usize {
+                return Err("longer than 2048 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol`
+    ///
+    /// <details><summary>JSON schema</summary>
+    ///
+    /// ```json
+    ///{
+    ///  "type": "string",
+    ///  "enum": [
+    ///    "TCP",
+    ///    "HTTP"
+    ///  ]
+    ///}
+    /// ```
+    /// </details>
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol {
+        #[serde(rename = "TCP")]
+        Tcp,
+        #[serde(rename = "HTTP")]
+        Http,
+    }
+    impl ::std::fmt::Display
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol
+    {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Tcp => f.write_str("TCP"),
+                Self::Http => f.write_str("HTTP"),
+            }
+        }
+    }
+    impl ::std::str::FromStr
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol
+    {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "TCP" => Ok(Self::Tcp),
+                "HTTP" => Ok(Self::Http),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<&::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName`
