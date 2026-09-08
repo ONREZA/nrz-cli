@@ -334,12 +334,29 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     })?;
 
     let mut deployment_manifest_source = build_result.manifest_source;
-    let build_artifact = BuildArtifact {
+    let mut build_artifact = BuildArtifact {
         output_dir: build_result.output_dir,
         manifest: build_result.manifest,
         manifest_source: build_result.manifest_source,
         detection,
     };
+    if let (Some(explicit), Some(manifest)) =
+        (request.explicit_compute, build_artifact.manifest.as_ref())
+        && super::compute_type_from_manifest(manifest) != explicit
+    {
+        if explicit == ComputeType::Process
+            && build_artifact.manifest_source == BuildManifestSource::Generated
+        {
+            // A generic STATIC fallback is an inference, not an authored routing
+            // contract. Resolve the requested PROCESS entry below before packing.
+            build_artifact.manifest = None;
+        } else {
+            return Err(output::coded_error(
+                "COMPUTE_MANIFEST_MISMATCH",
+                "Explicit compute mode conflicts with the build manifest. Update the manifest or build the matching export before deploying.",
+            ));
+        }
+    }
     let has_build_manifest = build_artifact.manifest.is_some();
     let compute = super::resolve_deploy_compute_type(
         request.explicit_compute,
