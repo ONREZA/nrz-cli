@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.40.1-beta.0] - 2026-09-08
+
+### 🐛 Bug Fixes
+
+- **deploy:** honor process manifest intent ([27695fa](https://github.com/ONREZA/nrz-cli/commit/27695faaa0d49f1d8436edad6ff4535b415c2576))
+
 ## [0.40.0] - 2026-09-06
 
 ### ✨ Features
