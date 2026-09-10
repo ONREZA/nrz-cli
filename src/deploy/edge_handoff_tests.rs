@@ -62,6 +62,7 @@ fn platform_resume_rejects_every_mutable_override() {
         prod: true,
         dry: true,
         verify: true,
+        wait_timeout: 120,
         environment: Some("production".to_string()),
         project_id: Some("project-1".to_string()),
         skip_build: true,

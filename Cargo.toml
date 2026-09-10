@@ -99,6 +99,7 @@ libc = "0.2"
 zip = { version = "8.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"

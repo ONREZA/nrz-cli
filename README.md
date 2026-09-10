@@ -118,6 +118,15 @@ Example:
 nrz deploy --json --token "$NRZ_TOKEN" --workspace my-team --environment production
 ```
 
+`nrz deploy --wait-timeout 600` waits up to 600 seconds for activation after
+source publication (default: 120 seconds). This does not change upload timeouts;
+the wait deadline also bounds in-flight status requests. If activation is not confirmed in time, the CLI exits with code
+1 and `DEPLOY_WAIT_TIMEOUT`, including the deployment ID, URL, and last known
+status. The deployment is not cancelled and may still complete on the server;
+check its status before starting another deployment. A timeout or status-read error
+finishes the uploaded build's log session with a warning, without marking the build
+as failed. Confirmed deployment failures still retain their failure diagnostics.
+
 ## Configuration
 
 Project configuration is stored in `onreza.toml` (committed to git). Local runtime state is stored in `.onreza/` (must stay gitignored).

@@ -16,6 +16,10 @@ use crate::api::{ApiClient, classify_api_retry, path_segment};
 use crate::cli::DeployArgs;
 use crate::output;
 
+#[path = "build_log_completion.rs"]
+mod completion;
+pub(super) use completion::BuildLogOutcome;
+
 const CREATE_TIMEOUT: Duration = Duration::from_secs(10);
 const MUTATION_TIMEOUT: Duration = Duration::from_secs(10);
 const MUTATION_RETRY_BUDGET: Duration = Duration::from_secs(30);
@@ -583,14 +587,13 @@ impl BuildLogSession {
         self.emitter.as_ref()
     }
 
-    pub(super) async fn finish(&mut self, result: &anyhow::Result<()>, success: BuildLogSuccess) {
-        if let Some(emitter) = &self.emitter {
-            match result {
-                Ok(()) => emitter.info(BuildLogPhase::Complete, success.message()),
-                Err(error) => emitter.error(BuildLogPhase::Error, &error.to_string()),
-            }
-            emitter.close();
-        }
+    pub(super) async fn finish(&mut self, outcome: BuildLogOutcome<'_>) {
+        // Capture the actual workflow phase before emitting terminal events.
+        let phase = *self
+            .phase
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let request = outcome.prepare(phase, &self.redactor, self.emitter.as_ref());
 
         let mut degraded_reason = None;
         if let Some(mut uploader) = self.uploader.take() {
@@ -617,27 +620,6 @@ impl BuildLogSession {
             );
         }
 
-        let error = result.as_ref().err();
-        let request = FinishRequest {
-            status: if result.is_ok() { "FINISHED" } else { "FAILED" },
-            message: error.map(|error| {
-                let message = output::reported_terminal_diagnostic(error).map_or_else(
-                    || error.to_string(),
-                    |diagnostic| diagnostic.message.clone(),
-                );
-                sanitize_message(&message, &self.redactor)
-            }),
-            error_code: error.and_then(error_code),
-            error_details: error
-                .and_then(error_details)
-                .map(|details| self.redactor.sanitize_json(&details)),
-            failure_phase: error.map(|_| {
-                *self
-                    .phase
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-            }),
-        };
         let path = format!("/v1/build-log-sessions/{}/finish", path_segment(&self.id));
         if finish_session(&self.client, &path, &request).await.is_err() {
             output::warn(

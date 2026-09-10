@@ -288,6 +288,10 @@ pub struct DeployArgs {
     #[arg(long, conflicts_with_all = ["dry", "resume_deployment"])]
     pub verify: bool,
 
+    /// Seconds to wait for activation after source publication; timing out does not cancel the deployment
+    #[arg(long, default_value_t = 120, value_name = "SECONDS", value_parser = clap::value_parser!(u32).range(1..), conflicts_with_all = ["dry", "resume_deployment"])]
+    pub wait_timeout: u32,
+
     /// Platform environment ID or exact name
     #[arg(long)]
     pub environment: Option<String>,
