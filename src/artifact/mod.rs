@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::build::manifest::{LayerTarget, Manifest};
 
+pub(crate) mod native_dependencies;
+#[cfg(test)]
+mod native_dependencies_tests;
 pub(crate) mod source_bundle_v1;
 #[cfg(test)]
 mod source_bundle_v1_tests;

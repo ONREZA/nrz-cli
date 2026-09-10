@@ -271,6 +271,10 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     let effective = &command.effective;
     let mut warnings = Vec::new();
     let production = request.target_production;
+    let runtime_platform = request
+        .platform_runner
+        .then(crate::artifact::native_dependencies::RuntimePlatform::from_environment)
+        .transpose()?;
 
     super::validate_prebuild_compute_intent(project_dir, request.explicit_compute)?;
 
@@ -482,6 +486,31 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     let scanned_files =
         scan_runtime_artifact_for_plan(runtime_artifact_root_for_scan, runtime_artifact_scan)
             .await?;
+
+    let scanned_files = if let Some(platform) = runtime_platform
+        .as_ref()
+        .filter(|_| compute != ComputeType::Static)
+    {
+        let pruned = crate::artifact::native_dependencies::prune_optional_native_dependencies(
+            &runtime_artifact.root_dir,
+            scanned_files,
+            platform,
+        )?;
+        if pruned.packages > 0 {
+            output::status(
+                json,
+                "~",
+                format!(
+                    "Excluded {} incompatible optional runtime packages ({} bytes)",
+                    pruned.packages, pruned.bytes
+                ),
+                output::Phase::Deploy,
+            );
+        }
+        pruned.files
+    } else {
+        scanned_files
+    };
 
     let artifact_files = super::prepare_artifact_files(
         &runtime_artifact.manifest,
