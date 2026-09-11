@@ -1,6 +1,6 @@
 [package]
 name = "nrz"
-version = "0.40.1"
+version = "0.40.2"
 edition = "2024"
 description = "ONREZA platform CLI — dev, build, deploy"
 license = "MIT"

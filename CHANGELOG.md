@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.40.2] - 2026-09-11
+
+### 🐛 Bug Fixes
+
+- **build:** prune incompatible native dependencies ([9673edd](https://github.com/ONREZA/nrz-cli/commit/9673eddf9991ee89ed8a95fcdeb1a8324d8f7fd2))
+- **deploy:** bound activation wait safely ([ce676f4](https://github.com/ONREZA/nrz-cli/commit/ce676f46aa24d0b41ca670ebd85f76b5a8dfee17))
+
 ## [0.40.1] - 2026-09-09
 
 ### 🐛 Bug Fixes
