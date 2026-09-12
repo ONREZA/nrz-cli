@@ -1,7 +1,7 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::api::{ApiClient, path_segment};
+use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::DeploymentsArgs;
 use crate::output;
@@ -38,6 +38,51 @@ pub struct Deployment {
     pub deployed_at: Option<String>,
     #[serde(default)]
     pub finished_at: Option<String>,
+}
+
+impl From<nrz_api::Project200Response6Deployment> for Deployment {
+    fn from(value: nrz_api::Project200Response6Deployment) -> Self {
+        Self {
+            id: value.id.to_string(),
+            status: value.status.into(),
+            is_preview: Some(value.is_preview),
+            is_rollback: Some(value.is_rollback),
+            is_active: Some(value.is_active),
+            commit_sha: Some(value.commit_sha),
+            branch: Some(value.branch),
+            url: value.url,
+            created_at: Some(
+                value
+                    .created_at
+                    .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+            ),
+            deployed_at: value
+                .deployed_at
+                .map(|time| time.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)),
+            finished_at: value
+                .finished_at
+                .map(|time| time.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)),
+        }
+    }
+}
+
+impl From<nrz_api::Project200ResponseProjectLatestDeploymentStatus> for DeploymentStatus {
+    fn from(value: nrz_api::Project200ResponseProjectLatestDeploymentStatus) -> Self {
+        use nrz_api::Project200ResponseProjectLatestDeploymentStatus as Wire;
+        match value {
+            Wire::Pending => Self::Pending,
+            Wire::Queued => Self::Queued,
+            Wire::Building => Self::Building,
+            Wire::Uploading => Self::Uploading,
+            Wire::Ingesting => Self::Ingesting,
+            Wire::Skipped => Self::Skipped,
+            Wire::SmokeTesting => Self::SmokeTesting,
+            Wire::Live => Self::Live,
+            Wire::Stopped => Self::Stopped,
+            Wire::Failed => Self::Failed,
+            Wire::Cancelled => Self::Cancelled,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -115,14 +160,14 @@ pub async fn run(
 
     let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
 
-    let resp: DeploymentsResponse = client
-        .get(&format!(
-            "/v1/deployments/project/{}?limit={}",
-            path_segment(&project_id),
-            args.limit
-        ))
+    let page = client
+        .project_deployments(&project_id, args.limit, 0)
         .await
         .context("failed to fetch deployments")?;
+    let resp = DeploymentsResponse {
+        deployments: page.deployments.into_iter().map(Deployment::from).collect(),
+        total: page.total.try_into().context("invalid deployment count")?,
+    };
 
     if json {
         output::json_output(&resp);

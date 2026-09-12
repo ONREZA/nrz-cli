@@ -137,6 +137,9 @@ Reference:
 
 ## Development
 
+See [the contributor guide](docs/development.md) for local development of
+detection, framework adapters, generated contracts and Functions inspection.
+
 ```bash
 mise install                   # install pinned local tools
 mise run hooks                 # install git hooks (lefthook)
@@ -145,7 +148,8 @@ mise run clippy                # strict lint
 mise run test                  # all tests
 mise run check                 # standard local quality gate
 cargo build --release          # release build
-dagger call release-metadata --source=. --channel=beta --bump=minor
+bun .dagger/scripts/capture-git-metadata.ts
+dagger call release-metadata --source=. --git-metadata=.nrz-release/git.json --channel=beta --bump=minor
 ```
 
 Commit messages are validated with Conventional Commits via Cocogitto + Lefthook, format: `type(scope): subject`.

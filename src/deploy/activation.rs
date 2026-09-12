@@ -196,6 +196,34 @@ pub(super) struct RuntimeStartupFailureDetails {
     pub(super) retry_after_seconds: Option<u64>,
 }
 
+impl TryFrom<nrz_api::Status200Response> for DeploymentStatusResponse {
+    type Error = anyhow::Error;
+    fn try_from(value: nrz_api::Status200Response) -> anyhow::Result<Self> {
+        let error_details = value
+            .error_details
+            .map(serde_json::to_value)
+            .transpose()?
+            .and_then(|value| serde_json::from_value(value).ok());
+        Ok(Self {
+            id: value.id.to_string(),
+            status: value.status,
+            url: value.url,
+            production: Some(value.production),
+            error: value.error,
+            error_code: value.error_code,
+            error_details,
+            created_at: Some(
+                value
+                    .created_at
+                    .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+            ),
+            ready_at: value
+                .ready_at
+                .map(|instant| instant.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)),
+        })
+    }
+}
+
 pub(super) fn format_deployment_failure(error: &str, status: &DeploymentStatusResponse) -> String {
     let Some(details) = status
         .error_details

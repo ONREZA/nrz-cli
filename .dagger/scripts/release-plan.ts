@@ -1,19 +1,14 @@
 #!/usr/bin/env bun
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
+import { releaseContracts } from "./release-contracts";
+import type { ReleaseGitMetadata } from "./capture-git-metadata";
 
 const repoUrl = "https://github.com/ONREZA/nrz-cli";
 const metadataPath = ".nrz-release/metadata.json";
 const defaultChannel = "stable";
 const releaseCommitPrefix = "chore(release):";
-const vendoredCrateDependencies = [
-  { name: "nrz-contract", path: "vendor/onreza-crates/nrz-contract" },
-  { name: "nrz-fn-source", path: "vendor/onreza-crates/nrz-fn-source" },
-  { name: "nrz-source-bundle", path: "vendor/onreza-crates/nrz-source-bundle" },
-  { name: "nrz-source-publisher", path: "vendor/onreza-crates/nrz-source-publisher" },
-] as const;
 
 type Bump = "major" | "minor" | "patch";
 
@@ -24,12 +19,6 @@ interface ParsedVersion {
   prerelease: string;
 }
 
-interface RawGitCommit {
-  hash: string;
-  subject: string;
-  body?: string;
-}
-
 export interface ReleaseCommit {
   hash: string;
   shortHash: string;
@@ -38,12 +27,6 @@ export interface ReleaseCommit {
   scope: string;
   text: string;
   breaking: boolean;
-}
-
-interface GitMetadata {
-  previousTag?: string | null;
-  tags?: string[];
-  commits?: RawGitCommit[];
 }
 
 interface ResolveOptions {
@@ -64,18 +47,6 @@ const typeHeadings: Record<string, string> = {
   ci: "\u{1f477} CI/CD",
   test: "\u2705 Testing",
 };
-
-function run(command: string, args: string[]): string {
-  return execFileSync(command, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-}
-
-function maybeRun(command: string, args: string[]): string {
-  try {
-    return run(command, args);
-  } catch {
-    return "";
-  }
-}
 
 function readVersion(): string {
   const cargo = readFileSync("Cargo.toml", "utf8");
@@ -142,45 +113,24 @@ export function normalizeBump(currentVersion: string, commits: ReleaseCommit[], 
   return "patch";
 }
 
-function readGitMetadata(): GitMetadata | undefined {
+function readGitMetadata(): ReleaseGitMetadata {
   if (!existsSync(".nrz-release/git.json")) {
-    return undefined;
+    throw new Error("Capture Git metadata from the selected checkout before planning a release");
   }
-  return JSON.parse(readFileSync(".nrz-release/git.json", "utf8")) as GitMetadata;
+  const metadata = JSON.parse(readFileSync(".nrz-release/git.json", "utf8")) as ReleaseGitMetadata;
+  if (!/^[a-f0-9]{40}$/.test(metadata.head) || typeof metadata.dirty !== "boolean" ||
+      !Array.isArray(metadata.tags) || !Array.isArray(metadata.commits)) {
+    throw new Error("Invalid release Git metadata");
+  }
+  return metadata;
 }
 
-function latestStableTag(metadata = readGitMetadata()): string | undefined {
-  if (metadata) {
-    return metadata.previousTag || undefined;
-  }
-  const tags = maybeRun("git", ["tag", "--list", "v[0-9]*", "--sort=-v:refname"]);
-  return tags
-    .split("\n")
-    .map((tag) => tag.trim())
-    .filter(Boolean)
-    .find((tag) => !tag.includes("-"));
+function latestStableTag(metadata: ReleaseGitMetadata): string | undefined {
+  return metadata.previousTag || undefined;
 }
 
-function commitsSince(tag: string | undefined, metadata = readGitMetadata()): ReleaseCommit[] {
-  if (metadata) {
-    return filterReleaseCommits(
-      (metadata.commits || []).map((commit) => parseCommit(commit.hash, commit.subject, commit.body || "")),
-    );
-  }
-  const range = tag ? `${tag}..HEAD` : "HEAD";
-  const raw = maybeRun("git", ["log", "--pretty=format:%H%x01%s%x01%b%x02", range]);
-  if (!raw) {
-    return [];
-  }
-  return raw
-    .split("\x02")
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => {
-      const [hash, subject, body = ""] = entry.split("\x01");
-      return parseCommit(hash, subject, body);
-    })
-    .filter((commit) => !isReleaseCommit(commit));
+function commitsSince(metadata: ReleaseGitMetadata): ReleaseCommit[] {
+  return filterReleaseCommits(metadata.commits.map(commit => parseCommit(commit.hash, commit.subject, commit.body)));
 }
 
 function parseCommit(hash: string, subject: string, body: string): ReleaseCommit {
@@ -200,29 +150,11 @@ export function filterReleaseCommits(commits: ReleaseCommit[]): ReleaseCommit[] 
   return commits.filter((commit) => !isReleaseCommit(commit));
 }
 
-function nextPrereleaseNumber(baseVersion: string, channelName: string, tagsFromMetadata?: string[]): number {
+function nextPrereleaseNumber(baseVersion: string, channelName: string, tags: string[] = []): number {
   const prefix = `v${baseVersion}-${channelName}.`;
-  if (tagsFromMetadata) {
-    const latestFromMetadata = tagsFromMetadata
-      .map((tag) => String(tag).trim())
-      .filter((tag) => tag.startsWith(prefix))
-      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
-      .at(0);
-    if (!latestFromMetadata) {
-      return 0;
-    }
-    const number = Number(latestFromMetadata.slice(prefix.length));
-    return Number.isFinite(number) ? number + 1 : 0;
-  }
-  const tags = maybeRun("git", ["tag", "--list", `${prefix}*`, "--sort=-v:refname"]);
-  const latest = tags
-    .split("\n")
-    .map((tag) => tag.trim())
-    .filter(Boolean)
-    .find((tag) => tag.startsWith(prefix));
-  if (!latest) {
-    return 0;
-  }
+  const latest = tags.filter(tag => tag.startsWith(prefix))
+    .sort((left, right) => right.localeCompare(left, undefined, { numeric: true })).at(0);
+  if (!latest) return 0;
   const number = Number(latest.slice(prefix.length));
   return Number.isFinite(number) ? number + 1 : 0;
 }
@@ -312,16 +244,12 @@ function changelogEntry(version: string, commits: ReleaseCommit[]): string {
 }
 
 export function releaseCargoToml(cargo: string, version: string): string {
-  let updated = cargo.replace(/^version\s*=\s*"[^"]+"/m, `version = "${version}"`);
-  for (const crate of vendoredCrateDependencies) {
-    const re = new RegExp(`^${escapeRegExp(crate.name)}\\s*=.*$`, "m");
-    if (!re.test(updated)) {
-      throw new Error(`Could not update ${crate.name} dependency in Cargo.toml`);
-    }
-    const next = updated.replace(re, `${crate.name} = { path = "${crate.path}" }`);
-    updated = next;
+  const manifest = Bun.TOML.parse(cargo) as { package?: { name?: string; version?: string } };
+  if (manifest.package?.name !== "nrz" || typeof manifest.package.version !== "string") {
+    throw new Error("Release manifest must contain the nrz package and its explicit version");
   }
-  return updated;
+  parseVersion(version);
+  return cargo.replace(/(\[package\][\s\S]*?^version\s*=\s*)"[^"]+"/m, `$1"${version}"`);
 }
 
 function updateLockPackageVersion(lock: string, packageName: string, version: string): string {
@@ -339,11 +267,6 @@ export function releaseCargoLock(lock: string, version: string): string {
 
 function updateCargoVersion(version: string): void {
   writeFileSync("Cargo.toml", releaseCargoToml(readFileSync("Cargo.toml", "utf8"), version));
-  for (const crate of vendoredCrateDependencies) {
-    if (!existsSync(join(crate.path, "Cargo.toml"))) {
-      throw new Error(`Missing sanitized nrz-cli crate snapshot: ${join(crate.path, "Cargo.toml")}`);
-    }
-  }
   writeFileSync("Cargo.lock", releaseCargoLock(readFileSync("Cargo.lock", "utf8"), version));
 }
 
@@ -386,12 +309,12 @@ function main(): void {
   const gitMetadata = readGitMetadata();
   const currentVersion = readVersion();
   const previousTag = latestStableTag(gitMetadata);
-  const commits = commitsSince(previousTag, gitMetadata);
+  const commits = commitsSince(gitMetadata);
   const nextVersion = resolveVersion(currentVersion, commits, {
     channel,
     explicitVersion,
     bumpInput,
-    tags: gitMetadata?.tags,
+    tags: gitMetadata.tags,
   });
   const tag = `v${nextVersion}`;
   const metadata = {
@@ -403,9 +326,13 @@ function main(): void {
     currentVersion,
     previousTag: previousTag || null,
     commitCount: commits.length,
+    sourceRevision: gitMetadata.head,
+    sourceDirty: gitMetadata.dirty,
+    contracts: releaseContracts(process.cwd()),
   };
 
   if (write) {
+    if (gitMetadata.dirty) throw new Error("Release preparation requires a clean, reviewed source checkout; use the metadata dry run for local changes");
     updateCargoVersion(nextVersion);
     updatePackageVersion(nextVersion);
     updateChangelog(nextVersion, commits);

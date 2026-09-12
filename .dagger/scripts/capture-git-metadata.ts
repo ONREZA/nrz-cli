@@ -2,57 +2,50 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 
-const outputPath = process.argv[2] || ".nrz-release/git.json";
-
-interface GitCommitMetadata {
+export interface GitCommitMetadata {
   hash: string;
   subject: string;
   body: string;
 }
 
-function run(args: string[]): string {
-  return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+export interface ReleaseGitMetadata {
+  head: string;
+  dirty: boolean;
+  previousTag: string | null;
+  tags: string[];
+  commits: GitCommitMetadata[];
 }
 
-function maybeRun(args: string[]): string {
-  try {
-    return run(args);
-  } catch {
-    return "";
+export function captureGitMetadata(cwd: string): ReleaseGitMetadata {
+  const run = (args: string[]) => execFileSync("git", args, {
+    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  });
+  const tags = (args: string[]) => run(["tag", "--list", "v[0-9]*", "--sort=-v:refname", ...args])
+    .trim().split("\n").filter(Boolean);
+  const head = run(["rev-parse", "--verify", "HEAD"]).trim();
+  const previousTag = tags(["--merged", head]).find(tag => !tag.includes("-")) ?? null;
+  const raw = run(["log", "-z", "--format=%H%x00%s%x00%b", previousTag ? `${previousTag}..${head}` : head]);
+  const fields = raw.split("\0");
+  if (fields.at(-1) === "") fields.pop();
+  if (fields.length % 3 !== 0) throw new Error("Invalid Git log metadata");
+  const commits: GitCommitMetadata[] = [];
+  for (let index = 0; index < fields.length; index += 3) {
+    commits.push({ hash: fields[index], subject: fields[index + 1], body: fields[index + 2] });
   }
+  return {
+    head,
+    dirty: run(["status", "--porcelain", "--untracked-files=normal"]).length > 0,
+    previousTag,
+    tags: tags([]),
+    commits,
+  };
 }
 
-function tags(): string[] {
-  return maybeRun(["tag", "--list", "v[0-9]*", "--sort=-v:refname"])
-    .split("\n")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const outputPath = process.argv[2] || ".nrz-release/git.json";
+  const metadata = captureGitMetadata(process.cwd());
+  mkdirSync(dirname(outputPath), { recursive: true });
+  writeFileSync(outputPath, `${JSON.stringify(metadata, null, 2)}\n`);
 }
-
-function commitsSince(tag: string | null): GitCommitMetadata[] {
-  const range = tag ? `${tag}..HEAD` : "HEAD";
-  const raw = maybeRun(["log", "--pretty=format:%H%x01%s%x01%b%x02", range]);
-  if (!raw) {
-    return [];
-  }
-  return raw
-    .split("\x02")
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => {
-      const [hash = "", subject = "", body = ""] = entry.split("\x01");
-      return { hash, subject, body };
-    });
-}
-
-const allTags = tags();
-const previousTag = allTags.find((tag) => !tag.includes("-")) || null;
-const metadata = {
-  previousTag,
-  tags: allTags,
-  commits: commitsSince(previousTag),
-};
-
-mkdirSync(dirname(outputPath), { recursive: true });
-writeFileSync(outputPath, `${JSON.stringify(metadata, null, 2)}\n`);

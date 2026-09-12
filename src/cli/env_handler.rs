@@ -3,7 +3,7 @@ use std::io::{IsTerminal, Read, Write};
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::api::{ApiClient, path_segment};
+use crate::api::ApiClient;
 use crate::auth;
 use crate::output;
 use nrz::config;
@@ -15,7 +15,7 @@ use super::env::{EnvArgs, EnvCommand};
 #[serde(rename_all = "camelCase")]
 struct EnvListResponse {
     env_vars: Vec<EnvVar>,
-    total: u64,
+    total: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -46,42 +46,42 @@ pub(crate) struct EnvVarEnvironment {
     name: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SetEnvBody<'a> {
-    key: &'a str,
-    value: &'a str,
-    is_secret: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    note: Option<&'a str>,
-    scope_type: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    environment_ids: Option<Vec<String>>,
-    replace_scope: bool,
-    change_category: bool,
-    confirmed: bool,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SetEnvResponse {
-    id: String,
-    key: String,
-    created: bool,
-    #[serde(default)]
-    is_secret: Option<bool>,
-    #[serde(default)]
-    scope_type: Option<String>,
-    #[serde(default)]
-    message: Option<String>,
-    #[serde(default)]
-    warnings: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct DeleteEnvResponse {
-    deleted: bool,
-    message: String,
+impl From<nrz_api::Env200Response> for EnvListResponse {
+    fn from(value: nrz_api::Env200Response) -> Self {
+        Self {
+            total: value.total,
+            env_vars: value
+                .env_vars
+                .into_iter()
+                .map(|variable| EnvVar {
+                    key: variable.key,
+                    value: variable.value,
+                    is_secret: variable.is_secret,
+                    note: variable.note,
+                    scope_type: Some(variable.scope_type.to_string()),
+                    preview_branch: variable.preview_branch,
+                    environments: variable
+                        .environments
+                        .into_iter()
+                        .map(|environment| EnvVarEnvironment {
+                            id: environment.id.to_string(),
+                            name: environment.name,
+                        })
+                        .collect(),
+                    created_at: Some(
+                        variable
+                            .created_at
+                            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+                    ),
+                    updated_at: Some(
+                        variable
+                            .updated_at
+                            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+                    ),
+                })
+                .collect(),
+        }
+    }
 }
 
 pub async fn run(
@@ -220,13 +220,14 @@ async fn list(
     json: bool,
 ) -> anyhow::Result<()> {
     let mut resp: EnvListResponse = client
-        .get(&format!("/v1/projects/{}/env", path_segment(project_id)))
+        .environment_variables(project_id)
         .await
-        .context("failed to fetch environment variables")?;
+        .context("failed to fetch environment variables")?
+        .into();
     if let Some(environment_id) = environment_id {
         resp.env_vars
             .retain(|variable| env_var_matches_environment(variable, environment_id));
-        resp.total = resp.env_vars.len() as u64;
+        resp.total = resp.env_vars.len() as i64;
     }
 
     if json {
@@ -297,23 +298,35 @@ struct SetEnvRequest<'a> {
 }
 
 async fn set(client: &ApiClient, request: SetEnvRequest<'_>) -> anyhow::Result<()> {
-    let body = SetEnvBody {
-        key: request.key,
-        value: request.value,
-        is_secret: request.is_secret,
-        note: request.note,
-        scope_type: request.scope_type,
-        environment_ids: request.environment_ids,
-        replace_scope: request.replace_scope,
-        change_category: request.change_category,
-        confirmed: true,
+    let body = nrz_api::EnvRequestBody {
+        key: request.key.to_owned(),
+        value: request.value.to_owned(),
+        is_secret: Some(
+            nrz_api::ProjectRequestBody2IncludeFilesOutsideRoot::Boolean(request.is_secret),
+        ),
+        note: request.note.map(str::to_owned),
+        scope_type: Some(match request.scope_type {
+            "ALL" => nrz_api::Project200Response3EnvVarScopeType::All,
+            "SELECTED" => nrz_api::Project200Response3EnvVarScopeType::Selected,
+            other => bail!("unsupported environment scope: {other}"),
+        }),
+        environment_ids: request
+            .environment_ids
+            .map(|ids| {
+                ids.into_iter()
+                    .map(|id| id.parse())
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()
+            .context("invalid environment ID")?,
+        replace_scope: Some(request.replace_scope),
+        change_category: Some(request.change_category),
+        confirmed: Some(true),
+        ..Default::default()
     };
 
-    let resp: SetEnvResponse = client
-        .post(
-            &format!("/v1/projects/{}/env", path_segment(request.project_id)),
-            &body,
-        )
+    let resp = client
+        .set_environment_variable(request.project_id, body)
         .await
         .context("failed to set environment variable")?;
 
@@ -338,12 +351,8 @@ async fn delete(
     confirmed: bool,
     json: bool,
 ) -> anyhow::Result<()> {
-    let resp: DeleteEnvResponse = client
-        .delete(&format!(
-            "/v1/projects/{}/env/{}?all=true&confirmed={confirmed}",
-            path_segment(project_id),
-            path_segment(key)
-        ))
+    let resp = client
+        .delete_environment_variable(project_id, key, confirmed)
         .await
         .context("failed to delete environment variable")?;
 

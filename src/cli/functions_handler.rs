@@ -3,9 +3,9 @@ use std::path::Path;
 use anyhow::Context;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::api::{ApiClient, path_segment};
+use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::functions::{
     FunctionsArgs, FunctionsCheckArgs, FunctionsCommand, FunctionsInvokeArgs, FunctionsRuntimeArgs,
@@ -45,7 +45,7 @@ async fn check(args: FunctionsCheckArgs, json: bool) -> anyhow::Result<()> {
         .with_context(|| format!("project directory not found: {}", args.dir))?;
 
     let edge_rules = functions::check_edge_rules(&project_dir)?;
-    let collected: functions::CollectedFunctions = functions::collect(&project_dir)?;
+    let mut collected: functions::CollectedFunctions = functions::collect(&project_dir)?;
     if collected.is_empty() && edge_rules.is_none() {
         return Err(output::coded_error(
             "ONREZA_FUNCTIONS_NOT_FOUND",
@@ -56,7 +56,7 @@ async fn check(args: FunctionsCheckArgs, json: bool) -> anyhow::Result<()> {
     let runtime = if collected.is_empty() {
         None
     } else {
-        Some(preflight(&project_dir, &collected).await?)
+        Some(preflight(&mut collected).await?)
     };
     let functions = collected
         .functions
@@ -123,7 +123,7 @@ struct FunctionCheckItem {
 }
 
 async fn runtime(args: FunctionsRuntimeArgs, json: bool) -> anyhow::Result<()> {
-    let resolver = RuntimeResolver::pinned()?;
+    let resolver = RuntimeResolver::configured()?;
     match args.command {
         FunctionsRuntimeCommand::Install => {
             let runtime = resolver.resolve().await?;
@@ -220,28 +220,26 @@ async fn invoke(
     .environment_id;
     let functions = list_remote_functions(&client, &project_id, &environment_id).await?;
     let function = resolve_function_by_name(&functions.functions, &args.name)?;
-    let revision_id = function.active_revision_id()?;
+    let revision_id = function.activation.active_revision_id.to_string();
     let request = build_test_invoke_request(&args)?;
-    let result_value: Value = client
-        .post(
-            &format!(
-                "/v1/projects/{}/function-activations/environments/{}/functions/{}/revisions/{}/test-invoke",
-                path_segment(&project_id),
-                path_segment(&environment_id),
-                path_segment(&function.id),
-                path_segment(&revision_id)
-            ),
-            &request,
+    let result = client
+        .test_invoke_function(
+            &project_id,
+            &environment_id,
+            &function.id.to_string(),
+            &revision_id,
+            request,
         )
         .await
         .context("failed to invoke ONREZA Function")?;
-    serde_json::from_value::<nrz_contract::CliFunctionTestInvokeResponse>(result_value.clone())
-        .context("ONREZA Function test invoke response does not match CLI contract")?;
-    let result: FunctionTestInvokeResult = serde_json::from_value(result_value)
-        .context("failed to parse ONREZA Function test invoke response")?;
+    anyhow::ensure!(
+        result.revision.id == revision_id && result.revision.function_id == function.id.to_string(),
+        "function invocation response belongs to another revision"
+    );
+    let result = result.try_into()?;
     let output = FunctionInvokeOutput {
         function_name: function.name.clone(),
-        function_id: function.id.clone(),
+        function_id: function.id.to_string(),
         environment_id,
         revision_id,
         result,
@@ -259,22 +257,18 @@ async fn list_remote_functions(
     client: &ApiClient,
     project_id: &str,
     environment_id: &str,
-) -> anyhow::Result<RemoteFunctionsResponse> {
+) -> anyhow::Result<nrz_api::FunctionListResponse> {
     client
-        .get(&format!(
-            "/v1/projects/{}/function-activations/environments/{}/functions",
-            path_segment(project_id),
-            path_segment(environment_id)
-        ))
+        .functions(project_id, environment_id)
         .await
         .context("failed to list ONREZA Functions")
 }
 
 fn resolve_function_by_name<'a>(
-    functions: &'a [RemoteFunction],
+    functions: &'a [nrz_api::FunctionListResponseItem],
     name: &str,
-) -> anyhow::Result<&'a RemoteFunction> {
-    let matches: Vec<&RemoteFunction> = functions
+) -> anyhow::Result<&'a nrz_api::FunctionListResponseItem> {
+    let matches: Vec<&nrz_api::FunctionListResponseItem> = functions
         .iter()
         .filter(|function| function.name == name)
         .collect();
@@ -291,7 +285,9 @@ fn resolve_function_by_name<'a>(
     }
 }
 
-pub(crate) fn build_test_invoke_request(args: &FunctionsInvokeArgs) -> anyhow::Result<Value> {
+pub(crate) fn build_test_invoke_request(
+    args: &FunctionsInvokeArgs,
+) -> anyhow::Result<nrz_api::TestInvokeRequestBody> {
     ensure_single_stdin(&[
         args.payload.as_deref(),
         args.body.as_deref(),
@@ -336,37 +332,38 @@ pub(crate) fn build_test_invoke_request(args: &FunctionsInvokeArgs) -> anyhow::R
         method.get_or_insert_with(|| "POST".to_string());
     }
 
-    let mut request = json!({
-        "method": method.unwrap_or_else(|| "GET".to_string()),
-        "path": path,
-        "host": host,
-        "headers": headers,
-    });
-    let object = request
-        .as_object_mut()
-        .expect("test invoke request must be a JSON object");
-    if let Some(query_string) = &args.query_string {
-        object.insert(
-            "queryString".to_string(),
-            Value::String(query_string.clone()),
-        );
-    }
-    if let Some(body_base64) = body_base64 {
-        object.insert("bodyBase64".to_string(), Value::String(body_base64));
-    }
-    if let Some(event_path) = args.event.as_deref() {
-        object.insert("event".to_string(), read_json_value(event_path, "event")?);
-    }
-    if let Some(debug_path) = args.debug.as_deref() {
-        object.insert(
-            "debug".to_string(),
-            read_json_value(debug_path, "debug options")?,
-        );
-    }
-
-    serde_json::from_value::<nrz_contract::CliFunctionTestInvokeRequest>(request.clone())
-        .context("ONREZA Function test invoke request does not match CLI contract")?;
-    Ok(request)
+    Ok(nrz_api::TestInvokeRequestBody {
+        method: Some(
+            serde_json::from_value(Value::String(method.unwrap_or_else(|| "GET".to_string())))
+                .context("invalid HTTP method")?,
+        ),
+        path: Some(path.to_string()),
+        host: Some(host.to_string()),
+        headers: Some(
+            headers
+                .into_iter()
+                .map(|[name, value]| (name, value))
+                .collect(),
+        ),
+        query_string: args.query_string.clone(),
+        body_base64,
+        event: args
+            .event
+            .as_deref()
+            .map(|path| {
+                serde_json::from_value(read_json_value(path, "event")?)
+                    .context("invalid function event")
+            })
+            .transpose()?,
+        debug: args
+            .debug
+            .as_deref()
+            .map(|path| {
+                serde_json::from_value(read_json_value(path, "debug options")?)
+                    .context("invalid debug options")
+            })
+            .transpose()?,
+    })
 }
 
 fn reject_fetch_flags_with_event(args: &FunctionsInvokeArgs) -> anyhow::Result<()> {
@@ -609,40 +606,6 @@ fn render_log_line(log: &Value) -> String {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteFunctionsResponse {
-    functions: Vec<RemoteFunction>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteFunction {
-    id: String,
-    name: String,
-    activation: Option<RemoteFunctionActivation>,
-}
-
-impl RemoteFunction {
-    fn active_revision_id(&self) -> anyhow::Result<String> {
-        self.activation
-            .as_ref()
-            .and_then(|activation| activation.active_revision_id.clone())
-            .ok_or_else(|| {
-                output::coded_error(
-                    "ONREZA_FUNCTION_REVISION_NOT_FOUND",
-                    format!("function '{}' has no active revision", self.name),
-                )
-            })
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteFunctionActivation {
-    active_revision_id: Option<String>,
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FunctionInvokeOutput {
@@ -698,4 +661,51 @@ pub(crate) struct FunctionInvokeResponse {
     pub(crate) headers: Vec<[String; 2]>,
     pub(crate) body_base64: Option<String>,
     pub(crate) body_preview: Option<String>,
+}
+
+impl TryFrom<nrz_api::FunctionTestInvokeResponse> for FunctionTestInvokeResult {
+    type Error = anyhow::Error;
+    fn try_from(value: nrz_api::FunctionTestInvokeResponse) -> anyhow::Result<Self> {
+        let invocation = value.invocation;
+        Ok(Self {
+            invocation: FunctionInvocation {
+                invocation_id: invocation.invocation_id,
+                ok: invocation.ok,
+                timings: invocation.timings.map(|value| FunctionInvocationTimings {
+                    total_ms: value.total_ms,
+                    worker_ms: value.worker_ms,
+                    wait_until_ms: value.wait_until_ms,
+                    cold_worker_start_ms: value.cold_worker_start_ms,
+                }),
+                response: invocation
+                    .response
+                    .map(|value| -> anyhow::Result<_> {
+                        Ok(FunctionInvokeResponse {
+                            status: value
+                                .status
+                                .map(u16::try_from)
+                                .transpose()
+                                .context("invalid function response status")?,
+                            headers: value
+                                .headers
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|(name, value)| [name, value])
+                                .collect(),
+                            body_base64: value.body_base64,
+                            body_preview: value.body_preview,
+                        })
+                    })
+                    .transpose()?,
+                error: invocation.error,
+                logs: invocation.logs.unwrap_or_default(),
+            },
+            debug_trace: value.debug_trace,
+            revision: FunctionInvokedRevision {
+                id: value.revision.id,
+                function_id: value.revision.function_id,
+                source_snapshot_id: value.revision.source_snapshot_id,
+            },
+        })
+    }
 }

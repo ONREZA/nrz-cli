@@ -1,5 +1,7 @@
 pub mod config;
 mod device_flow;
+#[cfg(test)]
+mod device_flow_tests;
 pub mod workspace;
 
 #[cfg(test)]
@@ -13,19 +15,10 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 use indicatif::{ProgressBar, ProgressStyle};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::api::ApiClient;
 use crate::output;
-
-#[derive(Debug, Deserialize)]
-struct UserInfo {
-    #[allow(dead_code)]
-    id: String,
-    email: String,
-    name: Option<String>,
-    username: Option<String>,
-}
 
 #[derive(Serialize)]
 struct LoginOutput {
@@ -120,17 +113,13 @@ pub async fn login(json: bool, token: Option<&str>) -> anyhow::Result<()> {
     // If token already provided via --token/NRZ_TOKEN, save it directly
     if let Some(tok) = token {
         let client = ApiClient::authenticated(tok)?;
-        let user: UserInfo = client
-            .get("/v1/user")
+        let user = client
+            .user()
             .await
             .context("invalid token — failed to fetch user info")?;
 
         let mut cfg = config::load();
-        cfg.add_workspace(
-            "personal",
-            tok.to_string(),
-            user.name.clone().unwrap_or_default(),
-        );
+        cfg.add_workspace("personal", tok.to_string(), user.name.clone());
         config::save(&cfg)?;
 
         if json {
@@ -206,42 +195,29 @@ pub async fn login(json: bool, token: Option<&str>) -> anyhow::Result<()> {
         s.finish_and_clear();
     }
 
-    match token_resp? {
-        device_flow::TokenResponse::Success {
-            access_token,
+    let nrz_api::Token200Response {
+        access_token,
+        workspace_slug,
+        workspace_name,
+        ..
+    } = token_resp?;
+    let mut cfg = config::load();
+    cfg.add_workspace(&workspace_slug, access_token, workspace_name.clone());
+    config::save(&cfg)?;
+    if json {
+        output::json_output(&LoginOutput {
             workspace_slug,
             workspace_name,
-            ..
-        } => {
-            let slug = if workspace_slug.is_empty() {
-                "personal".to_string()
-            } else {
-                workspace_slug.clone()
-            };
-
-            let mut cfg = config::load();
-            cfg.add_workspace(&slug, access_token, workspace_name.clone());
-            config::save(&cfg)?;
-
-            if json {
-                output::json_output(&LoginOutput {
-                    workspace_slug,
-                    workspace_name,
-                });
-            } else {
-                output::success(
-                    false,
-                    format!(
-                        "Logged in to workspace: {} ({slug})",
-                        console::style(&workspace_name).bold(),
-                    ),
-                    output::Phase::Auth,
-                );
-            }
-        }
-        device_flow::TokenResponse::Error { error } => {
-            anyhow::bail!("authorization failed: {error}");
-        }
+        });
+    } else {
+        output::success(
+            false,
+            format!(
+                "Logged in to workspace: {} ({workspace_slug})",
+                console::style(&workspace_name).bold()
+            ),
+            output::Phase::Auth,
+        );
     }
 
     Ok(())
@@ -251,10 +227,7 @@ pub async fn whoami(json: bool, token: Option<&str>, ws: Option<&str>) -> anyhow
     let ctx = workspace::resolve_workspace_context(token, ws)?;
 
     let client = ApiClient::authenticated(&ctx.token)?;
-    let user: UserInfo = client
-        .get("/v1/user")
-        .await
-        .context("failed to fetch user info")?;
+    let user = client.user().await.context("failed to fetch user info")?;
 
     let cfg = config::load();
     let workspace_name = cfg
@@ -266,15 +239,15 @@ pub async fn whoami(json: bool, token: Option<&str>, ws: Option<&str>) -> anyhow
     if json {
         output::json_output(&WhoamiOutput {
             email: user.email,
-            name: user.name,
+            name: Some(user.name),
             username: user.username,
             workspace_slug: ctx.workspace_slug,
             workspace_name,
         });
     } else {
         eprintln!("  {} {}", console::style("Email:").dim(), user.email);
-        if let Some(name) = &user.name {
-            eprintln!("  {} {}", console::style("Name:").dim(), name);
+        if !user.name.is_empty() {
+            eprintln!("  {} {}", console::style("Name:").dim(), user.name);
         }
         if let Some(username) = &user.username {
             eprintln!("  {} {}", console::style("Username:").dim(), username);

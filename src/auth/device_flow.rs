@@ -1,88 +1,101 @@
+use std::time::Duration;
+
 use anyhow::{Context, bail};
-use serde::Deserialize;
+use nrz_api::{
+    Device200Response, ErrorResponseError, PostV1deviceRequest, PostV1deviceResponse,
+    PostV1deviceTokenRequest, PostV1deviceTokenResponse, Token200Response, TokenRequestBody,
+};
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, client::ensure_success};
 
-#[derive(Debug, Deserialize)]
-pub struct DeviceCodeResponse {
-    pub device_code: String,
-    pub user_code: String,
-    #[allow(dead_code)]
-    pub verification_uri: String,
-    pub verification_uri_complete: String,
-    pub expires_in: u64,
-    pub interval: u64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum TokenResponse {
-    Success {
-        access_token: String,
-        #[allow(dead_code)]
-        token_type: String,
-        workspace_slug: String,
-        workspace_name: String,
-    },
-    Error {
-        error: String,
-    },
-}
-
-pub async fn request_device_code(client: &ApiClient) -> anyhow::Result<DeviceCodeResponse> {
-    client
-        .post_empty("/v1/device")
+pub async fn request_device_code(client: &ApiClient) -> anyhow::Result<Device200Response> {
+    let response = client
+        .platform()?
+        .post_v1device(PostV1deviceRequest {})
         .await
-        .context("failed to request device code")
+        .context("failed to request device code")?;
+    let device = match PostV1deviceRequest::parse_response(ensure_success(response).await?)
+        .await
+        .map_err(nrz_api::response_error)?
+    {
+        PostV1deviceResponse::Ok(device) => device,
+        _ => bail!("unexpected successful response from the device authorization API"),
+    };
+    positive_seconds(device.interval, "poll interval")?;
+    positive_seconds(device.expires_in, "device code lifetime")?;
+    Ok(device)
+}
+
+fn positive_seconds(value: i64, field: &str) -> anyhow::Result<Duration> {
+    let seconds = u64::try_from(value).with_context(|| format!("invalid {field}"))?;
+    if seconds == 0 {
+        bail!("invalid {field}: must be positive");
+    }
+    Ok(Duration::from_secs(seconds))
 }
 
 pub async fn poll_for_token(
     client: &ApiClient,
     device_code: &str,
-    interval: u64,
-    expires_in: u64,
-) -> anyhow::Result<TokenResponse> {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(expires_in);
-    let poll_interval = std::time::Duration::from_secs(interval);
-
+    interval: i64,
+    expires_in: i64,
+) -> anyhow::Result<Token200Response> {
+    let lifetime = positive_seconds(expires_in, "device code lifetime")?;
+    let deadline = tokio::time::Instant::now()
+        .checked_add(lifetime)
+        .context("device code lifetime exceeds the supported range")?;
+    let mut poll_interval = positive_seconds(interval, "poll interval")?;
+    let platform = client.platform()?;
     loop {
-        tokio::time::sleep(poll_interval).await;
-
+        let next_poll = tokio::time::Instant::now()
+            .checked_add(poll_interval)
+            .context("poll interval exceeds the supported range")?;
+        tokio::time::sleep_until(next_poll.min(deadline)).await;
         if tokio::time::Instant::now() >= deadline {
             bail!("device authorization timed out");
         }
-
-        let body = serde_json::json!({
-            "device_code": device_code,
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
-        });
-
-        let raw_resp = client
-            .post_raw("/v1/device/token", &body)
+        let request = PostV1deviceTokenRequest {
+            body: TokenRequestBody {
+                device_code: device_code.to_string(),
+                grant_type: Some("urn:ietf:params:oauth:grant-type:device_code".to_string()),
+            },
+        };
+        let poll = async {
+            let response = platform
+                .post_v1device_token(request)
+                .await
+                .context("failed to poll for token")?;
+            let response = if response.status() == reqwest::StatusCode::BAD_REQUEST {
+                response
+            } else {
+                ensure_success(response).await?
+            };
+            PostV1deviceTokenRequest::parse_response(response)
+                .await
+                .map_err(nrz_api::response_error)
+        };
+        let response = tokio::time::timeout_at(deadline, poll)
             .await
-            .context("failed to poll for token")?;
-
-        let resp_body = raw_resp
-            .text()
-            .await
-            .context("failed to read poll response")?;
-
-        let resp: TokenResponse =
-            serde_json::from_str(&resp_body).context("failed to parse poll response")?;
-
-        match &resp {
-            TokenResponse::Error { error } if error == "authorization_pending" => continue,
-            TokenResponse::Error { error } if error == "slow_down" => {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                continue;
+            .context("device authorization timed out")??;
+        match response {
+            PostV1deviceTokenResponse::Ok(token) => {
+                if token.access_token.is_empty() || token.workspace_slug.is_empty() {
+                    bail!("device authorization returned an incomplete token response");
+                }
+                positive_seconds(token.expires_in, "access token lifetime")?;
+                return Ok(token);
             }
-            TokenResponse::Error { error } if error == "expired_token" => {
-                bail!("device code expired. Please try again.");
-            }
-            TokenResponse::Error { error } => {
-                bail!("authorization failed: {error}");
-            }
-            TokenResponse::Success { .. } => return Ok(resp),
+            PostV1deviceTokenResponse::BadRequest(error) => match error.error {
+                ErrorResponseError::AuthorizationPending => {}
+                ErrorResponseError::SlowDown => {
+                    poll_interval = poll_interval
+                        .checked_add(Duration::from_secs(5))
+                        .context("poll interval exceeds the supported range")?;
+                }
+                ErrorResponseError::ExpiredToken => bail!("device code expired. Please try again."),
+                ErrorResponseError::InvalidGrant => bail!("authorization failed: invalid_grant"),
+            },
+            _ => bail!("unexpected response from the device token API"),
         }
     }
 }

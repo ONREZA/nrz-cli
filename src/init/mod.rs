@@ -7,7 +7,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::{Context, bail};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::api::ApiClient;
 use crate::auth;
@@ -24,22 +24,6 @@ struct InitOutput {
     project_name: Option<String>,
     framework: Option<String>,
     package_manager: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateProjectBody {
-    name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    framework_preset: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateProjectResponse {
-    id: String,
-    #[allow(dead_code)]
-    name: String,
 }
 
 pub async fn run(
@@ -295,17 +279,18 @@ async fn create_on_platform(
         output::Phase::Init,
     );
 
-    let body = CreateProjectBody {
+    let body = nrz_api::ProjectRequestBody {
         name: name.to_string(),
         framework_preset: framework.clone(),
+        ..Default::default()
     };
 
-    let resp: CreateProjectResponse = client
-        .post("/v1/projects", &body)
+    let resp = client
+        .create_project(body)
         .await
         .context("failed to create project")?;
 
-    Ok((resp.id, name.to_string()))
+    Ok((resp.id.to_string(), name.to_string()))
 }
 
 fn resolve_project_name(name_arg: &Option<String>, project_dir: &Path) -> String {

@@ -4,14 +4,18 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::api::{ApiClient, path_segment};
+use crate::api::ApiClient;
+
+pub(crate) mod wire;
+#[cfg(test)]
+mod wire_tests;
 use crate::auth;
 use crate::cli::execution_context::{ContextArgs, ContextCommand};
 use crate::output;
 use nrz::config::{self, ProjectConfig};
 
-pub const EXECUTION_CONTEXT_PROTOCOL: &str = "execution-context-v1";
-pub const RUNNER_CONTEXT_PROTOCOL: &str = "runner-context-v3";
+pub const EXECUTION_CONTEXT_PROTOCOL: &str = "execution-context-v2";
+pub const RUNNER_CONTEXT_PROTOCOL: &str = "runner-context-v4";
 const SAVED_CONTEXT_VERSION: u8 = 1;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -26,13 +30,6 @@ pub struct ExecutionContext {
     pub environment_type: String,
     pub source_ref: Option<String>,
     pub selection_source: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ResolveResponse {
-    protocol_version: String,
-    context: ExecutionContext,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -59,28 +56,6 @@ pub struct MaterializedExecutionContext {
 struct SavedExecutionContext {
     version: u8,
     environment_id: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ResolveBody<'a> {
-    environment: &'a str,
-    source_ref: Option<&'a str>,
-    selection_source: &'a str,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MaterializeBody<'a> {
-    environment_id: &'a str,
-    source_ref: Option<&'a str>,
-    purpose: &'a str,
-    selection_source: &'a str,
-}
-
-#[derive(Serialize)]
-struct DeploymentMaterializeBody<'a> {
-    purpose: &'a str,
 }
 
 pub async fn run(
@@ -217,22 +192,19 @@ pub async fn resolve(
     source_ref: Option<&str>,
     selection_source: &str,
 ) -> anyhow::Result<ExecutionContext> {
-    let response: ResolveResponse = client
-        .post(
-            &format!(
-                "/v1/projects/{}/execution-context/resolve",
-                path_segment(project_id)
-            ),
-            &ResolveBody {
-                environment: selector,
-                source_ref,
-                selection_source,
+    let response = client
+        .resolve_execution_context(
+            project_id,
+            nrz_api::ResolveRequestBody {
+                environment: selector.to_owned(),
+                source_ref: Some(source_ref.map(str::to_owned)),
+                selection_source: wire::selection_source(selection_source)?,
             },
         )
         .await
         .context("failed to resolve execution context")?;
     require_protocol(&response.protocol_version)?;
-    Ok(response.context)
+    Ok(response.context.into())
 }
 
 pub async fn materialize_desired(
@@ -242,20 +214,21 @@ pub async fn materialize_desired(
     purpose: &str,
 ) -> anyhow::Result<MaterializedExecutionContext> {
     let response: MaterializedExecutionContext = client
-        .post(
-            &format!(
-                "/v1/projects/{}/execution-context/materialize",
-                path_segment(&context.project_id)
-            ),
-            &MaterializeBody {
-                environment_id: &context.environment_id,
-                source_ref,
-                purpose,
-                selection_source: &context.selection_source,
+        .materialize_execution_context(
+            &context.project_id,
+            nrz_api::MaterializeRequestBody {
+                environment_id: context
+                    .environment_id
+                    .parse()
+                    .context("invalid environment ID")?,
+                source_ref: Some(source_ref.map(str::to_owned)),
+                purpose: wire::purpose(purpose)?,
+                selection_source: wire::selection_source(&context.selection_source)?,
             },
         )
         .await
-        .context("failed to materialize environment configuration")?;
+        .context("failed to materialize environment configuration")?
+        .into();
     require_protocol(&response.protocol_version)?;
     validate_snapshot_binding(&response, "DESIRED_STATE", None)?;
     if response.context.project_id != context.project_id
@@ -272,15 +245,15 @@ pub async fn materialize_deployment(
     purpose: &str,
 ) -> anyhow::Result<MaterializedExecutionContext> {
     let response: MaterializedExecutionContext = client
-        .post(
-            &format!(
-                "/v1/deployments/{}/execution-context/materialize",
-                path_segment(deployment_id)
-            ),
-            &DeploymentMaterializeBody { purpose },
+        .materialize_deployment_context(
+            deployment_id,
+            nrz_api::PurposeRequestBody {
+                purpose: wire::purpose(purpose)?,
+            },
         )
         .await
-        .context("failed to materialize deployment environment snapshot")?;
+        .context("failed to materialize deployment environment snapshot")?
+        .into();
     require_protocol(&response.protocol_version)?;
     validate_snapshot_binding(&response, "DEPLOYMENT", Some(deployment_id))?;
     Ok(response)

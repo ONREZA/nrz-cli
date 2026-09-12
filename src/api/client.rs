@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 use reqwest::header::{HeaderMap, HeaderValue};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct ApiError {
@@ -88,11 +88,10 @@ impl std::fmt::Display for StructuredApiError {
 
 impl std::error::Error for StructuredApiError {}
 
-/// Standard API envelope: `{"success":bool,"result":T,"errors":[],"messages":[]}`
+// DEPRECATED: recognize error envelopes from older platform gateways until their clients have migrated.
 #[derive(Debug, Deserialize)]
-struct ApiEnvelope<T> {
+struct ApiEnvelope {
     success: bool,
-    result: Option<T>,
     #[serde(default)]
     errors: Vec<ApiEnvelopeMessage>,
 }
@@ -129,6 +128,25 @@ pub struct ApiClient {
 }
 
 impl ApiClient {
+    pub(super) fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    pub(super) fn http_client(&self) -> &reqwest::Client {
+        &self.client
+    }
+
+    pub(crate) fn with_http_client(
+        base_url: String,
+        client: reqwest::Client,
+    ) -> anyhow::Result<Self> {
+        nrz_api::PlatformClient::with_client(&base_url, client.clone())?;
+        Ok(Self {
+            base_url,
+            client,
+            upload_client: build_upload_client()?,
+        })
+    }
     pub(crate) fn source_publication_transport(
         &self,
     ) -> nrz_source_publisher::HttpSourcePublicationTransport {
@@ -149,13 +167,7 @@ impl ApiClient {
 
         let client = build_api_http_client(headers)?;
 
-        let upload_client = build_upload_client()?;
-
-        Ok(Self {
-            client,
-            upload_client,
-            base_url,
-        })
+        Self::with_http_client(base_url, client)
     }
 
     pub fn authenticated(token: &str) -> anyhow::Result<Self> {
@@ -172,139 +184,7 @@ impl ApiClient {
 
         let client = build_api_http_client(headers)?;
 
-        let upload_client = build_upload_client()?;
-
-        Ok(Self {
-            client,
-            upload_client,
-            base_url,
-        })
-    }
-
-    pub async fn get<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
-        let url = format!("{}{}", self.base_url, path);
-        let resp = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .with_context(|| format!("request failed: GET {path}"))?;
-
-        check_response(resp).await
-    }
-
-    pub async fn post<B: Serialize, T: DeserializeOwned>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> anyhow::Result<T> {
-        let url = format!("{}{}", self.base_url, path);
-        let resp = self
-            .client
-            .post(&url)
-            .json(body)
-            .send()
-            .await
-            .with_context(|| format!("request failed: POST {path}"))?;
-
-        check_response(resp).await
-    }
-
-    /// POST that returns the raw response without checking status.
-    /// Used for device flow polling where 400 with `authorization_pending` is expected.
-    pub async fn post_raw<B: Serialize>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> anyhow::Result<reqwest::Response> {
-        let url = format!("{}{}", self.base_url, path);
-        self.client
-            .post(&url)
-            .json(body)
-            .send()
-            .await
-            .with_context(|| format!("request failed: POST {path}"))
-    }
-
-    pub async fn post_empty<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
-        let url = format!("{}{}", self.base_url, path);
-        let resp = self
-            .client
-            .post(&url)
-            .send()
-            .await
-            .with_context(|| format!("request failed: POST {path}"))?;
-
-        check_response(resp).await
-    }
-
-    pub async fn delete<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
-        let url = format!("{}{}", self.base_url, path);
-        let resp = self
-            .client
-            .delete(&url)
-            .send()
-            .await
-            .with_context(|| format!("request failed: DELETE {path}"))?;
-
-        check_response(resp).await
-    }
-
-    pub async fn delete_empty(&self, path: &str) -> anyhow::Result<()> {
-        let url = format!("{}{}", self.base_url, path);
-        let resp = self
-            .client
-            .delete(&url)
-            .send()
-            .await
-            .with_context(|| format!("request failed: DELETE {path}"))?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let retry_after_seconds =
-                parse_retry_after(resp.headers()).map(|duration| duration.as_secs());
-            let body = resp
-                .text()
-                .await
-                .unwrap_or_else(|e| format!("<failed to read response: {e}>"));
-            return Err(extract_api_error(status, &body, retry_after_seconds));
-        }
-
-        Ok(())
-    }
-
-    pub async fn patch<B: Serialize, T: DeserializeOwned>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> anyhow::Result<T> {
-        let url = format!("{}{}", self.base_url, path);
-        let resp = self
-            .client
-            .patch(&url)
-            .json(body)
-            .send()
-            .await
-            .with_context(|| format!("request failed: PATCH {path}"))?;
-
-        check_response(resp).await
-    }
-
-    pub async fn put<B: Serialize, T: DeserializeOwned>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> anyhow::Result<T> {
-        let url = format!("{}{}", self.base_url, path);
-        let resp = self
-            .client
-            .put(&url)
-            .json(body)
-            .send()
-            .await
-            .with_context(|| format!("request failed: PUT {path}"))?;
-
-        check_response(resp).await
+        Self::with_http_client(base_url, client)
     }
 }
 
@@ -341,7 +221,7 @@ pub(super) fn extract_api_error(
     body: &str,
     retry_after_seconds: Option<u64>,
 ) -> anyhow::Error {
-    if let Ok(envelope) = serde_json::from_str::<ApiEnvelope<serde_json::Value>>(body) {
+    if let Ok(envelope) = serde_json::from_str::<ApiEnvelope>(body) {
         if !envelope.errors.is_empty() {
             return anyhow::anyhow!(
                 "API error ({}): {}",
@@ -372,12 +252,26 @@ pub(super) fn extract_api_error(
             .into();
         }
 
-        return anyhow::anyhow!("API error ({}): {}", status, msg);
+        return StructuredApiError {
+            status,
+            code: format!("HTTP_{}", status.as_u16()),
+            message: msg,
+            retry_after_seconds: api_err.retry_after_seconds.or(retry_after_seconds),
+            details: api_err.details,
+        }
+        .into();
     }
-    anyhow::anyhow!("API error ({}): {}", status, body)
+    StructuredApiError {
+        status,
+        code: format!("HTTP_{}", status.as_u16()),
+        message: body.to_string(),
+        retry_after_seconds,
+        details: None,
+    }
+    .into()
 }
 
-async fn check_response<T: DeserializeOwned>(resp: reqwest::Response) -> anyhow::Result<T> {
+pub(crate) async fn ensure_success(resp: reqwest::Response) -> anyhow::Result<reqwest::Response> {
     let status = resp.status();
     if !status.is_success() {
         let retry_after_seconds =
@@ -388,25 +282,5 @@ async fn check_response<T: DeserializeOwned>(resp: reqwest::Response) -> anyhow:
             .unwrap_or_else(|e| format!("<failed to read response: {e}>"));
         return Err(extract_api_error(status, &body, retry_after_seconds));
     }
-
-    let body = resp.text().await.context("failed to read response body")?;
-
-    // Try API envelope format: {"success":true,"result":T,...}
-    // Use Value first to detect envelope structure without coupling to T
-    if let Ok(envelope) = serde_json::from_str::<ApiEnvelope<serde_json::Value>>(&body) {
-        if !envelope.success {
-            bail!(
-                "API returned success=false: {}",
-                format_envelope_errors(&envelope.errors)
-            );
-        }
-        let result_value = envelope
-            .result
-            .context("API returned success=true but result is null")?;
-        return serde_json::from_value(result_value)
-            .context("failed to deserialize API response result");
-    }
-
-    // Fallback: direct deserialization (for endpoints without envelope)
-    serde_json::from_str(&body).with_context(|| format!("failed to parse response: {body}"))
+    Ok(resp)
 }

@@ -1,10 +1,10 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::api::{ApiClient, path_segment};
+use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::RollbackArgs;
-use crate::deployments::{Deployment, DeploymentStatus, truncate_id};
+use crate::deployments::truncate_id;
 use crate::output;
 use nrz::config;
 use nrz::config::ProjectConfig;
@@ -18,11 +18,6 @@ struct RollbackResponse {
     message: Option<String>,
     rollback_from: Option<String>,
     rollback_to: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct DeploymentsResponse {
-    deployments: Vec<Deployment>,
 }
 
 pub async fn run(
@@ -43,13 +38,21 @@ pub async fn run(
         find_live_deployment(&client, &project_id).await?
     };
 
-    let resp: RollbackResponse = client
-        .post_empty(&format!(
-            "/v1/deployments/{}/rollback",
-            path_segment(&deployment_id)
-        ))
+    let result = client
+        .rollback_deployment(&deployment_id)
         .await
         .context("failed to rollback deployment")?;
+    anyhow::ensure!(
+        result.rollback_from == deployment_id.parse::<uuid::Uuid>()?,
+        "rollback response refers to another deployment"
+    );
+    let resp = RollbackResponse {
+        id: result.id.to_string(),
+        status: Some(result.status.to_string()),
+        message: Some(result.message),
+        rollback_from: Some(result.rollback_from.to_string()),
+        rollback_to: Some(result.rollback_to.to_string()),
+    };
 
     if json {
         output::json_output(&resp);
@@ -74,18 +77,46 @@ pub async fn run(
     Ok(())
 }
 
-async fn find_live_deployment(client: &ApiClient, project_id: &str) -> anyhow::Result<String> {
-    let resp: DeploymentsResponse = client
-        .get(&format!(
-            "/v1/deployments/project/{}?limit=10",
-            path_segment(project_id)
-        ))
-        .await
-        .context("failed to fetch deployments")?;
-
-    resp.deployments
-        .iter()
-        .find(|d| d.status == DeploymentStatus::Live)
-        .map(|d| d.id.clone())
-        .ok_or_else(|| anyhow::anyhow!("no live deployment found to rollback"))
+pub(crate) async fn find_live_deployment(
+    client: &ApiClient,
+    project_id: &str,
+) -> anyhow::Result<String> {
+    let mut offset = 0u32;
+    let mut candidate = None;
+    let mut seen = std::collections::HashSet::new();
+    loop {
+        let page = client
+            .project_deployments(project_id, 100, offset)
+            .await
+            .context("failed to fetch deployments")?;
+        anyhow::ensure!(page.total >= 0, "invalid deployment count");
+        let count = u32::try_from(page.deployments.len())?;
+        let previous_count = seen.len();
+        for deployment in page.deployments {
+            if !seen.insert(deployment.id) {
+                continue;
+            }
+            if deployment.is_active
+                && deployment.status
+                    == nrz_api::Project200ResponseProjectLatestDeploymentStatus::Live
+            {
+                anyhow::ensure!(
+                    candidate.is_none(),
+                    "multiple active deployments found; specify --deployment-id to select the environment to rollback"
+                );
+                candidate = Some(deployment.id.to_string());
+            }
+        }
+        offset = offset
+            .checked_add(count)
+            .context("deployment pagination overflow")?;
+        if i64::from(offset) >= page.total {
+            break;
+        }
+        anyhow::ensure!(
+            seen.len() > previous_count,
+            "deployment listing changed while selecting rollback; specify --deployment-id"
+        );
+    }
+    candidate.ok_or_else(|| anyhow::anyhow!("no active live deployment found to rollback"))
 }

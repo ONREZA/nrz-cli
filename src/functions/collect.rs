@@ -1,11 +1,16 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
-use nrz_fn_source::{
-    MAX_FUNCTION_SOURCE_FILE_BYTES, MAX_FUNCTIONS_PER_PUBLISH, analyze_function_entry,
-    function_name_from_entrypoint, is_function_entry_path,
-};
+use nrz_api::functions::{MAX_FUNCTION_SOURCE_FILE_BYTES, MAX_FUNCTIONS_PER_PUBLISH};
+const ENTRY_SUFFIXES: &[&str] = &[
+    ".nrz-fn.ts",
+    ".nrz-fn.tsx",
+    ".nrz-fn.js",
+    ".nrz-fn.jsx",
+    ".nrz-fn.mjs",
+];
 
 /// Directory names that are never part of function discovery.
 const DENIED_DIR_NAMES: &[&str] = &[
@@ -42,12 +47,13 @@ impl CollectedFunctions {
 /// A single function entry ready for native-runtime preflight and publishing.
 #[derive(Debug)]
 pub struct CollectedFunction {
-    /// Stable platform function identity declared in config or derived from the branded file name.
+    /// Filename-derived candidate; native preflight resolves and validates the declared identity.
     pub name: String,
     /// Entrypoint path relative to the project root.
     pub entrypoint: String,
     /// One-file source set keyed by `entrypoint`.
     pub sources: BTreeMap<String, String>,
+    pub(crate) inspected: Option<nrz_api::FunctionPublishSpec>,
 }
 
 /// Discover ONREZA Functions under the project root by branded file suffix.
@@ -65,41 +71,17 @@ pub fn collect(project_dir: &Path) -> anyhow::Result<CollectedFunctions> {
     }
 
     let mut functions = Vec::with_capacity(entries.len());
-    let mut seen_names = HashMap::new();
     for path in entries {
         let relative = relative_path(project_dir, &path);
-        let size = path.metadata()?.len();
-        if size > MAX_FUNCTION_SOURCE_FILE_BYTES {
+        let mut content = String::new();
+        std::fs::File::open(&path)?
+            .take(MAX_FUNCTION_SOURCE_FILE_BYTES + 1)
+            .read_to_string(&mut content)
+            .with_context(|| format!("function source '{relative}' is not valid UTF-8 text"))?;
+        if content.len() as u64 > MAX_FUNCTION_SOURCE_FILE_BYTES {
             bail!("function source '{relative}' exceeds {MAX_FUNCTION_SOURCE_FILE_BYTES} bytes");
         }
-
-        let content = std::fs::read_to_string(&path)
-            .with_context(|| format!("function source '{relative}' is not valid UTF-8 text"))?;
-        let analysis = analyze_function_entry(&relative, &content)
-            .with_context(|| format!("invalid ONREZA Function declaration in '{relative}'"))?;
-        let name = match analysis.declaration.name.as_deref() {
-            Some(name) => name.to_string(),
-            None => function_name_from_entrypoint(&relative)
-                .with_context(|| format!("invalid ONREZA Function entrypoint '{relative}'"))?
-                .to_string(),
-        };
-        if let Some(previous_entrypoint) = seen_names.get(&name) {
-            bail!(
-                "duplicate ONREZA Function name '{name}' in '{relative}' and '{previous_entrypoint}'"
-            );
-        }
-        seen_names.insert(name.clone(), relative.clone());
-
-        if !analysis.imports.is_empty() {
-            bail!(
-                "function entry '{}' imports '{}'; ONREZA Functions v1 entry files must be self-contained",
-                relative,
-                analysis.imports.join("', '")
-            );
-        }
-        if analysis.computed_dynamic_import {
-            bail!("function entry '{relative}' uses computed dynamic import");
-        }
+        let name = name_from_entrypoint(&relative).to_string();
 
         let mut sources = BTreeMap::new();
         sources.insert(relative.clone(), content);
@@ -107,6 +89,7 @@ pub fn collect(project_dir: &Path) -> anyhow::Result<CollectedFunctions> {
             name,
             entrypoint: relative,
             sources,
+            inspected: None,
         });
     }
 
@@ -135,7 +118,7 @@ fn walk_entries(dir: &Path, entries: &mut Vec<PathBuf>) -> anyhow::Result<()> {
             continue;
         }
 
-        if file_type.is_file() && is_function_entry_path(&name) {
+        if file_type.is_file() && ENTRY_SUFFIXES.iter().any(|suffix| name.ends_with(suffix)) {
             entries.push(path);
         }
     }
@@ -151,4 +134,12 @@ fn relative_path(root: &Path, path: &Path) -> String {
         .expect("walked path is under source root")
         .to_string_lossy()
         .replace('\\', "/")
+}
+
+pub(crate) fn name_from_entrypoint(path: &str) -> &str {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    ENTRY_SUFFIXES
+        .iter()
+        .find_map(|suffix| name.strip_suffix(suffix))
+        .unwrap_or(name)
 }

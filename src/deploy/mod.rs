@@ -1,9 +1,18 @@
+mod pre_source;
+use pre_source::*;
+mod source_registration;
+use source_registration::*;
+#[cfg(test)]
+mod publication_wire_tests;
+mod wire;
 // Shared private types and helpers for deployment commands. Stateful admission
 // and publication orchestration lives in workflow; activation owns status reads
 // and wait deadlines. Public command entrypoints remain re-exported here.
 mod activation;
 #[cfg(test)]
 mod activation_tests;
+#[cfg(test)]
+mod status_wire_tests;
 mod workflow;
 pub use workflow::run;
 
@@ -66,10 +75,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
 use indicatif::{ProgressBar, ProgressStyle};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::api::{ApiClient, classify_api_retry, path_segment};
+use crate::api::{ApiClient, classify_api_retry};
 use crate::artifact::source_bundle_v1::{
     SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, SourceBundlePlan, source_bundle_contract_characters,
 };
@@ -110,20 +119,9 @@ fn authoritative_server_framework_preset(preset: Option<&str>) -> Option<&str> {
 #[cfg(test)]
 type ProjectInfo = nrz::config::ProjectBuildSettings;
 
-// ── API structs ──────────────────────────────────────────────
+// ── Deployment state ────────────────────────────────────────
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AdmitDeploymentBody<'a> {
-    protocol_version: &'static str,
-    environment_id: &'a str,
-    branch: &'a str,
-    commit_sha: &'a str,
-    selection_source: &'a str,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug)]
 struct AdmissionDeployment {
     id: String,
     attempt: u32,
@@ -131,48 +129,13 @@ struct AdmissionDeployment {
     url: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug)]
 struct AdmissionResponse {
-    protocol_version: String,
     context: crate::execution_context::ExecutionContext,
     deployment: AdmissionDeployment,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DeploymentSourceBody {
-    protocol_version: &'static str,
-    attempt: u32,
-    operation_id: String,
-    manifest: serde_json::Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    functions: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct DeploymentSourceResponse {
-    id: String,
-    status: String,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-enum PreSourceFailureCode {
-    MaterializationFailed,
-    ConfigInvalid,
-    BuildFailed,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PreSourceFailureBody {
-    protocol_version: &'static str,
-    attempt: u32,
-    error_code: PreSourceFailureCode,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    diagnostic: Option<PreSourceFailureDiagnostic>,
-}
+type PreSourceFailureCode = nrz_api::FailBeforeSourceRequestBodyErrorCode;
 
 #[derive(Debug, Serialize)]
 struct PreSourceFailureDiagnostic {
@@ -182,25 +145,6 @@ struct PreSourceFailureDiagnostic {
     details: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Deserialize)]
-struct PreSourceFailureResponse {
-    #[allow(dead_code)]
-    accepted: bool,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PreSourceSkipBody<'a> {
-    protocol_version: &'static str,
-    attempt: u32,
-    reason: &'a str,
-}
-
-#[derive(Debug, Deserialize)]
-struct PreSourceSkipResponse {
-    accepted: bool,
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SkippedDeployOutput<'a> {
@@ -208,8 +152,7 @@ struct SkippedDeployOutput<'a> {
     status: &'static str,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug)]
 struct RunnerDeploymentContext {
     id: String,
     attempt: u32,
@@ -217,10 +160,8 @@ struct RunnerDeploymentContext {
     url: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug)]
 struct RunnerContextResponse {
-    protocol_version: String,
     context: crate::execution_context::ExecutionContext,
     deployment: RunnerDeploymentContext,
     settings: ProjectBuildSettings,
@@ -361,7 +302,7 @@ async fn build_functions_payload(
     json: bool,
     edge_rules_force: bool,
 ) -> anyhow::Result<Option<crate::functions::FunctionPublishPayload>> {
-    let collected = crate::functions::collect(project_dir)
+    let mut collected = crate::functions::collect(project_dir)
         .map_err(|error| output::with_default_code(error, "INVALID_CONFIG"))?;
     let user_edge_rules = crate::functions::load_edge_rules(project_dir)
         .map_err(|error| output::with_default_code(error, "INVALID_CONFIG"))?;
@@ -378,7 +319,7 @@ async fn build_functions_payload(
         !collected.is_empty() || user_edge_rules.is_some() || !generated_edge_rule_sets.is_empty();
 
     if !collected.is_empty() {
-        let runtime = crate::functions_runtime::preflight(project_dir, &collected).await?;
+        let runtime = crate::functions_runtime::preflight(&mut collected).await?;
         output::status(
             json,
             "✓",
@@ -406,7 +347,7 @@ async fn build_functions_payload(
         user_edge_rules,
         edge_rules_force,
         generated_edge_rule_sets,
-    )))
+    )?))
 }
 
 fn generated_nextjs_edge_rule_sets(
@@ -462,211 +403,6 @@ fn generated_nextjs_edge_rule_sets(
     }])
 }
 
-async fn mark_pre_source_skipped(
-    client: &ApiClient,
-    deployment_id: &str,
-    attempt: u32,
-    reason: &str,
-) -> anyhow::Result<()> {
-    let path = format!(
-        "/v1/deployments/{}/execution-context/skip-before-source",
-        path_segment(deployment_id)
-    );
-    let body = PreSourceSkipBody {
-        protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
-        attempt,
-        reason,
-    };
-    let started = Instant::now();
-    let mut delay = PRE_SOURCE_FAILURE_INITIAL_RETRY_DELAY;
-    loop {
-        let remaining = PRE_SOURCE_FAILURE_RETRY_BUDGET.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            break;
-        }
-        match tokio::time::timeout(
-            PRE_SOURCE_FAILURE_REQUEST_TIMEOUT.min(remaining),
-            client.post::<_, PreSourceSkipResponse>(&path, &body),
-        )
-        .await
-        {
-            Ok(Ok(response)) if response.accepted => return Ok(()),
-            Ok(Ok(_)) => {
-                return Err(output::coded_error(
-                    "IGNORED_BUILD_SKIP_REJECTED",
-                    "deployment state changed before Ignored Build Step could mark it skipped",
-                ));
-            }
-            Ok(Err(error)) => {
-                let Some(retry) = classify_api_retry(&error) else {
-                    return Err(error.context("failed to mark deployment skipped"));
-                };
-                let remaining = PRE_SOURCE_FAILURE_RETRY_BUDGET.saturating_sub(started.elapsed());
-                if remaining.is_zero() {
-                    break;
-                }
-                tokio::time::sleep(retry.retry_after.unwrap_or(delay).min(remaining)).await;
-                delay = (delay * 2).min(PRE_SOURCE_FAILURE_MAX_RETRY_DELAY);
-            }
-            Err(_) => {
-                let remaining = PRE_SOURCE_FAILURE_RETRY_BUDGET.saturating_sub(started.elapsed());
-                if remaining.is_zero() {
-                    break;
-                }
-                tokio::time::sleep(delay.min(remaining)).await;
-                delay = (delay * 2).min(PRE_SOURCE_FAILURE_MAX_RETRY_DELAY);
-            }
-        }
-    }
-    Err(output::coded_error(
-        "IGNORED_BUILD_SKIP_REPORT_FAILED",
-        "timed out while marking deployment skipped",
-    ))
-}
-
-async fn report_pre_source_failure(
-    client: Option<&ApiClient>,
-    deployment_id: &str,
-    attempt: u32,
-    error_code: PreSourceFailureCode,
-    error: Option<&anyhow::Error>,
-    redactor: Option<&ExactValueRedactor>,
-    json: bool,
-) {
-    let Some(client) = client else {
-        return;
-    };
-    let path = format!(
-        "/v1/deployments/{}/execution-context/fail-before-source",
-        path_segment(deployment_id)
-    );
-    let body = PreSourceFailureBody {
-        protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
-        attempt,
-        error_code,
-        diagnostic: error.and_then(|error| pre_source_failure_diagnostic(error, redactor)),
-    };
-    let started = Instant::now();
-    let mut delay = PRE_SOURCE_FAILURE_INITIAL_RETRY_DELAY;
-    let mut last_error = None;
-    loop {
-        let remaining = PRE_SOURCE_FAILURE_RETRY_BUDGET.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            break;
-        }
-        match tokio::time::timeout(
-            PRE_SOURCE_FAILURE_REQUEST_TIMEOUT.min(remaining),
-            client.post::<_, PreSourceFailureResponse>(&path, &body),
-        )
-        .await
-        {
-            Ok(Ok(_)) => return,
-            Ok(Err(error)) => {
-                let Some(retry) = classify_api_retry(&error) else {
-                    output::warn(
-                        json,
-                        format!("Could not mark admitted deployment failed: {error}"),
-                        output::Phase::Deploy,
-                    );
-                    return;
-                };
-                last_error = Some(error.to_string());
-                let remaining = PRE_SOURCE_FAILURE_RETRY_BUDGET.saturating_sub(started.elapsed());
-                if remaining.is_zero() {
-                    break;
-                }
-                tokio::time::sleep(retry.retry_after.unwrap_or(delay).min(remaining)).await;
-            }
-            Err(_) => {
-                last_error = Some("request timed out".to_string());
-                let remaining = PRE_SOURCE_FAILURE_RETRY_BUDGET.saturating_sub(started.elapsed());
-                if remaining.is_zero() {
-                    break;
-                }
-                tokio::time::sleep(delay.min(remaining)).await;
-            }
-        }
-        delay = (delay * 2).min(PRE_SOURCE_FAILURE_MAX_RETRY_DELAY);
-    }
-    output::warn(
-        json,
-        format!(
-            "Could not mark admitted deployment failed after retries: {}",
-            last_error.as_deref().unwrap_or("retry budget exhausted")
-        ),
-        output::Phase::Deploy,
-    );
-}
-
-fn pre_source_failure_diagnostic(
-    error: &anyhow::Error,
-    redactor: Option<&ExactValueRedactor>,
-) -> Option<PreSourceFailureDiagnostic> {
-    if let Some(diagnostic) = output::reported_terminal_diagnostic(error) {
-        return Some(PreSourceFailureDiagnostic {
-            code: diagnostic.code.clone(),
-            message: sanitize_pre_source_failure_message(&diagnostic.message, redactor),
-            details: sanitize_pre_source_failure_details(diagnostic.details.as_ref(), redactor),
-        });
-    }
-    if let Some(error) = crate::errors::find_cli_error(error) {
-        return Some(PreSourceFailureDiagnostic {
-            code: error.code.clone(),
-            message: sanitize_pre_source_failure_message(&error.to_string(), redactor),
-            details: sanitize_pre_source_failure_details(error.details.as_ref(), redactor),
-        });
-    }
-    if let Some(error) = error
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<output::CodedError>())
-    {
-        return Some(PreSourceFailureDiagnostic {
-            code: error.code.clone(),
-            message: sanitize_pre_source_failure_message(&error.message, redactor),
-            details: None,
-        });
-    }
-    if let Some(error) = error
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<crate::api::StructuredApiError>())
-    {
-        return Some(PreSourceFailureDiagnostic {
-            code: error.code.clone(),
-            message: sanitize_pre_source_failure_message(&error.message, redactor),
-            details: sanitize_pre_source_failure_details(error.details.as_ref(), redactor),
-        });
-    }
-    Some(PreSourceFailureDiagnostic {
-        code: "INTERNAL_ERROR".to_string(),
-        message: sanitize_pre_source_failure_message(&format!("{error:#}"), redactor),
-        details: None,
-    })
-}
-
-fn sanitize_pre_source_failure_details(
-    details: Option<&serde_json::Value>,
-    redactor: Option<&ExactValueRedactor>,
-) -> Option<serde_json::Value> {
-    details.map(|details| {
-        redactor.map_or_else(
-            || details.clone(),
-            |redactor| redactor.sanitize_json(details),
-        )
-    })
-}
-
-fn sanitize_pre_source_failure_message(
-    message: &str,
-    redactor: Option<&ExactValueRedactor>,
-) -> String {
-    let fallback_redactor = ExactValueRedactor::from_values(std::iter::empty())
-        .expect("empty build-log redactor must compile");
-    truncate_utf8(
-        sanitize_message(message, redactor.unwrap_or(&fallback_redactor)),
-        MAX_PRE_SOURCE_FAILURE_LOG_LENGTH,
-    )
-}
-
 fn emit_deploy_plan_explain(json: bool, explain: &plan::DeployPlanExplain) -> anyhow::Result<()> {
     if json {
         output::json_output(explain);
@@ -679,11 +415,11 @@ fn emit_deploy_plan_explain(json: bool, explain: &plan::DeployPlanExplain) -> an
 
 // ── Compute config sync ──────────────────────────────────────
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ComputeConfigBody {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    health_check_path: Option<String>,
+fn compute_config_body(health_check_path: Option<String>) -> nrz_api::ComputeConfigRequestBody {
+    nrz_api::ComputeConfigRequestBody {
+        health_check_path: Some(health_check_path),
+        ..Default::default()
+    }
 }
 
 /// Best-effort sync of compute config (health check path) to the platform.
@@ -693,12 +429,8 @@ async fn sync_compute_config(
     health_check: &ResolvedHealthCheck,
     json: bool,
 ) {
-    let body = ComputeConfigBody {
-        health_check_path: health_check.path.clone(),
-    };
-
-    let path = format!("/v1/compute-config/{}", path_segment(project_id));
-    let resp: Result<serde_json::Value, _> = client.put(&path, &body).await;
+    let body = compute_config_body(health_check.path.clone());
+    let resp = client.update_compute_config(project_id, body).await;
     if let Err(e) = resp {
         output::warn(
             json,
@@ -720,87 +452,6 @@ struct ResumeDeployOutput {
     runtime_artifact_files: crate::artifact::RuntimeArtifactFileBreakdown,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
-}
-
-async fn register_deployment_source(
-    client: &ApiClient,
-    deployment_id: &str,
-    attempt: u32,
-    manifest: serde_json::Value,
-    functions: Option<serde_json::Value>,
-    json: bool,
-) -> anyhow::Result<()> {
-    let namespace = Uuid::parse_str(deployment_id).context("deployment ID is not a valid UUID")?;
-    let path = format!("/v1/deployments/{}/source", path_segment(deployment_id));
-    let operation_id = Uuid::new_v5(
-        &namespace,
-        format!("onreza:deployment-source:{attempt}").as_bytes(),
-    )
-    .to_string();
-    let body = DeploymentSourceBody {
-        protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
-        attempt,
-        operation_id,
-        manifest,
-        functions,
-    };
-    let started = Instant::now();
-    let mut delay = SOURCE_REGISTRATION_INITIAL_RETRY_DELAY;
-
-    loop {
-        let remaining = SOURCE_REGISTRATION_RETRY_BUDGET.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            bail!(
-                "failed to register admitted deployment source after waiting {:?}",
-                SOURCE_REGISTRATION_RETRY_BUDGET
-            );
-        }
-        let response = tokio::time::timeout(
-            SOURCE_REGISTRATION_REQUEST_TIMEOUT.min(remaining),
-            client.post::<_, DeploymentSourceResponse>(&path, &body),
-        )
-        .await;
-        match response {
-            Ok(Ok(response)) => {
-                if response.id != deployment_id || response.status != "UPLOADING" {
-                    bail!("deployment source registration returned an unexpected state");
-                }
-                return Ok(());
-            }
-            Ok(Err(error)) => {
-                let Some(retry) = classify_api_retry(&error) else {
-                    return Err(map_source_registration_error(
-                        error,
-                        json,
-                        "failed to register admitted deployment source",
-                    ));
-                };
-                let remaining = SOURCE_REGISTRATION_RETRY_BUDGET.saturating_sub(started.elapsed());
-                if remaining.is_zero() {
-                    return Err(map_source_registration_error(
-                        error,
-                        json,
-                        &format!(
-                            "failed to register admitted deployment source after waiting {:?}",
-                            SOURCE_REGISTRATION_RETRY_BUDGET
-                        ),
-                    ));
-                }
-                tokio::time::sleep(retry.retry_after.unwrap_or(delay).min(remaining)).await;
-            }
-            Err(_) => {
-                let remaining = SOURCE_REGISTRATION_RETRY_BUDGET.saturating_sub(started.elapsed());
-                if remaining.is_zero() {
-                    bail!(
-                        "failed to register admitted deployment source after waiting {:?}",
-                        SOURCE_REGISTRATION_RETRY_BUDGET
-                    );
-                }
-                tokio::time::sleep(delay.min(remaining)).await;
-            }
-        }
-        delay = (delay * 2).min(SOURCE_REGISTRATION_MAX_RETRY_DELAY);
-    }
 }
 
 fn map_source_registration_error(error: anyhow::Error, json: bool, context: &str) -> anyhow::Error {

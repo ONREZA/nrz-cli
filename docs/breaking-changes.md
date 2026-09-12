@@ -6,6 +6,31 @@ required user actions. Sections marked `UNRELEASED` describe implemented but
 unpublished behavior
 and must receive exact `from`/`to` versions before release.
 
+## 0.41.0: runtime-inspected Functions publication
+
+| Field | Value |
+| --- | --- |
+| Status | `RELEASED` |
+| From version | `<=0.40.3` |
+| To version | `0.41.0` |
+| Required action | Upgrade the CLI when the platform enables the new protocol |
+| Compatibility error | `CLI_UPDATE_REQUIRED` or an unsupported context protocol |
+
+The CLI uses its native Functions runtime to evaluate module initialization,
+exported `config` and handlers. Computed configuration is supported. Publication
+sends the inspected metadata with the exact captured source bytes. The server
+requires this metadata and no longer infers it from JavaScript syntax.
+
+Run `nrz functions check` before publishing a project with Functions. Initialization
+errors, invalid handlers and unsupported imports are reported locally. Handler
+bodies are not invoked during inspection.
+
+This change uses `execution-context-v2` and `runner-context-v4`; older clients
+stop when negotiating the context. Once the compatible CLI release is available,
+update it with `nrz upgrade`,
+then retry the command. Existing project source need not be rewritten merely to
+match the old static extractor's syntax restrictions.
+
 ## 0.39.0-beta.5: runner-context-v3
 
 | Field | Value |

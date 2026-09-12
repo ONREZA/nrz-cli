@@ -11,7 +11,6 @@ use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use url::Url;
 
-use super::preflight::preflight_with_runtime;
 use super::process::RuntimeProcess;
 use super::{CachedRuntime, RUNTIME_PROTOCOL_VERSION, RuntimeResolver};
 
@@ -224,71 +223,6 @@ fn main() {
     };
 
     assert!(format!("{error:#}").contains("runtime control message exceeds 65536 bytes"));
-}
-
-#[tokio::test]
-async fn preflight_loads_every_collected_function_with_the_native_runtime() {
-    let directory = TempDir::new_in("/var/tmp").unwrap();
-    let entry_log = directory.path().join("loaded.txt");
-    let source = directory.path().join("runtime-helper.rs");
-    let executable = directory.path().join(if cfg!(windows) {
-        "runtime-helper.exe"
-    } else {
-        "runtime-helper"
-    });
-    std::fs::write(
-        &source,
-        format!(
-            r#"
-use std::io::{{self, BufRead}};
-use std::io::Write;
-
-fn main() {{
-    let release = std::env::var("ONREZA_FUNCTIONS_RUNTIME_RELEASE_ID").unwrap();
-    let entrypoint = std::env::var("ONREZA_FUNCTIONS_ENTRYPOINT").unwrap();
-    let mut log = std::fs::OpenOptions::new().create(true).append(true).open({entry_log:?}).unwrap();
-    writeln!(log, "{{}}", entrypoint).unwrap();
-    println!("{{{{\"type\":\"ready\",\"protocolVersion\":\"onreza-functions-poc/v2\",\"runtimeReleaseId\":\"{{}}\"}}}}", release);
-    for line in io::stdin().lock().lines() {{
-        if line.unwrap().contains("\"type\":\"shutdown\"") {{ break; }}
-    }}
-}}
-"#,
-            entry_log = entry_log,
-        ),
-    )
-    .unwrap();
-    let status = std::process::Command::new("rustc")
-        .arg(&source)
-        .arg("-o")
-        .arg(&executable)
-        .status()
-        .unwrap();
-    assert!(status.success());
-
-    for name in ["alpha", "beta"] {
-        std::fs::write(
-            directory.path().join(format!("{name}.nrz-fn.ts")),
-            "export const config = {};\nexport default {};\n",
-        )
-        .unwrap();
-    }
-    let collected = crate::functions::collect(directory.path()).unwrap();
-    let runtime = CachedRuntime {
-        runtime_release_id: "runtime-1111111111111111111111111111111111111111".to_string(),
-        target: current_target().to_string(),
-        path: executable,
-    };
-
-    let report = preflight_with_runtime(directory.path(), &collected, &runtime)
-        .await
-        .unwrap();
-
-    assert_eq!(report.functions_loaded, 2);
-    assert_eq!(
-        std::fs::read_to_string(entry_log).unwrap(),
-        "alpha.nrz-fn.ts\nbeta.nrz-fn.ts\n"
-    );
 }
 
 async fn release_file(

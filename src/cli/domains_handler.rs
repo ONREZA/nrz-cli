@@ -1,7 +1,7 @@
-use anyhow::Context;
-use serde::{Deserialize, Serialize};
+use anyhow::{Context, bail};
+use nrz_api::{DomainResponse as DomainsListResponse, DomainResponseItem as Domain};
 
-use crate::api::{ApiClient, path_segment, query_value};
+use crate::api::ApiClient;
 use crate::auth;
 use crate::execution_context;
 use crate::output;
@@ -9,83 +9,6 @@ use nrz::config;
 use nrz::config::ProjectConfig;
 
 use super::domains::{DomainsArgs, DomainsCommand};
-
-#[derive(Debug, Deserialize, Serialize)]
-struct DomainsListResponse {
-    domains: Vec<Domain>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Domain {
-    id: String,
-    domain: String,
-    environment_id: String,
-    dns_status: String,
-    tls_status: String,
-    dns_validated_at: Option<String>,
-    tls_issued_at: Option<String>,
-    tls_expires_at: Option<String>,
-    dns_error: Option<String>,
-    tls_error: Option<String>,
-    target_cname: Option<String>,
-    dns_mode: String,
-    managed_dns_zone: Option<DomainManagedDnsZone>,
-    redirect_from_www: bool,
-    created_at: String,
-    environment: DomainEnvironment,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DomainManagedDnsZone {
-    id: String,
-    zone_name: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct DomainEnvironment {
-    #[serde(rename = "type")]
-    env_type: String,
-    name: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AttachHostnameBody {
-    domain: String,
-    project_id: String,
-    environment_id: String,
-    redirect_from_www: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AttachHostnameResponse {
-    hostname: AddedHostname,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AddedHostname {
-    id: String,
-    domain: String,
-    dns_mode: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct VerifyWorkspaceZoneResponse {
-    delegation: Option<DelegationStatus>,
-    requeued: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct DelegationStatus {
-    delegated: bool,
-    expected: Vec<String>,
-    actual: Vec<String>,
-}
 
 pub async fn run(
     args: DomainsArgs,
@@ -136,8 +59,8 @@ async fn list(client: &ApiClient, project_id: &str, json: bool) -> anyhow::Resul
         eprintln!("  {}", "-".repeat(75));
 
         for d in &resp.domains {
-            let dns = format_status(&output::terminal_line(&d.dns_status));
-            let tls = format_status(&output::terminal_line(&d.tls_status));
+            let dns = format_status(&output::terminal_line(&d.dns_status.to_string()));
+            let tls = format_status(&output::terminal_line(&d.tls_status.to_string()));
             let domain = output::terminal_line(&d.domain);
             let env_name = output::terminal_line(&d.environment.name);
             eprintln!("  {domain:<40} {dns:<12} {tls:<10} {env_name}");
@@ -152,12 +75,7 @@ async fn fetch_project_domains(
     client: &ApiClient,
     project_id: &str,
 ) -> anyhow::Result<DomainsListResponse> {
-    client
-        .get(&format!(
-            "/v1/workspace-domains?projectIds={}",
-            query_value(project_id)
-        ))
-        .await
+    client.project_domains(project_id).await
 }
 
 fn format_status(status: &str) -> String {
@@ -186,15 +104,20 @@ async fn add(
     .await?
     .environment_id;
 
-    let body = AttachHostnameBody {
-        domain: domain.to_string(),
-        project_id: project_id.to_string(),
-        environment_id: env_id,
-        redirect_from_www: false,
+    let zones = client
+        .domain_zones()
+        .await
+        .context("failed to list connected domain zones")?;
+    let (zone_id, label) = hostname_zone(domain, &zones.domains)?;
+    let body = nrz_api::HostnameRequestBody {
+        name: label,
+        project_id: project_id.parse().context("invalid project ID")?,
+        environment_id: env_id.parse().context("invalid environment ID")?,
+        redirect_from_www: Some(false),
+        replace_record_ids: None,
     };
-
-    let resp: AttachHostnameResponse = client
-        .post("/v1/workspace-domains/hostnames", &body)
+    let resp = client
+        .attach_hostname(zone_id, body)
         .await
         .context("failed to add domain")?;
 
@@ -225,15 +148,19 @@ async fn remove(
     json: bool,
 ) -> anyhow::Result<()> {
     let domain = find_project_domain(client, project_id, domain_id).await?;
-    let delete_path = match (domain.managed_dns_zone.as_ref(), domain.dns_mode.as_str()) {
-        (Some(zone), _) => workspace_hostname_delete_url(&zone.id, domain_id),
-        (None, _) => project_domain_delete_url(project_id, domain_id),
-    };
-
-    client
-        .delete_empty(&delete_path)
-        .await
-        .context("failed to remove domain")?;
+    if let Some(zone) = domain.managed_dns_zone.as_ref() {
+        client
+            .detach_hostname(zone.id, domain.id)
+            .await
+            .context("failed to remove domain")?;
+    } else if domain.dns_mode == nrz_api::DomainResponseItemDnsMode::PlatformSubdomain {
+        client
+            .delete_platform_subdomain(project_id, domain.id)
+            .await
+            .context("failed to remove platform subdomain")?;
+    } else {
+        bail!("domain is not attached to a workspace zone; reconnect it before removal");
+    }
 
     if json {
         output::json_output(&serde_json::json!({
@@ -257,11 +184,11 @@ async fn verify(
     let zone_id = domain
         .managed_dns_zone
         .as_ref()
-        .map(|zone| zone.id.clone())
+        .map(|zone| zone.id)
         .ok_or_else(|| anyhow::anyhow!("domain is not attached to a workspace domain"))?;
 
-    let resp: VerifyWorkspaceZoneResponse = client
-        .post_empty(&workspace_zone_verify_url(&zone_id))
+    let resp = client
+        .verify_domain_zone(zone_id)
         .await
         .context("failed to verify domain")?;
 
@@ -295,34 +222,39 @@ async fn find_project_domain(
     project_id: &str,
     domain_id: &str,
 ) -> anyhow::Result<Domain> {
+    let binding_id: uuid::Uuid = domain_id.parse().context("invalid domain binding ID")?;
     fetch_project_domains(client, project_id)
         .await
         .context("failed to fetch domains")?
         .domains
         .into_iter()
-        .find(|domain| domain.id == domain_id)
+        .find(|domain| domain.id == binding_id)
         .ok_or_else(|| anyhow::anyhow!("domain not found in project: {domain_id}"))
 }
 
-pub(crate) fn workspace_hostname_delete_url(zone_id: &str, binding_id: &str) -> String {
-    format!(
-        "/v1/workspace-domains/domains/{}/hostnames/{}",
-        path_segment(zone_id),
-        path_segment(binding_id)
-    )
-}
-
-pub(crate) fn project_domain_delete_url(project_id: &str, domain_id: &str) -> String {
-    format!(
-        "/v1/domains/{}/platform-subdomains/{}",
-        path_segment(project_id),
-        path_segment(domain_id)
-    )
-}
-
-pub(crate) fn workspace_zone_verify_url(zone_id: &str) -> String {
-    format!(
-        "/v1/workspace-domains/domains/{}/verify",
-        path_segment(zone_id)
-    )
+/// Resolve an FQDN to the most specific connected zone and a relative DNS label.
+pub(crate) fn hostname_zone(
+    domain: &str,
+    zones: &[nrz_api::DomainResponse2Item],
+) -> anyhow::Result<(uuid::Uuid, String)> {
+    let domain = domain.strip_suffix('.').unwrap_or(domain);
+    let url::Host::Domain(domain) = url::Host::parse(domain).context("invalid domain name")? else {
+        bail!("a domain name is required, not an IP address");
+    };
+    let zone = zones
+        .iter()
+        .filter(|zone| {
+            domain == zone.zone_name
+                || domain
+                    .strip_suffix(&zone.zone_name)
+                    .is_some_and(|prefix| prefix.ends_with('.'))
+        })
+        .max_by_key(|zone| zone.zone_name.len())
+        .context("no connected workspace zone matches this hostname; connect the domain first")?;
+    let label = if domain == zone.zone_name {
+        "@".to_string()
+    } else {
+        domain[..domain.len() - zone.zone_name.len() - 1].to_string()
+    };
+    Ok((zone.id, label))
 }

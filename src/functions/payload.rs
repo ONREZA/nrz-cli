@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -18,18 +19,7 @@ pub struct FunctionPublishPayload {
     pub generated_edge_rule_sets: Vec<GeneratedEdgeRuleSet>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FunctionPublishSpec {
-    pub source: FunctionSourceFile,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FunctionSourceFile {
-    pub path: String,
-    pub content_text: String,
-}
+pub use nrz_api::FunctionPublishSpec;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,39 +31,34 @@ pub struct GeneratedEdgeRuleSet {
 }
 
 /// Assemble the publish payload from the discovered functions and optional edge
-/// rules. The platform re-extracts triggers from each entry source.
+/// rules. Only inspected source and evaluated metadata may cross this boundary.
 pub fn build_payload(
     origin: &'static str,
     collected: &CollectedFunctions,
     edge_rules: Option<Value>,
     edge_rules_force: bool,
     generated_edge_rule_sets: Vec<GeneratedEdgeRuleSet>,
-) -> FunctionPublishPayload {
+) -> anyhow::Result<FunctionPublishPayload> {
     let functions = collected
         .functions
         .iter()
         .map(|function| {
-            let content_text = function
-                .sources
-                .get(&function.entrypoint)
-                .expect("collected function entrypoint must exist in source set")
-                .clone();
-            FunctionPublishSpec {
-                source: FunctionSourceFile {
-                    path: function.entrypoint.clone(),
-                    content_text,
-                },
-            }
+            function.inspected.clone().with_context(|| {
+                format!(
+                    "function '{}' has not passed runtime inspection",
+                    function.entrypoint
+                )
+            })
         })
-        .collect();
+        .collect::<anyhow::Result<Vec<_>>>()?;
 
-    FunctionPublishPayload {
+    Ok(FunctionPublishPayload {
         origin,
         functions,
         edge_rules,
         edge_rules_force,
         generated_edge_rule_sets,
-    }
+    })
 }
 
 fn is_false(value: &bool) -> bool {

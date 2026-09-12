@@ -1,0 +1,50 @@
+[package]
+name = "nrz-contract"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Shared ONREZA artifact and Edge Rules contract types"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["serde"] }
+regress = "0.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["serde"] }
+
+[features]
+codegen = ["dep:typify", "dep:schemars08", "dep:prettyplease", "dep:syn", "dep:quote", "dep:proc-macro2", "dep:anyhow"]
+
+[dependencies.typify]
+version = "0.7"
+optional = true
+
+[dependencies.schemars08]
+package = "schemars"
+version = "0.8"
+optional = true
+
+[dependencies.prettyplease]
+version = "0.3"
+optional = true
+
+[dependencies.syn]
+version = "3"
+optional = true
+
+[dependencies.quote]
+version = "1"
+optional = true
+
+[dependencies.proc-macro2]
+version = "1"
+optional = true
+
+[dependencies.anyhow]
+version = "1"
+optional = true
+
+[[bin]]
+name = "gen-contract"
+path = "src/bin/gen_contract.rs"
+required-features = ["codegen"]

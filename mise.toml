@@ -10,25 +10,41 @@ actionlint = "1.7.12"
 description = "Install Git hooks"
 run = "lefthook install"
 
+[tasks."api:generate"]
+description = "Generate Rust API client from the committed OpenAPI contract (or --from server.json)"
+run = "bun scripts/generate-api.ts"
+
+[tasks."api:check"]
+description = "Check generated API drift against the pinned contract and generator"
+run = "bun scripts/generate-api.ts --check"
+
 [tasks.fmt]
 description = "Format Rust code"
-run = "cargo fmt"
+run = "cargo fmt --all"
+
+[tasks."contracts:generate"]
+description = "Generate shared artifact types from committed schemas, or import with --from"
+run = "cargo run --locked -p nrz-contract --features codegen --bin gen-contract --"
+
+[tasks."contracts:check"]
+description = "Verify reproducible shared artifact types against committed schemas"
+run = "cargo run --locked -p nrz-contract --features codegen --bin gen-contract -- --check"
 
 [tasks."fmt:check"]
 description = "Check Rust formatting"
-run = "cargo fmt -- --check"
+run = "cargo fmt --all --check"
 
 [tasks.clippy]
 description = "Run strict Rust lints"
-run = "cargo clippy -- -D warnings"
+run = "cargo clippy --locked --workspace --all-targets --no-deps -- -D warnings"
 
 [tasks.test]
 description = "Run Rust tests"
-run = "cargo test"
+run = "cargo test --locked --workspace"
 
 [tasks."dagger:scripts"]
 description = "Check Dagger release helper scripts"
-run = "cd .dagger && bun install --frozen-lockfile && bun run typecheck && bun test scripts/release-scripts.test.ts"
+run = "cd .dagger && bun install --frozen-lockfile && bun run typecheck && bun test scripts"
 
 [tasks."dagger:ci"]
 description = "Run the Dagger CI pipeline"
@@ -36,7 +52,7 @@ run = "dagger call ci --source=."
 
 [tasks."release:metadata"]
 description = "Dry-run release metadata"
-run = "dagger call release-metadata --source=. --channel=stable --bump=auto"
+run = ["bun .dagger/scripts/capture-git-metadata.ts", "dagger call release-metadata --source=. --git-metadata=.nrz-release/git.json --channel=stable --bump=auto"]
 
 [tasks."commits:check"]
 description = "Check Conventional Commits since the latest tag"
@@ -53,10 +69,13 @@ run = "cargo deny check licenses"
 [tasks.check]
 description = "Run the standard local quality gate"
 run = [
-  "cargo fmt -- --check",
-  "cargo clippy -- -D warnings",
-  "cargo test",
-  "cd .dagger && bun install --frozen-lockfile && bun run typecheck && bun test scripts/release-scripts.test.ts",
+  "bun test scripts",
+  "bun scripts/generate-api.ts --check",
+  "cargo run --locked -p nrz-contract --features codegen --bin gen-contract -- --check",
+  "cargo fmt --all --check",
+  "cargo clippy --locked --workspace --all-targets --no-deps -- -D warnings",
+  "cargo test --locked --workspace",
+  "cd .dagger && bun install --frozen-lockfile && bun run typecheck && bun test scripts",
   "actionlint",
   "cargo deny check licenses",
   "cog check --from-latest-tag --ignore-merge-commits",

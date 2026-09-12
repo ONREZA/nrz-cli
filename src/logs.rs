@@ -1,28 +1,11 @@
 use anyhow::Context;
-use serde::{Deserialize, Serialize};
 
-use crate::api::{ApiClient, path_segment, query_value};
+use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::LogsArgs;
 use crate::output;
 use nrz::config;
 use nrz::config::ProjectConfig;
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct LogsResponse {
-    pub(crate) entries: Vec<serde_json::Value>,
-    pagination: LogsPagination,
-    filters: serde_json::Value,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LogsPagination {
-    limit: u32,
-    has_more: bool,
-    next_cursor: Option<String>,
-}
 
 pub async fn run(
     args: LogsArgs,
@@ -37,20 +20,20 @@ pub async fn run(
 
     let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
 
-    let mut query = format!("limit={}", args.limit);
-    if let Some(search) = &args.search {
-        query.push_str(&format!("&search={}", query_value(search)));
-    }
-    if let Some(did) = &args.deployment_id {
-        query.push_str(&format!("&deploymentId={}", query_value(did)));
-    }
-
-    let resp: LogsResponse = client
-        .get(&format!(
-            "/v1/projects/{}/runtime-logs?{}",
-            path_segment(&project_id),
-            query
-        ))
+    let resp = client
+        .runtime_logs(
+            &project_id,
+            nrz_api::GetV1projectsByIdRuntimeLogsRequestQuery {
+                limit: Some(i64::from(args.limit)),
+                search: args.search,
+                deployment_id: args
+                    .deployment_id
+                    .map(|id| id.parse())
+                    .transpose()
+                    .context("invalid deployment ID")?,
+                ..Default::default()
+            },
+        )
         .await
         .context("failed to fetch logs")?;
 
@@ -63,7 +46,7 @@ pub async fn run(
         }
 
         for entry in &resp.entries {
-            eprintln!("{}", format_log_entry(entry));
+            eprintln!("{}", format_log_entry(&serde_json::to_value(entry)?));
         }
     }
 

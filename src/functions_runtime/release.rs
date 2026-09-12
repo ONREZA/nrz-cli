@@ -16,11 +16,15 @@ use uuid::Uuid;
 use super::RUNTIME_PROTOCOL_VERSION;
 
 const RELEASE_ORIGIN: &str = "https://releases.onreza.ru";
-const PINNED_RUNTIME_RELEASE_ID: &str = "runtime-2d20a492936c63b6dd1dd6b23f0e950af7e071e3";
-const PINNED_MANIFEST_URL: &str = "https://releases.onreza.ru/releases/runtime-2d20a492936c63b6dd1dd6b23f0e950af7e071e3/manifest.json";
-const PINNED_MANIFEST_SHA256: &str =
-    "01ec22c0eb82575f3a9a57f9c9bfbc8d156cfbb3499a3fc796a0c023fd17a7fd";
-const PINNED_SIGNATURE_URL: &str = "https://releases.onreza.ru/releases/runtime-2d20a492936c63b6dd1dd6b23f0e950af7e071e3/manifest.sig";
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RuntimePin {
+    runtime_release_id: String,
+    manifest_url: String,
+    manifest_sha256: String,
+    signature_url: String,
+}
+
 const SIGNING_PUBLIC_KEY_PEM: &str =
     include_str!("../../assets/functions-runtime-signing-public.pem");
 
@@ -44,6 +48,7 @@ pub(crate) struct RuntimeStatus {
 pub(crate) struct RuntimeResolver {
     config: ResolverConfig,
     client: reqwest::Client,
+    local_path: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -82,13 +87,26 @@ struct RuntimeArtifact {
 }
 
 impl RuntimeResolver {
+    pub(crate) fn configured() -> anyhow::Result<Self> {
+        Self::with_local_path(std::env::var_os("NRZ_FUNCTIONS_RUNTIME_PATH").map(PathBuf::from))
+    }
+
+    pub(super) fn with_local_path(path: Option<PathBuf>) -> anyhow::Result<Self> {
+        let mut resolver = Self::pinned()?;
+        resolver.local_path = path;
+        Ok(resolver)
+    }
+
     pub(crate) fn pinned() -> anyhow::Result<Self> {
+        let pin: RuntimePin =
+            serde_json::from_str(include_str!("../../assets/functions-runtime.lock.json"))
+                .context("invalid embedded Functions runtime pin")?;
         Self::from_config(ResolverConfig {
-            runtime_release_id: PINNED_RUNTIME_RELEASE_ID.to_string(),
-            manifest_url: Url::parse(PINNED_MANIFEST_URL)
+            runtime_release_id: pin.runtime_release_id,
+            manifest_url: Url::parse(&pin.manifest_url)
                 .context("invalid pinned runtime manifest URL")?,
-            manifest_sha256: PINNED_MANIFEST_SHA256.to_string(),
-            signature_url: Url::parse(PINNED_SIGNATURE_URL)
+            manifest_sha256: pin.manifest_sha256,
+            signature_url: Url::parse(&pin.signature_url)
                 .context("invalid pinned runtime signature URL")?,
             verifying_key: VerifyingKey::from_public_key_pem(SIGNING_PUBLIC_KEY_PEM)
                 .context("invalid embedded Functions runtime signing key")?,
@@ -108,10 +126,17 @@ impl RuntimeResolver {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .context("failed to create Functions runtime HTTP client")?;
-        Ok(Self { config, client })
+        Ok(Self {
+            config,
+            client,
+            local_path: None,
+        })
     }
 
     pub(crate) async fn resolve(&self) -> anyhow::Result<CachedRuntime> {
+        if let Some(path) = &self.local_path {
+            return self.resolve_local(path).await;
+        }
         let target = runtime_target()?;
         let cached_path = self.cached_path(target);
         if let Some(artifact) = self.cached_manifest_artifact(target).await?
@@ -144,6 +169,15 @@ impl RuntimeResolver {
     }
 
     pub(crate) async fn status(&self) -> anyhow::Result<RuntimeStatus> {
+        if let Some(path) = &self.local_path {
+            let runtime = self.resolve_local(path).await?;
+            return Ok(RuntimeStatus {
+                runtime_release_id: runtime.runtime_release_id,
+                target: runtime.target,
+                path: runtime.path,
+                installed: true,
+            });
+        }
         let target = runtime_target()?;
         let path = self.cached_path(target);
         let installed = match self.cached_manifest_artifact(target).await? {
@@ -164,6 +198,28 @@ impl RuntimeResolver {
             target: target.to_string(),
             path,
         }
+    }
+
+    async fn resolve_local(&self, path: &Path) -> anyhow::Result<CachedRuntime> {
+        let path = fs::canonicalize(path).await.with_context(|| {
+            format!("local Functions runtime does not exist: {}", path.display())
+        })?;
+        let metadata = fs::metadata(&path).await?;
+        if !metadata.is_file() || metadata.len() == 0 {
+            bail!("local Functions runtime must be a non-empty executable file");
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o111 == 0 {
+                bail!("local Functions runtime file is not executable");
+            }
+        }
+        Ok(CachedRuntime {
+            runtime_release_id: format!("local-sha256:{}", sha256_file(&path).await?),
+            target: runtime_target()?.to_string(),
+            path,
+        })
     }
 
     fn cached_path(&self, target: &str) -> PathBuf {

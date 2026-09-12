@@ -56,18 +56,11 @@ pub async fn run(
     let pre_source_failure_client = server_failure_mutations_enabled.then_some(&client);
 
     let runner_context = if let Some(deployment_id) = resume_deployment_id {
-        let context: RunnerContextResponse = client
-            .get(&format!("/v1/deployments/{deployment_id}/runner-context"))
-            .await
-            .context("failed to fetch exact deployment runner context")?;
-        require_runner_context_protocol(&context.protocol_version)?;
-        Some(context)
+        Some(wire::load_runner_context(&client, deployment_id).await?)
     } else {
         None
     };
 
-    // Resolve project settings before build. Platform runners use only their
-    // exact deployment-scoped context and never need project-wide API access.
     if let Some(runner) = &runner_context {
         command_context.apply_platform_runner_settings(&runner.settings)?;
     } else {
@@ -239,25 +232,9 @@ pub async fn run(
             Uuid::now_v7().simple().to_string()
         });
         output::status(json, "~", "Admitting deployment...", output::Phase::Deploy);
-        let admitted: AdmissionResponse = client
-            .post(
-                &format!(
-                    "/v1/projects/{}/deployments/admit",
-                    path_segment(&project_id)
-                ),
-                &AdmitDeploymentBody {
-                    protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
-                    environment_id: &context.environment_id,
-                    branch: &branch,
-                    commit_sha: &commit_sha,
-                    selection_source: &context.selection_source,
-                },
-            )
+        let admitted = wire::admit(&client, &project_id, &context, branch, commit_sha)
             .await
             .map_err(|error| map_create_deployment_error(error, json))?;
-        if admitted.protocol_version != crate::execution_context::EXECUTION_CONTEXT_PROTOCOL {
-            bail!("unsupported execution context protocol");
-        }
         let materialized = match crate::execution_context::materialize_deployment(
             &client,
             &admitted.deployment.id,
@@ -569,14 +546,13 @@ pub async fn run(
         }
 
         let spinner = make_spinner(json, "Waiting for activation...");
-        let status_path = format!("/v1/deployments/{}/status", path_segment(&deployment.id));
         let result = wait_for_activation(
             ActivationWait {
                 deployment_id: &deployment.id,
                 url: &deployment.url,
                 timeout: Duration::from_secs(u64::from(args.wait_timeout)),
             },
-            || client.get::<DeploymentStatusResponse>(&status_path),
+            || async { client.deployment_status(&deployment.id).await?.try_into() },
             |status| {
                 if let Some(spinner) = &spinner {
                     spinner.set_message(format!("Status: {}...", output::terminal_line(status)));

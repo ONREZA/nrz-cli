@@ -7,7 +7,7 @@
 - `src/cli/mod.rs` - верхнеуровневый `Command` enum и глобальные флаги.
 - `src/main.rs` - dispatch всех команд в handlers.
 - `src/cli/*` и профильные modules (`deploy`, `build`, `dev`, `init`, `auth`).
-- Endpoint-контракт DB/domains сверялся с текущим checkout `../deployment/packages/server`.
+- Endpoint-контракты входят в `api/openapi.json`; HTTP fixtures проверяют generated SDK и handlers.
 - `cargo build --quiet`.
 - `target/debug/nrz --help` и help для основных вложенных команд.
 
@@ -147,8 +147,8 @@ checkout. Legacy `--env`/`NRZ_ENV` остался только у локальн
 | `nrz db create` | Создает managed DB. | `--name`, `--cu-size`, `--wait`. |
 | `nrz db info [DATABASE]` | Детали DB. | DB можно указать ID/name; иначе auto-resolve. |
 | `nrz db delete <DATABASE>` | Удаляет DB. | `--force` для non-interactive/JSON. |
-| `nrz db start [DATABASE]` | Запускает stopped DB. | DB optional, auto-resolve работает. |
-| `nrz db stop [DATABASE]` | Останавливает running DB. | DB optional, auto-resolve работает. |
+| `nrz db start [DATABASE]` | Запускает stopped DB. | DB optional, auto-resolve требует единственного подходящего project attachment. |
+| `nrz db stop [DATABASE]` | Останавливает running DB. | DB optional, auto-resolve требует единственного подходящего project attachment. |
 | `nrz db connection [DATABASE]` | Печатает connection string. | `--branch` для branch connection. |
 | `nrz db query [SQL]` | Выполняет SQL локально с устройства через PostgreSQL connection URI. | API используется только для auth/project/database resolution и получения connection URI. `--database`, `--file`, `--branch`; если SQL и file не заданы, читает stdin. |
 | `nrz db branches [list]` | Список branches. | `--database`; subcommand optional, отсутствие subcommand = `list`. |
@@ -218,3 +218,21 @@ checkout. Legacy `--env`/`NRZ_ENV` остался только у локальн
 | `nrz env pull/push` | docs/skills/examples | Команды удалены: Server — source of truth, ephemeral локальное использование идет через `nrz env exec`. |
 
 Практический вывод: после cleanup текущая поверхность стала логичнее. Главные оставшиеся продуктовые решения, если они понадобятся позже: нужен ли отдельный интерактивный `db shell`, и нужно ли переносить local KV state из старого `.onreza/data/kv.json` в новый env-scoped файл автоматически.
+
+### Database selection and generated API
+
+Managed database commands use the generated OpenAPI client. Without an explicit
+ID/name or `[db].database`, selection requires a unique auto-inject attachment,
+or a unique project attachment when auto-inject is disabled. Ambiguous names or
+attachments require an exact ID; response ordering never selects a database for
+a mutation. Branch IDs are resolved against the database branch list before a
+branch command runs.
+
+`nrz db create --wait --json` emits the same database information projection as
+`nrz db info --json`. Creation credentials are not included in that projection.
+Start/stop responses report the accepted operation status; `pending` is not a
+claim that compute has already started or stopped.
+
+Interactive project selection (`nrz link` and unlinked `nrz deploy`) reads all
+project pages. Missing or repeated pages produce an error instead of presenting
+an incomplete list.

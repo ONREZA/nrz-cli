@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "SOURCE_BUNDLE_V1.0",
+  "capabilities": ["static", "compute"],
+  "files": [
+    {
+      "path": "dist/index.html",
+      "sha256": "57fc1b0c1b4414a16f65c4e132dcefa71ae372f43f2160ac468274ec4f0c8a83",
+      "size": 16,
+      "contentType": "text/html",
+      "role": "static",
+      "layerName": "static"
+    },
+    {
+      "path": "server/index.js",
+      "sha256": "453f3fa0141c865a2c0e882efa4cfed79ee95bdeaa17bde8db61907cfbd422dc",
+      "size": 22,
+      "role": "compute",
+      "layerName": "app"
+    }
+  ],
+  "layers": [
+    {
+      "name": "static",
+      "target": "STATIC",
+      "rootPath": "dist"
+    },
+    {
+      "name": "app",
+      "target": "COMPUTE",
+      "rootPath": "server",
+      "entrypoint": "index.js",
+      "runtimeConfig": {
+        "command": "bun",
+        "args": ["index.js"]
+      }
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "^/.*",
+      "layerName": "app",
+      "priority": 0
+    }
+  ],
+  "entrypoints": ["server/index.js"]
+}

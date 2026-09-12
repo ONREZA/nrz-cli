@@ -5,7 +5,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use crate::api::{ApiClient, path_segment};
+use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::rules::{
     RulesArgs, RulesCheckArgs, RulesCommand, RulesPublishArgs, RulesPullArgs, RulesStatusArgs,
@@ -142,28 +142,29 @@ async fn publish(
         args.environment.as_deref(),
     )
     .await?;
-    let body = functions::FunctionPublishPayload {
-        origin: "CLI",
-        functions: Vec::new(),
-        edge_rules: Some(edge_rules),
-        edge_rules_force: args.force_rules,
-        generated_edge_rule_sets: Vec::new(),
+    let body = nrz_api::PublishRequestBody {
+        origin: nrz_api::PublishRequestBodyOrigin::Cli,
+        functions: None,
+        edge_rules: Some(
+            serde_json::from_value(edge_rules)
+                .context("Edge Rules do not match the server contract")?,
+        ),
+        edge_rules_force: Some(args.force_rules),
+        generated_edge_rule_sets: None,
     };
-    let response: Value = match ctx
+    let response = match ctx
         .client
-        .post(
-            &format!(
-                "/v1/projects/{}/function-activations/environments/{}/functions/publish",
-                path_segment(&ctx.project_id),
-                path_segment(&ctx.environment_id)
-            ),
-            &body,
-        )
+        .publish_edge_rules(&ctx.project_id, &ctx.environment_id, body)
         .await
     {
         Ok(response) => response,
         Err(error) => return Err(map_publish_error(error, json)),
     };
+    anyhow::ensure!(
+        response.project_id == ctx.project_id && response.environment_id == ctx.environment_id,
+        "Edge Rules publication response belongs to another environment"
+    );
+    let response = serde_json::to_value(response)?;
 
     if json {
         output::json_output(&RulesPublishOutput {
@@ -202,7 +203,7 @@ async fn status(
     let local = load_local_rules_for_status(&project_dir);
     let request = build_edge_rules_status_request(local.edge_rules, local.local_invalid)?;
     let response =
-        get_edge_rules_status(&ctx.client, &ctx.project_id, &ctx.environment_id, &request).await?;
+        get_edge_rules_status(&ctx.client, &ctx.project_id, &ctx.environment_id, request).await?;
     let output = RulesStatusOutput::from_contract(response, local.file)?;
 
     if json {
@@ -283,19 +284,29 @@ async fn get_active_rule_set(
     project_id: &str,
     environment_id: &str,
 ) -> anyhow::Result<ActiveEdgeRuleSet> {
-    let response: ActiveEdgeRuleSetResponse = client
-        .get(&format!(
-            "/v1/projects/{}/function-activations/environments/{}/edge-rules",
-            path_segment(project_id),
-            path_segment(environment_id)
-        ))
+    let response = client
+        .active_edge_rules(project_id, environment_id)
         .await
         .context("failed to fetch active Edge Rules")?;
-    response.rule_set.ok_or_else(|| {
+    let rule_set = response.rule_set.ok_or_else(|| {
         output::coded_error(
             "ONREZA_RULES_NOT_FOUND",
             "no user-authored Edge Rules found for this environment",
         )
+    })?;
+    anyhow::ensure!(
+        rule_set.environment_id == environment_id.parse::<uuid::Uuid>()?,
+        "Edge Rules response belongs to another environment"
+    );
+    Ok(ActiveEdgeRuleSet {
+        id: rule_set.id.to_string(),
+        version: rule_set.version,
+        schema_version: Some(rule_set.schema_version),
+        source: rule_set.source.to_string(),
+        rules: rule_set.rules,
+        image_sources: serde_json::from_value(rule_set.image_sources)
+            .context("invalid active image sources")?,
+        checksum: rule_set.checksum,
     })
 }
 
@@ -303,19 +314,17 @@ async fn get_edge_rules_status(
     client: &ApiClient,
     project_id: &str,
     environment_id: &str,
-    request: &nrz_contract::CliEdgeRulesStatusRequest,
-) -> anyhow::Result<nrz_contract::CliEdgeRulesStatusResponse> {
-    client
-        .post(
-            &format!(
-                "/v1/projects/{}/function-activations/environments/{}/edge-rules/status",
-                path_segment(project_id),
-                path_segment(environment_id)
-            ),
-            request,
-        )
+    request: nrz_api::StatusRequestBody,
+) -> anyhow::Result<nrz_api::EdgeRulesStatusResponse> {
+    let response = client
+        .edge_rules_status(project_id, environment_id, request)
         .await
-        .context("failed to fetch Edge Rules status")
+        .context("failed to fetch Edge Rules status")?;
+    anyhow::ensure!(
+        response.environment_id == environment_id.parse::<uuid::Uuid>()?,
+        "Edge Rules status response belongs to another environment"
+    );
+    Ok(response)
 }
 
 fn canonical_project_dir(dir: &str) -> anyhow::Result<PathBuf> {
@@ -708,7 +717,7 @@ fn toml_key(key: &str) -> String {
 pub(crate) fn build_edge_rules_status_request(
     edge_rules: Option<Value>,
     local_invalid: bool,
-) -> anyhow::Result<nrz_contract::CliEdgeRulesStatusRequest> {
+) -> anyhow::Result<nrz_api::StatusRequestBody> {
     let body = match (edge_rules, local_invalid) {
         (Some(_), true) => {
             return Err(anyhow::anyhow!(
@@ -764,12 +773,6 @@ fn load_local_rules_for_status(project_dir: &Path) -> LocalRulesForStatus {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ActiveEdgeRuleSetResponse {
-    rule_set: Option<ActiveEdgeRuleSet>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct ActiveEdgeRuleSet {
     #[allow(dead_code)]
     pub(crate) id: String,
@@ -815,7 +818,7 @@ struct RulesStatusOutput {
 
 impl RulesStatusOutput {
     fn from_contract(
-        response: nrz_contract::CliEdgeRulesStatusResponse,
+        response: nrz_api::EdgeRulesStatusResponse,
         local_file: LocalRulesFileStatus,
     ) -> anyhow::Result<Self> {
         Ok(Self {

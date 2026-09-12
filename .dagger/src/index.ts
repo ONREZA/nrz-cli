@@ -9,16 +9,6 @@ import {
 const RUST_IMAGE = "rust:1.97-bookworm";
 const BUN_IMAGE = "oven/bun:1.3.14-debian";
 const ALPINE_IMAGE = "alpine:3.20";
-const RELEASE_GIT_METADATA_SCRIPT = ".dagger/scripts/capture-git-metadata.ts";
-const CLI_CRATES_VENDOR_DIR = "vendor/onreza-crates";
-const REQUIRED_CLI_CRATES = [
-  "nrz-contract",
-  "nrz-fn-source",
-  "nrz-source-bundle",
-  "nrz-runtime-artifact",
-  "nrz-source-publisher",
-] as const;
-
 const PLATFORMS = new Set<string>(RELEASE_PLATFORMS);
 const CHANNELS = new Set(["stable", "beta"]);
 
@@ -47,6 +37,8 @@ function rustContainer(source: Directory) {
     .withMountedCache("/work/target", dag.cacheVolume("nrz-cargo-target"))
     .withDirectory("/work", source)
     .withWorkdir("/work")
+    .withEnvVariable("CARGO_BUILD_JOBS", "2")
+    .withEnvVariable("RUST_TEST_THREADS", "4")
     .withEnvVariable("CARGO_TERM_COLOR", "always");
 }
 
@@ -60,35 +52,34 @@ function bunDevContainer(source: Directory) {
     .withExec(["sh", "-ceu", "cd .dagger && bun install --frozen-lockfile"]);
 }
 
-function bunContainerWithGit(source: Directory) {
-  return bunContainer(source)
-    .withExec([
-      "sh",
-      "-ceu",
-      [
-        "apt-get update",
-        "apt-get install -y --no-install-recommends git ca-certificates",
-        "rm -rf /var/lib/apt/lists/*",
-      ].join("\n"),
-    ])
-    .withExec(["git", "config", "--global", "--add", "safe.directory", "/work"]);
-}
-
-function sourceWithReleaseGitMetadata(source: Directory): Directory {
-  const sourceWithoutReleaseState = source.withoutDirectory(".nrz-release");
-  const sourceWithGit = sourceWithoutReleaseState.withDirectory(
-    ".git",
-    dag.currentWorkspace().directory(".git", { gitignore: false }),
-  );
-  const metadata = bunContainerWithGit(sourceWithGit)
-    .withExec(["bun", RELEASE_GIT_METADATA_SCRIPT])
-    .file("/work/.nrz-release/git.json");
-
-  return sourceWithoutReleaseState.withFile(".nrz-release/git.json", metadata);
+function sourceWithReleaseGitMetadata(source: Directory, gitMetadata: File): Directory {
+  return source.withoutDirectory(".nrz-release").withFile(".nrz-release/git.json", gitMetadata);
 }
 
 @object()
 export class NrzCli {
+  /** Verify generated HTTP and artifact models against their committed inputs. */
+  @func()
+  async contracts(
+    @argument({
+      ignore: [
+        ".cache", "target", "**/target", "node_modules", "**/node_modules",
+        "dist", "dist-archive", ".dagger/sdk", ".nrz-release", ".env", ".env.*",
+      ],
+    })
+    source: Directory,
+  ): Promise<string> {
+    await rustContainer(source)
+      .withFile("/usr/local/bin/bun", dag.container().from(BUN_IMAGE).file("/usr/local/bin/bun"))
+      .withMountedCache("/work/.cache/tools/oas3-gen", dag.cacheVolume("nrz-oas3-generator"))
+      .withExec(["rustup", "component", "add", "rustfmt"])
+      .withExec(["bun", "test", "scripts"])
+      .withExec(["bun", "scripts/generate-api.ts", "--check"])
+      .withExec(["cargo", "run", "--locked", "-p", "nrz-contract", "--features", "codegen", "--bin", "gen-contract", "--", "--check"])
+      .sync();
+    return "Generated contracts match committed inputs";
+  }
+
   /**
    * Run the Rust CI checks used by the GitHub CI workflow.
    */
@@ -96,6 +87,7 @@ export class NrzCli {
   async ci(
     @argument({
       ignore: [
+        ".cache",
         "target",
         "**/target",
         "node_modules",
@@ -111,8 +103,9 @@ export class NrzCli {
     })
     source: Directory,
   ): Promise<string> {
+    await this.contracts(source);
     await bunDevContainer(source)
-      .withExec(["sh", "-ceu", "cd .dagger && bun run typecheck && bun test scripts/release-scripts.test.ts"])
+      .withExec(["sh", "-ceu", "cd .dagger && bun run typecheck && bun test scripts"])
       .sync();
 
     let ctr = rustContainer(source);
@@ -126,9 +119,9 @@ export class NrzCli {
       ].join("\n"),
     ]);
     ctr = ctr.withExec(["rustup", "component", "add", "rustfmt", "clippy"]);
-    ctr = ctr.withExec(["cargo", "test", "--all"]);
-    ctr = ctr.withExec(["cargo", "fmt", "--", "--check"]);
-    ctr = ctr.withExec(["cargo", "clippy", "--", "-D", "warnings"]);
+    ctr = ctr.withExec(["cargo", "test", "--locked", "--workspace"]);
+    ctr = ctr.withExec(["cargo", "fmt", "--all", "--check"]);
+    ctr = ctr.withExec(["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--no-deps", "--", "-D", "warnings"]);
     await ctr.sync();
     return "CI checks passed";
   }
@@ -140,6 +133,7 @@ export class NrzCli {
   async releaseMetadata(
     @argument({
       ignore: [
+        ".cache",
         "target",
         "**/target",
         "node_modules",
@@ -154,6 +148,8 @@ export class NrzCli {
       ],
     })
     source: Directory,
+    /** Git metadata captured from the exact host checkout, including worktrees. */
+    gitMetadata: File,
     /** Release channel: stable or beta. */
     channel = "stable",
     /** Optional explicit version. Accepts 1.2.3, v1.2.3, or full prerelease versions. */
@@ -162,7 +158,7 @@ export class NrzCli {
     bump = "auto",
   ): Promise<string> {
     requireChannel(channel);
-    const releaseSource = sourceWithReleaseGitMetadata(source);
+    const releaseSource = sourceWithReleaseGitMetadata(source, gitMetadata);
     return bunContainer(releaseSource)
       .withEnvVariable("NRZ_RELEASE_CHANNEL", channel)
       .withEnvVariable("NRZ_RELEASE_VERSION", version)
@@ -178,6 +174,7 @@ export class NrzCli {
   async prepareRelease(
     @argument({
       ignore: [
+        ".cache",
         "target",
         "**/target",
         "node_modules",
@@ -192,6 +189,8 @@ export class NrzCli {
       ],
     })
     source: Directory,
+    /** Git metadata captured from the exact host checkout, including worktrees. */
+    gitMetadata: File,
     /** Release channel: stable or beta. */
     channel = "stable",
     /** Optional explicit version. Accepts 1.2.3, v1.2.3, or full prerelease versions. */
@@ -200,21 +199,8 @@ export class NrzCli {
     bump = "auto",
   ): Promise<Directory> {
     requireChannel(channel);
-    const releaseSource = sourceWithReleaseGitMetadata(source);
-    const requiredCrateChecks = REQUIRED_CLI_CRATES.map(
-      (crate) => `test -f ${CLI_CRATES_VENDOR_DIR}/${crate}/Cargo.toml`,
-    ).join(" && ");
+    const releaseSource = sourceWithReleaseGitMetadata(source, gitMetadata);
     const releaseDir = bunContainer(releaseSource)
-      .withExec([
-        "sh",
-        "-ceu",
-        [
-          `if ! ${requiredCrateChecks}; then`,
-          "  echo 'prepare-release requires vendor/onreza-crates from deployment scripts/sync-nrz-cli-crates.ts' >&2",
-          "  exit 1",
-          "fi",
-        ].join("\n"),
-      ])
       .withEnvVariable("NRZ_RELEASE_CHANNEL", channel)
       .withEnvVariable("NRZ_RELEASE_VERSION", version)
       .withEnvVariable("NRZ_RELEASE_BUMP", bump)
@@ -297,6 +283,7 @@ export class NrzCli {
   npmPackage(
     @argument({
       ignore: [
+        ".cache",
         "target",
         "**/target",
         "node_modules",
@@ -334,6 +321,7 @@ export class NrzCli {
   async publishGithubRelease(
     @argument({
       ignore: [
+        ".cache",
         "target",
         "**/target",
         "node_modules",

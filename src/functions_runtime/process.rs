@@ -33,9 +33,60 @@ struct ControlMessage {
     kind: String,
     protocol_version: Option<String>,
     runtime_release_id: Option<String>,
+    response: Option<InvocationResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InvocationResponse {
+    protocol_version: String,
+    invocation_id: String,
+    ok: bool,
+    locals: Option<Value>,
+    error: Option<InvocationError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InvocationError {
+    message: String,
 }
 
 impl RuntimeProcess {
+    pub(crate) async fn invoke(&mut self, invocation: Value) -> anyhow::Result<Value> {
+        let id = invocation
+            .get("invocationId")
+            .and_then(Value::as_str)
+            .context("runtime invocation has no identity")?
+            .to_string();
+        timeout(
+            CONTROL_TIMEOUT,
+            self.write_control(&json!({"type": "invoke", "invocation": invocation})),
+        )
+        .await
+        .context("ONREZA Functions runtime write timeout")??;
+        let message = self.read_control().await?;
+        if message.kind != "result" {
+            bail!("Functions runtime returned an unexpected invocation message");
+        }
+        let response = message
+            .response
+            .context("Functions runtime returned no invocation response")?;
+        if response.invocation_id != id || response.protocol_version != RUNTIME_PROTOCOL_VERSION {
+            bail!("Functions runtime returned an incompatible invocation response");
+        }
+        if !response.ok {
+            bail!(
+                "Functions runtime inspection failed: {}",
+                response
+                    .error
+                    .map(|error| error.message)
+                    .unwrap_or_else(|| "unknown runtime error".into())
+            );
+        }
+        response
+            .locals
+            .context("Functions runtime returned no inspection result")
+    }
     pub(crate) async fn start(
         runtime: &CachedRuntime,
         bundle_root: &Path,

@@ -1,3 +1,7 @@
+[workspace]
+members = ["api/client", "crates/*"]
+resolver = "3"
+
 [package]
 name = "nrz"
 version = "0.40.3"
@@ -14,12 +18,12 @@ name = "nrz"
 path = "src/main.rs"
 
 [dependencies]
-# Shared ONREZA wire and function source-shape contracts.
-# Source of truth lives in ../deployment/crates; sync copies the snapshot here.
-nrz-contract = { path = "vendor/onreza-crates/nrz-contract" }
-nrz-fn-source = { path = "vendor/onreza-crates/nrz-fn-source" }
-nrz-source-bundle = { path = "vendor/onreza-crates/nrz-source-bundle" }
-nrz-source-publisher = { path = "vendor/onreza-crates/nrz-source-publisher" }
+tempfile = "3"
+nrz-api = { path = "api/client" }
+# Public runtime, artifact and publication libraries shared with platform services.
+nrz-contract = { path = "crates/nrz-contract" }
+nrz-source-bundle = { path = "crates/nrz-source-bundle" }
+nrz-source-publisher = { path = "crates/nrz-source-publisher" }
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
@@ -102,7 +106,6 @@ zip = { version = "8.2", default-features = false, features = ["deflate-flate2-z
 tokio = { version = "1", features = ["test-util"] }
 assert_cmd = "2"
 predicates = "3"
-tempfile = "3"
 # HTTP client for integration tests
 reqwest = { version = "0.13", features = ["json"] }
 

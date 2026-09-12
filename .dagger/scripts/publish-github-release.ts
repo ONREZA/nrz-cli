@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "
 import { basename, join } from "node:path";
 
 import { RELEASE_REPOSITORY, REQUIRED_RELEASE_ASSETS } from "./release-assets";
+import { verifyReleaseProvenance } from "./release-contracts";
 
 const token = process.env.GITHUB_TOKEN;
 const repository = process.env.GITHUB_REPOSITORY || RELEASE_REPOSITORY;
@@ -100,7 +101,7 @@ async function uploadAsset(releaseId: number, filePath: string, name: string): P
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${token}`,
-        "Content-Type": name.endsWith(".txt") ? "text/plain" : "application/gzip",
+        "Content-Type": name.endsWith(".json") ? "application/json" : name.endsWith(".txt") ? "text/plain" : "application/gzip",
         "X-GitHub-Api-Version": "2022-11-28",
       },
       body: readFileSync(filePath),
@@ -194,11 +195,15 @@ async function main(): Promise<void> {
     throw new Error("GITHUB_TOKEN, NRZ_RELEASE_VERSION, and NRZ_RELEASE_TAG are required");
   }
 
-  const assetPaths = REQUIRED_RELEASE_ASSETS.map((asset) => requireAsset(asset));
+  const provenancePath = requireAsset("release-metadata.json");
+  const provenance = JSON.parse(readFileSync(provenancePath, "utf8"));
+  verifyReleaseProvenance(process.cwd(), provenance, { version, tag, channel });
+  const assetNames = [...REQUIRED_RELEASE_ASSETS, "release-metadata.json"];
+  const assetPaths = assetNames.map((asset) => requireAsset(asset));
   const checksum = createChecksums(assetPaths);
   const releaseBody = releaseNotes(checksum.text);
   const allUploads = [...assetPaths, checksum.path];
-  const allNames = [...REQUIRED_RELEASE_ASSETS, "checksums-sha256.txt"];
+  const allNames = [...assetNames, "checksums-sha256.txt"];
   const expectedPaths = Object.fromEntries(allNames.map((name, index) => [name, allUploads[index]]));
 
   let release = await findReleaseByTag(repository, tag);

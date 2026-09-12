@@ -483,7 +483,7 @@ pub(super) fn conform_manifest_to_wire_contract(
 
 /// Wire boundary for the ONREZA Functions publish payload, which rides in
 /// the deployment source request and is re-validated by the platform against its
-/// `FunctionPublishPayloadSchema`. Round-trip through the generated contract type so an
+/// OpenAPI schema. Round-trip through the generated SDK type so an
 /// unknown field or a bad origin is rejected before the bytes leave the CLI. The edge
 /// rule set is passed through opaquely — the platform owns its validation.
 pub(super) fn conform_functions_to_wire_contract(
@@ -494,7 +494,7 @@ pub(super) fn conform_functions_to_wire_contract(
     };
     let value =
         serde_json::to_value(&payload).context("failed to serialize functions publish payload")?;
-    let wire: nrz_contract::onreza_functions_publish::OnrezaFunctionsPublishPayloadV1 =
+    let wire: nrz_api::SourceRequestBodyFunctions =
         serde_json::from_value(value).map_err(|error| {
             anyhow::anyhow!(
                 "functions publish payload does not match the server contract: {error}.\n\

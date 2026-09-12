@@ -24,9 +24,22 @@ export const config = {
 export default {};
 "#,
     );
-    let collected = collect(tmp.path()).unwrap();
+    let mut collected = collect(tmp.path()).unwrap();
 
-    let payload = build_payload("DEPLOYMENT", &collected, None, false, Vec::new());
+    assert!(build_payload("DEPLOYMENT", &collected, None, false, Vec::new()).is_err());
+    let function = &mut collected.functions[0];
+    function.inspected = Some(nrz_api::FunctionPublishSpec {
+        source: nrz_api::FunctionPublishSpecSource {
+            path: function.entrypoint.clone(),
+            content_text: function.sources[&function.entrypoint].clone(),
+        },
+        declaration: nrz_api::FunctionDeclaration {
+            name: "billing-webhook".into(),
+            triggers: vec![],
+        },
+        handlers: vec![nrz_api::FunctionHandler::Fetch],
+    });
+    let payload = build_payload("DEPLOYMENT", &collected, None, false, Vec::new()).unwrap();
     let value = serde_json::to_value(&payload).unwrap();
 
     assert_eq!(value["origin"], "DEPLOYMENT");
@@ -39,7 +52,9 @@ export default {};
         "functions/billing-webhook.nrz-fn.ts"
     );
 
-    assert!(spec.get("triggers").is_none());
+    assert_eq!(spec["declaration"]["name"], "billing-webhook");
+    assert_eq!(spec["declaration"]["triggers"], serde_json::json!([]));
+    assert_eq!(spec["handlers"], serde_json::json!(["fetch"]));
 }
 
 #[test]
@@ -541,7 +556,7 @@ action = { type = "redirect", target = "/docs" }
     let collected = collect(tmp.path()).unwrap();
     let edge_rules = load_edge_rules(tmp.path()).unwrap();
 
-    let payload = build_payload("DEPLOYMENT", &collected, edge_rules, false, Vec::new());
+    let payload = build_payload("DEPLOYMENT", &collected, edge_rules, false, Vec::new()).unwrap();
     let value = serde_json::to_value(&payload).unwrap();
 
     assert!(value["functions"].as_array().unwrap().is_empty());

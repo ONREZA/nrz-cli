@@ -1,22 +1,11 @@
 //! Best-effort sync of detection results to the platform API.
 
+use crate::api::ApiClient;
 use crate::detect::types::{ComputeType, DetectionResult, PackageManagerType};
-use serde::Serialize;
-
-use crate::api::{ApiClient, path_segment};
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DetectionSyncBody<'a> {
-    framework: &'a str,
-    framework_name: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    framework_version: Option<&'a str>,
-    suggested_compute: &'a ComputeType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    package_manager: Option<&'a str>,
-    source: &'a str,
-}
+use nrz_api::{
+    DetectionRequestBody, Project200ResponseProjectDetectedComputeType,
+    ProjectRequestBodyPackageManager,
+};
 
 /// Send detection result to the platform API (best-effort, errors are silently ignored).
 ///
@@ -29,29 +18,32 @@ pub async fn sync_detection_to_api(client: &ApiClient, project_id: &str, result:
         .as_ref()
         .map(|p| detection_package_manager_to_platform(p.pm_type));
 
-    let body = DetectionSyncBody {
-        framework: &result.framework,
-        framework_name: &result.name,
-        framework_version: result.version.as_deref(),
-        suggested_compute: &result.suggested_compute,
+    let body = DetectionRequestBody {
+        framework: result.framework.clone(),
+        framework_name: result.name.clone(),
+        framework_version: result.version.clone(),
+        suggested_compute: match result.suggested_compute {
+            ComputeType::Static => Project200ResponseProjectDetectedComputeType::Static,
+            ComputeType::Process => Project200ResponseProjectDetectedComputeType::Process,
+        },
         package_manager: pm,
-        source: "cli",
+        source: "cli".into(),
     };
 
-    let path = format!("/v1/projects/{}/detection", path_segment(project_id));
-    // Best-effort: log warning on failure, don't fail the overall command
-    let resp: Result<serde_json::Value, _> = client.post(&path, &body).await;
+    let resp = client.sync_detection(project_id, body).await;
     if let Err(e) = resp {
         tracing::warn!("failed to sync detection to API: {e}");
     }
 }
 
-pub(crate) fn detection_package_manager_to_platform(pm: PackageManagerType) -> &'static str {
+pub(crate) fn detection_package_manager_to_platform(
+    pm: PackageManagerType,
+) -> ProjectRequestBodyPackageManager {
     match pm {
-        PackageManagerType::Npm => "NPM",
-        PackageManagerType::Yarn => "YARN",
-        PackageManagerType::Pnpm => "PNPM",
-        PackageManagerType::Bun => "BUN",
-        PackageManagerType::Pip => "PIP",
+        PackageManagerType::Npm => ProjectRequestBodyPackageManager::Npm,
+        PackageManagerType::Yarn => ProjectRequestBodyPackageManager::Yarn,
+        PackageManagerType::Pnpm => ProjectRequestBodyPackageManager::Pnpm,
+        PackageManagerType::Bun => ProjectRequestBodyPackageManager::Bun,
+        PackageManagerType::Pip => ProjectRequestBodyPackageManager::Pip,
     }
 }

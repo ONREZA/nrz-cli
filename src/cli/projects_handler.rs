@@ -1,118 +1,16 @@
 use std::io::{BufRead, IsTerminal, Write};
 
 use anyhow::{Context, bail};
-use serde::{Deserialize, Serialize};
 
-use crate::api::{ApiClient, path_segment};
+use crate::api::ApiClient;
 use crate::auth;
 use crate::output;
 use nrz::config;
 
 use super::projects::{ProjectsArgs, ProjectsCommand};
 
-// --- List ---
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectsResponse {
-    projects: Vec<ProjectSummary>,
-    total: u64,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectSummary {
-    id: String,
-    name: String,
-    display_name: Option<String>,
-    framework_preset: Option<String>,
-    updated_at: Option<String>,
-}
-
-// --- Create ---
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CreateProjectBody {
-    pub(crate) name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) display_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) git_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) branch: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) framework_preset: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) install_command: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) install_command_source: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) build_command: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) build_command_source: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) output_directory: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) output_directory_source: Option<&'static str>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateProjectResponse {
-    id: String,
-    name: String,
-    source_type: Option<String>,
-    git_url: Option<String>,
-    branch: Option<String>,
-    created_at: Option<String>,
-    message: Option<String>,
-}
-
-// --- Info ---
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProjectDetailResponse {
-    id: String,
-    name: String,
-    display_name: Option<String>,
-    source_type: Option<String>,
-    git_url: Option<String>,
-    branch: Option<String>,
-    framework_preset: Option<String>,
-    install_command: Option<String>,
-    build_command: Option<String>,
-    output_directory: Option<String>,
-    root_directory: Option<String>,
-    node_version: Option<String>,
-    package_manager: Option<String>,
-    auto_deploy_enabled: Option<bool>,
-    created_at: Option<String>,
-    updated_at: Option<String>,
-    #[serde(default)]
-    deployments: Vec<serde_json::Value>,
-    #[serde(default, rename = "_count")]
-    count: Option<serde_json::Value>,
-}
-
-// --- Update ---
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UpdateProjectResponse {
-    id: String,
-    message: Option<String>,
-}
-
-// --- Delete ---
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DeleteProjectResponse {
-    id: String,
-    message: Option<String>,
-}
+mod models;
+use models::*;
 
 pub async fn run(
     args: ProjectsArgs,
@@ -186,9 +84,10 @@ pub async fn run(
 
 async fn list(client: &ApiClient, limit: u32, json: bool) -> anyhow::Result<()> {
     let resp: ProjectsResponse = client
-        .get(&format!("/v1/projects?limit={limit}"))
+        .projects(limit, 0)
         .await
-        .context("failed to fetch projects")?;
+        .context("failed to fetch projects")?
+        .into();
 
     if json {
         output::json_output(&resp);
@@ -236,24 +135,32 @@ async fn create(
     output_directory: Option<String>,
     link: bool,
 ) -> anyhow::Result<()> {
-    let body = CreateProjectBody {
+    let body = nrz_api::ProjectRequestBody {
         name: name.clone(),
         display_name: display_name.clone(),
         git_url,
         branch,
         framework_preset: framework,
-        install_command_source: install_command.as_ref().map(|_| "USER"),
-        install_command,
-        build_command_source: build_command.as_ref().map(|_| "USER"),
-        build_command,
-        output_directory_source: output_directory.as_ref().map(|_| "USER"),
+        install_command_source: install_command
+            .as_ref()
+            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
+        install_command: install_command.map(Some),
+        build_command_source: build_command
+            .as_ref()
+            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
+        build_command: build_command.map(Some),
+        output_directory_source: output_directory
+            .as_ref()
+            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
         output_directory,
+        ..Default::default()
     };
 
     let resp: CreateProjectResponse = client
-        .post("/v1/projects", &body)
+        .create_project(body)
         .await
-        .context("failed to create project")?;
+        .context("failed to create project")?
+        .into();
 
     let linked = if link {
         let cwd = std::env::current_dir().context("failed to get current directory")?;
@@ -295,9 +202,10 @@ async fn create(
 
 async fn info(client: &ApiClient, id: &str, json: bool) -> anyhow::Result<()> {
     let resp: ProjectDetailResponse = client
-        .get(&project_api_path(id))
+        .project(id)
         .await
-        .with_context(|| format!("failed to fetch project {id}"))?;
+        .with_context(|| format!("failed to fetch project {id}"))?
+        .into();
 
     if json {
         output::json_output(&resp);
@@ -393,36 +301,54 @@ async fn update(
     root_directory: Option<String>,
     node_version: Option<String>,
 ) -> anyhow::Result<()> {
-    let mut body = serde_json::Map::new();
-
-    macro_rules! set_field {
-        ($field:expr, $key:expr) => {
-            if let Some(val) = $field {
-                body.insert($key.to_string(), serde_json::Value::String(val));
-            }
-        };
-    }
-
-    set_field!(display_name, "displayName");
-    set_field!(git_url, "gitUrl");
-    set_field!(branch, "branch");
-    set_field!(framework, "frameworkPreset");
-    set_field!(install_command, "installCommand");
-    set_field!(build_command, "buildCommand");
-    set_field!(output_directory, "outputDirectory");
-    set_field!(root_directory, "rootDirectory");
-    set_field!(node_version, "nodeVersion");
-
-    if body.is_empty() {
+    if [
+        &display_name,
+        &git_url,
+        &branch,
+        &framework,
+        &install_command,
+        &build_command,
+        &output_directory,
+        &root_directory,
+        &node_version,
+    ]
+    .iter()
+    .all(|value| value.is_none())
+    {
         bail!("no fields to update. Specify at least one --flag.");
     }
-
-    let body = serde_json::Value::Object(body);
-
-    let resp: UpdateProjectResponse = client
-        .patch(&project_api_path(id), &body)
+    let body = nrz_api::ProjectRequestBody2 {
+        display_name,
+        git_url: git_url.map(Some),
+        branch,
+        framework_preset: framework,
+        install_command_source: install_command
+            .as_ref()
+            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
+        install_command: install_command.map(Some),
+        build_command_source: build_command
+            .as_ref()
+            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
+        build_command: build_command.map(Some),
+        output_directory_source: output_directory
+            .as_ref()
+            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
+        output_directory: output_directory.map(Some),
+        root_directory,
+        node_version: node_version
+            .map(|value| serde_json::from_value(serde_json::Value::String(value)))
+            .transpose()
+            .context("invalid Node version")?,
+        ..Default::default()
+    };
+    let result = client
+        .update_project(id, body)
         .await
         .with_context(|| format!("failed to update project {id}"))?;
+    let resp = UpdateProjectResponse {
+        id: result.id.to_string(),
+        message: Some(result.message),
+    };
 
     if json {
         output::json_output(&resp);
@@ -461,10 +387,14 @@ async fn delete(client: &ApiClient, id: &str, force: bool, json: bool) -> anyhow
         }
     }
 
-    let resp: DeleteProjectResponse = client
-        .delete(&project_api_path(id))
+    let result = client
+        .delete_project(id)
         .await
         .with_context(|| format!("failed to delete project {id}"))?;
+    let resp = DeleteProjectResponse {
+        id: result.id.to_string(),
+        message: Some(result.message),
+    };
 
     if json {
         output::json_output(&resp);
@@ -477,8 +407,4 @@ async fn delete(client: &ApiClient, id: &str, force: bool, json: bool) -> anyhow
     }
 
     Ok(())
-}
-
-pub(crate) fn project_api_path(id: &str) -> String {
-    format!("/v1/projects/{}", path_segment(id))
 }

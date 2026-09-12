@@ -4,7 +4,7 @@ use anyhow::Context;
 use reqwest::header::{HeaderName, HeaderValue, LOCATION};
 use serde::{Deserialize, Serialize};
 
-use crate::api::{ApiClient, path_segment};
+use crate::api::ApiClient;
 use crate::errors::CliError;
 use crate::output;
 
@@ -44,6 +44,7 @@ struct VerificationResponse {
     location: Option<String>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DeploymentUrlsResponse {
@@ -180,15 +181,20 @@ async fn resolve_verification_base_url(
     }
 
     for attempt in 0..PRODUCTION_ALIAS_LOOKUP_ATTEMPTS {
-        let response: DeploymentUrlsResponse = request
+        let response = request
             .api_client
-            .get(&format!(
-                "/v1/deployments/{}",
-                path_segment(request.deployment_id)
-            ))
+            .deployment(request.deployment_id)
             .await
             .context("failed to resolve production deployment URL")?;
-        if let Some(url) = production_alias_url(&response.deployment_urls) {
+        let urls = response
+            .deployment_urls
+            .into_iter()
+            .map(|url| DeploymentUrl {
+                full_url: url.full_url,
+                alias_type: url.alias_type.to_string(),
+            })
+            .collect::<Vec<_>>();
+        if let Some(url) = production_alias_url(&urls) {
             return Ok(url.to_string());
         }
         if attempt + 1 < PRODUCTION_ALIAS_LOOKUP_ATTEMPTS {

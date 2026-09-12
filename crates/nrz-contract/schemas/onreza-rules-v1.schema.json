@@ -1,0 +1,764 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://docs.onreza.ru/schemas/onreza-rules-v1.schema.json",
+  "title": "ONREZA Edge Rule Set v1",
+  "description": "Authoring contract for onreza.rules.toml. nrz-cli and ONREZA Platform validate this shape, then normalize it into the routing rules used by the platform data plane. Server validation additionally enforces unique rule ids and cache-rule Vary coverage.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "rules"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "EDGE_RULE_SET_V1"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EdgeRuleAuthoring"
+      }
+    },
+    "imageSources": {
+      "maxItems": 128,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RemoteImageSourceAuthoring"
+      }
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "origin": {
+          "type": "string",
+          "enum": ["build", "ui"]
+        },
+        "revisionId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["origin"],
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "EdgeRuleAuthoring": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "condition": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["exact", "prefix", "glob"]
+                },
+                "value": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["type", "value"],
+              "additionalProperties": false
+            },
+            "methods": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+              }
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1
+            },
+            "headers": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "query": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "cookies": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "geo": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 2
+              }
+            },
+            "asn": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4294967295
+              }
+            },
+            "device": {
+              "type": "string",
+              "enum": ["desktop", "mobile", "tablet", "bot"]
+            },
+            "sourceIpCidrs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "method": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+              }
+            },
+            "any": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": ["exact", "prefix", "glob"]
+                      },
+                      "value": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["type", "value"],
+                    "additionalProperties": false
+                  },
+                  "methods": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+                    }
+                  },
+                  "host": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "headers": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "query": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "cookies": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "geo": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 2
+                    }
+                  },
+                  "asn": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 4294967295
+                    }
+                  },
+                  "device": {
+                    "type": "string",
+                    "enum": ["desktop", "mobile", "tablet", "bot"]
+                  },
+                  "sourceIpCidrs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "method": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "not": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": ["exact", "prefix", "glob"]
+                    },
+                    "value": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": ["type", "value"],
+                  "additionalProperties": false
+                },
+                "methods": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+                  }
+                },
+                "host": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "headers": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "query": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "cookies": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "geo": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2
+                  }
+                },
+                "asn": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4294967295
+                  }
+                },
+                "device": {
+                  "type": "string",
+                  "enum": ["desktop", "mobile", "tablet", "bot"]
+                },
+                "sourceIpCidrs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "method": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "action": {
+          "$ref": "#/$defs/EdgeRuleActionAuthoring"
+        }
+      },
+      "required": ["id", "action"],
+      "additionalProperties": false
+    },
+    "EdgeRuleActionAuthoring": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "allow"
+            }
+          },
+          "required": ["type"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "log"
+            }
+          },
+          "required": ["type"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "deny"
+            },
+            "statusCode": {
+              "type": "integer",
+              "minimum": 400,
+              "maximum": 599
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["shadow", "enforce"]
+            }
+          },
+          "required": ["type"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "redirect"
+            },
+            "target": {
+              "type": "string",
+              "minLength": 1
+            },
+            "statusCode": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "ifNoFile": {
+              "type": "boolean"
+            }
+          },
+          "required": ["type", "target"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "rewrite"
+            },
+            "target": {
+              "type": "string",
+              "minLength": 1
+            },
+            "external": {
+              "type": "boolean"
+            },
+            "ifNoFile": {
+              "type": "boolean"
+            }
+          },
+          "required": ["type", "target"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "set_headers"
+            },
+            "headers": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["type", "headers"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "remove_headers"
+            },
+            "headers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "required": ["type", "headers"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "cache"
+            },
+            "ttlSeconds": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "swrSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "vary": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["geo", "asn", "device", "header", "cookie", "query"]
+              }
+            }
+          },
+          "required": ["type", "ttlSeconds"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "bypass_cache"
+            }
+          },
+          "required": ["type"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "pipeline"
+            },
+            "override": {
+              "type": "boolean"
+            },
+            "inheritGate": {
+              "type": "boolean"
+            },
+            "steps": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "use": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+                      },
+                      "mode": {
+                        "type": "string",
+                        "enum": ["request", "response", "observe"]
+                      },
+                      "as": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "failure": {
+                        "type": "string",
+                        "enum": ["closed", "open"]
+                      },
+                      "cachePosition": {
+                        "type": "string",
+                        "enum": ["before", "after"]
+                      }
+                    },
+                    "required": ["use", "mode"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "$ref": "#/$defs/PipelineHandleStep"
+                  }
+                ]
+              }
+            }
+          },
+          "required": ["type", "steps"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "rate_limit"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "windowSeconds": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 600
+            },
+            "key": {
+              "type": "string",
+              "enum": ["ip", "ip_path", "ip_host", "host"]
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["shadow", "enforce"]
+            }
+          },
+          "required": ["type", "limit", "windowSeconds"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PipelineHandleStep": {
+      "type": "object",
+      "properties": {
+        "handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": ["handle"],
+      "additionalProperties": false
+    },
+    "RemoteImageSourceAuthoring": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "protocol": {
+          "type": "string",
+          "const": "https"
+        },
+        "hostname": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "pathname": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "search": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": ["id", "protocol", "hostname", "pathname"],
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "schemaVersion": "EDGE_RULE_SET_V1",
+      "rules": [
+        {
+          "id": "redirect-old-docs",
+          "name": "Redirect old docs",
+          "condition": {
+            "path": {
+              "type": "prefix",
+              "value": "/old-docs"
+            }
+          },
+          "action": {
+            "type": "redirect",
+            "target": "/docs",
+            "statusCode": 301,
+            "ifNoFile": false
+          }
+        },
+        {
+          "id": "redirect-cyrillic-domain",
+          "condition": {
+            "path": {
+              "type": "glob",
+              "value": "/{rest...}"
+            },
+            "host": "пример.рф"
+          },
+          "action": {
+            "type": "redirect",
+            "target": "https://example.com/{rest}",
+            "statusCode": 301,
+            "ifNoFile": false
+          }
+        },
+        {
+          "id": "clean-urls",
+          "condition": {
+            "path": {
+              "type": "glob",
+              "value": "/blog/{slug}"
+            }
+          },
+          "action": {
+            "type": "rewrite",
+            "target": "/posts/{slug}.html"
+          }
+        },
+        {
+          "id": "cache-assets",
+          "condition": {
+            "path": {
+              "type": "prefix",
+              "value": "/assets"
+            }
+          },
+          "action": {
+            "type": "cache",
+            "ttlSeconds": 3600
+          }
+        },
+        {
+          "id": "dashboard-auth",
+          "condition": {
+            "path": {
+              "type": "prefix",
+              "value": "/dashboard"
+            }
+          },
+          "action": {
+            "type": "pipeline",
+            "steps": [
+              {
+                "use": "require-session",
+                "mode": "request"
+              },
+              {
+                "handle": "@app"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "x-onreza-refinements": [
+    "unique rule ids per set",
+    "cache rule must Vary by request-dependent condition dimensions",
+    "pipeline actions must declare exactly one terminal handle step",
+    "pipeline response/observe steps must appear after the terminal handle",
+    "a narrower pipeline rule must re-declare a broader failure=closed request gate or set inherit_gate=false",
+    "glob path captures: '{name}' matches one segment, '{name...}' matches the remainder (at most one splat, unique names)",
+    "path captures are declared only in the root condition.path glob; any/not branch globs must not declare captures",
+    "redirect/rewrite target and set_headers values may interpolate '{name}'; every reference must be defined as a capture in the rule's root glob path matcher, splats are referenced by plain '{name}'",
+    "redirect target must be a relative path or an absolute http(s) URL; IDN hosts in absolute redirect targets are normalized to punycode",
+    "internal rewrite target must be a relative path; external rewrite target must be an absolute https URL",
+    "host conditions accept ASCII/punycode or IDN Unicode hostnames without scheme, port, path, or userinfo and are normalized to punycode",
+    "'{{name}}' escapes interpolation in target/header values and emits the literal text '{name}'"
+  ]
+}

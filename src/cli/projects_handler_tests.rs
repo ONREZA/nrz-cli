@@ -1,19 +1,20 @@
-use super::projects_handler::{CreateProjectBody, project_api_path};
+use nrz_api::{ProjectRequestBody, ProjectRequestBodyInstallCommandSource};
 
 #[test]
 fn create_project_body_marks_user_supplied_build_settings() {
-    let body = CreateProjectBody {
+    let body = ProjectRequestBody {
         name: "app".to_string(),
         display_name: None,
         git_url: None,
         branch: None,
         framework_preset: Some("nextjs".to_string()),
-        install_command: Some("pnpm install".to_string()),
-        install_command_source: Some("USER"),
-        build_command: Some("pnpm build".to_string()),
-        build_command_source: Some("USER"),
+        install_command: Some(Some("pnpm install".to_string())),
+        install_command_source: Some(ProjectRequestBodyInstallCommandSource::User),
+        build_command: Some(Some("pnpm build".to_string())),
+        build_command_source: Some(ProjectRequestBodyInstallCommandSource::User),
         output_directory: Some(".next".to_string()),
-        output_directory_source: Some("USER"),
+        output_directory_source: Some(ProjectRequestBodyInstallCommandSource::User),
+        ..Default::default()
     };
 
     let value = serde_json::to_value(body).unwrap();
@@ -22,10 +23,16 @@ fn create_project_body_marks_user_supplied_build_settings() {
     assert_eq!(value["outputDirectorySource"], "USER");
 }
 
-#[test]
-fn project_id_is_encoded_as_one_api_path_segment() {
-    assert_eq!(
-        project_api_path("project/../victim?force=true"),
-        "/v1/projects/project%2F%2E%2E%2Fvictim%3Fforce%3Dtrue"
-    );
+#[tokio::test]
+async fn malformed_project_id_is_rejected_before_transport() {
+    let client = crate::api::ApiClient::with_http_client(
+        "http://127.0.0.1:1".to_string(),
+        reqwest::Client::new(),
+    )
+    .unwrap();
+    let error = client
+        .project("project/../victim?force=true")
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("invalid project ID"));
 }

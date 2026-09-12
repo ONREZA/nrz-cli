@@ -1,55 +1,18 @@
-use crate::api::{ApiClient, path_segment};
+use crate::api::ApiClient;
 use crate::auth;
 use crate::cli::preview::{PreviewArgs, PreviewCommand};
 use crate::output;
 use anyhow::Context;
 use nrz::config;
 use nrz::config::ProjectConfig;
-use serde::{Deserialize, Serialize};
+use nrz_api::AccessResponseItem as ServerPreviewAccess;
+use serde::Serialize;
 
-#[cfg(test)]
 const BYPASS_HEADER_NAME: &str = "X-ONREZA-Protection-Bypass";
 const DEFAULT_TTL_DISPLAY: &str = "1h";
 const MIN_TTL_SECONDS: u64 = 60;
 const MAX_TTL_SECONDS: u64 = 24 * 60 * 60;
 pub(crate) const AGENT_PREVIEW_ACCESS_TTL_SECONDS: u64 = 15 * 60;
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CreatePreviewAccessBody {
-    note: String,
-    ttl_seconds: u64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreatePreviewAccessResponse {
-    access: ServerPreviewAccess,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ServerPreviewAccess {
-    project_id: String,
-    secret_id: String,
-    note: String,
-    expires_at: String,
-    ttl_seconds: u64,
-    header: ServerPreviewAccessHeader,
-    query: ServerPreviewAccessQuery,
-}
-
-#[derive(Debug, Deserialize)]
-struct ServerPreviewAccessHeader {
-    name: String,
-    value: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ServerPreviewAccessQuery {
-    name: String,
-    value: String,
-}
 
 #[derive(Debug, Serialize)]
 struct DeleteBypassSecretResponse {
@@ -140,14 +103,20 @@ pub(crate) async fn create_preview_access(
     url: Option<String>,
     ttl_seconds: u64,
 ) -> anyhow::Result<PreviewAccessOutput> {
-    let resp: CreatePreviewAccessResponse = client
-        .post(
-            &format!("/v1/preview-access/{}", path_segment(project_id)),
-            &CreatePreviewAccessBody { note, ttl_seconds },
+    let resp = client
+        .create_preview_access(
+            project_id,
+            nrz_api::PreviewAccessRequestBody {
+                note: Some(note),
+                ttl_seconds: Some(ttl_seconds.try_into().context("preview TTL is too large")?),
+            },
         )
         .await
         .context("failed to create preview access")?;
-    Ok(build_preview_access_output(resp.access, url))
+    if resp.access.project_id != project_id.parse::<uuid::Uuid>()? {
+        anyhow::bail!("preview access response belongs to another project");
+    }
+    build_preview_access_output(resp.access, url)
 }
 
 async fn revoke(
@@ -177,29 +146,43 @@ pub(crate) async fn revoke_preview_access(
     project_id: &str,
     secret_id: &str,
 ) -> anyhow::Result<()> {
-    client
-        .delete_empty(&format!(
-            "/v1/preview-access/{}/{}",
-            path_segment(project_id),
-            path_segment(secret_id)
-        ))
+    let response = client
+        .revoke_preview_access(project_id, secret_id)
         .await
-        .context("failed to revoke preview access")
+        .context("failed to revoke preview access")?;
+    anyhow::ensure!(
+        response.success,
+        "server did not confirm preview access revocation"
+    );
+    Ok(())
 }
 
 fn build_preview_access_output(
     access: ServerPreviewAccess,
     url: Option<String>,
-) -> PreviewAccessOutput {
+) -> anyhow::Result<PreviewAccessOutput> {
+    let ttl_seconds =
+        u64::try_from(access.ttl_seconds).context("invalid preview access lifetime")?;
+    anyhow::ensure!(
+        (MIN_TTL_SECONDS..=MAX_TTL_SECONDS).contains(&ttl_seconds),
+        "invalid preview access lifetime"
+    );
+    anyhow::ensure!(
+        access.header.name == BYPASS_HEADER_NAME && access.query.name == "_bypass",
+        "unsupported preview access transport"
+    );
     let curl_command =
         build_curl_command(url.as_deref(), &access.header.name, &access.header.value);
     let browser_url = url
         .as_deref()
         .and_then(|url| build_browser_url(url, &access.query.name, &access.query.value));
-    let revoke_command = preview_revoke_command(&access.project_id, &access.secret_id);
-    PreviewAccessOutput {
-        project_id: access.project_id,
-        secret_id: access.secret_id,
+    let revoke_command = preview_revoke_command(
+        &access.project_id.to_string(),
+        &access.secret_id.to_string(),
+    );
+    Ok(PreviewAccessOutput {
+        project_id: access.project_id.to_string(),
+        secret_id: access.secret_id.to_string(),
         note: access.note,
         header_name: access.header.name,
         header_value: access.header.value.clone(),
@@ -212,14 +195,16 @@ fn build_preview_access_output(
             name: access.query.name,
             value: access.query.value,
         },
-        expires_at: access.expires_at,
-        ttl_seconds: access.ttl_seconds,
+        expires_at: access
+            .expires_at
+            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+        ttl_seconds,
         ttl_enforced: true,
         url,
         browser_url,
         curl_command,
         revoke_command,
-    }
+    })
 }
 
 pub(crate) fn preview_access_hint(project_id: &str, url: Option<&str>) -> String {
@@ -353,72 +338,5 @@ fn shell_word(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn access() -> ServerPreviewAccess {
-        ServerPreviewAccess {
-            project_id: "project-1".to_string(),
-            secret_id: "secret-1".to_string(),
-            note: "test".to_string(),
-            expires_at: "2026-06-24T17:00:00.000Z".to_string(),
-            ttl_seconds: 3600,
-            header: ServerPreviewAccessHeader {
-                name: BYPASS_HEADER_NAME.to_string(),
-                value: "token-value".to_string(),
-            },
-            query: ServerPreviewAccessQuery {
-                name: "_bypass".to_string(),
-                value: "token-value".to_string(),
-            },
-        }
-    }
-
-    #[test]
-    fn preview_access_output_builds_agent_and_revoke_snippets() {
-        let output = build_preview_access_output(
-            access(),
-            Some("https://preview.onreza.app/docs?x=1".to_string()),
-        );
-
-        assert_eq!(output.header_name, BYPASS_HEADER_NAME);
-        assert_eq!(output.header_value, "token-value");
-        assert_eq!(output.query_name, "_bypass");
-        assert_eq!(output.query_value, "token-value");
-        assert_eq!(output.expires_at, "2026-06-24T17:00:00.000Z");
-        assert_eq!(output.ttl_seconds, 3600);
-        assert!(output.ttl_enforced);
-        assert_eq!(
-            output.browser_url.as_deref(),
-            Some("https://preview.onreza.app/docs?x=1&_bypass=token-value")
-        );
-        assert_eq!(
-            output.curl_command,
-            "curl -H 'X-ONREZA-Protection-Bypass: token-value' 'https://preview.onreza.app/docs?x=1'"
-        );
-        assert_eq!(
-            output.revoke_command,
-            "nrz preview revoke --project-id project-1 --secret-id secret-1"
-        );
-    }
-
-    #[test]
-    fn preview_access_hint_includes_url_only_when_available() {
-        assert_eq!(
-            preview_access_hint("project-1", Some("https://preview.onreza.app")),
-            "nrz preview access --project-id project-1 --url https://preview.onreza.app"
-        );
-        assert_eq!(
-            preview_access_hint("project-1", None),
-            "nrz preview access --project-id project-1"
-        );
-    }
-
-    #[test]
-    fn parse_ttl_accepts_common_units() {
-        assert_eq!(parse_ttl_seconds("60").unwrap(), 60);
-        assert_eq!(parse_ttl_seconds("15m").unwrap(), 900);
-        assert_eq!(parse_ttl_seconds("1h").unwrap(), 3600);
-        assert_eq!(parse_ttl_seconds("1d").unwrap(), 86_400);
-    }
-}
+#[path = "preview_tests.rs"]
+mod tests;

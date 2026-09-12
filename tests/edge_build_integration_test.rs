@@ -35,13 +35,13 @@ async fn edge_build_runner_context(
 ) -> Json<serde_json::Value> {
     state.record(Method::GET, &uri);
     Json(json!({
-        "protocolVersion": "runner-context-v3",
+        "protocolVersion": "runner-context-v4",
         "context": {
-            "workspaceId": "workspace-edge",
+            "workspaceId": "00000000-0000-0000-0000-000000000001",
             "workspaceSlug": "edge",
-            "projectId": "project-edge",
+            "projectId": "00000000-0000-0000-0000-000000000002",
             "projectName": "Edge project",
-            "environmentId": "environment-edge",
+            "environmentId": "00000000-0000-0000-0000-000000000003",
             "environmentName": "Preview",
             "environmentType": "PREVIEW",
             "sourceRef": "0123456789abcdef0123456789abcdef01234567",
@@ -51,6 +51,8 @@ async fn edge_build_runner_context(
             "id": state.deployment_id,
             "attempt": 1,
             "status": "BUILDING",
+            "branch": "main",
+            "commitSha": "0123456789abcdef0123456789abcdef01234567",
             "url": null
         },
         "settings": {
@@ -79,13 +81,13 @@ async fn edge_build_materialize(
     state.record(Method::POST, &uri);
     assert_eq!(body, json!({ "purpose": "DEPLOY" }));
     Json(json!({
-        "protocolVersion": "execution-context-v1",
+        "protocolVersion": "execution-context-v2",
         "context": {
-            "workspaceId": "workspace-edge",
+            "workspaceId": "00000000-0000-0000-0000-000000000001",
             "workspaceSlug": "edge",
-            "projectId": "project-edge",
+            "projectId": "00000000-0000-0000-0000-000000000002",
             "projectName": "Edge project",
-            "environmentId": "environment-edge",
+            "environmentId": "00000000-0000-0000-0000-000000000003",
             "environmentName": "Preview",
             "environmentType": "PREVIEW",
             "sourceRef": "0123456789abcdef0123456789abcdef01234567",

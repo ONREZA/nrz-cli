@@ -26,7 +26,7 @@ Every command must support machine and human modes:
 - `mise install`: install pinned local tools.
 - `mise run hooks`: install Lefthook hooks.
 - `mise run check`: run the standard local quality gate.
-- `dagger call release-metadata --source=. --channel=stable --bump=auto`: local release plan dry run.
+- `mise run release:metadata`: local release plan dry run.
 
 ## Coding Style & Testing Guidelines
 Use Rust 2024 + `rustfmt` defaults (4-space indentation, stable formatting). Naming: files/modules/functions `snake_case`, types `PascalCase`.

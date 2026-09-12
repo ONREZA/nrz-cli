@@ -4,14 +4,12 @@ This document is an implementation-facing support matrix for the ONREZA
 Next.js adapter. Keep it current when adapter behavior changes; the contents can
 later be moved into user-facing documentation.
 
-Canonical platform decisions are tracked in the deployment repository:
+Adapter implementation and conformance fixtures are included in this repository:
 
-- [`Framework Adapter Platform`](../../deployment/docs/rfc/framework-adapter-platform/INDEX.md)
-- [`Platform Capabilities`](../../deployment/docs/rfc/framework-adapter-platform/platform-capabilities.md)
-- [`Next.js Mapping`](../../deployment/docs/rfc/framework-adapter-platform/nextjs-mapping.md)
-
-[`nextjs-adapter-platform-contract.md`](./nextjs-adapter-platform-contract.md) is kept only as a
-compatibility pointer for older links.
+- [`src/nextjs_adapter.rs`](../src/nextjs_adapter.rs) and [`src/nextjs_adapter/`](../src/nextjs_adapter/);
+- [`conformance tests`](../tests/nextjs_adapter_conformance_test.rs);
+- [`artifact schemas`](../crates/nrz-contract/schemas/);
+- [`generated API contract`](../api/openapi.json).
 
 ## Version Boundary
 

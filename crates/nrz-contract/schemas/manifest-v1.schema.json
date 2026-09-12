@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://docs.onreza.ru/schemas/manifest-v1.schema.json",
+  "title": "ONREZA Build Output Manifest",
+  "description": "Build output manifest (manifest.json) — the contract between builder/adapter/CLI and the platform. Generated from the Zod source of truth used by the API server and consumed by the Rust CLI contract crate. Cross-field rules (layer/route references, regex compatibility, meta size) are enforced in code, not in this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "layers", "routes"],
+  "properties": {
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "layers": {
+      "minItems": 1,
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "directory": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "target": {
+                "type": "string",
+                "const": "STATIC"
+              }
+            },
+            "required": ["name", "directory", "target"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "directory": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "target": {
+                "type": "string",
+                "const": "COMPUTE"
+              },
+              "entry": {
+                "type": "string",
+                "minLength": 1
+              },
+              "runtime": {
+                "type": "object",
+                "properties": {
+                  "timeoutMs": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "memoryMb": {
+                    "type": "integer",
+                    "minimum": 32,
+                    "maximum": 8192
+                  },
+                  "maxConcurrency": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                }
+              }
+            },
+            "required": ["name", "directory", "target", "entry"],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "routes": {
+      "minItems": 1,
+      "maxItems": 200,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "layer": {
+            "type": "string",
+            "minLength": 1
+          },
+          "priority": {
+            "default": 0,
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "revalidate": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 31536000
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+            }
+          },
+          "headers": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "fallthrough": {
+            "type": "boolean"
+          },
+          "fallthroughWhen": {
+            "minItems": 1,
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "header"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "value": {
+                      "type": "string",
+                      "maxLength": 512
+                    }
+                  },
+                  "required": ["type", "name"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "query"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "value": {
+                      "type": "string",
+                      "maxLength": 512
+                    }
+                  },
+                  "required": ["type", "name"]
+                }
+              ]
+            }
+          }
+        },
+        "required": ["pattern", "layer"]
+      }
+    },
+    "prerender": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pages": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "format": "starts_with",
+            "pattern": "^\\/.*"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "html": {
+                "type": "string",
+                "minLength": 1
+              },
+              "data": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["html"]
+          }
+        }
+      },
+      "required": ["layer", "pages"]
+    },
+    "meta": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    }
+  }
+}

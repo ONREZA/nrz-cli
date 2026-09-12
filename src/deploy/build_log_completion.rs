@@ -54,16 +54,19 @@ impl BuildLogOutcome<'_> {
         }
         FinishRequest {
             status: if failure.is_some() {
-                "FAILED"
+                nrz_api::FinishRequestBodyStatus::Failed
             } else {
-                "FINISHED"
+                nrz_api::FinishRequestBodyStatus::Finished
             },
             message,
             error_code: failure.and_then(error_code),
-            error_details: failure
-                .and_then(error_details)
-                .map(|details| redactor.sanitize_json(&details)),
-            failure_phase: failure.map(|_| phase),
+            error_details: failure.and_then(error_details).map(|details| {
+                match redactor.sanitize_json(&details) {
+                    serde_json::Value::Object(fields) => fields.into_iter().collect(),
+                    value => std::collections::HashMap::from([("value".into(), value)]),
+                }
+            }),
+            failure_phase: failure.map(|_| phase.into()),
         }
     }
 }

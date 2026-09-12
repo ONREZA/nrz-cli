@@ -48,7 +48,7 @@ export default { fetch() { return new Response("ok"); } };
 }
 
 #[test]
-fn config_name_overrides_file_name() {
+fn discovery_preserves_source_for_runtime_name_resolution() {
     let tmp = tempfile::tempdir().unwrap();
     write(
         tmp.path(),
@@ -65,44 +65,12 @@ export default {};
     let collected = collect(tmp.path()).unwrap();
 
     assert_eq!(collected.functions.len(), 1);
-    assert_eq!(collected.functions[0].name, "billing-webhook");
+    assert_eq!(collected.functions[0].name, "BillingWebhook");
+    assert!(collected.functions[0].inspected.is_none());
     assert_eq!(
         collected.functions[0].entrypoint,
         "functions/BillingWebhook.nrz-fn.ts"
     );
-}
-
-#[test]
-fn rejects_duplicate_function_names() {
-    let tmp = tempfile::tempdir().unwrap();
-    write(
-        tmp.path(),
-        "functions/api.nrz-fn.ts",
-        r#"
-export const config = {
-  name: "api",
-} as const;
-export default {};
-"#,
-    );
-    write(
-        tmp.path(),
-        "functions/other.nrz-fn.ts",
-        r#"
-export const config = {
-  name: "api",
-} as const;
-export default {};
-"#,
-    );
-
-    let err = collect(tmp.path()).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("duplicate ONREZA Function name 'api'")
-    );
-    assert!(err.to_string().contains("functions/api.nrz-fn.ts"));
-    assert!(err.to_string().contains("functions/other.nrz-fn.ts"));
 }
 
 #[test]
@@ -126,19 +94,6 @@ fn rejects_unbranded_function_source() {
 }
 
 #[test]
-fn rejects_invalid_function_name_segment() {
-    let tmp = tempfile::tempdir().unwrap();
-    write(
-        tmp.path(),
-        "functions/Billing.nrz-fn.ts",
-        "export const config = {};\n",
-    );
-
-    let err = collect(tmp.path()).unwrap_err();
-    assert!(format!("{err:#}").contains("lowercase letters"));
-}
-
-#[test]
 fn rejects_file_larger_than_contract_limit() {
     let tmp = tempfile::tempdir().unwrap();
     write(
@@ -152,27 +107,14 @@ fn rejects_file_larger_than_contract_limit() {
 }
 
 #[test]
-fn rejects_missing_config_declaration() {
+fn discovery_does_not_parse_or_execute_user_modules() {
     let tmp = tempfile::tempdir().unwrap();
-    write(
-        tmp.path(),
-        "functions/api.nrz-fn.ts",
-        "export default { fetch() { return new Response('ok'); } };\n",
+    let source = "import './helper.ts'; const base = { name: 'api' }; export const config = { ...base }; export default () => {};";
+    write(tmp.path(), "functions/Api.nrz-fn.ts", source);
+    let collected = collect(tmp.path()).unwrap();
+    assert_eq!(
+        collected.functions[0].sources["functions/Api.nrz-fn.ts"],
+        source
     );
-
-    let err = collect(tmp.path()).unwrap_err();
-    assert!(format!("{err:#}").contains("export const config"));
-}
-
-#[test]
-fn rejects_user_imports() {
-    let tmp = tempfile::tempdir().unwrap();
-    write(
-        tmp.path(),
-        "functions/api.nrz-fn.ts",
-        "export const config = {};\nimport './lib.ts';\nexport default {};\n",
-    );
-
-    let err = collect(tmp.path()).unwrap_err();
-    assert!(err.to_string().contains("imports './lib.ts'"));
+    assert!(collected.functions[0].inspected.is_none());
 }

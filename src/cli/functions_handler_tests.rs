@@ -4,7 +4,7 @@ use serde_json::json;
 use crate::cli::functions::FunctionsInvokeArgs;
 
 use super::functions_handler::{
-    FunctionInvokeResponse, build_test_invoke_request, render_response_body,
+    FunctionInvokeResponse, build_test_invoke_request as build_typed_request, render_response_body,
 };
 
 #[test]
@@ -47,7 +47,7 @@ fn invoke_request_accepts_full_fetch_surface() {
     let body_path = tmp.path().join("body.txt");
     let debug_path = tmp.path().join("debug.json");
     std::fs::write(&body_path, "hello").unwrap();
-    std::fs::write(&debug_path, r#"{"waitUntilMode":"drain"}"#).unwrap();
+    std::fs::write(&debug_path, r#"{"bindings":{"queue":{"mode":"mock"}}}"#).unwrap();
 
     let request = build_test_invoke_request(&FunctionsInvokeArgs {
         method: Some("PATCH".to_string()),
@@ -74,7 +74,10 @@ fn invoke_request_accepts_full_fetch_surface() {
     );
     assert_eq!(request["bodyBase64"], "aGVsbG8=");
     assert!(request.get("event").is_none());
-    assert_eq!(request["debug"], json!({"waitUntilMode": "drain"}));
+    assert_eq!(
+        request["debug"],
+        json!({"bindings":{"queue":{"mode":"mock"}}})
+    );
 }
 
 #[test]
@@ -87,7 +90,7 @@ fn invoke_request_accepts_event_surface_without_fetch_flags() {
         r#"{"type":"manual","event":{"reason":"smoke"}}"#,
     )
     .unwrap();
-    std::fs::write(&debug_path, r#"{"waitUntilMode":"drain"}"#).unwrap();
+    std::fs::write(&debug_path, r#"{"bindings":{"queue":{"mode":"mock"}}}"#).unwrap();
 
     let request = build_test_invoke_request(&FunctionsInvokeArgs {
         event: Some(event_path.display().to_string()),
@@ -105,7 +108,10 @@ fn invoke_request_accepts_event_surface_without_fetch_flags() {
         request["event"],
         json!({"type": "manual", "event": {"reason": "smoke"}})
     );
-    assert_eq!(request["debug"], json!({"waitUntilMode": "drain"}));
+    assert_eq!(
+        request["debug"],
+        json!({"bindings":{"queue":{"mode":"mock"}}})
+    );
 }
 
 #[test]
@@ -209,4 +215,24 @@ fn invoke_args() -> FunctionsInvokeArgs {
         event: None,
         debug: None,
     }
+}
+
+fn build_test_invoke_request(args: &FunctionsInvokeArgs) -> anyhow::Result<serde_json::Value> {
+    Ok(serde_json::to_value(build_typed_request(args)?)?)
+}
+
+#[test]
+fn invoke_request_rejects_debug_options_removed_from_the_server_contract() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("debug.json");
+    std::fs::write(&path, r#"{"waitUntilMode":"drain"}"#).unwrap();
+    assert!(
+        build_test_invoke_request(&FunctionsInvokeArgs {
+            debug: Some(path.display().to_string()),
+            ..invoke_args()
+        })
+        .unwrap_err()
+        .to_string()
+        .contains("invalid debug options")
+    );
 }

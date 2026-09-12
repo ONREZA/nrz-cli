@@ -218,54 +218,31 @@ test("postinstall fails when no binary exists for the host platform", () => {
   assert.doesNotThrow(() => new Bun.Transpiler({ loader: "js" }).transformSync(script));
 });
 
-test("release cargo manifest points nrz crates at sanitized vendor snapshot", () => {
-  const cargo = [
-    '[package]',
-    'name = "nrz"',
-    'version = "0.32.4"',
-    '',
-    '[dependencies]',
-    'nrz-contract = { version = "0.1", path = "../deployment/crates/nrz-contract" }',
-    'nrz-fn-source = { version = "0.1", path = "../deployment/crates/nrz-fn-source" }',
-    'nrz-source-bundle = { version = "0.1", path = "../deployment/crates/nrz-source-bundle" }',
-    'nrz-source-publisher = { version = "0.1", path = "../deployment/crates/nrz-source-publisher" }',
-    '',
-  ].join("\n");
-
-  const updated = releaseCargoToml(cargo, "0.33.0-beta.0");
-
-  assert.match(updated, /^version = "0\.33\.0-beta\.0"$/m);
-  assert.match(updated, /^nrz-contract = \{ path = "vendor\/onreza-crates\/nrz-contract" \}$/m);
-  assert.match(updated, /^nrz-fn-source = \{ path = "vendor\/onreza-crates\/nrz-fn-source" \}$/m);
-  assert.match(updated, /^nrz-source-bundle = \{ path = "vendor\/onreza-crates\/nrz-source-bundle" \}$/m);
-  assert.match(updated, /^nrz-source-publisher = \{ path = "vendor\/onreza-crates\/nrz-source-publisher" \}$/m);
-  assert.doesNotMatch(updated, /\.\.\/deployment/);
+test("release manifest preserves workspace dependencies and changes only the CLI version", () => {
+  const cargo = `
+[workspace]
+members = ["api/client", "crates/*"]
+[workspace.package]
+version = "0.1.0"
+[package]
+name = "nrz"
+version = "0.40.2"
+[dependencies]
+nrz-api = { path = "api/client" }
+nrz-contract = { path = "crates/nrz-contract", features = ["validation"] }
+nrz-source-publisher = { path = "crates/nrz-source-publisher" }
+`;
+  const manifest = Bun.TOML.parse(cargo) as { package: { version: string } };
+  manifest.package.version = "0.41.0-beta.0";
+  assert.deepEqual(Bun.TOML.parse(releaseCargoToml(cargo, "0.41.0-beta.0")), manifest);
 });
 
-test("release cargo manifest accepts already sanitized nrz crate dependencies", () => {
-  const cargo = [
-    '[package]',
-    'name = "nrz"',
-    'version = "0.32.4"',
-    '',
-    '[dependencies]',
-    'nrz-contract = { path = "vendor/onreza-crates/nrz-contract" }',
-    'nrz-fn-source = { path = "vendor/onreza-crates/nrz-fn-source" }',
-    'nrz-source-bundle = { path = "vendor/onreza-crates/nrz-source-bundle" }',
-    'nrz-source-publisher = { path = "vendor/onreza-crates/nrz-source-publisher" }',
-    '',
-  ].join("\n");
-
-  const updated = releaseCargoToml(cargo, "0.33.0-beta.0");
-
-  assert.match(updated, /^version = "0\.33\.0-beta\.0"$/m);
-  assert.match(updated, /^nrz-contract = \{ path = "vendor\/onreza-crates\/nrz-contract" \}$/m);
-  assert.match(updated, /^nrz-fn-source = \{ path = "vendor\/onreza-crates\/nrz-fn-source" \}$/m);
-  assert.match(updated, /^nrz-source-bundle = \{ path = "vendor\/onreza-crates\/nrz-source-bundle" \}$/m);
-  assert.match(updated, /^nrz-source-publisher = \{ path = "vendor\/onreza-crates\/nrz-source-publisher" \}$/m);
+test("release manifest rejects the wrong package and an inherited CLI version", () => {
+  assert.throws(() => releaseCargoToml('[package]\nname = "other"\nversion = "1.0.0"', "2.0.0"), /explicit version/);
+  assert.throws(() => releaseCargoToml('[package]\nname = "nrz"\nversion.workspace = true', "2.0.0"), /explicit version/);
 });
 
-test("release cargo lock leaves vendored crate versions stable", () => {
+test("release cargo lock leaves public library versions stable", () => {
   const lock = [
     "[[package]]",
     'name = "nrz"',

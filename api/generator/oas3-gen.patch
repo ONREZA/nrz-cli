@@ -1,0 +1,3239 @@
+diff --git a/book/src/code-generation.md b/book/src/code-generation.md
+index 4075cad..8ca0be1 100644
+--- a/book/src/code-generation.md
++++ b/book/src/code-generation.md
+@@ -27,6 +27,22 @@ generated Rust code.
+ 
+ ## Generation Modes
+ 
++### Nullable properties and raw responses
++
++Optional nullable object properties use `Option<Option<T>>`: `None` omits the
++property, `Some(None)` sends JSON null, and `Some(Some(value))` sends a value.
++Deserialization preserves the same three states. Required nullable properties
++use `Option<T>`, always serialize, and reject a missing property.
++
++`client.raw()` exposes the same typed operation methods and request validation,
++returning `reqwest::Response` before parsing. Use it when status codes, headers
++(including `Retry-After`), or unrecognized response bodies affect policy. The
++generated request type's `parse_response` method remains available for typed
++response parsing after inspecting metadata.
++
++`--bidirectional-serde` derives both serde directions for schema models. This
++supports CLI JSON output, local request fixtures, and response persistence.
++
+ The positional `mode` argument selects what you generate.
+ 
+ ```text
+@@ -1235,3 +1251,18 @@ pub struct Widget {
+ | `--only` | *(none)* | Include only specified operations |
+ | `--exclude` | *(none)* | Exclude specified operations |
+ | `--all-schemas` | `false` | Generate all schemas regardless of usage |
++
++
++Fixed-length `prefixItems` arrays are represented as Rust tuples, including
++nested header pairs. Serde enforces positional types and exact tuple lengths.
++Variable-length tuple schemas are rejected explicitly. Complex tuple items
++(object, enum, or union) must be named schema references.
++
++### Literal object properties
++
++JSON Schema `const` on object properties constrains serialization and
++deserialization independently of `default`. Generated serde helpers reject
++other values and missing required properties, without including received data
++in the error. Optional properties may be omitted. This also lets untagged
++object unions with identical fields select a variant by their literal field
++values instead of accepting the first structurally matching variant.
+diff --git a/crates/oas3-gen-support/src/lib.rs b/crates/oas3-gen-support/src/lib.rs
+index 46a70d6..f8086ea 100644
+--- a/crates/oas3-gen-support/src/lib.rs
++++ b/crates/oas3-gen-support/src/lib.rs
+@@ -133,3 +133,5 @@ impl<T: DeserializeOwned> TooManyRequests<T> {
+     self.1
+   }
+ }
++mod present;
++pub use present::Present;
+diff --git a/crates/oas3-gen-support/src/present.rs b/crates/oas3-gen-support/src/present.rs
+new file mode 100644
+index 0000000..c3dd42d
+--- /dev/null
++++ b/crates/oas3-gen-support/src/present.rs
+@@ -0,0 +1,25 @@
++use std::marker::PhantomData;
++
++use serde::{Deserializer, Serializer};
++use serde_with::{DeserializeAs, SerializeAs};
++
++/// Adapts a present property while preserving an explicitly null value.
++///
++/// Pair this adapter with a field default and omission of outer `None` values.
++/// The inner adapter may itself deserialize a nullable value.
++pub struct Present<A>(PhantomData<A>);
++
++impl<T, A: SerializeAs<T>> SerializeAs<Option<T>> for Present<A> {
++  fn serialize_as<S: Serializer>(source: &Option<T>, serializer: S) -> Result<S::Ok, S::Error> {
++    match source {
++      Some(value) => A::serialize_as(value, serializer),
++      None => serializer.serialize_none(),
++    }
++  }
++}
++
++impl<'de, T, A: DeserializeAs<'de, T>> DeserializeAs<'de, Option<T>> for Present<A> {
++  fn deserialize_as<D: Deserializer<'de>>(deserializer: D) -> Result<Option<T>, D::Error> {
++    A::deserialize_as(deserializer).map(Some)
++  }
++}
+diff --git a/crates/oas3-gen/fixtures/event_stream/client.rs b/crates/oas3-gen/fixtures/event_stream/client.rs
+index 59836bf..b076242 100644
+--- a/crates/oas3-gen/fixtures/event_stream/client.rs
++++ b/crates/oas3-gen/fixtures/event_stream/client.rs
+@@ -46,6 +46,13 @@ impl EventStreamApiClient {
+     let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
+     Ok(Self { client, base_url: url })
+   }
++  /// Uses the same typed requests while retaining the complete HTTP response.
++  pub fn raw(&self) -> EventStreamApiClientRaw {
++    EventStreamApiClientRaw {
++      client: self.client.clone(),
++      base_url: self.base_url.clone(),
++    }
++  }
+   /// Stream events
+   ///
+   /// Returns a stream of server-sent events
+@@ -78,3 +85,42 @@ impl EventStreamApiClient {
+     TypedEventsRequest::parse_response(response).await
+   }
+ }
++/// Typed operation transport without consuming response status, headers, or body.
++#[derive(Debug, Clone)]
++pub struct EventStreamApiClientRaw {
++  client: Client,
++  base_url: Url,
++}
++impl EventStreamApiClientRaw {
++  /// Stream events
++  ///
++  /// Returns a stream of server-sent events
++  ///
++  /// * Path: `GET /events`
++  pub async fn events(&self, request: EventsRequest) -> anyhow::Result<reqwest::Response> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push("events");
++    let response = self.client.get(url).send().await?;
++    Ok(response)
++  }
++  /// Stream typed events
++  ///
++  /// Returns a stream of typed server-sent events with query parameters
++  ///
++  /// * Path: `GET /events/typed`
++  pub async fn typed_events(&self, request: TypedEventsRequest) -> anyhow::Result<reqwest::Response> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push("events")
++      .push("typed");
++    let response = self.client.get(url).query(&request.query).send().await?;
++    Ok(response)
++  }
++}
+diff --git a/crates/oas3-gen/fixtures/event_stream/mod.rs b/crates/oas3-gen/fixtures/event_stream/mod.rs
+index b7b9983..3115927 100644
+--- a/crates/oas3-gen/fixtures/event_stream/mod.rs
++++ b/crates/oas3-gen/fixtures/event_stream/mod.rs
+@@ -3,6 +3,7 @@
+ #![allow(clippy::enum_variant_names)]
+ #![allow(clippy::large_enum_variant)]
+ #![allow(clippy::missing_panics_doc)]
++#![allow(clippy::option_option)]
+ #![allow(clippy::result_large_err)]
+ #![allow(clippy::struct_field_names)]
+ #![allow(clippy::too_many_lines)]
+diff --git a/crates/oas3-gen/fixtures/intersection_union/client.rs b/crates/oas3-gen/fixtures/intersection_union/client.rs
+index 65c4350..ae30fce 100644
+--- a/crates/oas3-gen/fixtures/intersection_union/client.rs
++++ b/crates/oas3-gen/fixtures/intersection_union/client.rs
+@@ -42,4 +42,18 @@ impl IntersectionUnionTestClient {
+     let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
+     Ok(Self { client, base_url: url })
+   }
++  /// Uses the same typed requests while retaining the complete HTTP response.
++  pub fn raw(&self) -> IntersectionUnionTestClientRaw {
++    IntersectionUnionTestClientRaw {
++      client: self.client.clone(),
++      base_url: self.base_url.clone(),
++    }
++  }
++}
++/// Typed operation transport without consuming response status, headers, or body.
++#[derive(Debug, Clone)]
++pub struct IntersectionUnionTestClientRaw {
++  client: Client,
++  base_url: Url,
+ }
++impl IntersectionUnionTestClientRaw {}
+diff --git a/crates/oas3-gen/fixtures/intersection_union/mod.rs b/crates/oas3-gen/fixtures/intersection_union/mod.rs
+index 036b994..2a37b8d 100644
+--- a/crates/oas3-gen/fixtures/intersection_union/mod.rs
++++ b/crates/oas3-gen/fixtures/intersection_union/mod.rs
+@@ -3,6 +3,7 @@
+ #![allow(clippy::enum_variant_names)]
+ #![allow(clippy::large_enum_variant)]
+ #![allow(clippy::missing_panics_doc)]
++#![allow(clippy::option_option)]
+ #![allow(clippy::result_large_err)]
+ #![allow(clippy::struct_field_names)]
+ #![allow(clippy::too_many_lines)]
+diff --git a/crates/oas3-gen/fixtures/intersection_union/types.rs b/crates/oas3-gen/fixtures/intersection_union/types.rs
+index eee54ab..a5e9f07 100644
+--- a/crates/oas3-gen/fixtures/intersection_union/types.rs
++++ b/crates/oas3-gen/fixtures/intersection_union/types.rs
+@@ -10,11 +10,8 @@
+ use serde::{Deserialize, Serialize};
+ /// Must be a vehicle with an ID, and must be either a Car or a Boat.
+ #[serde_with::skip_serializing_none]
+-#[derive(
+-  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+-)]
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct Vehicle {
+-  #[validate(length(min = 1u64))]
+   pub id: String,
+   pub wheels: Option<i64>,
+   pub sails: Option<i64>,
+diff --git a/crates/oas3-gen/fixtures/petstore.json b/crates/oas3-gen/fixtures/petstore.json
+index 0a1552f..9dc1ec2 100644
+--- a/crates/oas3-gen/fixtures/petstore.json
++++ b/crates/oas3-gen/fixtures/petstore.json
+@@ -204,7 +204,8 @@
+ 						"required": true,
+ 						"description": "The id of the pet to retrieve",
+ 						"schema": {
+-							"type": "string"
++							"type": "string",
++						"minLength": 1
+ 						}
+ 					},
+ 					{
+@@ -213,7 +214,8 @@
+ 						"required": true,
+ 						"description": "API version to use for this request",
+ 						"schema": {
+-							"type": "string"
++							"type": "string",
++						"minLength": 1
+ 						}
+ 					}
+ 				],
+diff --git a/crates/oas3-gen/fixtures/petstore/client.rs b/crates/oas3-gen/fixtures/petstore/client.rs
+index 1b319eb..62792da 100644
+--- a/crates/oas3-gen/fixtures/petstore/client.rs
++++ b/crates/oas3-gen/fixtures/petstore/client.rs
+@@ -45,6 +45,13 @@ impl SwaggerPetstoreClient {
+     let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
+     Ok(Self { client, base_url: url })
+   }
++  /// Uses the same typed requests while retaining the complete HTTP response.
++  pub fn raw(&self) -> SwaggerPetstoreClientRaw {
++    SwaggerPetstoreClientRaw {
++      client: self.client.clone(),
++      base_url: self.base_url.clone(),
++    }
++  }
+   /// List all pets
+   ///
+   /// * Path: `GET /{api_version}/pets`
+@@ -142,3 +149,107 @@ impl SwaggerPetstoreClient {
+     UploadPetImageRequest::parse_response(response).await
+   }
+ }
++/// Typed operation transport without consuming response status, headers, or body.
++#[derive(Debug, Clone)]
++pub struct SwaggerPetstoreClientRaw {
++  client: Client,
++  base_url: Url,
++}
++impl SwaggerPetstoreClientRaw {
++  /// List all pets
++  ///
++  /// * Path: `GET /{api_version}/pets`
++  pub async fn list_pets(&self, request: ListPetsRequest) -> anyhow::Result<reqwest::Response> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push(&request.path.api_version.clone())
++      .push("pets");
++    let response = self
++      .client
++      .get(url)
++      .query(&request.query)
++      .headers(http::HeaderMap::try_from(&request.header).context("building request headers")?)
++      .send()
++      .await?;
++    Ok(response)
++  }
++  /// Create a pet
++  ///
++  /// * Path: `POST /{api_version}/pets`
++  pub async fn create_pets(&self, request: CreatePetsRequest) -> anyhow::Result<reqwest::Response> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push(&request.path.api_version.clone())
++      .push("pets");
++    let response = self.client.post(url).send().await?;
++    Ok(response)
++  }
++  /// List all cats
++  ///
++  /// * Path: `GET /cats`
++  pub async fn list_cats(&self, request: ListCatsRequest) -> anyhow::Result<reqwest::Response> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push("cats");
++    let response = self
++      .client
++      .get(url)
++      .query(&request.query)
++      .headers(http::HeaderMap::try_from(&request.header).context("building request headers")?)
++      .send()
++      .await?;
++    Ok(response)
++  }
++  /// Info for a specific pet
++  ///
++  /// * Path: `GET /pets/{petId}`
++  pub async fn show_pet_by_id(&self, request: ShowPetByIdRequest) -> anyhow::Result<reqwest::Response> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push("pets")
++      .push(&request.path.pet_id.clone());
++    let response = self
++      .client
++      .get(url)
++      .headers(http::HeaderMap::try_from(&request.header).context("building request headers")?)
++      .send()
++      .await?;
++    Ok(response)
++  }
++  /// Upload pet image and update name
++  ///
++  /// * Path: `POST /pets/{petId}/upload`
++  pub async fn upload_pet_image(&self, request: UploadPetImageRequest) -> anyhow::Result<reqwest::Response> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push("pets")
++      .push(&request.path.pet_id.clone())
++      .push("upload");
++    let mut req_builder = self.client.post(url);
++    let body = &request.body;
++    let mut form = reqwest::multipart::Form::new();
++    form = form.part("name", reqwest::multipart::Part::text(body.name.clone()));
++    form = form.part(
++      "image",
++      reqwest::multipart::Part::bytes(std::borrow::Cow::from(body.image.clone())),
++    );
++    req_builder = req_builder.multipart(form);
++    let response = req_builder.send().await?;
++    Ok(response)
++  }
++}
+diff --git a/crates/oas3-gen/fixtures/petstore/mod.rs b/crates/oas3-gen/fixtures/petstore/mod.rs
+index 508b12a..a14dd58 100644
+--- a/crates/oas3-gen/fixtures/petstore/mod.rs
++++ b/crates/oas3-gen/fixtures/petstore/mod.rs
+@@ -3,6 +3,7 @@
+ #![allow(clippy::enum_variant_names)]
+ #![allow(clippy::large_enum_variant)]
+ #![allow(clippy::missing_panics_doc)]
++#![allow(clippy::option_option)]
+ #![allow(clippy::result_large_err)]
+ #![allow(clippy::struct_field_names)]
+ #![allow(clippy::too_many_lines)]
+diff --git a/crates/oas3-gen/fixtures/petstore/types.rs b/crates/oas3-gen/fixtures/petstore/types.rs
+index 9fafc08..fdc96fe 100644
+--- a/crates/oas3-gen/fixtures/petstore/types.rs
++++ b/crates/oas3-gen/fixtures/petstore/types.rs
+@@ -15,7 +15,6 @@ pub const X_COMPATIBILITY_DATE: http::HeaderName = http::HeaderName::from_static
+ pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api-version");
+ pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct Allergies {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -24,7 +23,6 @@ pub struct Allergies {
+   pub r#type: Option<&'static str>,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct Diet {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -112,10 +110,9 @@ pub struct Error {
+   pub code: i32,
+   pub message: String,
+ }
+-#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
++#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+ pub struct ListPetsRequestPath {
+   /// Which version of the API to use.
+-  #[validate(length(min = 1u64))]
+   pub api_version: String,
+ }
+ #[serde_with::skip_serializing_none]
+@@ -167,7 +164,6 @@ impl core::convert::TryFrom<ListPetsRequestHeader> for http::HeaderMap {
+ /// List all pets
+ #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+ pub struct ListPetsRequest {
+-  #[validate(nested)]
+   pub path: ListPetsRequestPath,
+   #[validate(nested)]
+   pub query: ListPetsRequestQuery,
+@@ -228,16 +224,14 @@ pub enum ListPetsResponse {
+   ///default: unexpected error
+   Unknown(Error),
+ }
+-#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
++#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+ pub struct CreatePetsRequestPath {
+   /// Which version of the API to use.
+-  #[validate(length(min = 1u64))]
+   pub api_version: String,
+ }
+ /// Create a pet
+ #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+ pub struct CreatePetsRequest {
+-  #[validate(nested)]
+   pub path: CreatePetsRequestPath,
+ }
+ #[bon::bon]
+@@ -409,26 +403,22 @@ pub enum ShowPetByIdResponse {
+   ///default: unexpected error
+   Unknown(Error),
+ }
+-#[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default, bon::Builder)]
++#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct UploadRequestBody {
+   /// The pet's name
+-  #[validate(length(min = 1u64))]
+   pub name: String,
+   /// The pet's image file
+   pub image: Vec<u8>,
+ }
+-#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
++#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+ pub struct UploadPetImageRequestPath {
+   /// The id of the pet to update
+-  #[validate(length(min = 1u64))]
+   pub pet_id: String,
+ }
+ /// Upload pet image and update name
+ #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+ pub struct UploadPetImageRequest {
+-  #[validate(nested)]
+   pub path: UploadPetImageRequestPath,
+-  #[validate(nested)]
+   pub body: UploadRequestBody,
+ }
+ #[bon::bon]
+diff --git a/crates/oas3-gen/fixtures/petstore_server/mod.rs b/crates/oas3-gen/fixtures/petstore_server/mod.rs
+index 5258a4a..a98a22f 100644
+--- a/crates/oas3-gen/fixtures/petstore_server/mod.rs
++++ b/crates/oas3-gen/fixtures/petstore_server/mod.rs
+@@ -3,6 +3,7 @@
+ #![allow(clippy::enum_variant_names)]
+ #![allow(clippy::large_enum_variant)]
+ #![allow(clippy::missing_panics_doc)]
++#![allow(clippy::option_option)]
+ #![allow(clippy::result_large_err)]
+ #![allow(clippy::struct_field_names)]
+ #![allow(clippy::too_many_lines)]
+diff --git a/crates/oas3-gen/fixtures/petstore_server/types.rs b/crates/oas3-gen/fixtures/petstore_server/types.rs
+index 51615ee..4473b09 100644
+--- a/crates/oas3-gen/fixtures/petstore_server/types.rs
++++ b/crates/oas3-gen/fixtures/petstore_server/types.rs
+@@ -17,7 +17,6 @@ pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api
+ pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");
+ #[serde_with::skip_serializing_none]
+ #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct Allergies {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -27,7 +26,6 @@ pub struct Allergies {
+ }
+ #[serde_with::skip_serializing_none]
+ #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct Diet {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -107,10 +105,9 @@ pub struct Error {
+   pub code: i32,
+   pub message: String,
+ }
+-#[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
++#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
+ pub struct ListPetsRequestPath {
+   /// Which version of the API to use.
+-  #[validate(length(min = 1u64))]
+   pub api_version: String,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
+@@ -187,7 +184,6 @@ impl core::convert::TryFrom<http::HeaderMap> for ListPetsRequestHeader {
+ /// List all pets
+ #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+ pub struct ListPetsRequest {
+-  #[validate(nested)]
+   pub path: ListPetsRequestPath,
+   #[validate(nested)]
+   pub query: ListPetsRequestQuery,
+@@ -234,16 +230,14 @@ impl IntoResponse for ListPetsResponse {
+     }
+   }
+ }
+-#[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
++#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
+ pub struct CreatePetsRequestPath {
+   /// Which version of the API to use.
+-  #[validate(length(min = 1u64))]
+   pub api_version: String,
+ }
+ /// Create a pet
+ #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+ pub struct CreatePetsRequest {
+-  #[validate(nested)]
+   pub path: CreatePetsRequestPath,
+ }
+ #[bon::bon]
+@@ -440,26 +434,22 @@ impl IntoResponse for ShowPetByIdResponse {
+     }
+   }
+ }
+-#[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder)]
++#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct UploadRequestBody {
+   /// The pet's name
+-  #[validate(length(min = 1u64))]
+   pub name: String,
+   /// The pet's image file
+   pub image: Vec<u8>,
+ }
+-#[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
++#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
+ pub struct UploadPetImageRequestPath {
+   /// The id of the pet to update
+-  #[validate(length(min = 1u64))]
+   pub pet_id: String,
+ }
+ /// Upload pet image and update name
+ #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+ pub struct UploadPetImageRequest {
+-  #[validate(nested)]
+   pub path: UploadPetImageRequestPath,
+-  #[validate(nested)]
+   pub body: UploadRequestBody,
+ }
+ #[bon::bon]
+diff --git a/crates/oas3-gen/fixtures/union_serde/client.rs b/crates/oas3-gen/fixtures/union_serde/client.rs
+index 6aa1807..223c221 100644
+--- a/crates/oas3-gen/fixtures/union_serde/client.rs
++++ b/crates/oas3-gen/fixtures/union_serde/client.rs
+@@ -46,6 +46,13 @@ impl UnionSerializationTestApiClient {
+     let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
+     Ok(Self { client, base_url: url })
+   }
++  /// Uses the same typed requests while retaining the complete HTTP response.
++  pub fn raw(&self) -> UnionSerializationTestApiClientRaw {
++    UnionSerializationTestApiClientRaw {
++      client: self.client.clone(),
++      base_url: self.base_url.clone(),
++    }
++  }
+   /// Send content blocks
+   ///
+   /// * Path: `POST /content`
+@@ -73,3 +80,37 @@ impl UnionSerializationTestApiClient {
+     GetEventsRequest::parse_response(response).await
+   }
+ }
++/// Typed operation transport without consuming response status, headers, or body.
++#[derive(Debug, Clone)]
++pub struct UnionSerializationTestApiClientRaw {
++  client: Client,
++  base_url: Url,
++}
++impl UnionSerializationTestApiClientRaw {
++  /// Send content blocks
++  ///
++  /// * Path: `POST /content`
++  pub async fn send_content(&self, request: SendContentRequest) -> anyhow::Result<reqwest::Response> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push("content");
++    let response = self.client.post(url).json(&request.body).send().await?;
++    Ok(response)
++  }
++  /// Get events with discriminated union
++  ///
++  /// * Path: `GET /events`
++  pub async fn get_events(&self, request: GetEventsRequest) -> anyhow::Result<reqwest::Response> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push("events");
++    let response = self.client.get(url).send().await?;
++    Ok(response)
++  }
++}
+diff --git a/crates/oas3-gen/fixtures/union_serde/mod.rs b/crates/oas3-gen/fixtures/union_serde/mod.rs
+index 63eacf2..cfd975d 100644
+--- a/crates/oas3-gen/fixtures/union_serde/mod.rs
++++ b/crates/oas3-gen/fixtures/union_serde/mod.rs
+@@ -3,6 +3,7 @@
+ #![allow(clippy::enum_variant_names)]
+ #![allow(clippy::large_enum_variant)]
+ #![allow(clippy::missing_panics_doc)]
++#![allow(clippy::option_option)]
+ #![allow(clippy::result_large_err)]
+ #![allow(clippy::struct_field_names)]
+ #![allow(clippy::too_many_lines)]
+diff --git a/crates/oas3-gen/fixtures/union_serde/types.rs b/crates/oas3-gen/fixtures/union_serde/types.rs
+index e841598..d5cc235 100644
+--- a/crates/oas3-gen/fixtures/union_serde/types.rs
++++ b/crates/oas3-gen/fixtures/union_serde/types.rs
+@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
+ use validator::Validate;
+ #[serde_with::skip_serializing_none]
+ #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct ContentRequest {
+   pub blocks: Vec<ContentBlock>,
+   /// Flexible metadata that can be string or object
+@@ -110,24 +109,19 @@ impl ContentBlock {
+   }
+ }
+ #[serde_with::skip_serializing_none]
+-#[derive(
+-  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+-)]
+-#[serde(default)]
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct TextBlock {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+   #[default(Some("text"))]
+   #[builder(skip = Some("text"))]
+   pub r#type: Option<&'static str>,
+-  #[validate(length(min = 1u64))]
+   pub text: String,
+   pub annotations: Option<Vec<Annotation>>,
+   pub recipes: Option<Vec<RecipeList>>,
+ }
+ #[serde_with::skip_serializing_none]
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct ImageBlock {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -139,53 +133,41 @@ pub struct ImageBlock {
+   pub alt_text: Option<String>,
+ }
+ #[serde_with::skip_serializing_none]
+-#[derive(
+-  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+-)]
+-#[serde(default)]
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct CodeBlock {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+   #[default(Some("code"))]
+   #[builder(skip = Some("code"))]
+   pub r#type: Option<&'static str>,
+-  #[validate(length(min = 1u64))]
+   pub code: String,
+   pub language: Option<String>,
+ }
+ #[serde_with::skip_serializing_none]
+-#[derive(
+-  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+-)]
+-#[serde(default)]
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct ToolUseBlock {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+   #[default(Some("tool_use"))]
+   #[builder(skip = Some("tool_use"))]
+   pub r#type: Option<&'static str>,
+-  #[validate(length(min = 1u64))]
+   pub id: String,
+-  #[validate(length(min = 1u64))]
+   pub name: String,
+   pub input: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[serde_with::skip_serializing_none]
+-#[derive(
+-  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+-)]
+-#[serde(default)]
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct ToolResultBlock {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+   #[default(Some("tool_result"))]
+   #[builder(skip = Some("tool_result"))]
+   pub r#type: Option<&'static str>,
+-  #[validate(length(min = 1u64))]
+   pub tool_use_id: String,
+   /// Tool result can be text or array of content blocks
+   pub content: ToolResultContent,
+-  pub iterations: Option<UsageCounters>,
++  #[serde(default, with = "serde_with::rust::double_option")]
++  pub iterations: Option<Option<UsageCounters>>,
+   pub is_error: Option<bool>,
+ }
+ /// Tool result can be text or array of content blocks
+@@ -312,7 +294,6 @@ impl ImageSource {
+ #[serde_with::serde_as]
+ #[serde_with::skip_serializing_none]
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct Base64ImageSource {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -327,14 +308,13 @@ pub struct Base64ImageSource {
+ #[derive(
+   Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+ )]
+-#[serde(default)]
+ pub struct UrlImageSource {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+   #[default(Some("url"))]
+   #[builder(skip = Some("url"))]
+   pub r#type: Option<&'static str>,
+-  #[validate(url, length(min = 1u64))]
++  #[validate(url)]
+   pub url: String,
+ }
+ #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+@@ -410,10 +390,7 @@ impl<'de> serde::Deserialize<'de> for Annotation {
+   }
+ }
+ #[serde_with::skip_serializing_none]
+-#[derive(
+-  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+-)]
+-#[serde(default)]
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct CitationAnnotation {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -422,7 +399,6 @@ pub struct CitationAnnotation {
+   pub r#type: Option<&'static str>,
+   pub start: i64,
+   pub end: i64,
+-  #[validate(length(min = 1u64))]
+   #[builder(name = build_value)]
+   pub build: String,
+ }
+@@ -430,7 +406,6 @@ pub struct CitationAnnotation {
+ #[derive(
+   Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+ )]
+-#[serde(default)]
+ pub struct LinkAnnotation {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -439,7 +414,7 @@ pub struct LinkAnnotation {
+   pub r#type: Option<&'static str>,
+   pub start: i64,
+   pub end: i64,
+-  #[validate(url, length(min = 1u64))]
++  #[validate(url)]
+   pub url: String,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+@@ -518,7 +493,6 @@ impl Event {
+   }
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct MessageStartEvent {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -528,7 +502,6 @@ pub struct MessageStartEvent {
+   pub message: Message,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct ContentBlockStartEvent {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -540,7 +513,6 @@ pub struct ContentBlockStartEvent {
+   pub content_block: Box<ContentBlock>,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct ContentBlockDeltaEvent {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -552,7 +524,6 @@ pub struct ContentBlockDeltaEvent {
+   pub delta: Box<Delta>,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct ContentBlockStopEvent {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -562,7 +533,6 @@ pub struct ContentBlockStopEvent {
+   pub index: i64,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct MessageStopEvent {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -571,7 +541,6 @@ pub struct MessageStopEvent {
+   pub r#type: Option<&'static str>,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct PingEvent {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -629,7 +598,6 @@ impl Delta {
+   }
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct TextDelta {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -639,7 +607,6 @@ pub struct TextDelta {
+   pub text: String,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct InputJsonDelta {
+   #[doc(hidden)]
+   #[serde(default, rename = "type", skip_deserializing)]
+@@ -815,14 +782,25 @@ pub enum Metadata {
+   Object(indexmap::IndexMap<String, serde_json::Value>),
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct ErrorResponse {
+   #[serde(rename = "type")]
++  #[serde(deserialize_with = "ErrorResponse::deserialize_const_type")]
+   #[default("error".to_string())]
+   #[builder(default = "error".to_string())]
+   pub r#type: String,
+   pub error: ErrorDetails,
+ }
++impl ErrorResponse {
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn deserialize_const_type<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
++    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
++    let expected: String = serde_json::from_str::<String>("\"error\"").map_err(serde::de::Error::custom)?;
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(value)
++  }
++}
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct ErrorDetails {
+   #[serde(rename = "type")]
+@@ -866,6 +844,7 @@ impl core::fmt::Display for ErrorType {
+ pub enum NullableStringOrNumber {
+   String(String),
+   Number(f64),
++  Null,
+ }
+ /// Test union that can be single item or array
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+@@ -885,11 +864,14 @@ impl ArrayOrSingle {
+ }
+ #[serde_with::skip_serializing_none]
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct RecipeList {
+-  pub ingredients: Option<indexmap::IndexMap<String, serde_json::Value>>,
+-  pub required: Option<Vec<String>>,
++  #[serde(default, with = "serde_with::rust::double_option")]
++  pub ingredients: Option<Option<indexmap::IndexMap<String, serde_json::Value>>>,
++  #[serde(default, with = "serde_with::rust::double_option")]
++  pub required: Option<Option<Vec<String>>>,
+   #[serde(rename = "type")]
++  #[serde(deserialize_with = "RecipeList::deserialize_const_type")]
++  #[serde(serialize_with = "RecipeList::serialize_const_type")]
+   #[default("object".to_string())]
+   #[builder(default = "object".to_string())]
+   pub r#type: String,
+@@ -897,6 +879,30 @@ pub struct RecipeList {
+   #[serde(flatten)]
+   pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
++impl RecipeList {
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn deserialize_const_type<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
++    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
++    let expected: String = serde_json::from_str::<String>("\"object\"").map_err(serde::de::Error::custom)?;
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(value)
++  }
++  #[allow(
++    clippy::ref_option,
++    clippy::trivially_copy_pass_by_ref,
++    reason = "serde field serializers receive a reference"
++  )]
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn serialize_const_type<S: serde::Serializer>(value: &String, serializer: S) -> Result<S::Ok, S::Error> {
++    let expected: String = serde_json::from_str::<String>("\"object\"").map_err(serde::ser::Error::custom)?;
++    if value != &expected {
++      return Err(serde::ser::Error::custom("value does not match schema const"));
++    }
++    serde::Serialize::serialize(value, serializer)
++  }
++}
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+ #[serde(untagged)]
+ pub enum UsageCounters {
+@@ -926,33 +932,82 @@ pub enum HypotheticalVersion {
+   Citation(CitationAnnotation),
+   Link(LinkAnnotation),
+ }
+-#[serde_with::skip_serializing_none]
+ #[derive(
+   Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+ )]
+-#[serde(default)]
+ pub struct UsageCounterA {
+   #[validate(range(min = 0i64))]
+   pub output_tokens: i64,
+   #[serde(rename = "type")]
+-  #[default(Some("counter_a".to_string()))]
+-  pub r#type: Option<String>,
++  #[serde(deserialize_with = "UsageCounterA::deserialize_const_type")]
++  #[serde(serialize_with = "UsageCounterA::serialize_const_type")]
++  #[default("counter_a".to_string())]
++  #[builder(default = "counter_a".to_string())]
++  pub r#type: String,
++}
++impl UsageCounterA {
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn deserialize_const_type<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
++    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
++    let expected: String = serde_json::from_str::<String>("\"counter_a\"").map_err(serde::de::Error::custom)?;
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(value)
++  }
++  #[allow(
++    clippy::ref_option,
++    clippy::trivially_copy_pass_by_ref,
++    reason = "serde field serializers receive a reference"
++  )]
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn serialize_const_type<S: serde::Serializer>(value: &String, serializer: S) -> Result<S::Ok, S::Error> {
++    let expected: String = serde_json::from_str::<String>("\"counter_a\"").map_err(serde::ser::Error::custom)?;
++    if value != &expected {
++      return Err(serde::ser::Error::custom("value does not match schema const"));
++    }
++    serde::Serialize::serialize(value, serializer)
++  }
+ }
+-#[serde_with::skip_serializing_none]
+ #[derive(
+   Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
+ )]
+-#[serde(default)]
+ pub struct UsageCounterB {
+   #[validate(range(min = 0i64))]
+   pub output_tokens: i64,
+   #[serde(rename = "type")]
+-  #[default(Some("counter_b".to_string()))]
+-  pub r#type: Option<String>,
++  #[serde(deserialize_with = "UsageCounterB::deserialize_const_type")]
++  #[serde(serialize_with = "UsageCounterB::serialize_const_type")]
++  #[default("counter_b".to_string())]
++  #[builder(default = "counter_b".to_string())]
++  pub r#type: String,
++}
++impl UsageCounterB {
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn deserialize_const_type<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
++    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
++    let expected: String = serde_json::from_str::<String>("\"counter_b\"").map_err(serde::de::Error::custom)?;
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(value)
++  }
++  #[allow(
++    clippy::ref_option,
++    clippy::trivially_copy_pass_by_ref,
++    reason = "serde field serializers receive a reference"
++  )]
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn serialize_const_type<S: serde::Serializer>(value: &String, serializer: S) -> Result<S::Ok, S::Error> {
++    let expected: String = serde_json::from_str::<String>("\"counter_b\"").map_err(serde::ser::Error::custom)?;
++    if value != &expected {
++      return Err(serde::ser::Error::custom("value does not match schema const"));
++    }
++    serde::Serialize::serialize(value, serializer)
++  }
+ }
+ #[serde_with::skip_serializing_none]
+ #[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default, bon::Builder)]
+-#[serde(default)]
+ pub struct ImageSize {
+   /// The width of the generated image.
+   #[validate(range(max = 14_142i64, exclusive_min = 0i64))]
+diff --git a/crates/oas3-gen/fixtures/wire_semantics.json b/crates/oas3-gen/fixtures/wire_semantics.json
+new file mode 100644
+index 0000000..f174417
+--- /dev/null
++++ b/crates/oas3-gen/fixtures/wire_semantics.json
+@@ -0,0 +1,376 @@
++{
++  "openapi": "3.1.0",
++  "info": {
++    "title": "Wire semantics",
++    "version": "1.0.0"
++  },
++  "paths": {
++    "/serialization": {
++      "post": {
++        "operationId": "serialization",
++        "requestBody": {
++          "required": true,
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/RequestOnly"
++              }
++            }
++          }
++        },
++        "responses": {
++          "200": {
++            "description": "response-only",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "type": "object",
++                  "required": [
++                    "accepted"
++                  ],
++                  "properties": {
++                    "accepted": {
++                      "type": "boolean"
++                    }
++                  }
++                }
++              }
++            }
++          }
++        }
++      }
++    },
++    "/items/{id}/": {
++      "patch": {
++        "operationId": "updateItem",
++        "parameters": [
++          {
++            "name": "id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string"
++            }
++          }
++        ],
++        "requestBody": {
++          "required": true,
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/WireDocument"
++              }
++            }
++          }
++        },
++        "responses": {
++          "200": {
++            "description": "Updated",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/WireDocument"
++                }
++              }
++            }
++          }
++        }
++      }
++    }
++  },
++  "components": {
++    "schemas": {
++      "WireDocument": {
++        "type": "object",
++        "required": [
++          "requiredNullable",
++          "requiredBytes"
++        ],
++        "properties": {
++          "requiredNullable": {
++            "type": [
++              "string",
++              "null"
++            ]
++          },
++          "requiredBytes": {
++            "type": [
++              "string",
++              "null"
++            ],
++            "format": "byte"
++          },
++          "optionalNullable": {
++            "type": [
++              "string",
++              "null"
++            ],
++            "minLength": 1
++          },
++          "optionalInteger": {
++            "type": [
++              "integer",
++              "null"
++            ],
++            "minimum": 1
++          },
++          "optionalBytes": {
++            "type": [
++              "string",
++              "null"
++            ],
++            "format": "byte"
++          },
++          "optionalUnion": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ]
++          },
++          "optionalObject": {
++            "type": [
++              "object",
++              "null"
++            ],
++            "required": [
++              "name"
++            ],
++            "properties": {
++              "name": {
++                "type": "string"
++              }
++            }
++          },
++          "optionalArray": {
++            "type": [
++              "array",
++              "null"
++            ],
++            "items": {
++              "type": "object",
++              "required": [
++                "count"
++              ],
++              "properties": {
++                "count": {
++                  "type": "integer"
++                }
++              }
++            }
++          },
++          "optionalEnum": {
++            "anyOf": [
++              {
++                "type": "string",
++                "enum": [
++                  "INIT",
++                  "BUILD"
++                ]
++              },
++              {
++                "type": "null"
++              }
++            ]
++          },
++          "optionalTypedEnum": {
++            "type": [
++              "string",
++              "null"
++            ],
++            "enum": [
++              "INIT",
++              "BUILD",
++              null
++            ]
++          }
++        }
++      },
++      "RequestOnly": {
++        "type": "object",
++        "required": [
++          "name"
++        ],
++        "properties": {
++          "name": {
++            "type": "string"
++          }
++        }
++      },
++      "DefaultsModel": {
++        "type": "object",
++        "required": [
++          "required",
++          "requiredDefault"
++        ],
++        "properties": {
++          "required": {
++            "type": "string"
++          },
++          "requiredDefault": {
++            "type": "integer",
++            "default": 1,
++            "minimum": 0
++          },
++          "optionalDefault": {
++            "type": "integer",
++            "default": 3
++          }
++        }
++      },
++      "ArbitraryJson": {
++        "anyOf": [
++          {
++            "type": "null"
++          },
++          {
++            "type": "string"
++          },
++          {
++            "type": "number"
++          },
++          {
++            "type": "boolean"
++          },
++          {
++            "type": "array",
++            "items": {
++              "$ref": "#/components/schemas/ArbitraryJson"
++            }
++          },
++          {
++            "type": "object",
++            "additionalProperties": {
++              "$ref": "#/components/schemas/ArbitraryJson"
++            }
++          }
++        ]
++      },
++      "TupleDocument": {
++        "type": "object",
++        "required": [
++          "headers",
++          "pair"
++        ],
++        "properties": {
++          "headers": {
++            "type": "array",
++            "items": {
++              "type": "array",
++              "prefixItems": [
++                {
++                  "type": "string"
++                },
++                {
++                  "type": "string"
++                }
++              ],
++              "minItems": 2,
++              "maxItems": 2,
++              "items": false
++            }
++          },
++          "pair": {
++            "type": "array",
++            "prefixItems": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "integer",
++                "format": "int64"
++              }
++            ],
++            "minItems": 2,
++            "items": false
++          },
++          "single": {
++            "type": [
++              "array",
++              "null"
++            ],
++            "prefixItems": [
++              {
++                "type": "boolean"
++              }
++            ],
++            "minItems": 1,
++            "items": false
++          }
++        }
++      },
++      "LiteralDocument": {
++        "type": "object",
++        "required": [
++          "kind",
++          "enabled",
++          "count"
++        ],
++        "properties": {
++          "kind": {
++            "type": "string",
++            "const": "ready"
++          },
++          "enabled": {
++            "type": "boolean",
++            "const": true
++          },
++          "count": {
++            "type": "number",
++            "const": 1
++          },
++          "optional": {
++            "type": "string",
++            "const": "fixed"
++          },
++          "nullable": {
++            "type": [
++              "string",
++              "null"
++            ],
++            "const": "fixed"
++          }
++        }
++      },
++      "LiteralUnion": {
++        "oneOf": [
++          {
++            "type": "object",
++            "required": [
++              "kind",
++              "id"
++            ],
++            "properties": {
++              "kind": {
++                "type": "string",
++                "const": "accepted"
++              },
++              "id": {
++                "type": "integer"
++              }
++            }
++          },
++          {
++            "type": "object",
++            "required": [
++              "kind",
++              "id"
++            ],
++            "properties": {
++              "kind": {
++                "type": "string",
++                "const": "rejected"
++              },
++              "id": {
++                "type": "integer"
++              }
++            }
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/crates/oas3-gen/fixtures/wire_semantics/client.rs b/crates/oas3-gen/fixtures/wire_semantics/client.rs
+new file mode 100644
+index 0000000..d4f8752
+--- /dev/null
++++ b/crates/oas3-gen/fixtures/wire_semantics/client.rs
+@@ -0,0 +1,111 @@
++//!
++//! AUTO-GENERATED CODE - DO NOT EDIT!
++//!
++//! Wire semantics
++//! Source: crates/oas3-gen/fixtures/wire_semantics.json
++//! Version: 1.0.0
++//! Generated by `oas3-gen v0.28.0`
++//!
++
++use anyhow::Context;
++use reqwest::{Client, Url};
++use validator::Validate;
++
++use super::types::*;
++pub const BASE_URL: &str = "https://example.com/";
++#[derive(Debug, Clone)]
++pub struct WireClient {
++  pub client: Client,
++  pub base_url: Url,
++}
++impl Default for WireClient {
++  fn default() -> Self {
++    Self::new()
++  }
++}
++impl WireClient {
++  /// Create a client using the OpenAPI `servers[0]` URL.
++  #[must_use]
++  #[track_caller]
++  pub fn new() -> Self {
++    Self {
++      client: Client::builder().build().expect("client"),
++      base_url: Url::parse(BASE_URL).expect("valid base url"),
++    }
++  }
++  /// Create a client with a custom base URL.
++  pub fn with_base_url(base_url: impl AsRef<str>) -> anyhow::Result<Self> {
++    Ok(Self {
++      client: Client::builder().build().context("building reqwest client")?,
++      base_url: Url::parse(base_url.as_ref()).context("parsing base url")?,
++    })
++  }
++  /// Create a client from an existing `reqwest::Client`.
++  pub fn with_client(base_url: impl AsRef<str>, client: Client) -> anyhow::Result<Self> {
++    let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
++    Ok(Self { client, base_url: url })
++  }
++  /// Uses the same typed requests while retaining the complete HTTP response.
++  pub fn raw(&self) -> WireClientRaw {
++    WireClientRaw {
++      client: self.client.clone(),
++      base_url: self.base_url.clone(),
++    }
++  }
++  /// * Path: `POST /serialization`
++  pub async fn serialization(&self, request: SerializationRequest) -> anyhow::Result<SerializationResponse> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push("serialization");
++    let response = self.client.post(url).json(&request.body).send().await?;
++    SerializationRequest::parse_response(response).await
++  }
++  /// * Path: `PATCH /items/{id}/`
++  pub async fn update_item(&self, request: UpdateItemRequest) -> anyhow::Result<UpdateItemResponse> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push("items")
++      .push(&request.path.id.clone())
++      .push("");
++    let response = self.client.patch(url).json(&request.body).send().await?;
++    UpdateItemRequest::parse_response(response).await
++  }
++}
++/// Typed operation transport without consuming response status, headers, or body.
++#[derive(Debug, Clone)]
++pub struct WireClientRaw {
++  client: Client,
++  base_url: Url,
++}
++impl WireClientRaw {
++  /// * Path: `POST /serialization`
++  pub async fn serialization(&self, request: SerializationRequest) -> anyhow::Result<reqwest::Response> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push("serialization");
++    let response = self.client.post(url).json(&request.body).send().await?;
++    Ok(response)
++  }
++  /// * Path: `PATCH /items/{id}/`
++  pub async fn update_item(&self, request: UpdateItemRequest) -> anyhow::Result<reqwest::Response> {
++    request.validate().context("parameter validation")?;
++    let mut url = self.base_url.clone();
++    url
++      .path_segments_mut()
++      .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
++      .push("items")
++      .push(&request.path.id.clone())
++      .push("");
++    let response = self.client.patch(url).json(&request.body).send().await?;
++    Ok(response)
++  }
++}
+diff --git a/crates/oas3-gen/fixtures/wire_semantics/mod.rs b/crates/oas3-gen/fixtures/wire_semantics/mod.rs
+new file mode 100644
+index 0000000..718765d
+--- /dev/null
++++ b/crates/oas3-gen/fixtures/wire_semantics/mod.rs
+@@ -0,0 +1,25 @@
++#![allow(clippy::default_trait_access)]
++#![allow(clippy::doc_markdown)]
++#![allow(clippy::enum_variant_names)]
++#![allow(clippy::large_enum_variant)]
++#![allow(clippy::missing_panics_doc)]
++#![allow(clippy::option_option)]
++#![allow(clippy::result_large_err)]
++#![allow(clippy::struct_field_names)]
++#![allow(clippy::too_many_lines)]
++#![allow(clippy::unnecessary_wraps)]
++#![allow(clippy::unused_self)]
++#![allow(dead_code)]
++//!
++//! AUTO-GENERATED CODE - DO NOT EDIT!
++//!
++//! Wire semantics
++//! Source: crates/oas3-gen/fixtures/wire_semantics.json
++//! Version: 1.0.0
++//! Generated by `oas3-gen v0.28.0`
++//!
++
++mod client;
++mod types;
++pub use client::*;
++pub use types::*;
+diff --git a/crates/oas3-gen/fixtures/wire_semantics/types.rs b/crates/oas3-gen/fixtures/wire_semantics/types.rs
+new file mode 100644
+index 0000000..74b6363
+--- /dev/null
++++ b/crates/oas3-gen/fixtures/wire_semantics/types.rs
+@@ -0,0 +1,427 @@
++//!
++//! AUTO-GENERATED CODE - DO NOT EDIT!
++//!
++//! Wire semantics
++//! Source: crates/oas3-gen/fixtures/wire_semantics.json
++//! Version: 1.0.0
++//! Generated by `oas3-gen v0.28.0`
++//!
++
++use serde::{Deserialize, Serialize};
++use validator::Validate;
++#[serde_with::serde_as]
++#[serde_with::skip_serializing_none]
++#[derive(
++  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
++)]
++pub struct WireDocument {
++  #[serde(deserialize_with = "Option::deserialize", rename = "requiredNullable")]
++  #[serialize_always]
++  pub required_nullable: Option<String>,
++  #[serde_as(as = "Option<serde_with::base64::Base64>", no_default)]
++  #[serde(rename = "requiredBytes")]
++  #[serialize_always]
++  pub required_bytes: Option<Vec<u8>>,
++  #[serde(default, with = "serde_with::rust::double_option", rename = "optionalNullable")]
++  #[validate(length(min = 1u64))]
++  pub optional_nullable: Option<Option<String>>,
++  #[serde(default, with = "serde_with::rust::double_option", rename = "optionalInteger")]
++  #[validate(range(min = 1i64))]
++  pub optional_integer: Option<Option<i64>>,
++  #[serde_as(as = "oas3_gen_support::Present<Option<serde_with::base64::Base64>>")]
++  #[serde(default, rename = "optionalBytes")]
++  pub optional_bytes: Option<Option<Vec<u8>>>,
++  #[serde(default, with = "serde_with::rust::double_option", rename = "optionalUnion")]
++  pub optional_union: Option<Option<String>>,
++  #[serde(default, with = "serde_with::rust::double_option", rename = "optionalObject")]
++  pub optional_object: Option<Option<RequestOnly>>,
++  #[serde(default, with = "serde_with::rust::double_option", rename = "optionalArray")]
++  pub optional_array: Option<Option<Vec<WireDocumentOptionalArray>>>,
++  #[serde(default, with = "serde_with::rust::double_option", rename = "optionalEnum")]
++  pub optional_enum: Option<Option<WireDocumentOptionalTypedEnum>>,
++  #[serde(default, with = "serde_with::rust::double_option", rename = "optionalTypedEnum")]
++  pub optional_typed_enum: Option<Option<WireDocumentOptionalTypedEnum>>,
++}
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
++pub struct RequestOnly {
++  pub name: String,
++}
++#[serde_with::skip_serializing_none]
++#[derive(
++  Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
++)]
++pub struct DefaultsModel {
++  pub required: String,
++  #[serde(rename = "requiredDefault")]
++  #[validate(range(min = 0i64))]
++  #[default(1i64)]
++  #[builder(default = 1i64)]
++  pub required_default: i64,
++  #[serde(rename = "optionalDefault")]
++  #[default(Some(3i64))]
++  pub optional_default: Option<i64>,
++}
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
++#[serde(untagged)]
++pub enum ArbitraryJson {
++  String(String),
++  Number(f64),
++  Boolean(bool),
++  Array(Vec<ArbitraryJson>),
++  Object(indexmap::IndexMap<String, Box<ArbitraryJson>>),
++  Null,
++}
++#[serde_with::skip_serializing_none]
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
++pub struct TupleDocument {
++  pub headers: Vec<(String, String)>,
++  pub pair: (String, i64),
++  #[serde(default, with = "serde_with::rust::double_option")]
++  pub single: Option<Option<(bool,)>>,
++}
++#[serde_with::skip_serializing_none]
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
++pub struct LiteralDocument {
++  #[serde(deserialize_with = "LiteralDocument::deserialize_const_kind")]
++  #[serde(serialize_with = "LiteralDocument::serialize_const_kind")]
++  #[default("ready".to_string())]
++  #[builder(default = "ready".to_string())]
++  pub kind: String,
++  #[serde(deserialize_with = "LiteralDocument::deserialize_const_enabled")]
++  #[serde(serialize_with = "LiteralDocument::serialize_const_enabled")]
++  #[default(true)]
++  #[builder(default = true)]
++  pub enabled: bool,
++  #[serde(deserialize_with = "LiteralDocument::deserialize_const_count")]
++  #[serde(serialize_with = "LiteralDocument::serialize_const_count")]
++  #[default(1f64)]
++  #[builder(default = 1f64)]
++  pub count: f64,
++  #[serde(deserialize_with = "LiteralDocument::deserialize_const_optional")]
++  #[serde(default)]
++  #[serde(serialize_with = "LiteralDocument::serialize_const_optional")]
++  #[default(Some("fixed".to_string()))]
++  pub optional: Option<String>,
++  #[serde(default)]
++  #[serde(deserialize_with = "LiteralDocument::deserialize_const_nullable")]
++  #[serde(serialize_with = "LiteralDocument::serialize_const_nullable")]
++  #[default(Some(Some("fixed".to_string())))]
++  pub nullable: Option<Option<String>>,
++}
++impl LiteralDocument {
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn deserialize_const_kind<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
++    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
++    let expected: String = serde_json::from_str::<String>("\"ready\"").map_err(serde::de::Error::custom)?;
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(value)
++  }
++  #[allow(
++    clippy::ref_option,
++    clippy::trivially_copy_pass_by_ref,
++    reason = "serde field serializers receive a reference"
++  )]
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn serialize_const_kind<S: serde::Serializer>(value: &String, serializer: S) -> Result<S::Ok, S::Error> {
++    let expected: String = serde_json::from_str::<String>("\"ready\"").map_err(serde::ser::Error::custom)?;
++    if value != &expected {
++      return Err(serde::ser::Error::custom("value does not match schema const"));
++    }
++    serde::Serialize::serialize(value, serializer)
++  }
++}
++impl LiteralDocument {
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn deserialize_const_enabled<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
++    let value = <bool as serde::Deserialize>::deserialize(deserializer)?;
++    let expected: bool = serde_json::from_str::<bool>("true").map_err(serde::de::Error::custom)?;
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(value)
++  }
++  #[allow(
++    clippy::ref_option,
++    clippy::trivially_copy_pass_by_ref,
++    reason = "serde field serializers receive a reference"
++  )]
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn serialize_const_enabled<S: serde::Serializer>(value: &bool, serializer: S) -> Result<S::Ok, S::Error> {
++    let expected: bool = serde_json::from_str::<bool>("true").map_err(serde::ser::Error::custom)?;
++    if value != &expected {
++      return Err(serde::ser::Error::custom("value does not match schema const"));
++    }
++    serde::Serialize::serialize(value, serializer)
++  }
++}
++impl LiteralDocument {
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn deserialize_const_count<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f64, D::Error> {
++    let value = <f64 as serde::Deserialize>::deserialize(deserializer)?;
++    let expected: f64 = serde_json::from_str::<f64>("1").map_err(serde::de::Error::custom)?;
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(value)
++  }
++  #[allow(
++    clippy::ref_option,
++    clippy::trivially_copy_pass_by_ref,
++    reason = "serde field serializers receive a reference"
++  )]
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn serialize_const_count<S: serde::Serializer>(value: &f64, serializer: S) -> Result<S::Ok, S::Error> {
++    let expected: f64 = serde_json::from_str::<f64>("1").map_err(serde::ser::Error::custom)?;
++    if value != &expected {
++      return Err(serde::ser::Error::custom("value does not match schema const"));
++    }
++    serde::Serialize::serialize(value, serializer)
++  }
++}
++impl LiteralDocument {
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn deserialize_const_optional<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
++    let value = <Option<String> as serde::Deserialize>::deserialize(deserializer)?;
++    let expected: Option<String> =
++      serde_json::from_str::<Option<String>>("\"fixed\"").map_err(serde::de::Error::custom)?;
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(value)
++  }
++  #[allow(
++    clippy::ref_option,
++    clippy::trivially_copy_pass_by_ref,
++    reason = "serde field serializers receive a reference"
++  )]
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn serialize_const_optional<S: serde::Serializer>(value: &Option<String>, serializer: S) -> Result<S::Ok, S::Error> {
++    let expected: Option<String> =
++      serde_json::from_str::<Option<String>>("\"fixed\"").map_err(serde::ser::Error::custom)?;
++    if value != &expected {
++      return Err(serde::ser::Error::custom("value does not match schema const"));
++    }
++    serde::Serialize::serialize(value, serializer)
++  }
++}
++impl LiteralDocument {
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn deserialize_const_nullable<'de, D: serde::Deserializer<'de>>(
++    deserializer: D,
++  ) -> Result<Option<Option<String>>, D::Error> {
++    let value = Some(<Option<String> as serde::Deserialize>::deserialize(deserializer)?);
++    let expected: Option<Option<String>> =
++      Some(serde_json::from_str::<Option<String>>("\"fixed\"").map_err(serde::de::Error::custom)?);
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(value)
++  }
++  #[allow(
++    clippy::ref_option,
++    clippy::trivially_copy_pass_by_ref,
++    reason = "serde field serializers receive a reference"
++  )]
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn serialize_const_nullable<S: serde::Serializer>(
++    value: &Option<Option<String>>,
++    serializer: S,
++  ) -> Result<S::Ok, S::Error> {
++    let expected: Option<Option<String>> =
++      Some(serde_json::from_str::<Option<String>>("\"fixed\"").map_err(serde::ser::Error::custom)?);
++    if value != &expected {
++      return Err(serde::ser::Error::custom("value does not match schema const"));
++    }
++    serde::Serialize::serialize(value, serializer)
++  }
++}
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
++#[serde(untagged)]
++pub enum LiteralUnion {
++  #[default]
++  Object(LiteralUnionObject),
++  Object2(LiteralUnionObject2),
++}
++impl LiteralUnion {
++  pub fn object(id: i64) -> Self {
++    Self::Object(LiteralUnionObject {
++      id,
++      ..Default::default()
++    })
++  }
++  pub fn object2(id: i64) -> Self {
++    Self::Object2(LiteralUnionObject2 {
++      id,
++      ..Default::default()
++    })
++  }
++}
++#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
++pub struct SerializationRequest {
++  pub body: RequestOnly,
++}
++#[bon::bon]
++impl SerializationRequest {
++  /// Create a new request with the given parameters.
++  #[builder]
++  pub fn new(body: RequestOnly) -> anyhow::Result<Self> {
++    let request = Self { body };
++    request.validate()?;
++    Ok(request)
++  }
++}
++impl SerializationRequest {
++  /// Parse the HTTP response into the response enum.
++  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<SerializationResponse> {
++    let status = req.status();
++    if status == http::StatusCode::OK {
++      let data = oas3_gen_support::Diagnostics::<AcceptedResponse>::json_with_diagnostics(req).await?;
++      return Ok(SerializationResponse::Ok(data));
++    }
++    let _ = req.bytes().await?;
++    Ok(SerializationResponse::Unknown)
++  }
++}
++/// Response types for serialization
++#[derive(Debug, Clone)]
++pub enum SerializationResponse {
++  ///200: response-only
++  Ok(AcceptedResponse),
++  ///default: Unknown response
++  Unknown,
++}
++#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
++pub struct UpdateItemRequestPath {
++  pub id: String,
++}
++#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
++pub struct UpdateItemRequest {
++  pub path: UpdateItemRequestPath,
++  #[validate(nested)]
++  pub body: WireDocument,
++}
++#[bon::bon]
++impl UpdateItemRequest {
++  /// Create a new request with the given parameters.
++  #[builder]
++  pub fn new(id: String, body: WireDocument) -> anyhow::Result<Self> {
++    let request = Self {
++      path: UpdateItemRequestPath { id },
++      body,
++    };
++    request.validate()?;
++    Ok(request)
++  }
++}
++impl UpdateItemRequest {
++  /// Parse the HTTP response into the response enum.
++  pub async fn parse_response(req: reqwest::Response) -> anyhow::Result<UpdateItemResponse> {
++    let status = req.status();
++    if status == http::StatusCode::OK {
++      let data = oas3_gen_support::Diagnostics::<WireDocument>::json_with_diagnostics(req).await?;
++      return Ok(UpdateItemResponse::Ok(data));
++    }
++    let _ = req.bytes().await?;
++    Ok(UpdateItemResponse::Unknown)
++  }
++}
++/// Response types for updateItem
++#[derive(Debug, Clone)]
++pub enum UpdateItemResponse {
++  ///200: Updated
++  Ok(WireDocument),
++  ///default: Unknown response
++  Unknown,
++}
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
++pub struct WireDocumentOptionalArray {
++  pub count: i64,
++}
++#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
++pub enum WireDocumentOptionalTypedEnum {
++  #[serde(rename = "INIT")]
++  #[default]
++  Init,
++  #[serde(rename = "BUILD")]
++  Build,
++}
++impl core::fmt::Display for WireDocumentOptionalTypedEnum {
++  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
++    match self {
++      Self::Init => write!(f, "INIT"),
++      Self::Build => write!(f, "BUILD"),
++    }
++  }
++}
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
++pub struct LiteralUnionObject {
++  #[serde(deserialize_with = "LiteralUnionObject::deserialize_const_kind")]
++  #[serde(serialize_with = "LiteralUnionObject::serialize_const_kind")]
++  #[default("accepted".to_string())]
++  #[builder(default = "accepted".to_string())]
++  pub kind: String,
++  pub id: i64,
++}
++impl LiteralUnionObject {
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn deserialize_const_kind<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
++    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
++    let expected: String = serde_json::from_str::<String>("\"accepted\"").map_err(serde::de::Error::custom)?;
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(value)
++  }
++  #[allow(
++    clippy::ref_option,
++    clippy::trivially_copy_pass_by_ref,
++    reason = "serde field serializers receive a reference"
++  )]
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn serialize_const_kind<S: serde::Serializer>(value: &String, serializer: S) -> Result<S::Ok, S::Error> {
++    let expected: String = serde_json::from_str::<String>("\"accepted\"").map_err(serde::ser::Error::custom)?;
++    if value != &expected {
++      return Err(serde::ser::Error::custom("value does not match schema const"));
++    }
++    serde::Serialize::serialize(value, serializer)
++  }
++}
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
++pub struct LiteralUnionObject2 {
++  #[serde(deserialize_with = "LiteralUnionObject2::deserialize_const_kind")]
++  #[serde(serialize_with = "LiteralUnionObject2::serialize_const_kind")]
++  #[default("rejected".to_string())]
++  #[builder(default = "rejected".to_string())]
++  pub kind: String,
++  pub id: i64,
++}
++impl LiteralUnionObject2 {
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn deserialize_const_kind<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
++    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
++    let expected: String = serde_json::from_str::<String>("\"rejected\"").map_err(serde::de::Error::custom)?;
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(value)
++  }
++  #[allow(
++    clippy::ref_option,
++    clippy::trivially_copy_pass_by_ref,
++    reason = "serde field serializers receive a reference"
++  )]
++  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++  fn serialize_const_kind<S: serde::Serializer>(value: &String, serializer: S) -> Result<S::Ok, S::Error> {
++    let expected: String = serde_json::from_str::<String>("\"rejected\"").map_err(serde::ser::Error::custom)?;
++    if value != &expected {
++      return Err(serde::ser::Error::custom("value does not match schema const"));
++    }
++    serde::Serialize::serialize(value, serializer)
++  }
++}
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
++pub struct AcceptedResponse {
++  pub accepted: bool,
++}
+diff --git a/crates/oas3-gen/src/generator/ast/fields.rs b/crates/oas3-gen/src/generator/ast/fields.rs
+index 895271a..cb2aae2 100644
+--- a/crates/oas3-gen/src/generator/ast/fields.rs
++++ b/crates/oas3-gen/src/generator/ast/fields.rs
+@@ -15,6 +15,9 @@ pub struct FieldDef {
+   #[builder(default)]
+   pub docs: Documentation,
+   pub rust_type: TypeRef,
++  /// Required nullable fields must serialize even when their value is null.
++  #[builder(default)]
++  pub required_nullable: bool,
+   #[builder(default)]
+   pub serde_attrs: BTreeSet<SerdeAttribute>,
+   pub serde_as_attr: Option<SerdeAsFieldAttr>,
+@@ -25,6 +28,8 @@ pub struct FieldDef {
+   #[builder(default)]
+   pub builder_attrs: Vec<BuilderAttribute>,
+   pub default_value: Option<serde_json::Value>,
++  /// JSON Schema literal constraint, independent of a default value.
++  pub const_value: Option<serde_json::Value>,
+   pub example_value: Option<serde_json::Value>,
+   #[builder(into)]
+   pub parameter_location: Option<ParameterLocation>,
+@@ -38,7 +43,7 @@ pub struct FieldDef {
+ impl FieldDef {
+   #[must_use]
+   pub fn is_required(&self) -> bool {
+-    self.default_value.is_none() && !self.rust_type.nullable
++    self.default_value.is_none() && (!self.rust_type.nullable || self.required_nullable)
+   }
+ 
+   #[must_use]
+@@ -125,7 +130,7 @@ pub trait FieldCollection: Send + Sync {
+ 
+   /// Derives struct-level serde attributes from field characteristics.
+   ///
+-  /// Appends `#[serde(default)]` to `base` when any field carries a default value.
++  /// Schema defaults are annotations and do not permit omission of required properties.
+   #[must_use]
+   fn struct_serde_attrs(&self, base: Vec<SerdeAttribute>) -> Vec<SerdeAttribute>;
+ 
+@@ -310,12 +315,7 @@ impl FieldCollection for [FieldDef] {
+   }
+ 
+   fn struct_serde_attrs(&self, base: Vec<SerdeAttribute>) -> Vec<SerdeAttribute> {
+-    let default_serde = self
+-      .iter()
+-      .any(|f| f.default_value.is_some())
+-      .then_some(SerdeAttribute::Default);
+-
+-    base.into_iter().chain(default_serde).collect()
++    base
+   }
+ 
+   fn struct_outer_attrs(&self) -> Vec<OuterAttr> {
+diff --git a/crates/oas3-gen/src/generator/ast/lints.rs b/crates/oas3-gen/src/generator/ast/lints.rs
+index 4c904e7..b38a987 100644
+--- a/crates/oas3-gen/src/generator/ast/lints.rs
++++ b/crates/oas3-gen/src/generator/ast/lints.rs
+@@ -10,6 +10,7 @@ pub enum LintAllow {
+   ClippyEnumVariantNames,
+   ClippyLargeEnumVariant,
+   ClippyMissingPanicsDoc,
++  ClippyOptionOption,
+   ClippyResultLargeErr,
+   ClippyStructFieldNames,
+   ClippyTooManyLines,
+@@ -26,6 +27,7 @@ impl ToTokens for LintAllow {
+       Self::ClippyEnumVariantNames => quote! { #![allow(clippy::enum_variant_names)] },
+       Self::ClippyLargeEnumVariant => quote! { #![allow(clippy::large_enum_variant)] },
+       Self::ClippyMissingPanicsDoc => quote! { #![allow(clippy::missing_panics_doc)] },
++      Self::ClippyOptionOption => quote! { #![allow(clippy::option_option)] },
+       Self::ClippyResultLargeErr => quote! { #![allow(clippy::result_large_err)] },
+       Self::ClippyStructFieldNames => quote! { #![allow(clippy::struct_field_names)] },
+       Self::ClippyTooManyLines => quote! { #![allow(clippy::too_many_lines)] },
+@@ -52,6 +54,7 @@ impl Default for GlobalLintsNode {
+         LintAllow::ClippyEnumVariantNames,
+         LintAllow::ClippyLargeEnumVariant,
+         LintAllow::ClippyMissingPanicsDoc,
++        LintAllow::ClippyOptionOption,
+         LintAllow::ClippyResultLargeErr,
+         LintAllow::ClippyStructFieldNames,
+         LintAllow::ClippyTooManyLines,
+diff --git a/crates/oas3-gen/src/generator/ast/outer_attrs.rs b/crates/oas3-gen/src/generator/ast/outer_attrs.rs
+index 1846edc..794244c 100644
+--- a/crates/oas3-gen/src/generator/ast/outer_attrs.rs
++++ b/crates/oas3-gen/src/generator/ast/outer_attrs.rs
+@@ -45,6 +45,10 @@ pub enum SerdeAsSeparator {
+ /// custom type overrides via the `--customize` CLI flag.
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub enum SerdeAsFieldAttr {
++  /// Preserves explicit null around an existing nullable field adapter.
++  OptionalNullable(Box<Self>),
++  /// Prevents serde_as from defaulting a required field on omission.
++  Required(Box<Self>),
+   SeparatedList {
+     separator: SerdeAsSeparator,
+     optional: bool,
+@@ -56,9 +60,11 @@ pub enum SerdeAsFieldAttr {
+   },
+ }
+ 
+-impl ToTokens for SerdeAsFieldAttr {
+-  fn to_tokens(&self, tokens: &mut TokenStream) {
+-    let type_str = match self {
++impl SerdeAsFieldAttr {
++  fn adapter_type(&self) -> String {
++    match self {
++      Self::OptionalNullable(inner) => format!("oas3_gen_support::Present<{}>", inner.adapter_type()),
++      Self::Required(inner) => inner.adapter_type(),
+       Self::SeparatedList { separator, optional } => {
+         if *optional {
+           format!("Option<{}>", separator.as_ref())
+@@ -80,8 +86,18 @@ impl ToTokens for SerdeAsFieldAttr {
+         }
+         result
+       }
++    }
++  }
++}
++
++impl ToTokens for SerdeAsFieldAttr {
++  fn to_tokens(&self, tokens: &mut TokenStream) {
++    let type_str = self.adapter_type();
++    let attr = if matches!(self, Self::Required(_)) {
++      quote! { #[serde_as(as = #type_str, no_default)] }
++    } else {
++      quote! { #[serde_as(as = #type_str)] }
+     };
+-    let attr = quote! { #[serde_as(as = #type_str)] };
+     tokens.extend(attr);
+   }
+ }
+diff --git a/crates/oas3-gen/src/generator/ast/parsed_path.rs b/crates/oas3-gen/src/generator/ast/parsed_path.rs
+index 258d498..a7b56aa 100644
+--- a/crates/oas3-gen/src/generator/ast/parsed_path.rs
++++ b/crates/oas3-gen/src/generator/ast/parsed_path.rs
+@@ -198,9 +198,10 @@ impl ParsedPath {
+       .collect::<HashMap<_, _>>();
+ 
+     let segments = path_part
+-      .trim_start_matches('/')
++      .strip_prefix('/')
++      .unwrap_or(path_part)
+       .split('/')
+-      .filter(|s| !s.is_empty())
++      .filter(|_| !matches!(path_part, "" | "/"))
+       .map(|segment| PathSegment::parse(segment, &param_map))
+       .collect::<Result<Vec<_>, _>>()?;
+ 
+diff --git a/crates/oas3-gen/src/generator/ast/serde_attrs.rs b/crates/oas3-gen/src/generator/ast/serde_attrs.rs
+index 99079e9..8e8fd5c 100644
+--- a/crates/oas3-gen/src/generator/ast/serde_attrs.rs
++++ b/crates/oas3-gen/src/generator/ast/serde_attrs.rs
+@@ -9,6 +9,8 @@ use quote::{ToTokens, quote};
+ pub enum SerdeAttribute {
+   Alias(String),
+   Default,
++  With(String),
++  DeserializeWith(String),
+   DenyUnknownFields,
+   Flatten,
+   Rename(String),
+@@ -22,6 +24,8 @@ impl ToTokens for SerdeAttribute {
+     let attr = match self {
+       Self::Alias(name) => quote! { alias = #name },
+       Self::Default => quote! { default },
++      Self::With(path) => quote! { with = #path },
++      Self::DeserializeWith(path) => quote! { deserialize_with = #path },
+       Self::DenyUnknownFields => quote! { deny_unknown_fields },
+       Self::Flatten => quote! { flatten },
+       Self::Rename(name) => quote! { rename = #name },
+diff --git a/crates/oas3-gen/src/generator/ast/types.rs b/crates/oas3-gen/src/generator/ast/types.rs
+index 46eaa44..a35566b 100644
+--- a/crates/oas3-gen/src/generator/ast/types.rs
++++ b/crates/oas3-gen/src/generator/ast/types.rs
+@@ -42,6 +42,9 @@ pub struct TypeRef {
+   pub base_type: RustPrimitive,
+   pub boxed: bool,
+   pub nullable: bool,
++  /// Keeps omission distinct from an explicit null for object properties.
++  #[builder(default)]
++  pub optional_nullable: bool,
+   pub is_array: bool,
+   pub unique_items: bool,
+ }
+@@ -52,6 +55,7 @@ impl TypeRef {
+       base_type: base_type.into(),
+       boxed: false,
+       nullable: false,
++      optional_nullable: false,
+       is_array: false,
+       unique_items: false,
+     }
+@@ -113,6 +117,9 @@ impl TypeRef {
+     if self.nullable {
+       result = format!("Option<{result}>");
+     }
++    if self.optional_nullable {
++      result = format!("Option<{result}>");
++    }
+ 
+     result
+   }
+@@ -160,6 +167,7 @@ impl TypeRef {
+       base_type: self.base_type.clone(),
+       boxed: self.boxed,
+       nullable: false,
++      optional_nullable: false,
+       is_array: false,
+       unique_items: false,
+     };
+@@ -485,6 +493,9 @@ impl ToTokens for TypeRef {
+     if self.nullable {
+       type_tokens = quote! { Option<#type_tokens> };
+     }
++    if self.optional_nullable {
++      type_tokens = quote! { Option<#type_tokens> };
++    }
+ 
+     type_tokens.to_tokens(tokens);
+   }
+diff --git a/crates/oas3-gen/src/generator/codegen/client.rs b/crates/oas3-gen/src/generator/codegen/client.rs
+index 42b10bd..f411055 100644
+--- a/crates/oas3-gen/src/generator/codegen/client.rs
++++ b/crates/oas3-gen/src/generator/codegen/client.rs
+@@ -538,6 +538,10 @@ impl ClientMethodFragment {
+   }
+ 
+   pub(crate) fn generate(&self) -> anyhow::Result<TokenStream> {
++    self.generate_with_parsing(true)
++  }
++
++  fn generate_with_parsing(&self, parse: bool) -> anyhow::Result<TokenStream> {
+     let Some(request_ident) = self.op.request_type.as_ref().map(|r| format_ident!("{r}")) else {
+       anyhow::bail!("operation `{}` is missing request type", self.op.operation_id);
+     };
+@@ -553,8 +557,16 @@ impl ClientMethodFragment {
+     let response_fragment = ResponseParsingFragment::new(&self.op);
+ 
+     let vis = self.visibility.to_tokens();
+-    let return_type = response_fragment.success_type();
+-    let parse_block = response_fragment.parse_body();
++    let return_type = if parse {
++      response_fragment.success_type()
++    } else {
++      quote! { reqwest::Response }
++    };
++    let parse_block = if parse {
++      response_fragment.parse_body()
++    } else {
++      quote! { Ok(response) }
++    };
+ 
+     let request_chain = if body_fragment.needs_conditional() {
+       quote! {
+@@ -728,6 +740,16 @@ impl ToTokens for ClientFragment {
+     let client_struct = ClientStructFragment::new(client_ident.clone(), self.visibility);
+     let default_impl = ClientDefaultImplFragment::new(client_ident.clone());
+     let constructors = ClientConstructorsFragment::new(self.visibility);
++    let raw_ident = format_ident!("{}Raw", client_ident);
++    let raw_methods = self
++      .operations
++      .iter()
++      .filter(|op| op.kind == OperationKind::Http)
++      .filter_map(|op| {
++        ClientMethodFragment::new(op.clone(), self.visibility)
++          .generate_with_parsing(false)
++          .ok()
++      });
+ 
+     quote! {
+       use anyhow::Context;
+@@ -744,8 +766,23 @@ impl ToTokens for ClientFragment {
+ 
+       impl #client_ident {
+         #constructors
++        /// Uses the same typed requests while retaining the complete HTTP response.
++        #vis fn raw(&self) -> #raw_ident {
++          #raw_ident { client: self.client.clone(), base_url: self.base_url.clone() }
++        }
+         #(#methods)*
+       }
++
++      /// Typed operation transport without consuming response status, headers, or body.
++      #[derive(Debug, Clone)]
++      #vis struct #raw_ident {
++        client: Client,
++        base_url: Url,
++      }
++
++      impl #raw_ident {
++        #(#raw_methods)*
++      }
+     }
+     .to_tokens(tokens);
+   }
+diff --git a/crates/oas3-gen/src/generator/codegen/coercion.rs b/crates/oas3-gen/src/generator/codegen/coercion.rs
+index 0582f65..6ee42b2 100644
+--- a/crates/oas3-gen/src/generator/codegen/coercion.rs
++++ b/crates/oas3-gen/src/generator/codegen/coercion.rs
+@@ -5,6 +5,14 @@ use serde_json::Value;
+ use crate::generator::ast::{RustPrimitive, TypeRef};
+ 
+ pub(crate) fn json_to_rust_literal(value: &serde_json::Value, rust_type: &TypeRef) -> TokenStream {
++  if rust_type.optional_nullable {
++    let inner_type = TypeRef {
++      optional_nullable: false,
++      ..rust_type.clone()
++    };
++    let inner = json_to_rust_literal(value, &inner_type);
++    return quote! { Some(#inner) };
++  }
+   if matches!(value, serde_json::Value::Null) {
+     return quote! { None };
+   }
+diff --git a/crates/oas3-gen/src/generator/codegen/literal_fields.rs b/crates/oas3-gen/src/generator/codegen/literal_fields.rs
+new file mode 100644
+index 0000000..e0dc5c1
+--- /dev/null
++++ b/crates/oas3-gen/src/generator/codegen/literal_fields.rs
+@@ -0,0 +1,112 @@
++use proc_macro2::TokenStream;
++use quote::{ToTokens, format_ident, quote};
++
++use crate::generator::ast::{DeriveTrait, DerivesProvider, FieldDef, StructDef, StructKind};
++
++pub(crate) struct LiteralFieldsFragment<'a>(pub &'a StructDef);
++
++impl ToTokens for LiteralFieldsFragment<'_> {
++  fn to_tokens(&self, tokens: &mut TokenStream) {
++    for field in &self.0.fields {
++      LiteralFieldFragment::new(field, self.0).to_tokens(tokens);
++    }
++  }
++}
++
++pub(crate) struct LiteralFieldFragment<'a> {
++  field: &'a FieldDef,
++  parent: &'a StructDef,
++}
++
++impl<'a> LiteralFieldFragment<'a> {
++  pub(crate) fn new(field: &'a FieldDef, parent: &'a StructDef) -> Self {
++    Self { field, parent }
++  }
++
++  fn active(&self) -> bool {
++    self.field.const_value.is_some()
++      && !self.field.doc_hidden
++      && !matches!(self.parent.kind, StructKind::HeaderParams | StructKind::PathParams)
++  }
++
++  fn method(&self, prefix: &str) -> proc_macro2::Ident {
++    format_ident!("{}_const_{}", prefix, self.field.name.as_str().trim_start_matches("r#"))
++  }
++
++  pub(crate) fn attributes(&self) -> TokenStream {
++    if !self.active() {
++      return TokenStream::new();
++    }
++    let mut tokens = TokenStream::new();
++    let derives = self.parent.derives();
++    if derives.contains(&DeriveTrait::Deserialize) {
++      let path = format!("{}::{}", self.parent.name, self.method("deserialize"));
++      tokens.extend(quote! { #[serde(deserialize_with = #path)] });
++      if self.field.rust_type.nullable && !self.field.required_nullable && !self.field.rust_type.optional_nullable {
++        tokens.extend(quote! { #[serde(default)] });
++      }
++    }
++    if derives.contains(&DeriveTrait::Serialize) {
++      let path = format!("{}::{}", self.parent.name, self.method("serialize"));
++      tokens.extend(quote! { #[serde(serialize_with = #path)] });
++    }
++    tokens
++  }
++}
++
++impl ToTokens for LiteralFieldFragment<'_> {
++  fn to_tokens(&self, tokens: &mut TokenStream) {
++    if !self.active() {
++      return;
++    }
++    let literal = self.field.const_value.as_ref().expect("literal field").to_string();
++    let parent = &self.parent.name;
++    let rust_type = &self.field.rust_type;
++    let mut inner_type = rust_type.clone();
++    inner_type.optional_nullable = false;
++    let expected = if rust_type.optional_nullable {
++      quote! { Some(serde_json::from_str::<#inner_type>(#literal).map_err(serde::de::Error::custom)?) }
++    } else {
++      quote! { serde_json::from_str::<#rust_type>(#literal).map_err(serde::de::Error::custom)? }
++    };
++    let read = if rust_type.optional_nullable {
++      quote! { Some(<#inner_type as serde::Deserialize>::deserialize(deserializer)?) }
++    } else {
++      quote! { <#rust_type as serde::Deserialize>::deserialize(deserializer)? }
++    };
++    let derives = self.parent.derives();
++    let mut methods = TokenStream::new();
++    if derives.contains(&DeriveTrait::Deserialize) {
++      let name = self.method("deserialize");
++      methods.extend(quote! {
++        #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++        fn #name<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<#rust_type, D::Error> {
++          let value = #read;
++          let expected: #rust_type = #expected;
++          if value != expected { return Err(serde::de::Error::custom("value does not match schema const")); }
++          Ok(value)
++        }
++      });
++    }
++    if derives.contains(&DeriveTrait::Serialize) {
++      let name = self.method("serialize");
++      let expected = if rust_type.optional_nullable {
++        quote! { Some(serde_json::from_str::<#inner_type>(#literal).map_err(serde::ser::Error::custom)?) }
++      } else {
++        quote! { serde_json::from_str::<#rust_type>(#literal).map_err(serde::ser::Error::custom)? }
++      };
++      methods.extend(quote! {
++        #[allow(clippy::ref_option, clippy::trivially_copy_pass_by_ref, reason = "serde field serializers receive a reference")]
++        #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
++        fn #name<S: serde::Serializer>(value: &#rust_type, serializer: S) -> Result<S::Ok, S::Error> {
++          let expected: #rust_type = #expected;
++          if value != &expected { return Err(serde::ser::Error::custom("value does not match schema const")); }
++          serde::Serialize::serialize(value, serializer)
++        }
++      });
++    }
++    if !methods.is_empty() {
++      tokens.extend(quote! { impl #parent { #methods } });
++    }
++  }
++}
+diff --git a/crates/oas3-gen/src/generator/codegen/mod.rs b/crates/oas3-gen/src/generator/codegen/mod.rs
+index fc94d09..26b9ebf 100644
+--- a/crates/oas3-gen/src/generator/codegen/mod.rs
++++ b/crates/oas3-gen/src/generator/codegen/mod.rs
+@@ -29,6 +29,7 @@ pub mod constants;
+ pub mod enums;
+ pub(crate) mod headers;
+ pub mod http;
++mod literal_fields;
+ pub mod methods;
+ pub mod mod_file;
+ pub mod server;
+diff --git a/crates/oas3-gen/src/generator/codegen/structs.rs b/crates/oas3-gen/src/generator/codegen/structs.rs
+index 31f869e..57817d9 100644
+--- a/crates/oas3-gen/src/generator/codegen/structs.rs
++++ b/crates/oas3-gen/src/generator/codegen/structs.rs
+@@ -10,6 +10,7 @@ use super::{
+     generate_field_default_attr, generate_outer_attrs, generate_serde_as_attr, generate_serde_attrs,
+     generate_validation_attrs,
+   },
++  literal_fields::{LiteralFieldFragment, LiteralFieldsFragment},
+ };
+ use crate::generator::{
+   ast::{
+@@ -55,6 +56,7 @@ impl ToTokens for StructFragment<'_> {
+     let definition = StructDefinitionFragment::new(self.def, self.regex_lookup, self.visibility);
+     let impl_block = StructImplBlockFragment::new(self.def, self.visibility);
+     let header_map = HeaderMapFragment::new(self.def);
++    let literal_fields = LiteralFieldsFragment(self.def);
+ 
+     tokens.extend(quote! {
+       #definition
+@@ -62,6 +64,7 @@ impl ToTokens for StructFragment<'_> {
+       #impl_block
+ 
+       #header_map
++      #literal_fields
+ 
+     });
+ 
+@@ -186,11 +189,14 @@ impl ToTokens for StructFieldFragment<'_> {
+       )
+     };
+ 
++    let literal = LiteralFieldFragment::new(self.field, self.struct_def);
++    let literal_attrs = literal.attributes();
+     let validation = self.validation_attrs();
+     let deprecated = generate_deprecated_attr(self.field.deprecated);
+     let default_val = generate_field_default_attr(self.field);
+     let builder_attr = generate_builder_attrs(&self.field.builder_attrs);
+     let doc_hidden = generate_doc_hidden_attr(self.field.doc_hidden);
++    let serialize_always = self.field.required_nullable.then(|| quote! { #[serialize_always] });
+ 
+     tokens.extend(quote! {
+       #doc_hidden
+@@ -198,6 +204,8 @@ impl ToTokens for StructFieldFragment<'_> {
+       #deprecated
+       #serde_as
+       #serde_attrs
++      #literal_attrs
++      #serialize_always
+       #validation
+       #default_val
+       #builder_attr
+diff --git a/crates/oas3-gen/src/generator/converter/fields.rs b/crates/oas3-gen/src/generator/converter/fields.rs
+index 446ba4c..8abefb6 100644
+--- a/crates/oas3-gen/src/generator/converter/fields.rs
++++ b/crates/oas3-gen/src/generator/converter/fields.rs
+@@ -180,36 +180,55 @@ impl FieldConverter {
+ 
+     let is_nullable_union = prop_schema.has_union() && prop_schema.has_null_variant(self.context.graph().spec());
+ 
+-    let should_be_optional = !is_required
+-      || prop_schema.default.is_some()
+-      || is_nullable_union
+-      || (is_discriminator && !discriminator_has_enum)
+-      || is_odata_optional;
++    let should_be_optional =
++      !is_required || is_nullable_union || (is_discriminator && !discriminator_has_enum) || is_odata_optional;
+ 
+-    let final_type = if should_be_optional && !resolved_type.nullable {
++    let schema_nullable = resolved_type.nullable || is_nullable_union;
++    let mut final_type = if should_be_optional && !resolved_type.nullable {
+       resolved_type.with_option()
+     } else {
+       resolved_type
+     };
++    final_type.optional_nullable = schema_nullable && !is_required;
+ 
+     let validation_attrs = Self::extract_all_validation(prop_name, is_required, prop_schema, &final_type);
+     let default_value = Self::extract_default_value(prop_schema);
+ 
+     let rust_field_name = FieldNameToken::from_raw(prop_name);
+-    let serde_attrs = if rust_field_name == prop_name {
++    let mut serde_attrs = if rust_field_name == prop_name {
+       BTreeSet::new()
+     } else {
+       BTreeSet::from([SerdeAttribute::Rename(prop_name.to_string())])
+     };
+ 
+-    let serde_as_attr = self.customization_for_type(&final_type, prop_schema);
++    let mut serde_as_attr = self.customization_for_type(&final_type, prop_schema);
++    if final_type.optional_nullable {
++      serde_attrs.insert(SerdeAttribute::Default);
++      if let Some(adapter) = serde_as_attr {
++        serde_as_attr = Some(SerdeAsFieldAttr::OptionalNullable(Box::new(adapter)));
++      } else {
++        serde_attrs.insert(SerdeAttribute::With("serde_with::rust::double_option".to_string()));
++      }
++    } else if schema_nullable && is_required {
++      if let Some(adapter) = serde_as_attr {
++        serde_as_attr = Some(SerdeAsFieldAttr::Required(Box::new(adapter)));
++      } else {
++        serde_attrs.insert(SerdeAttribute::DeserializeWith("Option::deserialize".to_string()));
++      }
++    }
++
++    if prop_schema.const_value.is_some() && !is_discriminator {
++      serde_attrs.retain(|attr| !matches!(attr, SerdeAttribute::With(_) | SerdeAttribute::DeserializeWith(_)));
++    }
+ 
+     let field = FieldDef::builder()
+       .schema(prop_schema)
+       .maybe_default_value(default_value)
++      .maybe_const_value(prop_schema.const_value.clone())
+       .maybe_serde_as_attr(serde_as_attr)
+       .name(rust_field_name)
+       .rust_type(final_type)
++      .required_nullable(schema_nullable && is_required)
+       .serde_attrs(serde_attrs)
+       .validation_attrs(validation_attrs)
+       .build();
+@@ -270,7 +289,7 @@ impl FieldConverter {
+   /// min/max values, and pattern constraints.
+   pub(crate) fn extract_all_validation(
+     prop_name: &str,
+-    is_required: bool,
++    _is_required: bool,
+     schema: &ObjectSchema,
+     type_ref: &TypeRef,
+   ) -> Vec<ValidationAttribute> {
+@@ -300,9 +319,7 @@ impl FieldConverter {
+       });
+ 
+       if !is_non_string_format {
+-        if let Some(length_attr) =
+-          ValidationAttribute::length(schema.min_length, schema.max_length, is_required && !type_ref.nullable)
+-        {
++        if let Some(length_attr) = ValidationAttribute::length(schema.min_length, schema.max_length, false) {
+           attrs.push(length_attr);
+         }
+ 
+@@ -324,6 +341,7 @@ impl FieldConverter {
+     }
+ 
+     if schema.is_array()
++      && schema.prefix_items.is_empty()
+       && let Some(length_attr) = ValidationAttribute::length(schema.min_items, schema.max_items, false)
+     {
+       attrs.push(length_attr);
+diff --git a/crates/oas3-gen/src/generator/converter/mod.rs b/crates/oas3-gen/src/generator/converter/mod.rs
+index 6fa1d88..fb35d1a 100644
+--- a/crates/oas3-gen/src/generator/converter/mod.rs
++++ b/crates/oas3-gen/src/generator/converter/mod.rs
+@@ -156,12 +156,24 @@ pub enum CollectionTypePolicy {
+   Hashed,
+ }
+ 
++/// Configuration for code generation.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
++pub enum SerdePolicy {
++  /// Generate only the serde direction needed by each operation.
++  #[default]
++  Directional,
++  /// Allow serializing responses and deserializing requests as well.
++  Bidirectional,
++}
++
+ /// Configuration for code generation.
+ ///
+ /// Uses typed enums instead of booleans to make intent explicit at call sites
+ /// and prevent invalid combinations.
+ #[derive(Debug, Clone, Default, bon::Builder)]
+ pub struct CodegenConfig {
++  #[builder(default)]
++  pub serde_policy: SerdePolicy,
+   #[builder(default)]
+   pub enum_case: EnumCasePolicy,
+   #[builder(default)]
+diff --git a/crates/oas3-gen/src/generator/converter/tests/enums.rs b/crates/oas3-gen/src/generator/converter/tests/enums.rs
+index ae5489a..8f855fa 100644
+--- a/crates/oas3-gen/src/generator/converter/tests/enums.rs
++++ b/crates/oas3-gen/src/generator/converter/tests/enums.rs
+@@ -1712,11 +1712,7 @@ fn test_anyof_with_nullable_map_type_generates_enum() -> anyhow::Result<()> {
+   );
+ 
+   let enum_def = enum_def.unwrap();
+-  assert_eq!(
+-    enum_def.variants.len(),
+-    1,
+-    "should have 1 variant (the map type, with null filtered out)"
+-  );
++  assert_eq!(enum_def.variants.len(), 2, "should preserve both map and null variants");
+ 
+   let variant = &enum_def.variants[0];
+   assert!(
+diff --git a/crates/oas3-gen/src/generator/converter/tests/metadata_tests.rs b/crates/oas3-gen/src/generator/converter/tests/metadata_tests.rs
+index 2d0f447..ebcb344 100644
+--- a/crates/oas3-gen/src/generator/converter/tests/metadata_tests.rs
++++ b/crates/oas3-gen/src/generator/converter/tests/metadata_tests.rs
+@@ -208,16 +208,10 @@ fn validation_length_skipped_for_non_string_types() {
+ }
+ 
+ #[test]
+-fn validation_required_string_implies_min_length() {
++fn validation_required_string_does_not_imply_min_length() {
+   let schema = string_schema();
+   let attrs = FieldConverter::extract_all_validation("test", true, &schema, &TypeRef::new(RustPrimitive::String));
+-  assert_eq!(
+-    attrs,
+-    vec![ValidationAttribute::Length {
+-      min: Some(1),
+-      max: None
+-    }]
+-  );
++  assert!(attrs.is_empty());
+ }
+ 
+ #[test]
+diff --git a/crates/oas3-gen/src/generator/converter/tests/structs.rs b/crates/oas3-gen/src/generator/converter/tests/structs.rs
+index 898c29b..b7588aa 100644
+--- a/crates/oas3-gen/src/generator/converter/tests/structs.rs
++++ b/crates/oas3-gen/src/generator/converter/tests/structs.rs
+@@ -253,7 +253,7 @@ fn discriminator_handler_detect_parent() {
+ }
+ 
+ #[test]
+-fn discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<()> {
++fn discriminated_child_defaults_do_not_default_the_entire_object() -> anyhow::Result<()> {
+   let loaf_schema = parse_schema(json!({
+     "type": "object",
+     "properties": {
+@@ -296,8 +296,8 @@ fn discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<()> {
+     .expect("Nugget struct should be present");
+ 
+   assert!(
+-    struct_def.serde_attrs.contains(&SerdeAttribute::Default),
+-    "Struct with default field values should have #[serde(default)]"
++    !struct_def.serde_attrs.contains(&SerdeAttribute::Default),
++    "A field default must not make the entire object optional"
+   );
+ 
+   Ok(())
+diff --git a/crates/oas3-gen/src/generator/converter/type_resolver.rs b/crates/oas3-gen/src/generator/converter/type_resolver.rs
+index d30ccef..1abf51a 100644
+--- a/crates/oas3-gen/src/generator/converter/type_resolver.rs
++++ b/crates/oas3-gen/src/generator/converter/type_resolver.rs
+@@ -3,7 +3,7 @@ use std::rc::Rc;
+ use anyhow::{Context, Result};
+ use inflections::Inflect;
+ use itertools::Itertools;
+-use oas3::spec::{ObjectSchema, Schema, SchemaType, Spec};
++use oas3::spec::{ObjectSchema, Schema, SchemaType, SchemaTypeSet, Spec};
+ 
+ use super::{
+   ConversionOutput,
+@@ -119,6 +119,28 @@ impl TypeResolver {
+       return self.resolve_ref(ref_path, schema);
+     }
+ 
++    if let Some(kind) = schema.non_null_type() {
++      let mut inner = schema.clone();
++      inner.schema_type = Some(SchemaTypeSet::Single(kind));
++      inner.enum_values.retain(|value| !value.is_null());
++      let mut resolved = self.resolve_property(parent_name, property_name, &inner, schema_ref)?;
++      resolved.result = resolved.result.with_option();
++      return Ok(resolved);
++    }
++
++    if let Some(variants) = schema.union_variants_with_kind()
++      && variants.len() == 2
++      && let Ok(variant) = variants
++        .iter()
++        .filter(|variant| !variant_is_nullable(variant, self.spec()))
++        .exactly_one()
++    {
++      let inner = self.resolve(variant)?;
++      let mut resolved = self.resolve_property(parent_name, property_name, &inner, variant)?;
++      resolved.result = resolved.result.with_option();
++      return Ok(resolved);
++    }
++
+     if schema.all_of.len() == 1
+       && let Some(type_ref) = self.try_union(&schema.all_of)?
+     {
+@@ -483,6 +505,9 @@ impl TypeResolver {
+       }
+       SchemaType::Null => Ok(TypeRef::new(RustPrimitive::Unit).with_option()),
+       SchemaType::Array => {
++        if !schema.prefix_items.is_empty() {
++          return self.closed_tuple_type(schema);
++        }
+         let item = self.array_item_type(schema)?;
+         let unique = self.preserve_unique_items(schema);
+         Ok(TypeRef::new(item.to_rust_type()).with_vec().with_unique_items(unique))
+@@ -490,6 +515,32 @@ impl TypeResolver {
+     }
+   }
+ 
++  /// Resolves fixed-length JSON Schema tuples without erasing positional item types.
++  fn closed_tuple_type(&self, schema: &ObjectSchema) -> Result<TypeRef> {
++    let length = u64::try_from(schema.prefix_items.len())?;
++    let closed =
++      schema.max_items == Some(length) || matches!(schema.items.as_deref(), Some(Schema::Boolean(value)) if !value.0);
++    anyhow::ensure!(
++      closed && schema.min_items == Some(length),
++      "prefixItems requires a fixed-length closed tuple; variable-length tuples are not supported"
++    );
++    let mut types = vec![];
++    for item in &schema.prefix_items {
++      let resolved = self.resolve(item)?;
++      let type_ref = if let Some(reference) = item.ref_path() {
++        self.resolve_ref(reference, &resolved)?.result
++      } else {
++        anyhow::ensure!(
++          !resolved.is_inline_object() && !resolved.has_enum_values() && !resolved.has_union(),
++          "tuple object, enum, and union items must use named schema references"
++        );
++        self.resolve_type(&resolved)?
++      };
++      types.push(type_ref.to_rust_type());
++    }
++    Ok(TypeRef::new(format!("({},)", types.join(", "))))
++  }
++
+   /// Returns the Rust primitive for a schema type, applying format overrides.
+   fn format_or_default(typ: SchemaType, schema: &ObjectSchema) -> RustPrimitive {
+     let default = match typ {
+diff --git a/crates/oas3-gen/src/generator/converter/unions.rs b/crates/oas3-gen/src/generator/converter/unions.rs
+index 1cfaafa..ff5fce0 100644
+--- a/crates/oas3-gen/src/generator/converter/unions.rs
++++ b/crates/oas3-gen/src/generator/converter/unions.rs
+@@ -14,7 +14,10 @@ use super::{
+ };
+ use crate::{
+   generator::{
+-    ast::{Documentation, EnumDefault, EnumDefaultValue, EnumVariantToken, RustPrimitive, RustType, VariantDef},
++    ast::{
++      Documentation, EnumDefault, EnumDefaultValue, EnumVariantToken, RustPrimitive, RustType, VariantContent,
++      VariantDef,
++    },
+     converter::{ConverterContext, discriminator::DiscriminatorConverter},
+     naming::{
+       identifiers::ensure_unique,
+@@ -187,6 +190,16 @@ impl UnionConverter {
+     )?;
+     let inline_types = inline_types.into_iter().flatten().collect::<Vec<_>>();
+ 
++    if has_null_variant {
++      let names = variants.iter().map(|variant| variant.name.to_string()).collect();
++      variants.push(
++        VariantDef::builder()
++          .name(EnumVariantToken::new(ensure_unique("Null", &names)))
++          .content(VariantContent::Unit)
++          .build(),
++      );
++    }
++
+     let default_mode = self.resolve_default_mode(schema, &mut variants, &inline_types, has_null_variant);
+ 
+     variants = strip_common_affixes(variants);
+@@ -297,9 +310,8 @@ impl UnionConverter {
+   ///
+   /// For each branch, resolves the schema reference, infers a variant name
+   /// (from `$ref` path, schema `title`, or positional fallback), and ensures
+-  /// uniqueness across all variants. Null schemas are skipped as they represent
+-  /// nullable wrappers rather than distinct variants; the returned flag records
+-  /// whether any null branch was seen.
++  /// uniqueness across all variants. Null schemas are tracked separately so the
++  /// assembled enum can retain a null variant, including recursive map/array uses.
+   fn collect_union_variant_specs(&self, variants_src: &[Schema]) -> anyhow::Result<(Vec<UnionVariantSpec>, bool)> {
+     let mut specs = vec![];
+     let mut seen_names = BTreeSet::new();
+diff --git a/crates/oas3-gen/src/generator/orchestrator.rs b/crates/oas3-gen/src/generator/orchestrator.rs
+index 4a183e3..c5602e2 100644
+--- a/crates/oas3-gen/src/generator/orchestrator.rs
++++ b/crates/oas3-gen/src/generator/orchestrator.rs
+@@ -68,10 +68,16 @@ impl Orchestrator {
+ 
+   pub fn generate(&self, mode: &dyn GenerationMode, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
+     let artifacts = self.collect_generation_artifacts();
++    let mut usage = artifacts.serde_recorder.into_usage_map();
++    if artifacts.config.serde_policy == crate::generator::converter::SerdePolicy::Bidirectional {
++      for flags in usage.values_mut() {
++        *flags = (true, true);
++      }
++    }
+     let postprocessed = PostprocessOutput::new(
+       artifacts.rust_types,
+       artifacts.operations_info,
+-      artifacts.serde_recorder.into_usage_map(),
++      usage,
+       artifacts.config.target,
+       artifacts.unique_headers,
+     );
+diff --git a/crates/oas3-gen/src/main.rs b/crates/oas3-gen/src/main.rs
+index 01bd907..5e98cbe 100644
+--- a/crates/oas3-gen/src/main.rs
++++ b/crates/oas3-gen/src/main.rs
+@@ -37,4 +37,5 @@ mod fixtures {
+   pub mod petstore;
+   pub mod petstore_server;
+   pub mod union_serde;
++  pub mod wire_semantics;
+ }
+diff --git a/crates/oas3-gen/src/tests/mod.rs b/crates/oas3-gen/src/tests/mod.rs
+index 7fdb29c..2dfc51d 100644
+--- a/crates/oas3-gen/src/tests/mod.rs
++++ b/crates/oas3-gen/src/tests/mod.rs
+@@ -10,3 +10,4 @@ mod petstore;
+ mod petstore_server;
+ #[cfg(test)]
+ mod union_serde;
++mod wire_semantics;
+diff --git a/crates/oas3-gen/src/tests/union_serde.rs b/crates/oas3-gen/src/tests/union_serde.rs
+index 044f841..a3488c5 100644
+--- a/crates/oas3-gen/src/tests/union_serde.rs
++++ b/crates/oas3-gen/src/tests/union_serde.rs
+@@ -200,7 +200,7 @@ mod tests {
+     assert!(
+       matches!(
+         tr.iterations,
+-        Some(UsageCounters::A(UsageCounterA { output_tokens: 2, .. }))
++        Some(Some(UsageCounters::A(UsageCounterA { output_tokens: 2, .. })))
+       ),
+       "iterations should parse as UsageCounters::A"
+     );
+@@ -215,7 +215,7 @@ mod tests {
+     let ContentBlock::ToolResult(tr) = block else {
+       panic!("Expected ToolResultBlock when iterations is null");
+     };
+-    assert!(tr.iterations.is_none(), "null iterations should deserialize to None");
++    assert!(matches!(tr.iterations, Some(None)), "explicit null must remain present");
+   }
+ 
+   #[test]
+@@ -228,14 +228,14 @@ mod tests {
+       "notes": {"difficulty": "easy"}
+     });
+     let recipe: RecipeList = serde_json::from_value(recipe_json).unwrap();
+-    let ingredients = recipe.ingredients.as_ref().unwrap();
++    let ingredients = recipe.ingredients.as_ref().unwrap().as_ref().unwrap();
+     assert_eq!(
+       ingredients.get("flour"),
+       Some(&json!("2 cups")),
+       "ingredients value mismatch"
+     );
+     assert_eq!(
+-      recipe.required.as_ref().unwrap(),
++      recipe.required.as_ref().unwrap().as_ref().unwrap(),
+       &vec!["flour".to_string()],
+       "required list mismatch"
+     );
+@@ -257,12 +257,12 @@ mod tests {
+     });
+     let nullable_recipe: RecipeList = serde_json::from_value(nullable_json).unwrap();
+     assert!(
+-      nullable_recipe.ingredients.is_none(),
+-      "null ingredients should deserialize to None"
++      matches!(nullable_recipe.ingredients, Some(None)),
++      "explicit null ingredients must remain present"
+     );
+     assert!(
+-      nullable_recipe.required.is_none(),
+-      "null required should deserialize to None"
++      matches!(nullable_recipe.required, Some(None)),
++      "explicit null required must remain present"
+     );
+   }
+ 
+diff --git a/crates/oas3-gen/src/tests/wire_semantics.rs b/crates/oas3-gen/src/tests/wire_semantics.rs
+new file mode 100644
+index 0000000..51e807a
+--- /dev/null
++++ b/crates/oas3-gen/src/tests/wire_semantics.rs
+@@ -0,0 +1,261 @@
++use std::{
++  io::{Read, Write},
++  net::TcpListener,
++};
++
++use serde_json::json;
++use validator::Validate as _;
++
++use crate::fixtures::wire_semantics::*;
++
++#[test]
++fn recursive_json_unions_preserve_nulls_in_arrays_and_maps() -> anyhow::Result<()> {
++  for value in [
++    json!(null),
++    json!([null, "text", true]),
++    json!({"nested": {"value": null}, "array": [null]}),
++  ] {
++    let parsed: ArbitraryJson = serde_json::from_value(value.clone())?;
++    assert_eq!(serde_json::to_value(parsed)?, value);
++  }
++  Ok(())
++}
++
++#[test]
++fn nullable_enums_keep_presence_and_reject_unknown_variants() -> anyhow::Result<()> {
++  for name in ["optionalEnum", "optionalTypedEnum"] {
++    for value in [json!(null), json!("INIT"), json!("BUILD")] {
++      let document = json!({"requiredNullable": null, "requiredBytes": null, name: value});
++      let parsed: WireDocument = serde_json::from_value(document.clone())?;
++      assert_eq!(serde_json::to_value(parsed)?, document);
++    }
++    assert!(
++      serde_json::from_value::<WireDocument>(json!({"requiredNullable": null, "requiredBytes": null, name: "UNKNOWN"}))
++        .is_err()
++    );
++  }
++  Ok(())
++}
++
++#[test]
++fn nullable_objects_and_arrays_keep_their_property_types() -> anyhow::Result<()> {
++  let valid = json!({
++    "requiredNullable": null, "requiredBytes": null,
++    "optionalObject": {"name": "nested"}, "optionalArray": [{"count": 2}]
++  });
++  let value: WireDocument = serde_json::from_value(valid.clone())?;
++  assert_eq!(value.optional_object.as_ref().unwrap().as_ref().unwrap().name, "nested");
++  assert_eq!(value.optional_array.as_ref().unwrap().as_ref().unwrap()[0].count, 2);
++  assert_eq!(serde_json::to_value(value)?, valid);
++  let invalid = json!({"requiredNullable": null, "requiredBytes": null, "optionalObject": {}});
++  assert!(serde_json::from_value::<WireDocument>(invalid).is_err());
++  Ok(())
++}
++
++#[test]
++fn bidirectional_models_support_cli_output_and_request_fixtures() -> anyhow::Result<()> {
++  let request: RequestOnly = serde_json::from_value(json!({"name": "example"}))?;
++  assert_eq!(request.name, "example");
++  assert_eq!(
++    serde_json::to_value(AcceptedResponse { accepted: true })?,
++    json!({"accepted": true})
++  );
++  Ok(())
++}
++
++#[test]
++fn defaults_do_not_make_required_properties_optional() -> anyhow::Result<()> {
++  for input in [json!({}), json!({"required": "present"}), json!({"requiredDefault": 2})] {
++    assert!(
++      serde_json::from_value::<DefaultsModel>(input.clone()).is_err(),
++      "accepted {input}"
++    );
++  }
++  let model: DefaultsModel = serde_json::from_value(json!({"required": "present", "requiredDefault": 2}))?;
++  assert_eq!(model.required_default, 2);
++  assert!(model.optional_default.is_none());
++  let empty: DefaultsModel = serde_json::from_value(json!({"required": "", "requiredDefault": 2}))?;
++  empty.validate()?;
++  Ok(())
++}
++
++#[test]
++fn nullable_properties_preserve_presence_and_validate_values() -> anyhow::Result<()> {
++  let nulls = json!({"requiredNullable": null, "requiredBytes": null});
++  let mut value: WireDocument = serde_json::from_value(nulls.clone())?;
++  assert_eq!(serde_json::to_value(&value)?, nulls);
++  assert!(value.optional_nullable.is_none());
++
++  value.optional_nullable = Some(None);
++  value.optional_integer = Some(None);
++  value.optional_bytes = Some(None);
++  value.optional_union = Some(None);
++  let explicit_nulls = json!({
++    "requiredNullable": null, "requiredBytes": null,
++    "optionalNullable": null, "optionalInteger": null, "optionalBytes": null, "optionalUnion": null
++  });
++  assert_eq!(serde_json::to_value(&value)?, explicit_nulls);
++  assert_eq!(serde_json::from_value::<WireDocument>(explicit_nulls)?, value);
++  value.validate()?;
++
++  value.optional_nullable = Some(Some("hello".to_string()));
++  value.optional_integer = Some(Some(2));
++  value.optional_bytes = Some(Some(vec![104, 105]));
++  value.required_bytes = Some(vec![104, 105]);
++  let encoded = serde_json::to_value(&value)?;
++  assert_eq!(encoded["optionalBytes"], "aGk=");
++  assert_eq!(encoded["requiredBytes"], "aGk=");
++  assert_eq!(encoded["optionalNullable"], "hello");
++  assert_eq!(serde_json::from_value::<WireDocument>(encoded)?, value);
++  value.validate()?;
++  value.optional_nullable = Some(Some(String::new()));
++  assert!(value.validate().is_err());
++  value.optional_nullable = None;
++  value.optional_integer = Some(Some(0));
++  assert!(value.validate().is_err());
++
++  for missing in [
++    json!({}),
++    json!({"requiredNullable": null}),
++    json!({"requiredBytes": null}),
++  ] {
++    assert!(
++      serde_json::from_value::<WireDocument>(missing.clone()).is_err(),
++      "accepted {missing}"
++    );
++  }
++  Ok(())
++}
++
++#[tokio::test]
++async fn raw_operations_preserve_http_evidence_and_encode_requests() -> anyhow::Result<()> {
++  for status in [200, 429, 599] {
++    let listener = TcpListener::bind("127.0.0.1:0")?;
++    let url = format!("http://{}", listener.local_addr()?);
++    let server = std::thread::spawn(move || -> std::io::Result<String> {
++      let (mut stream, _) = listener.accept()?;
++      stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
++      let mut bytes = Vec::new();
++      let mut buffer = [0; 4096];
++      loop {
++        let count = stream.read(&mut buffer)?;
++        if count == 0 {
++          break;
++        }
++        bytes.extend_from_slice(&buffer[..count]);
++        if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
++          let headers = String::from_utf8_lossy(&bytes[..end]).to_lowercase();
++          let length = headers
++            .lines()
++            .find_map(|line| line.strip_prefix("content-length: "))
++            .and_then(|value| value.parse::<usize>().ok())
++            .unwrap_or(0);
++          if bytes.len() >= end + 4 + length {
++            break;
++          }
++        }
++      }
++      write!(
++        stream,
++        "HTTP/1.1 {status} Test\r\nRetry-After: 17\r\nContent-Length: 9\r\nConnection: close\r\n\r\nnot-json!"
++      )?;
++      Ok(String::from_utf8_lossy(&bytes).into_owned())
++    });
++    let http = reqwest::Client::builder()
++      .timeout(std::time::Duration::from_secs(5))
++      .build()?;
++    let client = WireClient::with_client(url, http)?;
++    let request = UpdateItemRequest {
++      path: UpdateItemRequestPath {
++        id: "a/b ?#".to_string(),
++      },
++      body: WireDocument {
++        optional_nullable: Some(None),
++        ..Default::default()
++      },
++    };
++    let response = client.raw().update_item(request).await?;
++    assert_eq!(response.status().as_u16(), status);
++    assert_eq!(response.headers()["retry-after"], "17");
++    assert_eq!(response.bytes().await?.as_ref(), b"not-json!");
++    let received = server.join().expect("HTTP fixture thread")?;
++    let (headers, body) = received.split_once("\r\n\r\n").expect("HTTP request");
++    assert!(
++      headers.starts_with("PATCH /items/a%2Fb%20%3F%23/ HTTP/1.1\r\n"),
++      "{headers}"
++    );
++    assert_eq!(
++      serde_json::from_str::<serde_json::Value>(body)?,
++      json!({
++        "requiredNullable": null, "requiredBytes": null, "optionalNullable": null
++      })
++    );
++  }
++  Ok(())
++}
++
++#[test]
++fn tuples_preserve_positional_types_and_exact_lengths() -> anyhow::Result<()> {
++  let value = json!({"headers":[["accept","application/json"]], "pair":["count",3], "single":[true]});
++  let document: TupleDocument = serde_json::from_value(value.clone())?;
++  assert_eq!(
++    document.headers[0],
++    ("accept".to_owned(), "application/json".to_owned())
++  );
++  assert_eq!(document.pair, ("count".to_owned(), 3));
++  assert_eq!(serde_json::to_value(document)?, value);
++  for header in [
++    json!([]),
++    json!(["name"]),
++    json!(["name", "value", "extra"]),
++    json!(["name", 5]),
++  ] {
++    assert!(serde_json::from_value::<TupleDocument>(json!({"headers":[header],"pair":["count",3]})).is_err());
++  }
++  assert!(serde_json::from_value::<TupleDocument>(json!({"headers":[],"pair":[3,"count"]})).is_err());
++  Ok(())
++}
++
++#[test]
++fn literal_fields_enforce_values_and_presence_in_both_directions() -> anyhow::Result<()> {
++  let value = json!({"kind":"ready","enabled":true,"count":1});
++  let parsed: LiteralDocument = serde_json::from_value(value.clone())?;
++  assert_eq!(
++    serde_json::to_value(&parsed)?,
++    json!({"kind":"ready","enabled":true,"count":1.0})
++  );
++  for (field, invalid) in [
++    ("kind", json!("other")),
++    ("enabled", json!(false)),
++    ("count", json!(2)),
++    ("optional", json!(null)),
++    ("optional", json!("other")),
++    ("nullable", json!(null)),
++  ] {
++    let mut document = value.clone();
++    document[field] = invalid;
++    assert!(serde_json::from_value::<LiteralDocument>(document).is_err(), "{field}");
++  }
++  let mut missing = value.clone();
++  missing.as_object_mut().expect("object").remove("kind");
++  assert!(serde_json::from_value::<LiteralDocument>(missing).is_err());
++  let mut changed = parsed;
++  changed.kind = "other".to_string();
++  assert!(serde_json::to_value(changed).is_err());
++  let nullable: LiteralDocument =
++    serde_json::from_value(json!({"kind":"ready","enabled":true,"count":1,"nullable":"fixed"}))?;
++  assert_eq!(serde_json::to_value(nullable)?["nullable"], "fixed");
++  Ok(())
++}
++
++#[test]
++fn untagged_object_unions_use_literal_fields_to_select_the_variant() -> anyhow::Result<()> {
++  for kind in ["accepted", "rejected"] {
++    let value = json!({"kind":kind,"id":1});
++    let parsed: LiteralUnion = serde_json::from_value(value.clone())?;
++    assert_eq!(serde_json::to_value(parsed)?, value);
++  }
++  assert!(serde_json::from_value::<LiteralUnion>(json!({"kind":"unknown","id":1})).is_err());
++  assert!(serde_json::from_value::<LiteralUnion>(json!({"id":1})).is_err());
++  Ok(())
++}
+diff --git a/crates/oas3-gen/src/ui/cli.rs b/crates/oas3-gen/src/ui/cli.rs
+index c8a06fb..932a849 100644
+--- a/crates/oas3-gen/src/ui/cli.rs
++++ b/crates/oas3-gen/src/ui/cli.rs
+@@ -119,6 +119,9 @@ pub struct GenerateCommand {
+   /// Disable generation of ergonomic helper methods for enum variants
+   #[arg(long, default_value_t = false, display_order = 13, help_heading = "Code Generation")]
+   pub no_helpers: bool,
++  /// Generate both serde directions for schema models, including request and response models
++  #[arg(long, default_value_t = false, help_heading = "Code Generation")]
++  pub bidirectional_serde: bool,
+ 
+   /// Custom serde_as type overrides (format: type_name=custom::Path)
+   #[arg(
+diff --git a/crates/oas3-gen/src/ui/commands/generate.rs b/crates/oas3-gen/src/ui/commands/generate.rs
+index 3eb04f4..65ebd0d 100644
+--- a/crates/oas3-gen/src/ui/commands/generate.rs
++++ b/crates/oas3-gen/src/ui/commands/generate.rs
+@@ -43,6 +43,7 @@ pub struct GenerateConfig {
+   pub only_operations: Option<HashSet<String>>,
+   pub excluded_operations: Option<HashSet<String>>,
+   pub no_helpers: bool,
++  pub bidirectional_serde: bool,
+   pub enable_builders: bool,
+   pub no_ordered_collections: bool,
+   pub doc_format: bool,
+@@ -65,6 +66,11 @@ impl GenerateConfig {
+ 
+   fn create_orchestrator(&self, spec: oas3::Spec) -> Orchestrator {
+     let config = CodegenConfig::builder()
++      .serde_policy(if self.bidirectional_serde {
++        crate::generator::converter::SerdePolicy::Bidirectional
++      } else {
++        crate::generator::converter::SerdePolicy::Directional
++      })
+       .enum_case(if self.preserve_case_variants {
+         EnumCasePolicy::Preserve
+       } else {
+@@ -187,6 +193,7 @@ impl GenerateConfig {
+       enum_mode,
+       enum_layout,
+       no_helpers,
++      bidirectional_serde,
+       all_schemas,
+       all_headers,
+       enable_builders,
+@@ -229,6 +236,7 @@ impl GenerateConfig {
+       only_operations: only.map(|ops| ops.into_iter().collect()),
+       excluded_operations: exclude.map(|ops| ops.into_iter().collect()),
+       no_helpers,
++      bidirectional_serde,
+       enable_builders,
+       no_ordered_collections,
+       doc_format,
+diff --git a/crates/oas3-gen/src/utils/schema_ext.rs b/crates/oas3-gen/src/utils/schema_ext.rs
+index 0b2dfd8..a75e7b5 100644
+--- a/crates/oas3-gen/src/utils/schema_ext.rs
++++ b/crates/oas3-gen/src/utils/schema_ext.rs
+@@ -326,8 +326,8 @@ impl SchemaExt for ObjectSchema {
+ 
+   fn is_numeric(&self) -> bool {
+     matches!(
+-      &self.schema_type,
+-      Some(SchemaTypeSet::Single(SchemaType::Number | SchemaType::Integer))
++      self.single_type_or_nullable(),
++      Some(SchemaType::Number | SchemaType::Integer)
+     )
+   }
+ 

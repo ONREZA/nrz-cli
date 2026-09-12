@@ -68,10 +68,19 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
 
+      - name: Setup Node.js for host Git metadata
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: '24'
+
+      - name: Capture Git metadata from the selected checkout
+        run: node .dagger/scripts/capture-git-metadata.ts
+
       - name: Apply release metadata
         run: |
           dagger call prepare-release \
             --source=. \
+            --git-metadata=.nrz-release/git.json \
             --channel="$RELEASE_CHANNEL" \
             --version="$RELEASE_VERSION" \
             --bump="$RELEASE_BUMP" \
@@ -96,6 +105,13 @@ jobs:
             echo "prerelease=$PRERELEASE"
             echo "npm_dist_tag=$NPM_DIST_TAG"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Upload release provenance
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: nrz-release-provenance
+          path: .nrz-release/metadata.json
+          include-hidden-files: true
 
       - name: Commit and tag release
         run: |
@@ -153,7 +169,7 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
 
       - name: Strip binary (Linux/macOS)
         if: matrix.os != 'windows-latest'
@@ -191,6 +207,7 @@ jobs:
           dagger call package-release-artifacts \
             --binaries=./dist/raw \
             export --path ./dist/release --wipe=true
+          cp ./dist/raw/nrz-release-provenance/metadata.json ./dist/release/release-metadata.json
 
       - name: Attest release archives
         uses: actions/attest@v4

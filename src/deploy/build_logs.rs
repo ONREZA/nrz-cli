@@ -8,17 +8,21 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use chrono::{SecondsFormat, Utc};
 use regex::{Captures, Regex};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::api::{ApiClient, classify_api_retry, path_segment};
+use crate::api::{ApiClient, classify_api_retry};
 use crate::cli::DeployArgs;
 use crate::output;
 
 #[path = "build_log_completion.rs"]
 mod completion;
+mod wire;
+#[cfg(test)]
+mod wire_tests;
 pub(super) use completion::BuildLogOutcome;
+use nrz_api::FinishRequestBody as FinishRequest;
 
 const CREATE_TIMEOUT: Duration = Duration::from_secs(10);
 const MUTATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -124,40 +128,6 @@ pub(super) fn parse_env_toggle(value: Option<&str>) -> Option<bool> {
     }
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateSessionRequest<'a> {
-    id: &'a str,
-    project_id: &'a str,
-    deployment_id: &'a str,
-    attempt: u32,
-    producer_id: &'a str,
-    source: BuildLogSource,
-    cli_version: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    builder_version: Option<&'a str>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CreateSessionResponse {
-    session: SessionResponse,
-}
-
-#[derive(Debug, Deserialize)]
-struct WorkspacePolicyResponse {
-    enabled: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionResponse {
-    id: String,
-    shipping_policy: String,
-    next_seq: u32,
-    accepted_bytes: usize,
-}
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BuildLogEvent {
@@ -168,31 +138,6 @@ struct BuildLogEvent {
     phase: BuildLogPhase,
     message: String,
     origin: BuildLogOrigin,
-}
-
-#[derive(Debug, Serialize)]
-struct AppendEventsRequest<'a> {
-    events: &'a [BuildLogEvent],
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AppendEventsResponse {
-    next_seq: u32,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct FinishRequest {
-    status: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    message: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error_code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error_details: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    failure_phase: Option<BuildLogPhase>,
 }
 
 struct EmitterState {
@@ -466,11 +411,7 @@ impl BuildLogSession {
             return None;
         }
         if config.source == BuildLogSource::LocalCli {
-            let policy = tokio::time::timeout(
-                CREATE_TIMEOUT,
-                client.get::<WorkspacePolicyResponse>("/v1/build-log-sessions/workspace-policy"),
-            )
-            .await;
+            let policy = tokio::time::timeout(CREATE_TIMEOUT, client.build_log_policy()).await;
             match policy {
                 Ok(Ok(policy)) if policy.enabled => {}
                 Ok(Ok(_)) => return None,
@@ -501,21 +442,17 @@ impl BuildLogSession {
         let id = id.to_string();
         let producer_id = producer_id.to_string();
         let builder_version = std::env::var("NRZ_BUILDER_VERSION").ok();
-        let request = CreateSessionRequest {
+        let request = wire::SessionInput {
             id: &id,
             project_id,
             deployment_id,
             attempt: config.attempt,
             producer_id: &producer_id,
             source: config.source,
-            cli_version: env!("CARGO_PKG_VERSION"),
             builder_version: builder_version.as_deref(),
         };
-        let response = tokio::time::timeout(
-            CREATE_TIMEOUT,
-            client.post::<_, CreateSessionResponse>("/v1/build-log-sessions", &request),
-        )
-        .await;
+        let response =
+            tokio::time::timeout(CREATE_TIMEOUT, wire::create_session(client, request)).await;
         let response = match response {
             Ok(Ok(response)) => response,
             Ok(Err(error)) => {
@@ -538,7 +475,7 @@ impl BuildLogSession {
 
         let phase = Arc::new(Mutex::new(BuildLogPhase::Init));
         let dropped = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let shipping_enabled = response.session.shipping_policy == "ENABLED";
+        let shipping_enabled = response.shipping_enabled;
         if !shipping_enabled {
             return None;
         }
@@ -546,8 +483,8 @@ impl BuildLogSession {
             let (sender, receiver) = mpsc::channel(UPLOAD_CHANNEL_CAPACITY);
             let emitter = BuildLogEmitter {
                 state: Arc::new(Mutex::new(EmitterState {
-                    next_seq: response.session.next_seq,
-                    accepted_bytes: response.session.accepted_bytes,
+                    next_seq: response.next_seq,
+                    accepted_bytes: response.accepted_bytes,
                     sender: Some(sender),
                 })),
                 phase: Arc::clone(&phase),
@@ -559,11 +496,8 @@ impl BuildLogSession {
                     BuildLogSource::RemoteBuilder => BuildLogOrigin::Builder,
                 },
             };
-            let uploader = tokio::spawn(upload_events(
-                client.clone(),
-                response.session.id.clone(),
-                receiver,
-            ));
+            let uploader =
+                tokio::spawn(upload_events(client.clone(), response.id.clone(), receiver));
             emit_upload_notice(project_dir, workspace_id, project_id, config.source, json);
             emitter.debug(BuildLogPhase::Init, "Build log session started");
             (Some(emitter), Some(uploader))
@@ -572,7 +506,7 @@ impl BuildLogSession {
         };
 
         Some(Self {
-            id: response.session.id,
+            id: response.id,
             client: client.clone(),
             emitter,
             uploader,
@@ -620,8 +554,10 @@ impl BuildLogSession {
             );
         }
 
-        let path = format!("/v1/build-log-sessions/{}/finish", path_segment(&self.id));
-        if finish_session(&self.client, &path, &request).await.is_err() {
+        if finish_session(&self.client, &self.id, &request)
+            .await
+            .is_err()
+        {
             output::warn(
                 self.json,
                 "Could not finalize build-log session",
@@ -633,7 +569,7 @@ impl BuildLogSession {
 
 async fn finish_session(
     client: &ApiClient,
-    path: &str,
+    session_id: &str,
     request: &FinishRequest,
 ) -> anyhow::Result<()> {
     let started = Instant::now();
@@ -641,7 +577,7 @@ async fn finish_session(
     loop {
         let result = tokio::time::timeout(
             MUTATION_TIMEOUT,
-            client.post::<_, serde_json::Value>(path, request),
+            client.finish_build_log_session(session_id, request.clone()),
         )
         .await;
         match result {
@@ -722,15 +658,24 @@ async fn upload_batch(
     let started = Instant::now();
     let mut delay = UPLOAD_RETRY_INITIAL_DELAY;
     let expected_next_seq = events.last().map_or(0, |event| event.seq + 1);
-    let path = format!("/v1/build-log-sessions/{}/events", path_segment(session_id));
+    let request = nrz_api::EventRequestBody {
+        events: events
+            .iter()
+            .map(TryInto::try_into)
+            .collect::<anyhow::Result<_>>()?,
+    };
     loop {
         let response = tokio::time::timeout(
             UPLOAD_REQUEST_TIMEOUT,
-            client.post::<_, AppendEventsResponse>(&path, &AppendEventsRequest { events }),
+            client.append_build_log_events(session_id, request.clone()),
         )
         .await;
         match response {
-            Ok(Ok(response)) if response.next_seq == expected_next_seq => return Ok(()),
+            Ok(Ok(response))
+                if response.accepted && response.next_seq == i64::from(expected_next_seq) =>
+            {
+                return Ok(());
+            }
             Ok(Ok(response)) => anyhow::bail!(
                 "server acknowledged unexpected build-log cursor {} instead of {}",
                 response.next_seq,

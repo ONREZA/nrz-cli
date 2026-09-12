@@ -4,19 +4,6 @@ use axum::response::Redirect;
 use axum::routing::get;
 
 use super::client::{build_api_http_client, extract_api_error};
-use super::{path_segment, query_value};
-
-#[test]
-fn api_components_cannot_change_path_or_query_structure() {
-    assert_eq!(
-        path_segment("project/../other?admin=true#x"),
-        "project%2F%2E%2E%2Fother%3Fadmin%3Dtrue%23x"
-    );
-    assert_eq!(
-        query_value("project&admin=true#x"),
-        "project%26admin%3Dtrue%23x"
-    );
-}
 
 #[tokio::test]
 async fn api_client_does_not_follow_redirects() {
@@ -81,4 +68,56 @@ fn structured_api_error_accepts_numeric_code() {
 
     assert_eq!(structured.code, "1234");
     assert_eq!(structured.message, "invalid project");
+}
+
+#[test]
+fn unrecognized_server_errors_keep_retry_policy_and_body() {
+    for body in [
+        "upstream unavailable",
+        r#"{"message":"upstream unavailable"}"#,
+    ] {
+        let error = extract_api_error(StatusCode::BAD_GATEWAY, body, Some(17));
+        let structured = error.downcast_ref::<super::StructuredApiError>().unwrap();
+        assert_eq!(structured.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(structured.message, "upstream unavailable");
+        assert_eq!(
+            super::classify_api_retry(&error).unwrap().retry_after,
+            Some(std::time::Duration::from_secs(17))
+        );
+    }
+}
+
+#[tokio::test]
+async fn generated_user_operation_checks_the_response_contract() {
+    let response = serde_json::json!({
+        "id": "00000000-0000-0000-0000-000000000001", "email": "test@example.com",
+        "name": "Test", "username": null
+    });
+    let app = Router::new().route(
+        "/v1/user",
+        get(move |headers: HeaderMap| {
+            let response = response.clone();
+            async move {
+                assert_eq!(headers["x-api-key"], "test-key");
+                axum::Json(response)
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let mut headers = HeaderMap::new();
+    headers.insert("x-api-key", "test-key".parse().unwrap());
+    let client = super::ApiClient::with_http_client(
+        format!("http://{address}"),
+        build_api_http_client(headers).unwrap(),
+    )
+    .unwrap();
+    let user = client.user().await.unwrap();
+    assert_eq!(user.email, "test@example.com");
+    assert_eq!(user.name, "Test");
+    assert!(user.username.is_none());
+    server.abort();
 }
