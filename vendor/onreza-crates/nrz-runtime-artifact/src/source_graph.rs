@@ -11,9 +11,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION, RuntimeArtifactError, SOURCE_BUNDLE_MEDIA_TYPE,
-    VerifiedDependencyMaterializationManifest, VerifiedRuntimeArtifactGraph,
-    finalize_runtime_artifact_graph,
+    RUNTIME_ARTIFACT_GRAPH_MOUNT_BINDINGS_SCHEMA_VERSION, RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION,
+    RuntimeArtifactError, SOURCE_BUNDLE_MEDIA_TYPE, VerifiedDependencyMaterializationManifest,
+    VerifiedRuntimeArtifactGraph, finalize_runtime_artifact_graph,
 };
 
 const SOURCE_BUNDLE_ARTIFACT_KIND: &str = "SOURCE_BUNDLE_V1";
@@ -87,14 +87,49 @@ pub fn finalize_source_bundle_runtime_graph_with_dependencies(
         .map(|file| file.path.clone())
         .collect::<Vec<_>>();
     let dependency_layers = dependency_layers(manifest, dependencies)?;
-    let runtime_layers = runtime_layers(manifest, &dependency_layers)?;
-    let dependencies = dependencies
-        .iter()
-        .map(runtime_dependency)
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut runtime_layers = runtime_layers(manifest, &dependency_layers)?;
+    // Layer ownership is many-to-one: identical immutable dependencies may be
+    // shared by several compute layers. The graph stores each descriptor once.
+    let mut descriptors: Vec<Value> = Vec::new();
+    let mut identities: HashMap<&str, usize> = HashMap::new();
+    for dependency in dependencies {
+        let descriptor = runtime_dependency(dependency)?;
+        let id = dependency.manifest.materialization_id();
+        if let Some(&index) = identities.get(id) {
+            let mut existing = descriptors[index].clone();
+            existing["mountPoint"] = descriptor["mountPoint"].clone();
+            if existing != descriptor {
+                return Err(RuntimeArtifactError::Invariant(format!(
+                    "dependency materialization '{id}' has conflicting descriptors"
+                )));
+            }
+        } else {
+            identities.insert(id, descriptors.len());
+            descriptors.push(descriptor);
+        }
+    }
+    let explicit_bindings = descriptors.len() != dependencies.len();
+    if explicit_bindings {
+        for layer in &mut runtime_layers {
+            let name = layer["layerName"]
+                .as_str()
+                .expect("compiled runtime layer name");
+            let mounts = dependencies
+                .iter()
+                .filter(|dependency| dependency.layer_name == name)
+                .map(|dependency| {
+                    json!({
+                        "materializationId": dependency.manifest.materialization_id(),
+                        "mountPoint": dependency.mount_point,
+                    })
+                })
+                .collect::<Vec<_>>();
+            layer["dependencyBindings"] = json!({ "mounts": mounts });
+        }
+    }
     finalize_runtime_artifact_graph(
         json!({
-            "schemaVersion": RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION,
+            "schemaVersion": if explicit_bindings { RUNTIME_ARTIFACT_GRAPH_MOUNT_BINDINGS_SCHEMA_VERSION } else { RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION },
             "application": {
                 "artifactId": source_logical_artifact_id,
                 "manifestDigest": logical_manifest_sha256,
@@ -104,7 +139,7 @@ pub fn finalize_source_bundle_runtime_graph_with_dependencies(
                     "size": source_size_bytes
                 }
             },
-            "dependencies": dependencies,
+            "dependencies": descriptors,
             "runtimeLayers": runtime_layers
         }),
         &application_paths,
@@ -157,10 +192,11 @@ fn dependency_layers(
                 dependency.layer_name
             )));
         }
-        result
-            .entry(dependency.layer_name.to_string())
-            .or_default()
-            .push(dependency.manifest.materialization_id().to_string());
+        let ids = result.entry(dependency.layer_name.to_string()).or_default();
+        let id = dependency.manifest.materialization_id().to_string();
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
     }
 
     for layer_name in dependency_file_layers {
@@ -465,6 +501,71 @@ mod tests {
             graph.wire().runtime_layers[0].dependency_materialization_ids[0].as_str(),
             dependency_manifest.materialization_id()
         );
+    }
+
+    #[test]
+    fn identical_content_has_one_descriptor_and_exact_layer_mount_bindings() {
+        let dependency = dependency_manifest();
+        let mut manifest = manifest_with_dependency();
+        let mut other_layer = manifest.layers[0].clone();
+        other_layer.name = "worker".into();
+        manifest.layers.push(other_layer);
+        let mut other_file = manifest.files.last().unwrap().clone();
+        other_file.path = "worker/node_modules/pkg/index.js".into();
+        other_file.layer_name = Some("worker".into());
+        manifest.files.push(other_file);
+        let graph = finalize_source_bundle_runtime_graph_with_dependencies(
+            &"a".repeat(64),
+            &"b".repeat(64),
+            1024,
+            &manifest,
+            &[
+                SourceDependencyMaterialization {
+                    layer_name: "server",
+                    mount_point: "/output/node_modules",
+                    manifest: &dependency,
+                },
+                SourceDependencyMaterialization {
+                    layer_name: "server",
+                    mount_point: "/output/nested/node_modules",
+                    manifest: &dependency,
+                },
+                SourceDependencyMaterialization {
+                    layer_name: "worker",
+                    mount_point: "/output/worker/node_modules",
+                    manifest: &dependency,
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            graph.wire().schema_version.to_string(),
+            RUNTIME_ARTIFACT_GRAPH_MOUNT_BINDINGS_SCHEMA_VERSION
+        );
+        assert_eq!(graph.wire().dependencies.len(), 1);
+        let server = &graph.wire().runtime_layers[0];
+        let worker = &graph.wire().runtime_layers[1];
+        assert_eq!(server.dependency_materialization_ids.len(), 1);
+        assert_eq!(
+            graph.dependency_mounts(server.layer_name.as_str()).unwrap(),
+            vec![
+                (dependency.materialization_id(), "/output/node_modules"),
+                (
+                    dependency.materialization_id(),
+                    "/output/nested/node_modules"
+                ),
+            ]
+        );
+        assert_eq!(
+            graph.dependency_mounts(worker.layer_name.as_str()).unwrap(),
+            vec![(
+                dependency.materialization_id(),
+                "/output/worker/node_modules"
+            ),]
+        );
+        let value = serde_json::to_value(graph.wire()).unwrap();
+        let restored = crate::verify_runtime_artifact_graph(value, &["server.js".into()]).unwrap();
+        assert_eq!(restored.graph_digest(), graph.graph_digest());
     }
 
     #[test]

@@ -22,6 +22,8 @@ pub use source_graph::{
 };
 
 pub const RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION: &str = "RUNTIME_ARTIFACT_GRAPH_V2.0";
+pub const RUNTIME_ARTIFACT_GRAPH_MOUNT_BINDINGS_SCHEMA_VERSION: &str =
+    "RUNTIME_ARTIFACT_GRAPH_V2.1";
 pub const DEPENDENCY_MATERIALIZATION_V1_SCHEMA_VERSION: &str = "DEPENDENCY_MATERIALIZATION_V1.0";
 pub const DEPENDENCY_EROFS_MEDIA_TYPE: &str = "application/vnd.onreza.dependency.erofs.v1";
 pub const SOURCE_BUNDLE_MEDIA_TYPE: &str = "application/vnd.onreza.source-bundle.tar+zstd.v1";
@@ -59,6 +61,50 @@ impl VerifiedRuntimeArtifactGraph {
     #[must_use]
     pub fn graph_digest(&self) -> &str {
         self.wire.graph_digest.as_str()
+    }
+
+    /// Resolve only this layer's verified bindings while sharing content identity.
+    pub fn dependency_mounts(
+        &self,
+        layer_name: &str,
+    ) -> Result<Vec<(&str, &str)>, RuntimeArtifactError> {
+        let layer = self
+            .wire
+            .runtime_layers
+            .iter()
+            .find(|layer| layer.layer_name.as_str() == layer_name)
+            .ok_or_else(|| {
+                RuntimeArtifactError::Invariant(format!("unknown runtime layer '{layer_name}'"))
+            })?;
+        if let Some(bindings) = &layer.dependency_bindings {
+            return Ok(bindings
+                .mounts
+                .iter()
+                .map(|binding| {
+                    (
+                        binding.materialization_id.as_str(),
+                        binding.mount_point.as_str(),
+                    )
+                })
+                .collect());
+        }
+        // DEPRECATED: immutable pre-binding graphs have one mount per materialization.
+        Ok(layer
+            .dependency_materialization_ids
+            .iter()
+            .map(|id| {
+                let dependency = self
+                    .wire
+                    .dependencies
+                    .iter()
+                    .find(|dependency| dependency.materialization_id.as_str() == id.as_str())
+                    .expect("verified layer dependency exists");
+                (
+                    dependency.materialization_id.as_str(),
+                    dependency.mount_point.as_str(),
+                )
+            })
+            .collect())
     }
 }
 
@@ -156,11 +202,18 @@ pub fn verify_runtime_artifact_graph(
     let wire: RuntimeArtifactGraphV2Wire = serde_json::from_value(value)?;
     let mut normalized_value = serde_json::to_value(&wire)?;
 
-    require_equal(
-        "schemaVersion",
-        &wire.schema_version,
-        RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION,
-    )?;
+    let schema_version = wire.schema_version.to_string();
+    let explicit_bindings = schema_version == RUNTIME_ARTIFACT_GRAPH_MOUNT_BINDINGS_SCHEMA_VERSION;
+    if schema_version != RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION && !explicit_bindings {
+        return invariant("unsupported runtime artifact graph schema version");
+    }
+    if wire
+        .runtime_layers
+        .iter()
+        .any(|layer| layer.dependency_bindings.is_some() != explicit_bindings)
+    {
+        return invariant("runtime mount bindings must match the graph schema version");
+    }
     require_equal(
         "application.blobDescriptor.mediaType",
         &wire.application.blob_descriptor.media_type,
@@ -211,7 +264,11 @@ pub fn verify_runtime_artifact_graph(
         )?;
     }
 
-    let mounts = dependencies.values().copied().collect::<Vec<_>>();
+    let mut mounts = if explicit_bindings {
+        Vec::new()
+    } else {
+        dependencies.values().copied().collect::<Vec<_>>()
+    };
     for (index, left) in mounts.iter().enumerate() {
         for right in mounts.iter().skip(index + 1) {
             if paths_overlap(left, right) {
@@ -224,6 +281,7 @@ pub fn verify_runtime_artifact_graph(
 
     let mut layer_names = HashSet::new();
     let mut referenced_dependencies = HashSet::new();
+    let mut referenced_mounts = HashSet::new();
     for layer in &wire.runtime_layers {
         let layer_name = layer.layer_name.as_str();
         if !layer_names.insert(layer_name) {
@@ -287,6 +345,31 @@ pub fn verify_runtime_artifact_graph(
             }
             referenced_dependencies.insert(materialization_id);
         }
+        if let Some(bindings) = &layer.dependency_bindings {
+            if bindings.mounts.len() > MAX_LAYER_DEPENDENCIES {
+                return invariant("dependency mount bindings exceed the per-layer limit");
+            }
+            let mut bound = HashSet::new();
+            for (index, binding) in bindings.mounts.iter().enumerate() {
+                let id = binding.materialization_id.as_str();
+                if !layer_dependencies.contains(id) {
+                    return invariant("mount binding references an unowned dependency");
+                }
+                let mount = binding.mount_point.as_str();
+                verify_mount_point(mount)?;
+                for prior in bindings.mounts.iter().take(index) {
+                    if paths_overlap(prior.mount_point.as_str(), mount) {
+                        return invariant("dependency mount bindings overlap");
+                    }
+                }
+                bound.insert(id);
+                referenced_mounts.insert((id, mount));
+                mounts.push(mount);
+            }
+            if bound != layer_dependencies {
+                return invariant("mount bindings do not cover every layer dependency");
+            }
+        }
     }
 
     for materialization_id in dependencies.keys() {
@@ -295,9 +378,14 @@ pub fn verify_runtime_artifact_graph(
                 "dependency '{materialization_id}' is not referenced by a runtime layer"
             ));
         }
+        if explicit_bindings
+            && !referenced_mounts.contains(&(*materialization_id, dependencies[materialization_id]))
+        {
+            return invariant("dependency descriptor mount must represent an actual binding");
+        }
     }
 
-    verify_application_ownership(&dependencies, application_paths)?;
+    verify_application_ownership(&mounts, application_paths)?;
 
     let digest_object = normalized_value
         .as_object_mut()
@@ -330,19 +418,15 @@ pub fn finalize_runtime_artifact_graph(
 }
 
 fn verify_application_ownership(
-    dependencies: &HashMap<&str, &str>,
+    mounts: &[&str],
     application_paths: &[String],
 ) -> Result<(), RuntimeArtifactError> {
     for path in application_paths {
         verify_safe_relative_path("application path", path)?;
         let normalized = if path == "." { "" } else { path.as_str() };
-        for mount_point in dependencies.values() {
+        for mount_point in mounts {
             let mount_path = &mount_point["/output/".len()..];
-            if normalized == mount_path
-                || normalized
-                    .strip_prefix(mount_path)
-                    .is_some_and(|suffix| suffix.starts_with('/'))
-            {
+            if paths_overlap(normalized, mount_path) {
                 return invariant(format!(
                     "application path '{path}' collides with dependency mount '{mount_point}'"
                 ));
