@@ -48,6 +48,7 @@ function bunContainer(source: Directory) {
 
 function bunDevContainer(source: Directory) {
   return bunContainer(source)
+    .withExec(["sh", "-ceu", "apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*"])
     .withMountedCache("/root/.bun/install/cache", dag.cacheVolume("nrz-bun-install-cache"))
     .withExec(["sh", "-ceu", "cd .dagger && bun install --frozen-lockfile"]);
 }
