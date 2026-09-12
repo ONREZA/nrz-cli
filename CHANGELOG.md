@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.41.0] - 2026-09-12
+
+### ✨ Features
+
+- **cli:** adopt public runtime and API SDK ([f7e656a](https://github.com/ONREZA/nrz-cli/commit/f7e656ac2acf8255e1e729ebf443b5f3885613b9))
+
 ## [0.40.3] - 2026-09-12
 
 ### 🐛 Bug Fixes
