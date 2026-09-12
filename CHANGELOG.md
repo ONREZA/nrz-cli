@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.40.3] - 2026-09-12
+
+### 🐛 Bug Fixes
+
+- **deploy:** sync shared dependency bindings ([f4a8276](https://github.com/ONREZA/nrz-cli/commit/f4a82769928e0666e2a0f5caf4c6c8443bc21dd2))
+
 ## [0.40.2] - 2026-09-11
 
 ### 🐛 Bug Fixes
