@@ -27,6 +27,26 @@ directory, then run:
 cargo test --locked --bin nrz real_sharp_loads_and_encodes_an_image_from_the_pruned_source_archive -- --ignored
 ```
 
+Bun PROCESS applications use the same dependency packaging as Node applications.
+An external dynamic import in `dist/server.mjs` therefore resolves from the
+published `node_modules`, including native addons and their transitive libraries.
+The compute runtime disables Bun's implicit npm installer; missing artifact
+dependencies must not be downloaded during a customer request.
+
+To qualify the complete Bun artifact path, prepare `NRZ_NATIVE_FIXTURE_ROOT`
+with Bun package metadata, installed sharp and a `dist/server.mjs` that performs
+native image processing and prints `SHARP_NATIVE_OK 768` after producing a
+16x16 RGB buffer. Then run:
+
+```sh
+cargo test --locked --bin nrz bun_sharp_encodes_from_relocated_source_archive -- --ignored
+```
+
+This test resolves the build output, packages and extracts the source archive,
+and executes its declared entrypoint with `bun --no-install` and a ten-second
+deadline. It rejects the WASM fallback when the fixture checks
+`sharp.versions.emscripten` before processing the image.
+
 The test builds and extracts a source archive, then runs `server.js` with Node
 and requires successful image encoding. The fixture must print
 `sharp-runtime-ok` only after that operation. New CLI releases require a Builder

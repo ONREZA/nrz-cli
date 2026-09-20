@@ -3,97 +3,101 @@ use super::*;
 #[cfg(unix)]
 #[test]
 fn node_process_runtime_artifact_prefers_workspace_root_for_hoisted_app_symlink() {
-    let workspace = tempdir().unwrap();
-    let app = workspace.path().join("apps/api");
-    fs::create_dir_all(app.join("dist/src")).unwrap();
-    fs::write(
-        app.join("package.json"),
-        r#"{
-            "dependencies": {
-                "@nestjs/core": "10.0.0"
-            }
-        }"#,
-    )
-    .unwrap();
-    fs::write(app.join("dist/src/main.js"), "require('@nestjs/core')").unwrap();
-
-    fs::create_dir_all(workspace.path().join("node_modules/@nestjs/core")).unwrap();
-    fs::write(
-        workspace.path().join("node_modules/@nestjs/core/index.js"),
-        "module.exports = {}",
-    )
-    .unwrap();
-    fs::create_dir_all(app.join("node_modules/@nestjs")).unwrap();
-    std::os::unix::fs::symlink(
-        "../../../../node_modules/@nestjs/core",
-        app.join("node_modules/@nestjs/core"),
-    )
-    .unwrap();
-
-    let detection = crate::detect::detect_with_framework_override(&app, None);
-    assert_eq!(detection.framework, "nestjs");
-    let manifest = build_manifest::generate_compute_manifest("src/main.js");
-
-    let artifact = resolve_runtime_artifact(
-        workspace.path(),
-        &app,
-        app.join("dist"),
-        manifest,
-        &detection,
-        true,
-    )
-    .unwrap();
-
-    assert_eq!(artifact.root_dir, workspace.path());
-    let compute_layer = artifact
-        .manifest
-        .layers
-        .iter()
-        .find(|layer| layer.target == build_manifest::LayerTarget::Compute)
+    for runtime_type in [RuntimeType::Node, RuntimeType::Bun] {
+        let workspace = tempdir().unwrap();
+        let app = workspace.path().join("apps/api");
+        fs::create_dir_all(app.join("dist/src")).unwrap();
+        fs::write(
+            app.join("package.json"),
+            r#"{
+                "dependencies": {
+                    "@nestjs/core": "10.0.0"
+                }
+            }"#,
+        )
         .unwrap();
-    assert_eq!(compute_layer.directory, ".");
-    assert_eq!(
-        compute_layer.entry.as_deref(),
-        Some("apps/api/dist/src/main.js")
-    );
+        fs::write(app.join("dist/src/main.js"), "require('@nestjs/core')").unwrap();
 
-    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
-    let breakdown = artifact.scan.file_breakdown(&scanned);
-    assert_eq!(breakdown.total, scanned.len());
-    assert!(breakdown.build_output > 0);
-    assert!(breakdown.node_modules > 0);
-    assert!(breakdown.metadata > 0);
-    assert_eq!(breakdown.workspace_packages, 0);
-    let structured = serde_json::to_string(&breakdown).unwrap();
-    assert!(!structured.contains(&workspace.path().display().to_string()));
-    let paths = scanned
-        .iter()
-        .map(|file| file.path.as_str())
-        .collect::<Vec<_>>();
-    assert!(paths.contains(&"apps/api/node_modules/@nestjs/core"));
-    assert!(paths.contains(&"node_modules/@nestjs/core/index.js"));
-
-    let deployable = prepare_deploy_files(&artifact.manifest, scanned, &detection, true).unwrap();
-    let plan = source_bundle_v1::build_source_bundle_plan(
-        &artifact.root_dir,
-        &artifact.manifest,
-        &deployable,
-    )
-    .unwrap();
-    let symlink = plan
-        .logical_manifest
-        .files
-        .iter()
-        .find(|file| file.path == "apps/api/node_modules/@nestjs/core")
+        fs::create_dir_all(workspace.path().join("node_modules/@nestjs/core")).unwrap();
+        fs::write(
+            workspace.path().join("node_modules/@nestjs/core/index.js"),
+            "module.exports = {}",
+        )
         .unwrap();
-    assert_eq!(
-        symlink.entry_type,
-        Some(source_bundle_v1::SourceLogicalManifestEntryType::Symlink)
-    );
-    assert_eq!(
-        symlink.link_target.as_deref(),
-        Some("../../../../node_modules/@nestjs/core")
-    );
+        fs::create_dir_all(app.join("node_modules/@nestjs")).unwrap();
+        std::os::unix::fs::symlink(
+            "../../../../node_modules/@nestjs/core",
+            app.join("node_modules/@nestjs/core"),
+        )
+        .unwrap();
+
+        let mut detection = crate::detect::detect_with_framework_override(&app, None);
+        assert_eq!(detection.framework, "nestjs");
+        let manifest = build_manifest::generate_compute_manifest("src/main.js");
+
+        detection.metadata.runtime.runtime_type = runtime_type;
+        let artifact = resolve_runtime_artifact(
+            workspace.path(),
+            &app,
+            app.join("dist"),
+            manifest,
+            &detection,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(artifact.root_dir, workspace.path());
+        let compute_layer = artifact
+            .manifest
+            .layers
+            .iter()
+            .find(|layer| layer.target == build_manifest::LayerTarget::Compute)
+            .unwrap();
+        assert_eq!(compute_layer.directory, ".");
+        assert_eq!(
+            compute_layer.entry.as_deref(),
+            Some("apps/api/dist/src/main.js")
+        );
+
+        let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+        let breakdown = artifact.scan.file_breakdown(&scanned);
+        assert_eq!(breakdown.total, scanned.len());
+        assert!(breakdown.build_output > 0);
+        assert!(breakdown.node_modules > 0);
+        assert!(breakdown.metadata > 0);
+        assert_eq!(breakdown.workspace_packages, 0);
+        let structured = serde_json::to_string(&breakdown).unwrap();
+        assert!(!structured.contains(&workspace.path().display().to_string()));
+        let paths = scanned
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+        assert!(paths.contains(&"apps/api/node_modules/@nestjs/core"));
+        assert!(paths.contains(&"node_modules/@nestjs/core/index.js"));
+
+        let deployable =
+            prepare_deploy_files(&artifact.manifest, scanned, &detection, true).unwrap();
+        let plan = source_bundle_v1::build_source_bundle_plan(
+            &artifact.root_dir,
+            &artifact.manifest,
+            &deployable,
+        )
+        .unwrap();
+        let symlink = plan
+            .logical_manifest
+            .files
+            .iter()
+            .find(|file| file.path == "apps/api/node_modules/@nestjs/core")
+            .unwrap();
+        assert_eq!(
+            symlink.entry_type,
+            Some(source_bundle_v1::SourceLogicalManifestEntryType::Symlink)
+        );
+        assert_eq!(
+            symlink.link_target.as_deref(),
+            Some("../../../../node_modules/@nestjs/core")
+        );
+    }
 }
 
 #[test]

@@ -1,6 +1,100 @@
 use super::*;
 
 #[test]
+fn bun_process_archive_resolves_dynamic_and_transitive_dependencies_offline() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{
+        "packageManager":"bun@1.4.2",
+        "dependencies":{"hono":"4.0.0","runtime-pkg":"1.0.0"}
+    }"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("bun.lock"), "{}").unwrap();
+    fs::create_dir_all(dir.path().join("dist")).unwrap();
+    fs::write(
+        dir.path().join("dist/server.mjs"),
+        "const { default: value } = await import('runtime-pkg'); console.log(value);",
+    )
+    .unwrap();
+    for (name, body) in [
+        (
+            "runtime-pkg",
+            "import value from 'transitive-pkg'; export default value;",
+        ),
+        ("transitive-pkg", "export default 'ARTIFACT_RUNTIME_OK';"),
+    ] {
+        let package = dir.path().join("node_modules").join(name);
+        fs::create_dir_all(&package).unwrap();
+        fs::write(
+            package.join("package.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "name":name,"version":"1.0.0","type":"module","main":"index.js"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(package.join("index.js"), body).unwrap();
+    }
+    assert_bun_runtime_archive_output(dir.path(), "ARTIFACT_RUNTIME_OK");
+}
+
+#[test]
+#[ignore = "requires an installed sharp fixture with Bun package metadata and dist/server.mjs"]
+fn bun_sharp_encodes_from_relocated_source_archive() {
+    let fixture =
+        PathBuf::from(std::env::var_os("NRZ_NATIVE_FIXTURE_ROOT").expect("native fixture"));
+    assert_bun_runtime_archive_output(&fixture, "SHARP_NATIVE_OK 768");
+}
+
+fn assert_bun_runtime_archive_output(root: &Path, expected: &str) {
+    let detection = crate::detect::detect_with_framework_override(root, Some("hono"));
+    assert_eq!(detection.metadata.runtime.runtime_type, RuntimeType::Bun);
+    let artifact = resolve_runtime_artifact(
+        root,
+        root,
+        root.join("dist"),
+        build_manifest::generate_compute_manifest("server.mjs"),
+        &detection,
+        true,
+    )
+    .unwrap();
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let files = prepare_deploy_files(&artifact.manifest, scanned, &detection, true).unwrap();
+    let plan = source_bundle_v1::build_source_bundle_plan_with_scan(
+        &artifact.root_dir,
+        &artifact.manifest,
+        &files,
+        &artifact.scan,
+        source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap();
+    let unpacked = tempdir().unwrap();
+    let decoder =
+        zstd::stream::read::Decoder::new(fs::File::open(plan.source_path()).unwrap()).unwrap();
+    tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+    let entry = &plan.logical_manifest.entrypoints[0];
+    // An extracted deployment must resolve its own dependencies even with npm
+    // auto-install disabled and without access to the source project's files.
+    let output = assert_cmd::Command::new("bun")
+        .timeout(std::time::Duration::from_secs(10))
+        .arg("--no-install")
+        .arg(entry)
+        .current_dir(unpacked.path())
+        .env("BUN_INSTALL_CACHE_DIR", unpacked.path().join("empty-cache"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), expected);
+}
+
+#[test]
 fn prepare_deploy_files_keeps_python_dependencies_and_prunes_platform_metadata() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".onreza/python/3.14/site-packages/orjson")).unwrap();
@@ -359,40 +453,43 @@ fn node_process_runtime_artifact_uses_project_root_for_nestjs() {
 
 #[test]
 fn process_root_output_keeps_dependency_categories_distinct() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), r#"{"main":"server.js"}"#).unwrap();
-    fs::write(dir.path().join("server.js"), "require('runtime-pkg')").unwrap();
-    fs::create_dir_all(dir.path().join("node_modules/runtime-pkg")).unwrap();
-    fs::write(
-        dir.path().join("node_modules/runtime-pkg/index.js"),
-        "module.exports = true",
-    )
-    .unwrap();
+    for runtime_type in [RuntimeType::Node, RuntimeType::Bun] {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("package.json"), r#"{"main":"server.js"}"#).unwrap();
+        fs::write(dir.path().join("server.js"), "require('runtime-pkg')").unwrap();
+        fs::create_dir_all(dir.path().join("node_modules/runtime-pkg")).unwrap();
+        fs::write(
+            dir.path().join("node_modules/runtime-pkg/index.js"),
+            "module.exports = true",
+        )
+        .unwrap();
 
-    let detection = make_detection("express", None);
-    let artifact = resolve_runtime_artifact(
-        dir.path(),
-        dir.path(),
-        dir.path().to_path_buf(),
-        build_manifest::generate_compute_manifest("server.js"),
-        &detection,
-        true,
-    )
-    .unwrap();
-    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+        let mut detection = make_detection("express", None);
+        detection.metadata.runtime.runtime_type = runtime_type;
+        let artifact = resolve_runtime_artifact(
+            dir.path(),
+            dir.path(),
+            dir.path().to_path_buf(),
+            build_manifest::generate_compute_manifest("server.js"),
+            &detection,
+            true,
+        )
+        .unwrap();
+        let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
 
-    assert_eq!(
-        artifact.scan.file_breakdown(&scanned),
-        crate::artifact::RuntimeArtifactFileBreakdown {
-            build_output: 1,
-            node_modules: 1,
-            python_site_packages: 0,
-            metadata: 1,
-            workspace_packages: 0,
-            other: 0,
-            total: 3,
-        }
-    );
+        assert_eq!(
+            artifact.scan.file_breakdown(&scanned),
+            crate::artifact::RuntimeArtifactFileBreakdown {
+                build_output: 1,
+                node_modules: 1,
+                python_site_packages: 0,
+                metadata: 1,
+                workspace_packages: 0,
+                other: 0,
+                total: 3,
+            }
+        );
+    }
 }
 
 #[test]

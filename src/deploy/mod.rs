@@ -48,6 +48,7 @@ mod python_toolchain;
 #[cfg(test)]
 mod python_toolchain_tests;
 mod runtime_artifact;
+mod runtime_packaging;
 mod scan;
 mod source_upload;
 mod verify;
@@ -62,6 +63,7 @@ use health_check::resolve_health_check;
 use health_check::validate_health_path;
 use ignored_build::{IgnoredBuildOutcome, IgnoredBuildRequest};
 use runtime_artifact::*;
+use runtime_packaging::*;
 pub(crate) use scan::hash_file_streaming;
 #[cfg(test)]
 pub(crate) use scan::scan_dir;
