@@ -6,8 +6,8 @@ import {
   releaseAssetName,
 } from "../scripts/release-assets";
 
-const RUST_IMAGE = "rust:1.97-bookworm";
-const BUN_IMAGE = "oven/bun:1.3.14-debian";
+const RUST_IMAGE = "rust:1.98-bookworm";
+const BUN_IMAGE = "oven/bun:1.4.2-debian";
 const ALPINE_IMAGE = "alpine:3.20";
 const PLATFORMS = new Set<string>(RELEASE_PLATFORMS);
 const CHANNELS = new Set(["stable", "beta"]);
