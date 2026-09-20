@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.41.1] - 2026-09-20
+
+### 🔧 Changed
+
+- **deps:** update deps ([9458e59](https://github.com/ONREZA/nrz-cli/commit/9458e595f85e08ca6c3824cd9c8b9bb22c499861))
+
+### 🐛 Bug Fixes
+
+- **deploy:** package bun runtime dependencies ([5449b53](https://github.com/ONREZA/nrz-cli/commit/5449b53e85dde9db817e309745948ecbad9e7cb3))
+- **ci:** install git for metadata checks ([2d6a0a6](https://github.com/ONREZA/nrz-cli/commit/2d6a0a69f742148d67f3c5f4d393112655b6ff1d))
+
 ## [0.41.0] - 2026-09-12
 
 ### ✨ Features
