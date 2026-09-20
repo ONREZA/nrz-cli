@@ -3,355 +3,7 @@
 
 #![allow(dead_code, unused, clippy::all)]
 pub mod edge_rules {
-    /// Error types.
-    pub mod error {
-        /// Error from a `TryFrom` or `FromStr` implementation.
-        pub struct ConversionError(::std::borrow::Cow<'static, str>);
-        impl ::std::error::Error for ConversionError {}
-        impl ::std::fmt::Display for ConversionError {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> Result<(), ::std::fmt::Error> {
-                ::std::fmt::Display::fmt(&self.0, f)
-            }
-        }
-        impl ::std::fmt::Debug for ConversionError {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> Result<(), ::std::fmt::Error> {
-                ::std::fmt::Debug::fmt(&self.0, f)
-            }
-        }
-        impl From<&'static str> for ConversionError {
-            fn from(value: &'static str) -> Self {
-                Self(value.into())
-            }
-        }
-        impl From<String> for ConversionError {
-            fn from(value: String) -> Self {
-                Self(value.into())
-            }
-        }
-    }
     ///`EdgeRuleActionAuthoring`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "oneOf": [
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "type"
-    ///      ],
-    ///      "properties": {
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "allow"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "type"
-    ///      ],
-    ///      "properties": {
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "log"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "type"
-    ///      ],
-    ///      "properties": {
-    ///        "mode": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "shadow",
-    ///            "enforce"
-    ///          ]
-    ///        },
-    ///        "statusCode": {
-    ///          "type": "integer",
-    ///          "maximum": 599.0,
-    ///          "minimum": 400.0
-    ///        },
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "deny"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "target",
-    ///        "type"
-    ///      ],
-    ///      "properties": {
-    ///        "ifNoFile": {
-    ///          "type": "boolean"
-    ///        },
-    ///        "statusCode": {
-    ///          "type": "integer",
-    ///          "maximum": 9007199254740991.0,
-    ///          "minimum": -9007199254740991.0
-    ///        },
-    ///        "target": {
-    ///          "type": "string",
-    ///          "minLength": 1
-    ///        },
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "redirect"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "target",
-    ///        "type"
-    ///      ],
-    ///      "properties": {
-    ///        "external": {
-    ///          "type": "boolean"
-    ///        },
-    ///        "ifNoFile": {
-    ///          "type": "boolean"
-    ///        },
-    ///        "target": {
-    ///          "type": "string",
-    ///          "minLength": 1
-    ///        },
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "rewrite"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "headers",
-    ///        "type"
-    ///      ],
-    ///      "properties": {
-    ///        "headers": {
-    ///          "type": "object",
-    ///          "additionalProperties": {
-    ///            "type": "string"
-    ///          },
-    ///          "propertyNames": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          }
-    ///        },
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "set_headers"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "headers",
-    ///        "type"
-    ///      ],
-    ///      "properties": {
-    ///        "headers": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          }
-    ///        },
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "remove_headers"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "ttlSeconds",
-    ///        "type"
-    ///      ],
-    ///      "properties": {
-    ///        "swrSeconds": {
-    ///          "type": "integer",
-    ///          "maximum": 9007199254740991.0,
-    ///          "minimum": 0.0
-    ///        },
-    ///        "ttlSeconds": {
-    ///          "type": "integer",
-    ///          "maximum": 9007199254740991.0,
-    ///          "exclusiveMinimum": 0.0
-    ///        },
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "cache"
-    ///        },
-    ///        "vary": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "string",
-    ///            "enum": [
-    ///              "geo",
-    ///              "asn",
-    ///              "device",
-    ///              "header",
-    ///              "cookie",
-    ///              "query"
-    ///            ]
-    ///          }
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "type"
-    ///      ],
-    ///      "properties": {
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "bypass_cache"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "steps",
-    ///        "type"
-    ///      ],
-    ///      "properties": {
-    ///        "inheritGate": {
-    ///          "type": "boolean"
-    ///        },
-    ///        "override": {
-    ///          "type": "boolean"
-    ///        },
-    ///        "steps": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "anyOf": [
-    ///              {
-    ///                "type": "object",
-    ///                "required": [
-    ///                  "mode",
-    ///                  "use"
-    ///                ],
-    ///                "properties": {
-    ///                  "as": {
-    ///                    "type": "string",
-    ///                    "maxLength": 64,
-    ///                    "minLength": 1
-    ///                  },
-    ///                  "cachePosition": {
-    ///                    "type": "string",
-    ///                    "enum": [
-    ///                      "before",
-    ///                      "after"
-    ///                    ]
-    ///                  },
-    ///                  "failure": {
-    ///                    "type": "string",
-    ///                    "enum": [
-    ///                      "closed",
-    ///                      "open"
-    ///                    ]
-    ///                  },
-    ///                  "mode": {
-    ///                    "type": "string",
-    ///                    "enum": [
-    ///                      "request",
-    ///                      "response",
-    ///                      "observe"
-    ///                    ]
-    ///                  },
-    ///                  "use": {
-    ///                    "type": "string",
-    ///                    "maxLength": 64,
-    ///                    "minLength": 1,
-    ///                    "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
-    ///                  }
-    ///                },
-    ///                "additionalProperties": false
-    ///              },
-    ///              {
-    ///                "$ref": "#/definitions/PipelineHandleStep"
-    ///              }
-    ///            ]
-    ///          },
-    ///          "minItems": 1
-    ///        },
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "pipeline"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "limit",
-    ///        "type",
-    ///        "windowSeconds"
-    ///      ],
-    ///      "properties": {
-    ///        "key": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "ip",
-    ///            "ip_path",
-    ///            "ip_host",
-    ///            "host"
-    ///          ]
-    ///        },
-    ///        "limit": {
-    ///          "type": "integer",
-    ///          "maximum": 100000.0,
-    ///          "minimum": 1.0
-    ///        },
-    ///        "mode": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "shadow",
-    ///            "enforce"
-    ///          ]
-    ///        },
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "rate_limit"
-    ///        },
-    ///        "windowSeconds": {
-    ///          "type": "integer",
-    ///          "maximum": 600.0,
-    ///          "minimum": 10.0
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    }
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(tag = "type", deny_unknown_fields)]
     pub enum EdgeRuleActionAuthoring {
@@ -361,11 +13,10 @@ pub mod edge_rules {
         Log,
         #[serde(rename = "deny")]
         Deny {
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             mode: ::std::option::Option<EdgeRuleActionAuthoringMode>,
             #[serde(
                 rename = "statusCode",
-                default,
                 skip_serializing_if = "::std::option::Option::is_none"
             )]
             status_code: ::std::option::Option<i64>,
@@ -374,13 +25,11 @@ pub mod edge_rules {
         Redirect {
             #[serde(
                 rename = "ifNoFile",
-                default,
                 skip_serializing_if = "::std::option::Option::is_none"
             )]
             if_no_file: ::std::option::Option<bool>,
             #[serde(
                 rename = "statusCode",
-                default,
                 skip_serializing_if = "::std::option::Option::is_none"
             )]
             status_code: ::std::option::Option<i64>,
@@ -388,11 +37,10 @@ pub mod edge_rules {
         },
         #[serde(rename = "rewrite")]
         Rewrite {
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             external: ::std::option::Option<bool>,
             #[serde(
                 rename = "ifNoFile",
-                default,
                 skip_serializing_if = "::std::option::Option::is_none"
             )]
             if_no_file: ::std::option::Option<bool>,
@@ -413,7 +61,6 @@ pub mod edge_rules {
         Cache {
             #[serde(
                 rename = "swrSeconds",
-                default,
                 skip_serializing_if = "::std::option::Option::is_none"
             )]
             swr_seconds: ::std::option::Option<i64>,
@@ -428,13 +75,11 @@ pub mod edge_rules {
         Pipeline {
             #[serde(
                 rename = "inheritGate",
-                default,
                 skip_serializing_if = "::std::option::Option::is_none"
             )]
             inherit_gate: ::std::option::Option<bool>,
             #[serde(
                 rename = "override",
-                default,
                 skip_serializing_if = "::std::option::Option::is_none"
             )]
             override_: ::std::option::Option<bool>,
@@ -442,26 +87,16 @@ pub mod edge_rules {
         },
         #[serde(rename = "rate_limit")]
         RateLimit {
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             key: ::std::option::Option<EdgeRuleActionAuthoringKey>,
             limit: ::std::num::NonZeroU64,
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             mode: ::std::option::Option<EdgeRuleActionAuthoringMode>,
             #[serde(rename = "windowSeconds")]
             window_seconds: i64,
         },
     }
     ///`EdgeRuleActionAuthoringHeadersItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleActionAuthoringHeadersItem(::std::string::String);
@@ -491,14 +126,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringHeadersItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringHeadersItem {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -520,16 +147,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleActionAuthoringHeadersKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleActionAuthoringHeadersKey(::std::string::String);
@@ -559,14 +176,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringHeadersKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringHeadersKey {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -588,21 +197,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleActionAuthoringKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "ip",
-    ///    "ip_path",
-    ///    "ip_host",
-    ///    "host"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -653,14 +247,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringKey {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -670,19 +256,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleActionAuthoringMode`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "shadow",
-    ///    "enforce"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -725,14 +298,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringMode {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringMode {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -742,80 +307,19 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleActionAuthoringStepsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "anyOf": [
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "mode",
-    ///        "use"
-    ///      ],
-    ///      "properties": {
-    ///        "as": {
-    ///          "type": "string",
-    ///          "maxLength": 64,
-    ///          "minLength": 1
-    ///        },
-    ///        "cachePosition": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "before",
-    ///            "after"
-    ///          ]
-    ///        },
-    ///        "failure": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "closed",
-    ///            "open"
-    ///          ]
-    ///        },
-    ///        "mode": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "request",
-    ///            "response",
-    ///            "observe"
-    ///          ]
-    ///        },
-    ///        "use": {
-    ///          "type": "string",
-    ///          "maxLength": 64,
-    ///          "minLength": 1,
-    ///          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    {
-    ///      "$ref": "#/definitions/PipelineHandleStep"
-    ///    }
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(untagged, deny_unknown_fields)]
     pub enum EdgeRuleActionAuthoringStepsItem {
         Object {
-            #[serde(
-                rename = "as",
-                default,
-                skip_serializing_if = "::std::option::Option::is_none"
-            )]
+            #[serde(rename = "as", skip_serializing_if = "::std::option::Option::is_none")]
             as_: ::std::option::Option<EdgeRuleActionAuthoringStepsItemObjectAs>,
             #[serde(
                 rename = "cachePosition",
-                default,
                 skip_serializing_if = "::std::option::Option::is_none"
             )]
             cache_position:
                 ::std::option::Option<EdgeRuleActionAuthoringStepsItemObjectCachePosition>,
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             failure: ::std::option::Option<EdgeRuleActionAuthoringStepsItemObjectFailure>,
             mode: EdgeRuleActionAuthoringStepsItemObjectMode,
             #[serde(rename = "use")]
@@ -829,17 +333,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleActionAuthoringStepsItemObjectAs`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 64,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleActionAuthoringStepsItemObjectAs(::std::string::String);
@@ -872,14 +365,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectAs {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectAs {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -901,19 +386,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleActionAuthoringStepsItemObjectCachePosition`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "before",
-    ///    "after"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -956,16 +428,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for EdgeRuleActionAuthoringStepsItemObjectCachePosition
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for EdgeRuleActionAuthoringStepsItemObjectCachePosition
     {
@@ -977,19 +439,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleActionAuthoringStepsItemObjectFailure`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "closed",
-    ///    "open"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -1032,16 +481,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for EdgeRuleActionAuthoringStepsItemObjectFailure
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for EdgeRuleActionAuthoringStepsItemObjectFailure
     {
@@ -1053,20 +492,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleActionAuthoringStepsItemObjectMode`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "request",
-    ///    "response",
-    ///    "observe"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -1113,16 +538,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for EdgeRuleActionAuthoringStepsItemObjectMode
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectMode {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -1132,18 +547,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleActionAuthoringStepsItemObjectUse`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 64,
-    ///  "minLength": 1,
-    ///  "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleActionAuthoringStepsItemObjectUse(::std::string::String);
@@ -1183,14 +586,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectUse {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringStepsItemObjectUse {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -1212,16 +607,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleActionAuthoringTarget`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleActionAuthoringTarget(::std::string::String);
@@ -1251,14 +636,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringTarget {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringTarget {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -1280,23 +657,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleActionAuthoringVaryItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "geo",
-    ///    "asn",
-    ///    "device",
-    ///    "header",
-    ///    "cookie",
-    ///    "query"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -1355,14 +715,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleActionAuthoringVaryItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleActionAuthoringVaryItem {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -1372,808 +724,20 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoring`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "action",
-    ///    "id"
-    ///  ],
-    ///  "properties": {
-    ///    "action": {
-    ///      "$ref": "#/definitions/EdgeRuleActionAuthoring"
-    ///    },
-    ///    "condition": {
-    ///      "type": "object",
-    ///      "properties": {
-    ///        "any": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "object",
-    ///            "properties": {
-    ///              "asn": {
-    ///                "type": "array",
-    ///                "items": {
-    ///                  "type": "integer",
-    ///                  "maximum": 4294967295.0,
-    ///                  "minimum": 1.0
-    ///                }
-    ///              },
-    ///              "cookies": {
-    ///                "type": "object",
-    ///                "additionalProperties": {
-    ///                  "type": "string"
-    ///                },
-    ///                "propertyNames": {
-    ///                  "type": "string",
-    ///                  "minLength": 1
-    ///                }
-    ///              },
-    ///              "device": {
-    ///                "type": "string",
-    ///                "enum": [
-    ///                  "desktop",
-    ///                  "mobile",
-    ///                  "tablet",
-    ///                  "bot"
-    ///                ]
-    ///              },
-    ///              "geo": {
-    ///                "type": "array",
-    ///                "items": {
-    ///                  "type": "string",
-    ///                  "maxLength": 2,
-    ///                  "minLength": 2
-    ///                }
-    ///              },
-    ///              "headers": {
-    ///                "type": "object",
-    ///                "additionalProperties": {
-    ///                  "type": "string"
-    ///                },
-    ///                "propertyNames": {
-    ///                  "type": "string",
-    ///                  "minLength": 1
-    ///                }
-    ///              },
-    ///              "host": {
-    ///                "type": "string",
-    ///                "minLength": 1
-    ///              },
-    ///              "method": {
-    ///                "type": "array",
-    ///                "items": {
-    ///                  "type": "string",
-    ///                  "enum": [
-    ///                    "GET",
-    ///                    "POST",
-    ///                    "PUT",
-    ///                    "DELETE",
-    ///                    "PATCH",
-    ///                    "HEAD",
-    ///                    "OPTIONS"
-    ///                  ]
-    ///                }
-    ///              },
-    ///              "methods": {
-    ///                "type": "array",
-    ///                "items": {
-    ///                  "type": "string",
-    ///                  "enum": [
-    ///                    "GET",
-    ///                    "POST",
-    ///                    "PUT",
-    ///                    "DELETE",
-    ///                    "PATCH",
-    ///                    "HEAD",
-    ///                    "OPTIONS"
-    ///                  ]
-    ///                }
-    ///              },
-    ///              "path": {
-    ///                "type": "object",
-    ///                "required": [
-    ///                  "type",
-    ///                  "value"
-    ///                ],
-    ///                "properties": {
-    ///                  "type": {
-    ///                    "type": "string",
-    ///                    "enum": [
-    ///                      "exact",
-    ///                      "prefix",
-    ///                      "glob"
-    ///                    ]
-    ///                  },
-    ///                  "value": {
-    ///                    "type": "string",
-    ///                    "minLength": 1
-    ///                  }
-    ///                },
-    ///                "additionalProperties": false
-    ///              },
-    ///              "query": {
-    ///                "type": "object",
-    ///                "additionalProperties": {
-    ///                  "type": "string"
-    ///                },
-    ///                "propertyNames": {
-    ///                  "type": "string",
-    ///                  "minLength": 1
-    ///                }
-    ///              },
-    ///              "sourceIpCidrs": {
-    ///                "type": "array",
-    ///                "items": {
-    ///                  "type": "string",
-    ///                  "minLength": 1
-    ///                }
-    ///              }
-    ///            },
-    ///            "additionalProperties": false
-    ///          },
-    ///          "minItems": 1
-    ///        },
-    ///        "asn": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "integer",
-    ///            "maximum": 4294967295.0,
-    ///            "minimum": 1.0
-    ///          }
-    ///        },
-    ///        "cookies": {
-    ///          "type": "object",
-    ///          "additionalProperties": {
-    ///            "type": "string"
-    ///          },
-    ///          "propertyNames": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          }
-    ///        },
-    ///        "device": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "desktop",
-    ///            "mobile",
-    ///            "tablet",
-    ///            "bot"
-    ///          ]
-    ///        },
-    ///        "geo": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "string",
-    ///            "maxLength": 2,
-    ///            "minLength": 2
-    ///          }
-    ///        },
-    ///        "headers": {
-    ///          "type": "object",
-    ///          "additionalProperties": {
-    ///            "type": "string"
-    ///          },
-    ///          "propertyNames": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          }
-    ///        },
-    ///        "host": {
-    ///          "type": "string",
-    ///          "minLength": 1
-    ///        },
-    ///        "method": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "string",
-    ///            "enum": [
-    ///              "GET",
-    ///              "POST",
-    ///              "PUT",
-    ///              "DELETE",
-    ///              "PATCH",
-    ///              "HEAD",
-    ///              "OPTIONS"
-    ///            ]
-    ///          }
-    ///        },
-    ///        "methods": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "string",
-    ///            "enum": [
-    ///              "GET",
-    ///              "POST",
-    ///              "PUT",
-    ///              "DELETE",
-    ///              "PATCH",
-    ///              "HEAD",
-    ///              "OPTIONS"
-    ///            ]
-    ///          }
-    ///        },
-    ///        "not": {
-    ///          "type": "object",
-    ///          "properties": {
-    ///            "asn": {
-    ///              "type": "array",
-    ///              "items": {
-    ///                "type": "integer",
-    ///                "maximum": 4294967295.0,
-    ///                "minimum": 1.0
-    ///              }
-    ///            },
-    ///            "cookies": {
-    ///              "type": "object",
-    ///              "additionalProperties": {
-    ///                "type": "string"
-    ///              },
-    ///              "propertyNames": {
-    ///                "type": "string",
-    ///                "minLength": 1
-    ///              }
-    ///            },
-    ///            "device": {
-    ///              "type": "string",
-    ///              "enum": [
-    ///                "desktop",
-    ///                "mobile",
-    ///                "tablet",
-    ///                "bot"
-    ///              ]
-    ///            },
-    ///            "geo": {
-    ///              "type": "array",
-    ///              "items": {
-    ///                "type": "string",
-    ///                "maxLength": 2,
-    ///                "minLength": 2
-    ///              }
-    ///            },
-    ///            "headers": {
-    ///              "type": "object",
-    ///              "additionalProperties": {
-    ///                "type": "string"
-    ///              },
-    ///              "propertyNames": {
-    ///                "type": "string",
-    ///                "minLength": 1
-    ///              }
-    ///            },
-    ///            "host": {
-    ///              "type": "string",
-    ///              "minLength": 1
-    ///            },
-    ///            "method": {
-    ///              "type": "array",
-    ///              "items": {
-    ///                "type": "string",
-    ///                "enum": [
-    ///                  "GET",
-    ///                  "POST",
-    ///                  "PUT",
-    ///                  "DELETE",
-    ///                  "PATCH",
-    ///                  "HEAD",
-    ///                  "OPTIONS"
-    ///                ]
-    ///              }
-    ///            },
-    ///            "methods": {
-    ///              "type": "array",
-    ///              "items": {
-    ///                "type": "string",
-    ///                "enum": [
-    ///                  "GET",
-    ///                  "POST",
-    ///                  "PUT",
-    ///                  "DELETE",
-    ///                  "PATCH",
-    ///                  "HEAD",
-    ///                  "OPTIONS"
-    ///                ]
-    ///              }
-    ///            },
-    ///            "path": {
-    ///              "type": "object",
-    ///              "required": [
-    ///                "type",
-    ///                "value"
-    ///              ],
-    ///              "properties": {
-    ///                "type": {
-    ///                  "type": "string",
-    ///                  "enum": [
-    ///                    "exact",
-    ///                    "prefix",
-    ///                    "glob"
-    ///                  ]
-    ///                },
-    ///                "value": {
-    ///                  "type": "string",
-    ///                  "minLength": 1
-    ///                }
-    ///              },
-    ///              "additionalProperties": false
-    ///            },
-    ///            "query": {
-    ///              "type": "object",
-    ///              "additionalProperties": {
-    ///                "type": "string"
-    ///              },
-    ///              "propertyNames": {
-    ///                "type": "string",
-    ///                "minLength": 1
-    ///              }
-    ///            },
-    ///            "sourceIpCidrs": {
-    ///              "type": "array",
-    ///              "items": {
-    ///                "type": "string",
-    ///                "minLength": 1
-    ///              }
-    ///            }
-    ///          },
-    ///          "additionalProperties": false
-    ///        },
-    ///        "path": {
-    ///          "type": "object",
-    ///          "required": [
-    ///            "type",
-    ///            "value"
-    ///          ],
-    ///          "properties": {
-    ///            "type": {
-    ///              "type": "string",
-    ///              "enum": [
-    ///                "exact",
-    ///                "prefix",
-    ///                "glob"
-    ///              ]
-    ///            },
-    ///            "value": {
-    ///              "type": "string",
-    ///              "minLength": 1
-    ///            }
-    ///          },
-    ///          "additionalProperties": false
-    ///        },
-    ///        "query": {
-    ///          "type": "object",
-    ///          "additionalProperties": {
-    ///            "type": "string"
-    ///          },
-    ///          "propertyNames": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          }
-    ///        },
-    ///        "sourceIpCidrs": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          }
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "enabled": {
-    ///      "type": "boolean"
-    ///    },
-    ///    "id": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    },
-    ///    "name": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct EdgeRuleAuthoring {
         pub action: EdgeRuleActionAuthoring,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub condition: ::std::option::Option<EdgeRuleAuthoringCondition>,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub enabled: ::std::option::Option<bool>,
         pub id: EdgeRuleAuthoringId,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub name: ::std::option::Option<EdgeRuleAuthoringName>,
     }
     ///`EdgeRuleAuthoringCondition`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "properties": {
-    ///    "any": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "object",
-    ///        "properties": {
-    ///          "asn": {
-    ///            "type": "array",
-    ///            "items": {
-    ///              "type": "integer",
-    ///              "maximum": 4294967295.0,
-    ///              "minimum": 1.0
-    ///            }
-    ///          },
-    ///          "cookies": {
-    ///            "type": "object",
-    ///            "additionalProperties": {
-    ///              "type": "string"
-    ///            },
-    ///            "propertyNames": {
-    ///              "type": "string",
-    ///              "minLength": 1
-    ///            }
-    ///          },
-    ///          "device": {
-    ///            "type": "string",
-    ///            "enum": [
-    ///              "desktop",
-    ///              "mobile",
-    ///              "tablet",
-    ///              "bot"
-    ///            ]
-    ///          },
-    ///          "geo": {
-    ///            "type": "array",
-    ///            "items": {
-    ///              "type": "string",
-    ///              "maxLength": 2,
-    ///              "minLength": 2
-    ///            }
-    ///          },
-    ///          "headers": {
-    ///            "type": "object",
-    ///            "additionalProperties": {
-    ///              "type": "string"
-    ///            },
-    ///            "propertyNames": {
-    ///              "type": "string",
-    ///              "minLength": 1
-    ///            }
-    ///          },
-    ///          "host": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          },
-    ///          "method": {
-    ///            "type": "array",
-    ///            "items": {
-    ///              "type": "string",
-    ///              "enum": [
-    ///                "GET",
-    ///                "POST",
-    ///                "PUT",
-    ///                "DELETE",
-    ///                "PATCH",
-    ///                "HEAD",
-    ///                "OPTIONS"
-    ///              ]
-    ///            }
-    ///          },
-    ///          "methods": {
-    ///            "type": "array",
-    ///            "items": {
-    ///              "type": "string",
-    ///              "enum": [
-    ///                "GET",
-    ///                "POST",
-    ///                "PUT",
-    ///                "DELETE",
-    ///                "PATCH",
-    ///                "HEAD",
-    ///                "OPTIONS"
-    ///              ]
-    ///            }
-    ///          },
-    ///          "path": {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "type",
-    ///              "value"
-    ///            ],
-    ///            "properties": {
-    ///              "type": {
-    ///                "type": "string",
-    ///                "enum": [
-    ///                  "exact",
-    ///                  "prefix",
-    ///                  "glob"
-    ///                ]
-    ///              },
-    ///              "value": {
-    ///                "type": "string",
-    ///                "minLength": 1
-    ///              }
-    ///            },
-    ///            "additionalProperties": false
-    ///          },
-    ///          "query": {
-    ///            "type": "object",
-    ///            "additionalProperties": {
-    ///              "type": "string"
-    ///            },
-    ///            "propertyNames": {
-    ///              "type": "string",
-    ///              "minLength": 1
-    ///            }
-    ///          },
-    ///          "sourceIpCidrs": {
-    ///            "type": "array",
-    ///            "items": {
-    ///              "type": "string",
-    ///              "minLength": 1
-    ///            }
-    ///          }
-    ///        },
-    ///        "additionalProperties": false
-    ///      },
-    ///      "minItems": 1
-    ///    },
-    ///    "asn": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "integer",
-    ///        "maximum": 4294967295.0,
-    ///        "minimum": 1.0
-    ///      }
-    ///    },
-    ///    "cookies": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "device": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "desktop",
-    ///        "mobile",
-    ///        "tablet",
-    ///        "bot"
-    ///      ]
-    ///    },
-    ///    "geo": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "maxLength": 2,
-    ///        "minLength": 2
-    ///      }
-    ///    },
-    ///    "headers": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "host": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    },
-    ///    "method": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "enum": [
-    ///          "GET",
-    ///          "POST",
-    ///          "PUT",
-    ///          "DELETE",
-    ///          "PATCH",
-    ///          "HEAD",
-    ///          "OPTIONS"
-    ///        ]
-    ///      }
-    ///    },
-    ///    "methods": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "enum": [
-    ///          "GET",
-    ///          "POST",
-    ///          "PUT",
-    ///          "DELETE",
-    ///          "PATCH",
-    ///          "HEAD",
-    ///          "OPTIONS"
-    ///        ]
-    ///      }
-    ///    },
-    ///    "not": {
-    ///      "type": "object",
-    ///      "properties": {
-    ///        "asn": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "integer",
-    ///            "maximum": 4294967295.0,
-    ///            "minimum": 1.0
-    ///          }
-    ///        },
-    ///        "cookies": {
-    ///          "type": "object",
-    ///          "additionalProperties": {
-    ///            "type": "string"
-    ///          },
-    ///          "propertyNames": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          }
-    ///        },
-    ///        "device": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "desktop",
-    ///            "mobile",
-    ///            "tablet",
-    ///            "bot"
-    ///          ]
-    ///        },
-    ///        "geo": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "string",
-    ///            "maxLength": 2,
-    ///            "minLength": 2
-    ///          }
-    ///        },
-    ///        "headers": {
-    ///          "type": "object",
-    ///          "additionalProperties": {
-    ///            "type": "string"
-    ///          },
-    ///          "propertyNames": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          }
-    ///        },
-    ///        "host": {
-    ///          "type": "string",
-    ///          "minLength": 1
-    ///        },
-    ///        "method": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "string",
-    ///            "enum": [
-    ///              "GET",
-    ///              "POST",
-    ///              "PUT",
-    ///              "DELETE",
-    ///              "PATCH",
-    ///              "HEAD",
-    ///              "OPTIONS"
-    ///            ]
-    ///          }
-    ///        },
-    ///        "methods": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "string",
-    ///            "enum": [
-    ///              "GET",
-    ///              "POST",
-    ///              "PUT",
-    ///              "DELETE",
-    ///              "PATCH",
-    ///              "HEAD",
-    ///              "OPTIONS"
-    ///            ]
-    ///          }
-    ///        },
-    ///        "path": {
-    ///          "type": "object",
-    ///          "required": [
-    ///            "type",
-    ///            "value"
-    ///          ],
-    ///          "properties": {
-    ///            "type": {
-    ///              "type": "string",
-    ///              "enum": [
-    ///                "exact",
-    ///                "prefix",
-    ///                "glob"
-    ///              ]
-    ///            },
-    ///            "value": {
-    ///              "type": "string",
-    ///              "minLength": 1
-    ///            }
-    ///          },
-    ///          "additionalProperties": false
-    ///        },
-    ///        "query": {
-    ///          "type": "object",
-    ///          "additionalProperties": {
-    ///            "type": "string"
-    ///          },
-    ///          "propertyNames": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          }
-    ///        },
-    ///        "sourceIpCidrs": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          }
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "path": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "type",
-    ///        "value"
-    ///      ],
-    ///      "properties": {
-    ///        "type": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "exact",
-    ///            "prefix",
-    ///            "glob"
-    ///          ]
-    ///        },
-    ///        "value": {
-    ///          "type": "string",
-    ///          "minLength": 1
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "query": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "sourceIpCidrs": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct EdgeRuleAuthoringCondition {
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
@@ -2188,7 +752,7 @@ pub mod edge_rules {
             EdgeRuleAuthoringConditionCookiesKey,
             ::std::string::String,
         >,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub device: ::std::option::Option<EdgeRuleAuthoringConditionDevice>,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
         pub geo: ::std::vec::Vec<EdgeRuleAuthoringConditionGeoItem>,
@@ -2200,15 +764,15 @@ pub mod edge_rules {
             EdgeRuleAuthoringConditionHeadersKey,
             ::std::string::String,
         >,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub host: ::std::option::Option<EdgeRuleAuthoringConditionHost>,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
         pub method: ::std::vec::Vec<EdgeRuleAuthoringConditionMethodItem>,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
         pub methods: ::std::vec::Vec<EdgeRuleAuthoringConditionMethodsItem>,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub not: ::std::option::Option<EdgeRuleAuthoringConditionNot>,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub path: ::std::option::Option<EdgeRuleAuthoringConditionPath>,
         #[serde(
             default,
@@ -2223,157 +787,8 @@ pub mod edge_rules {
         )]
         pub source_ip_cidrs: ::std::vec::Vec<EdgeRuleAuthoringConditionSourceIpCidrsItem>,
     }
-    impl ::std::default::Default for EdgeRuleAuthoringCondition {
-        fn default() -> Self {
-            Self {
-                any: Default::default(),
-                asn: Default::default(),
-                cookies: Default::default(),
-                device: Default::default(),
-                geo: Default::default(),
-                headers: Default::default(),
-                host: Default::default(),
-                method: Default::default(),
-                methods: Default::default(),
-                not: Default::default(),
-                path: Default::default(),
-                query: Default::default(),
-                source_ip_cidrs: Default::default(),
-            }
-        }
-    }
     ///`EdgeRuleAuthoringConditionAnyItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "properties": {
-    ///    "asn": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "integer",
-    ///        "maximum": 4294967295.0,
-    ///        "minimum": 1.0
-    ///      }
-    ///    },
-    ///    "cookies": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "device": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "desktop",
-    ///        "mobile",
-    ///        "tablet",
-    ///        "bot"
-    ///      ]
-    ///    },
-    ///    "geo": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "maxLength": 2,
-    ///        "minLength": 2
-    ///      }
-    ///    },
-    ///    "headers": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "host": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    },
-    ///    "method": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "enum": [
-    ///          "GET",
-    ///          "POST",
-    ///          "PUT",
-    ///          "DELETE",
-    ///          "PATCH",
-    ///          "HEAD",
-    ///          "OPTIONS"
-    ///        ]
-    ///      }
-    ///    },
-    ///    "methods": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "enum": [
-    ///          "GET",
-    ///          "POST",
-    ///          "PUT",
-    ///          "DELETE",
-    ///          "PATCH",
-    ///          "HEAD",
-    ///          "OPTIONS"
-    ///        ]
-    ///      }
-    ///    },
-    ///    "path": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "type",
-    ///        "value"
-    ///      ],
-    ///      "properties": {
-    ///        "type": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "exact",
-    ///            "prefix",
-    ///            "glob"
-    ///          ]
-    ///        },
-    ///        "value": {
-    ///          "type": "string",
-    ///          "minLength": 1
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "query": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "sourceIpCidrs": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct EdgeRuleAuthoringConditionAnyItem {
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
@@ -2386,7 +801,7 @@ pub mod edge_rules {
             EdgeRuleAuthoringConditionAnyItemCookiesKey,
             ::std::string::String,
         >,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub device: ::std::option::Option<EdgeRuleAuthoringConditionAnyItemDevice>,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
         pub geo: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItemGeoItem>,
@@ -2398,13 +813,13 @@ pub mod edge_rules {
             EdgeRuleAuthoringConditionAnyItemHeadersKey,
             ::std::string::String,
         >,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub host: ::std::option::Option<EdgeRuleAuthoringConditionAnyItemHost>,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
         pub method: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItemMethodItem>,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
         pub methods: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItemMethodsItem>,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub path: ::std::option::Option<EdgeRuleAuthoringConditionAnyItemPath>,
         #[serde(
             default,
@@ -2421,34 +836,7 @@ pub mod edge_rules {
         )]
         pub source_ip_cidrs: ::std::vec::Vec<EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem>,
     }
-    impl ::std::default::Default for EdgeRuleAuthoringConditionAnyItem {
-        fn default() -> Self {
-            Self {
-                asn: Default::default(),
-                cookies: Default::default(),
-                device: Default::default(),
-                geo: Default::default(),
-                headers: Default::default(),
-                host: Default::default(),
-                method: Default::default(),
-                methods: Default::default(),
-                path: Default::default(),
-                query: Default::default(),
-                source_ip_cidrs: Default::default(),
-            }
-        }
-    }
     ///`EdgeRuleAuthoringConditionAnyItemCookiesKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionAnyItemCookiesKey(::std::string::String);
@@ -2478,16 +866,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for EdgeRuleAuthoringConditionAnyItemCookiesKey
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for EdgeRuleAuthoringConditionAnyItemCookiesKey
     {
@@ -2511,21 +889,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionAnyItemDevice`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "desktop",
-    ///    "mobile",
-    ///    "tablet",
-    ///    "bot"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -2576,14 +939,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemDevice {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemDevice {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -2593,17 +948,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionAnyItemGeoItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 2,
-    ///  "minLength": 2
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionAnyItemGeoItem(::std::string::String);
@@ -2636,14 +980,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemGeoItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemGeoItem {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -2665,16 +1001,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionAnyItemHeadersKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionAnyItemHeadersKey(::std::string::String);
@@ -2704,16 +1030,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for EdgeRuleAuthoringConditionAnyItemHeadersKey
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for EdgeRuleAuthoringConditionAnyItemHeadersKey
     {
@@ -2737,16 +1053,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionAnyItemHost`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionAnyItemHost(::std::string::String);
@@ -2776,14 +1082,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemHost {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemHost {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -2805,24 +1103,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionAnyItemMethodItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "GET",
-    ///    "POST",
-    ///    "PUT",
-    ///    "DELETE",
-    ///    "PATCH",
-    ///    "HEAD",
-    ///    "OPTIONS"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -2885,16 +1165,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for EdgeRuleAuthoringConditionAnyItemMethodItem
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for EdgeRuleAuthoringConditionAnyItemMethodItem
     {
@@ -2906,24 +1176,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionAnyItemMethodsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "GET",
-    ///    "POST",
-    ///    "PUT",
-    ///    "DELETE",
-    ///    "PATCH",
-    ///    "HEAD",
-    ///    "OPTIONS"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -2986,16 +1238,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for EdgeRuleAuthoringConditionAnyItemMethodsItem
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for EdgeRuleAuthoringConditionAnyItemMethodsItem
     {
@@ -3007,34 +1249,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionAnyItemPath`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "type",
-    ///    "value"
-    ///  ],
-    ///  "properties": {
-    ///    "type": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "exact",
-    ///        "prefix",
-    ///        "glob"
-    ///      ]
-    ///    },
-    ///    "value": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct EdgeRuleAuthoringConditionAnyItemPath {
@@ -3043,20 +1257,6 @@ pub mod edge_rules {
         pub value: EdgeRuleAuthoringConditionAnyItemPathValue,
     }
     ///`EdgeRuleAuthoringConditionAnyItemPathType`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "exact",
-    ///    "prefix",
-    ///    "glob"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -3103,14 +1303,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemPathType {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemPathType {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -3120,16 +1312,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionAnyItemPathValue`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionAnyItemPathValue(::std::string::String);
@@ -3159,16 +1341,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for EdgeRuleAuthoringConditionAnyItemPathValue
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemPathValue {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -3190,16 +1362,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionAnyItemQueryKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionAnyItemQueryKey(::std::string::String);
@@ -3229,14 +1391,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionAnyItemQueryKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionAnyItemQueryKey {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -3258,16 +1412,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem(::std::string::String);
@@ -3299,16 +1443,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for EdgeRuleAuthoringConditionAnyItemSourceIpCidrsItem
     {
@@ -3332,16 +1466,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionCookiesKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionCookiesKey(::std::string::String);
@@ -3371,14 +1495,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionCookiesKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionCookiesKey {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -3400,21 +1516,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionDevice`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "desktop",
-    ///    "mobile",
-    ///    "tablet",
-    ///    "bot"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -3465,14 +1566,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionDevice {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionDevice {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -3482,17 +1575,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionGeoItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 2,
-    ///  "minLength": 2
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionGeoItem(::std::string::String);
@@ -3525,14 +1607,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionGeoItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionGeoItem {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -3554,16 +1628,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionHeadersKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionHeadersKey(::std::string::String);
@@ -3593,14 +1657,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionHeadersKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionHeadersKey {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -3622,16 +1678,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionHost`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionHost(::std::string::String);
@@ -3661,14 +1707,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionHost {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionHost {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -3690,24 +1728,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionMethodItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "GET",
-    ///    "POST",
-    ///    "PUT",
-    ///    "DELETE",
-    ///    "PATCH",
-    ///    "HEAD",
-    ///    "OPTIONS"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -3770,14 +1790,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionMethodItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionMethodItem {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -3787,24 +1799,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionMethodsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "GET",
-    ///    "POST",
-    ///    "PUT",
-    ///    "DELETE",
-    ///    "PATCH",
-    ///    "HEAD",
-    ///    "OPTIONS"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -3867,14 +1861,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionMethodsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionMethodsItem {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -3884,137 +1870,7 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionNot`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "properties": {
-    ///    "asn": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "integer",
-    ///        "maximum": 4294967295.0,
-    ///        "minimum": 1.0
-    ///      }
-    ///    },
-    ///    "cookies": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "device": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "desktop",
-    ///        "mobile",
-    ///        "tablet",
-    ///        "bot"
-    ///      ]
-    ///    },
-    ///    "geo": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "maxLength": 2,
-    ///        "minLength": 2
-    ///      }
-    ///    },
-    ///    "headers": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "host": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    },
-    ///    "method": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "enum": [
-    ///          "GET",
-    ///          "POST",
-    ///          "PUT",
-    ///          "DELETE",
-    ///          "PATCH",
-    ///          "HEAD",
-    ///          "OPTIONS"
-    ///        ]
-    ///      }
-    ///    },
-    ///    "methods": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "enum": [
-    ///          "GET",
-    ///          "POST",
-    ///          "PUT",
-    ///          "DELETE",
-    ///          "PATCH",
-    ///          "HEAD",
-    ///          "OPTIONS"
-    ///        ]
-    ///      }
-    ///    },
-    ///    "path": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "type",
-    ///        "value"
-    ///      ],
-    ///      "properties": {
-    ///        "type": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "exact",
-    ///            "prefix",
-    ///            "glob"
-    ///          ]
-    ///        },
-    ///        "value": {
-    ///          "type": "string",
-    ///          "minLength": 1
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "query": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    },
-    ///    "sourceIpCidrs": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "minLength": 1
-    ///      }
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct EdgeRuleAuthoringConditionNot {
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
@@ -4027,7 +1883,7 @@ pub mod edge_rules {
             EdgeRuleAuthoringConditionNotCookiesKey,
             ::std::string::String,
         >,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub device: ::std::option::Option<EdgeRuleAuthoringConditionNotDevice>,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
         pub geo: ::std::vec::Vec<EdgeRuleAuthoringConditionNotGeoItem>,
@@ -4039,13 +1895,13 @@ pub mod edge_rules {
             EdgeRuleAuthoringConditionNotHeadersKey,
             ::std::string::String,
         >,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub host: ::std::option::Option<EdgeRuleAuthoringConditionNotHost>,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
         pub method: ::std::vec::Vec<EdgeRuleAuthoringConditionNotMethodItem>,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
         pub methods: ::std::vec::Vec<EdgeRuleAuthoringConditionNotMethodsItem>,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub path: ::std::option::Option<EdgeRuleAuthoringConditionNotPath>,
         #[serde(
             default,
@@ -4062,34 +1918,7 @@ pub mod edge_rules {
         )]
         pub source_ip_cidrs: ::std::vec::Vec<EdgeRuleAuthoringConditionNotSourceIpCidrsItem>,
     }
-    impl ::std::default::Default for EdgeRuleAuthoringConditionNot {
-        fn default() -> Self {
-            Self {
-                asn: Default::default(),
-                cookies: Default::default(),
-                device: Default::default(),
-                geo: Default::default(),
-                headers: Default::default(),
-                host: Default::default(),
-                method: Default::default(),
-                methods: Default::default(),
-                path: Default::default(),
-                query: Default::default(),
-                source_ip_cidrs: Default::default(),
-            }
-        }
-    }
     ///`EdgeRuleAuthoringConditionNotCookiesKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionNotCookiesKey(::std::string::String);
@@ -4119,14 +1948,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotCookiesKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotCookiesKey {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -4148,21 +1969,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionNotDevice`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "desktop",
-    ///    "mobile",
-    ///    "tablet",
-    ///    "bot"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -4213,14 +2019,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotDevice {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotDevice {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -4230,17 +2028,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionNotGeoItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 2,
-    ///  "minLength": 2
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionNotGeoItem(::std::string::String);
@@ -4273,14 +2060,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotGeoItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotGeoItem {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -4302,16 +2081,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionNotHeadersKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionNotHeadersKey(::std::string::String);
@@ -4341,14 +2110,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotHeadersKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotHeadersKey {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -4370,16 +2131,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionNotHost`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionNotHost(::std::string::String);
@@ -4409,14 +2160,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotHost {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotHost {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -4438,24 +2181,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionNotMethodItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "GET",
-    ///    "POST",
-    ///    "PUT",
-    ///    "DELETE",
-    ///    "PATCH",
-    ///    "HEAD",
-    ///    "OPTIONS"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -4518,14 +2243,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotMethodItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotMethodItem {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -4535,24 +2252,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionNotMethodsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "GET",
-    ///    "POST",
-    ///    "PUT",
-    ///    "DELETE",
-    ///    "PATCH",
-    ///    "HEAD",
-    ///    "OPTIONS"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -4615,14 +2314,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotMethodsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotMethodsItem {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -4632,34 +2323,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionNotPath`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "type",
-    ///    "value"
-    ///  ],
-    ///  "properties": {
-    ///    "type": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "exact",
-    ///        "prefix",
-    ///        "glob"
-    ///      ]
-    ///    },
-    ///    "value": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct EdgeRuleAuthoringConditionNotPath {
@@ -4668,20 +2331,6 @@ pub mod edge_rules {
         pub value: EdgeRuleAuthoringConditionNotPathValue,
     }
     ///`EdgeRuleAuthoringConditionNotPathType`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "exact",
-    ///    "prefix",
-    ///    "glob"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -4728,14 +2377,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotPathType {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotPathType {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -4745,16 +2386,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionNotPathValue`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionNotPathValue(::std::string::String);
@@ -4784,14 +2415,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotPathValue {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotPathValue {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -4813,16 +2436,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionNotQueryKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionNotQueryKey(::std::string::String);
@@ -4852,14 +2465,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionNotQueryKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionNotQueryKey {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -4881,16 +2486,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionNotSourceIpCidrsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionNotSourceIpCidrsItem(::std::string::String);
@@ -4922,16 +2517,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for EdgeRuleAuthoringConditionNotSourceIpCidrsItem
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for EdgeRuleAuthoringConditionNotSourceIpCidrsItem
     {
@@ -4955,34 +2540,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionPath`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "type",
-    ///    "value"
-    ///  ],
-    ///  "properties": {
-    ///    "type": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "exact",
-    ///        "prefix",
-    ///        "glob"
-    ///      ]
-    ///    },
-    ///    "value": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct EdgeRuleAuthoringConditionPath {
@@ -4991,20 +2548,6 @@ pub mod edge_rules {
         pub value: EdgeRuleAuthoringConditionPathValue,
     }
     ///`EdgeRuleAuthoringConditionPathType`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "exact",
-    ///    "prefix",
-    ///    "glob"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -5051,14 +2594,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionPathType {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionPathType {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -5068,16 +2603,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionPathValue`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionPathValue(::std::string::String);
@@ -5107,14 +2632,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionPathValue {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionPathValue {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -5136,16 +2653,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionQueryKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionQueryKey(::std::string::String);
@@ -5175,14 +2682,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringConditionQueryKey {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringConditionQueryKey {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -5204,16 +2703,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringConditionSourceIpCidrsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringConditionSourceIpCidrsItem(::std::string::String);
@@ -5243,16 +2732,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for EdgeRuleAuthoringConditionSourceIpCidrsItem
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for EdgeRuleAuthoringConditionSourceIpCidrsItem
     {
@@ -5276,16 +2755,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringId`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringId(::std::string::String);
@@ -5315,14 +2784,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringId {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringId {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -5344,16 +2805,6 @@ pub mod edge_rules {
         }
     }
     ///`EdgeRuleAuthoringName`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct EdgeRuleAuthoringName(::std::string::String);
@@ -5383,14 +2834,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for EdgeRuleAuthoringName {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for EdgeRuleAuthoringName {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -5412,162 +2855,6 @@ pub mod edge_rules {
         }
     }
     ///Authoring contract for onreza.rules.toml. nrz-cli and ONREZA Platform validate this shape, then normalize it into the routing rules used by the platform data plane. Server validation additionally enforces unique rule ids and cache-rule Vary coverage.
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "$id": "https://docs.onreza.ru/schemas/onreza-rules-v1.schema.json",
-    ///  "title": "ONREZA Edge Rule Set v1",
-    ///  "description": "Authoring contract for onreza.rules.toml. nrz-cli and ONREZA Platform validate this shape, then normalize it into the routing rules used by the platform data plane. Server validation additionally enforces unique rule ids and cache-rule Vary coverage.",
-    ///  "examples": [
-    ///    {
-    ///      "rules": [
-    ///        {
-    ///          "action": {
-    ///            "ifNoFile": false,
-    ///            "statusCode": 301,
-    ///            "target": "/docs",
-    ///            "type": "redirect"
-    ///          },
-    ///          "condition": {
-    ///            "path": {
-    ///              "type": "prefix",
-    ///              "value": "/old-docs"
-    ///            }
-    ///          },
-    ///          "id": "redirect-old-docs",
-    ///          "name": "Redirect old docs"
-    ///        },
-    ///        {
-    ///          "action": {
-    ///            "ifNoFile": false,
-    ///            "statusCode": 301,
-    ///            "target": "https://example.com/{rest}",
-    ///            "type": "redirect"
-    ///          },
-    ///          "condition": {
-    ///            "host": "пример.рф",
-    ///            "path": {
-    ///              "type": "glob",
-    ///              "value": "/{rest...}"
-    ///            }
-    ///          },
-    ///          "id": "redirect-cyrillic-domain"
-    ///        },
-    ///        {
-    ///          "action": {
-    ///            "target": "/posts/{slug}.html",
-    ///            "type": "rewrite"
-    ///          },
-    ///          "condition": {
-    ///            "path": {
-    ///              "type": "glob",
-    ///              "value": "/blog/{slug}"
-    ///            }
-    ///          },
-    ///          "id": "clean-urls"
-    ///        },
-    ///        {
-    ///          "action": {
-    ///            "ttlSeconds": 3600,
-    ///            "type": "cache"
-    ///          },
-    ///          "condition": {
-    ///            "path": {
-    ///              "type": "prefix",
-    ///              "value": "/assets"
-    ///            }
-    ///          },
-    ///          "id": "cache-assets"
-    ///        },
-    ///        {
-    ///          "action": {
-    ///            "steps": [
-    ///              {
-    ///                "mode": "request",
-    ///                "use": "require-session"
-    ///              },
-    ///              {
-    ///                "handle": "@app"
-    ///              }
-    ///            ],
-    ///            "type": "pipeline"
-    ///          },
-    ///          "condition": {
-    ///            "path": {
-    ///              "type": "prefix",
-    ///              "value": "/dashboard"
-    ///            }
-    ///          },
-    ///          "id": "dashboard-auth"
-    ///        }
-    ///      ],
-    ///      "schemaVersion": "EDGE_RULE_SET_V1"
-    ///    }
-    ///  ],
-    ///  "type": "object",
-    ///  "required": [
-    ///    "rules",
-    ///    "schemaVersion"
-    ///  ],
-    ///  "properties": {
-    ///    "imageSources": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "$ref": "#/definitions/RemoteImageSourceAuthoring"
-    ///      },
-    ///      "maxItems": 128
-    ///    },
-    ///    "rules": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "$ref": "#/definitions/EdgeRuleAuthoring"
-    ///      }
-    ///    },
-    ///    "schemaVersion": {
-    ///      "type": "string",
-    ///      "const": "EDGE_RULE_SET_V1"
-    ///    },
-    ///    "source": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "origin"
-    ///      ],
-    ///      "properties": {
-    ///        "origin": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "build",
-    ///            "ui"
-    ///          ]
-    ///        },
-    ///        "revisionId": {
-    ///          "type": "string",
-    ///          "minLength": 1
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    }
-    ///  },
-    ///  "additionalProperties": false,
-    ///  "x-onreza-refinements": [
-    ///    "unique rule ids per set",
-    ///    "cache rule must Vary by request-dependent condition dimensions",
-    ///    "pipeline actions must declare exactly one terminal handle step",
-    ///    "pipeline response/observe steps must appear after the terminal handle",
-    ///    "a narrower pipeline rule must re-declare a broader failure=closed request gate or set inherit_gate=false",
-    ///    "glob path captures: '{name}' matches one segment, '{name...}' matches the remainder (at most one splat, unique names)",
-    ///    "path captures are declared only in the root condition.path glob; any/not branch globs must not declare captures",
-    ///    "redirect/rewrite target and set_headers values may interpolate '{name}'; every reference must be defined as a capture in the rule's root glob path matcher, splats are referenced by plain '{name}'",
-    ///    "redirect target must be a relative path or an absolute http(s) URL; IDN hosts in absolute redirect targets are normalized to punycode",
-    ///    "internal rewrite target must be a relative path; external rewrite target must be an absolute https URL",
-    ///    "host conditions accept ASCII/punycode or IDN Unicode hostnames without scheme, port, path, or userinfo and are normalized to punycode",
-    ///    "'{{name}}' escapes interpolation in target/header values and emits the literal text '{name}'"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaEdgeRuleSetV1 {
@@ -5580,61 +2867,21 @@ pub mod edge_rules {
         pub rules: ::std::vec::Vec<EdgeRuleAuthoring>,
         #[serde(rename = "schemaVersion")]
         pub schema_version: ::std::string::String,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub source: ::std::option::Option<OnrezaEdgeRuleSetV1Source>,
     }
     ///`OnrezaEdgeRuleSetV1Source`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "origin"
-    ///  ],
-    ///  "properties": {
-    ///    "origin": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "build",
-    ///        "ui"
-    ///      ]
-    ///    },
-    ///    "revisionId": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaEdgeRuleSetV1Source {
         pub origin: OnrezaEdgeRuleSetV1SourceOrigin,
         #[serde(
             rename = "revisionId",
-            default,
             skip_serializing_if = "::std::option::Option::is_none"
         )]
         pub revision_id: ::std::option::Option<OnrezaEdgeRuleSetV1SourceRevisionId>,
     }
     ///`OnrezaEdgeRuleSetV1SourceOrigin`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "build",
-    ///    "ui"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -5677,14 +2924,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for OnrezaEdgeRuleSetV1SourceOrigin {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for OnrezaEdgeRuleSetV1SourceOrigin {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -5694,16 +2933,6 @@ pub mod edge_rules {
         }
     }
     ///`OnrezaEdgeRuleSetV1SourceRevisionId`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaEdgeRuleSetV1SourceRevisionId(::std::string::String);
@@ -5733,14 +2962,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for OnrezaEdgeRuleSetV1SourceRevisionId {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for OnrezaEdgeRuleSetV1SourceRevisionId {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -5762,43 +2983,12 @@ pub mod edge_rules {
         }
     }
     ///`PipelineHandleStep`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "handle"
-    ///  ],
-    ///  "properties": {
-    ///    "handle": {
-    ///      "type": "string",
-    ///      "maxLength": 64,
-    ///      "minLength": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct PipelineHandleStep {
         pub handle: PipelineHandleStepHandle,
     }
     ///`PipelineHandleStepHandle`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 64,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct PipelineHandleStepHandle(::std::string::String);
@@ -5831,14 +3021,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for PipelineHandleStepHandle {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for PipelineHandleStepHandle {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -5860,82 +3042,21 @@ pub mod edge_rules {
         }
     }
     ///`RemoteImageSourceAuthoring`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "hostname",
-    ///    "id",
-    ///    "pathname",
-    ///    "protocol"
-    ///  ],
-    ///  "properties": {
-    ///    "enabled": {
-    ///      "type": "boolean"
-    ///    },
-    ///    "hostname": {
-    ///      "type": "string",
-    ///      "maxLength": 256,
-    ///      "minLength": 1
-    ///    },
-    ///    "id": {
-    ///      "type": "string",
-    ///      "maxLength": 128,
-    ///      "minLength": 1,
-    ///      "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
-    ///    },
-    ///    "name": {
-    ///      "type": "string",
-    ///      "maxLength": 255,
-    ///      "minLength": 1
-    ///    },
-    ///    "pathname": {
-    ///      "type": "string",
-    ///      "maxLength": 1024,
-    ///      "minLength": 1
-    ///    },
-    ///    "protocol": {
-    ///      "type": "string",
-    ///      "const": "https"
-    ///    },
-    ///    "search": {
-    ///      "type": "string",
-    ///      "maxLength": 2048
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct RemoteImageSourceAuthoring {
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub enabled: ::std::option::Option<bool>,
         pub hostname: RemoteImageSourceAuthoringHostname,
         pub id: RemoteImageSourceAuthoringId,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub name: ::std::option::Option<RemoteImageSourceAuthoringName>,
         pub pathname: RemoteImageSourceAuthoringPathname,
         pub protocol: ::std::string::String,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub search: ::std::option::Option<RemoteImageSourceAuthoringSearch>,
     }
     ///`RemoteImageSourceAuthoringHostname`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 256,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct RemoteImageSourceAuthoringHostname(::std::string::String);
@@ -5968,14 +3089,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for RemoteImageSourceAuthoringHostname {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for RemoteImageSourceAuthoringHostname {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -5997,18 +3110,6 @@ pub mod edge_rules {
         }
     }
     ///`RemoteImageSourceAuthoringId`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 128,
-    ///  "minLength": 1,
-    ///  "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct RemoteImageSourceAuthoringId(::std::string::String);
@@ -6048,14 +3149,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for RemoteImageSourceAuthoringId {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for RemoteImageSourceAuthoringId {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -6077,17 +3170,6 @@ pub mod edge_rules {
         }
     }
     ///`RemoteImageSourceAuthoringName`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 255,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct RemoteImageSourceAuthoringName(::std::string::String);
@@ -6120,14 +3202,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for RemoteImageSourceAuthoringName {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for RemoteImageSourceAuthoringName {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -6149,17 +3223,6 @@ pub mod edge_rules {
         }
     }
     ///`RemoteImageSourceAuthoringPathname`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 1024,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct RemoteImageSourceAuthoringPathname(::std::string::String);
@@ -6192,14 +3255,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for RemoteImageSourceAuthoringPathname {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for RemoteImageSourceAuthoringPathname {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -6221,16 +3276,6 @@ pub mod edge_rules {
         }
     }
     ///`RemoteImageSourceAuthoringSearch`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 2048
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct RemoteImageSourceAuthoringSearch(::std::string::String);
@@ -6260,14 +3305,6 @@ pub mod edge_rules {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for RemoteImageSourceAuthoringSearch {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for RemoteImageSourceAuthoringSearch {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -6288,8 +3325,6 @@ pub mod edge_rules {
                 })
         }
     }
-}
-pub mod manifest {
     /// Error types.
     pub mod error {
         /// Error from a `TryFrom` or `FromStr` implementation.
@@ -6316,370 +3351,21 @@ pub mod manifest {
             }
         }
     }
+}
+pub mod manifest {
     ///Build output manifest (manifest.json) — the contract between builder/adapter/CLI and the platform. Generated from the Zod source of truth used by the API server and consumed by the Rust CLI contract crate. Cross-field rules (layer/route references, regex compatibility, meta size) are enforced in code, not in this schema.
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "$id": "https://docs.onreza.ru/schemas/manifest-v1.schema.json",
-    ///  "title": "ONREZA Build Output Manifest",
-    ///  "description": "Build output manifest (manifest.json) — the contract between builder/adapter/CLI and the platform. Generated from the Zod source of truth used by the API server and consumed by the Rust CLI contract crate. Cross-field rules (layer/route references, regex compatibility, meta size) are enforced in code, not in this schema.",
-    ///  "type": "object",
-    ///  "required": [
-    ///    "layers",
-    ///    "routes",
-    ///    "version"
-    ///  ],
-    ///  "properties": {
-    ///    "layers": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "oneOf": [
-    ///          {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "directory",
-    ///              "name",
-    ///              "target"
-    ///            ],
-    ///            "properties": {
-    ///              "directory": {
-    ///                "type": "string",
-    ///                "maxLength": 256,
-    ///                "minLength": 1
-    ///              },
-    ///              "name": {
-    ///                "type": "string",
-    ///                "maxLength": 64,
-    ///                "minLength": 1
-    ///              },
-    ///              "target": {
-    ///                "type": "string",
-    ///                "const": "STATIC"
-    ///              }
-    ///            },
-    ///            "additionalProperties": false
-    ///          },
-    ///          {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "directory",
-    ///              "entry",
-    ///              "name",
-    ///              "target"
-    ///            ],
-    ///            "properties": {
-    ///              "directory": {
-    ///                "type": "string",
-    ///                "maxLength": 256,
-    ///                "minLength": 1
-    ///              },
-    ///              "entry": {
-    ///                "type": "string",
-    ///                "minLength": 1
-    ///              },
-    ///              "name": {
-    ///                "type": "string",
-    ///                "maxLength": 64,
-    ///                "minLength": 1
-    ///              },
-    ///              "runtime": {
-    ///                "type": "object",
-    ///                "properties": {
-    ///                  "maxConcurrency": {
-    ///                    "type": "integer",
-    ///                    "maximum": 9007199254740991.0,
-    ///                    "exclusiveMinimum": 0.0
-    ///                  },
-    ///                  "memoryMb": {
-    ///                    "type": "integer",
-    ///                    "maximum": 8192.0,
-    ///                    "minimum": 32.0
-    ///                  },
-    ///                  "timeoutMs": {
-    ///                    "type": "integer",
-    ///                    "maximum": 9007199254740991.0,
-    ///                    "exclusiveMinimum": 0.0
-    ///                  }
-    ///                }
-    ///              },
-    ///              "target": {
-    ///                "type": "string",
-    ///                "const": "COMPUTE"
-    ///              }
-    ///            },
-    ///            "additionalProperties": false
-    ///          }
-    ///        ]
-    ///      },
-    ///      "maxItems": 10,
-    ///      "minItems": 1
-    ///    },
-    ///    "meta": {
-    ///      "type": "object",
-    ///      "additionalProperties": {},
-    ///      "propertyNames": {
-    ///        "type": "string"
-    ///      }
-    ///    },
-    ///    "prerender": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "layer",
-    ///        "pages"
-    ///      ],
-    ///      "properties": {
-    ///        "layer": {
-    ///          "type": "string",
-    ///          "minLength": 1
-    ///        },
-    ///        "pages": {
-    ///          "type": "object",
-    ///          "additionalProperties": {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "html"
-    ///            ],
-    ///            "properties": {
-    ///              "data": {
-    ///                "type": "string",
-    ///                "minLength": 1
-    ///              },
-    ///              "html": {
-    ///                "type": "string",
-    ///                "minLength": 1
-    ///              }
-    ///            }
-    ///          },
-    ///          "propertyNames": {
-    ///            "type": "string",
-    ///            "format": "starts_with",
-    ///            "pattern": "^\\/.*"
-    ///          }
-    ///        }
-    ///      }
-    ///    },
-    ///    "routes": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "object",
-    ///        "required": [
-    ///          "layer",
-    ///          "pattern"
-    ///        ],
-    ///        "properties": {
-    ///          "fallthrough": {
-    ///            "type": "boolean"
-    ///          },
-    ///          "fallthroughWhen": {
-    ///            "type": "array",
-    ///            "items": {
-    ///              "oneOf": [
-    ///                {
-    ///                  "type": "object",
-    ///                  "required": [
-    ///                    "name",
-    ///                    "type"
-    ///                  ],
-    ///                  "properties": {
-    ///                    "name": {
-    ///                      "type": "string",
-    ///                      "maxLength": 64,
-    ///                      "minLength": 1
-    ///                    },
-    ///                    "type": {
-    ///                      "type": "string",
-    ///                      "const": "header"
-    ///                    },
-    ///                    "value": {
-    ///                      "type": "string",
-    ///                      "maxLength": 512
-    ///                    }
-    ///                  }
-    ///                },
-    ///                {
-    ///                  "type": "object",
-    ///                  "required": [
-    ///                    "name",
-    ///                    "type"
-    ///                  ],
-    ///                  "properties": {
-    ///                    "name": {
-    ///                      "type": "string",
-    ///                      "maxLength": 64,
-    ///                      "minLength": 1
-    ///                    },
-    ///                    "type": {
-    ///                      "type": "string",
-    ///                      "const": "query"
-    ///                    },
-    ///                    "value": {
-    ///                      "type": "string",
-    ///                      "maxLength": 512
-    ///                    }
-    ///                  }
-    ///                }
-    ///              ]
-    ///            },
-    ///            "maxItems": 16,
-    ///            "minItems": 1
-    ///          },
-    ///          "headers": {
-    ///            "type": "object",
-    ///            "additionalProperties": {
-    ///              "type": "string"
-    ///            },
-    ///            "propertyNames": {
-    ///              "type": "string"
-    ///            }
-    ///          },
-    ///          "layer": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          },
-    ///          "methods": {
-    ///            "type": "array",
-    ///            "items": {
-    ///              "type": "string",
-    ///              "enum": [
-    ///                "GET",
-    ///                "POST",
-    ///                "PUT",
-    ///                "DELETE",
-    ///                "PATCH",
-    ///                "HEAD",
-    ///                "OPTIONS"
-    ///              ]
-    ///            }
-    ///          },
-    ///          "pattern": {
-    ///            "type": "string",
-    ///            "maxLength": 500,
-    ///            "minLength": 1
-    ///          },
-    ///          "priority": {
-    ///            "default": 0,
-    ///            "type": "integer",
-    ///            "maximum": 9007199254740991.0,
-    ///            "minimum": -9007199254740991.0
-    ///          },
-    ///          "revalidate": {
-    ///            "type": "integer",
-    ///            "maximum": 31536000.0,
-    ///            "exclusiveMinimum": 0.0
-    ///          }
-    ///        }
-    ///      },
-    ///      "maxItems": 200,
-    ///      "minItems": 1
-    ///    },
-    ///    "version": {
-    ///      "type": "number",
-    ///      "const": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaBuildOutputManifest {
         pub layers: ::std::vec::Vec<OnrezaBuildOutputManifestLayersItem>,
         #[serde(default, skip_serializing_if = "::serde_json::Map::is_empty")]
         pub meta: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub prerender: ::std::option::Option<OnrezaBuildOutputManifestPrerender>,
         pub routes: ::std::vec::Vec<OnrezaBuildOutputManifestRoutesItem>,
         pub version: f64,
     }
     ///`OnrezaBuildOutputManifestLayersItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "oneOf": [
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "directory",
-    ///        "name",
-    ///        "target"
-    ///      ],
-    ///      "properties": {
-    ///        "directory": {
-    ///          "type": "string",
-    ///          "maxLength": 256,
-    ///          "minLength": 1
-    ///        },
-    ///        "name": {
-    ///          "type": "string",
-    ///          "maxLength": 64,
-    ///          "minLength": 1
-    ///        },
-    ///        "target": {
-    ///          "type": "string",
-    ///          "const": "STATIC"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "directory",
-    ///        "entry",
-    ///        "name",
-    ///        "target"
-    ///      ],
-    ///      "properties": {
-    ///        "directory": {
-    ///          "type": "string",
-    ///          "maxLength": 256,
-    ///          "minLength": 1
-    ///        },
-    ///        "entry": {
-    ///          "type": "string",
-    ///          "minLength": 1
-    ///        },
-    ///        "name": {
-    ///          "type": "string",
-    ///          "maxLength": 64,
-    ///          "minLength": 1
-    ///        },
-    ///        "runtime": {
-    ///          "type": "object",
-    ///          "properties": {
-    ///            "maxConcurrency": {
-    ///              "type": "integer",
-    ///              "maximum": 9007199254740991.0,
-    ///              "exclusiveMinimum": 0.0
-    ///            },
-    ///            "memoryMb": {
-    ///              "type": "integer",
-    ///              "maximum": 8192.0,
-    ///              "minimum": 32.0
-    ///            },
-    ///            "timeoutMs": {
-    ///              "type": "integer",
-    ///              "maximum": 9007199254740991.0,
-    ///              "exclusiveMinimum": 0.0
-    ///            }
-    ///          }
-    ///        },
-    ///        "target": {
-    ///          "type": "string",
-    ///          "const": "COMPUTE"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    }
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(tag = "target", deny_unknown_fields)]
     pub enum OnrezaBuildOutputManifestLayersItem {
@@ -6693,22 +3379,11 @@ pub mod manifest {
             directory: OnrezaBuildOutputManifestLayersItemDirectory,
             entry: OnrezaBuildOutputManifestLayersItemEntry,
             name: OnrezaBuildOutputManifestLayersItemName,
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             runtime: ::std::option::Option<OnrezaBuildOutputManifestLayersItemRuntime>,
         },
     }
     ///`OnrezaBuildOutputManifestLayersItemDirectory`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 256,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaBuildOutputManifestLayersItemDirectory(::std::string::String);
@@ -6741,16 +3416,6 @@ pub mod manifest {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaBuildOutputManifestLayersItemDirectory
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaBuildOutputManifestLayersItemDirectory
     {
@@ -6774,16 +3439,6 @@ pub mod manifest {
         }
     }
     ///`OnrezaBuildOutputManifestLayersItemEntry`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaBuildOutputManifestLayersItemEntry(::std::string::String);
@@ -6813,14 +3468,6 @@ pub mod manifest {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for OnrezaBuildOutputManifestLayersItemEntry {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for OnrezaBuildOutputManifestLayersItemEntry {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -6842,17 +3489,6 @@ pub mod manifest {
         }
     }
     ///`OnrezaBuildOutputManifestLayersItemName`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 64,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaBuildOutputManifestLayersItemName(::std::string::String);
@@ -6885,14 +3521,6 @@ pub mod manifest {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for OnrezaBuildOutputManifestLayersItemName {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for OnrezaBuildOutputManifestLayersItemName {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -6914,106 +3542,25 @@ pub mod manifest {
         }
     }
     ///`OnrezaBuildOutputManifestLayersItemRuntime`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "properties": {
-    ///    "maxConcurrency": {
-    ///      "type": "integer",
-    ///      "maximum": 9007199254740991.0,
-    ///      "exclusiveMinimum": 0.0
-    ///    },
-    ///    "memoryMb": {
-    ///      "type": "integer",
-    ///      "maximum": 8192.0,
-    ///      "minimum": 32.0
-    ///    },
-    ///    "timeoutMs": {
-    ///      "type": "integer",
-    ///      "maximum": 9007199254740991.0,
-    ///      "exclusiveMinimum": 0.0
-    ///    }
-    ///  }
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
     pub struct OnrezaBuildOutputManifestLayersItemRuntime {
         #[serde(
             rename = "maxConcurrency",
-            default,
             skip_serializing_if = "::std::option::Option::is_none"
         )]
         pub max_concurrency: ::std::option::Option<::std::num::NonZeroU64>,
         #[serde(
             rename = "memoryMb",
-            default,
             skip_serializing_if = "::std::option::Option::is_none"
         )]
         pub memory_mb: ::std::option::Option<i64>,
         #[serde(
             rename = "timeoutMs",
-            default,
             skip_serializing_if = "::std::option::Option::is_none"
         )]
         pub timeout_ms: ::std::option::Option<::std::num::NonZeroU64>,
     }
-    impl ::std::default::Default for OnrezaBuildOutputManifestLayersItemRuntime {
-        fn default() -> Self {
-            Self {
-                max_concurrency: Default::default(),
-                memory_mb: Default::default(),
-                timeout_ms: Default::default(),
-            }
-        }
-    }
     ///`OnrezaBuildOutputManifestPrerender`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "layer",
-    ///    "pages"
-    ///  ],
-    ///  "properties": {
-    ///    "layer": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    },
-    ///    "pages": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "object",
-    ///        "required": [
-    ///          "html"
-    ///        ],
-    ///        "properties": {
-    ///          "data": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          },
-    ///          "html": {
-    ///            "type": "string",
-    ///            "minLength": 1
-    ///          }
-    ///        }
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string",
-    ///        "format": "starts_with",
-    ///        "pattern": "^\\/.*"
-    ///      }
-    ///    }
-    ///  }
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     pub struct OnrezaBuildOutputManifestPrerender {
         pub layer: OnrezaBuildOutputManifestPrerenderLayer,
@@ -7023,16 +3570,6 @@ pub mod manifest {
         >,
     }
     ///`OnrezaBuildOutputManifestPrerenderLayer`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaBuildOutputManifestPrerenderLayer(::std::string::String);
@@ -7062,14 +3599,6 @@ pub mod manifest {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for OnrezaBuildOutputManifestPrerenderLayer {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for OnrezaBuildOutputManifestPrerenderLayer {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -7091,17 +3620,6 @@ pub mod manifest {
         }
     }
     ///`OnrezaBuildOutputManifestPrerenderPagesKey`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "format": "starts_with",
-    ///  "pattern": "^\\/.*"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaBuildOutputManifestPrerenderPagesKey(::std::string::String);
@@ -7133,16 +3651,6 @@ pub mod manifest {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaBuildOutputManifestPrerenderPagesKey
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for OnrezaBuildOutputManifestPrerenderPagesKey {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -7164,45 +3672,13 @@ pub mod manifest {
         }
     }
     ///`OnrezaBuildOutputManifestPrerenderPagesValue`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "html"
-    ///  ],
-    ///  "properties": {
-    ///    "data": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    },
-    ///    "html": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    }
-    ///  }
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     pub struct OnrezaBuildOutputManifestPrerenderPagesValue {
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub data: ::std::option::Option<OnrezaBuildOutputManifestPrerenderPagesValueData>,
         pub html: OnrezaBuildOutputManifestPrerenderPagesValueHtml,
     }
     ///`OnrezaBuildOutputManifestPrerenderPagesValueData`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaBuildOutputManifestPrerenderPagesValueData(::std::string::String);
@@ -7234,16 +3710,6 @@ pub mod manifest {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaBuildOutputManifestPrerenderPagesValueData
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaBuildOutputManifestPrerenderPagesValueData
     {
@@ -7267,16 +3733,6 @@ pub mod manifest {
         }
     }
     ///`OnrezaBuildOutputManifestPrerenderPagesValueHtml`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaBuildOutputManifestPrerenderPagesValueHtml(::std::string::String);
@@ -7308,16 +3764,6 @@ pub mod manifest {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaBuildOutputManifestPrerenderPagesValueHtml
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaBuildOutputManifestPrerenderPagesValueHtml
     {
@@ -7341,124 +3787,9 @@ pub mod manifest {
         }
     }
     ///`OnrezaBuildOutputManifestRoutesItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "layer",
-    ///    "pattern"
-    ///  ],
-    ///  "properties": {
-    ///    "fallthrough": {
-    ///      "type": "boolean"
-    ///    },
-    ///    "fallthroughWhen": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "oneOf": [
-    ///          {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "name",
-    ///              "type"
-    ///            ],
-    ///            "properties": {
-    ///              "name": {
-    ///                "type": "string",
-    ///                "maxLength": 64,
-    ///                "minLength": 1
-    ///              },
-    ///              "type": {
-    ///                "type": "string",
-    ///                "const": "header"
-    ///              },
-    ///              "value": {
-    ///                "type": "string",
-    ///                "maxLength": 512
-    ///              }
-    ///            }
-    ///          },
-    ///          {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "name",
-    ///              "type"
-    ///            ],
-    ///            "properties": {
-    ///              "name": {
-    ///                "type": "string",
-    ///                "maxLength": 64,
-    ///                "minLength": 1
-    ///              },
-    ///              "type": {
-    ///                "type": "string",
-    ///                "const": "query"
-    ///              },
-    ///              "value": {
-    ///                "type": "string",
-    ///                "maxLength": 512
-    ///              }
-    ///            }
-    ///          }
-    ///        ]
-    ///      },
-    ///      "maxItems": 16,
-    ///      "minItems": 1
-    ///    },
-    ///    "headers": {
-    ///      "type": "object",
-    ///      "additionalProperties": {
-    ///        "type": "string"
-    ///      },
-    ///      "propertyNames": {
-    ///        "type": "string"
-    ///      }
-    ///    },
-    ///    "layer": {
-    ///      "type": "string",
-    ///      "minLength": 1
-    ///    },
-    ///    "methods": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "enum": [
-    ///          "GET",
-    ///          "POST",
-    ///          "PUT",
-    ///          "DELETE",
-    ///          "PATCH",
-    ///          "HEAD",
-    ///          "OPTIONS"
-    ///        ]
-    ///      }
-    ///    },
-    ///    "pattern": {
-    ///      "type": "string",
-    ///      "maxLength": 500,
-    ///      "minLength": 1
-    ///    },
-    ///    "priority": {
-    ///      "default": 0,
-    ///      "type": "integer",
-    ///      "maximum": 9007199254740991.0,
-    ///      "minimum": -9007199254740991.0
-    ///    },
-    ///    "revalidate": {
-    ///      "type": "integer",
-    ///      "maximum": 31536000.0,
-    ///      "exclusiveMinimum": 0.0
-    ///    }
-    ///  }
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     pub struct OnrezaBuildOutputManifestRoutesItem {
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub fallthrough: ::std::option::Option<bool>,
         #[serde(
             rename = "fallthroughWhen",
@@ -7478,94 +3809,29 @@ pub mod manifest {
         pub pattern: OnrezaBuildOutputManifestRoutesItemPattern,
         #[serde(default)]
         pub priority: i64,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub revalidate: ::std::option::Option<::std::num::NonZeroU64>,
     }
     ///`OnrezaBuildOutputManifestRoutesItemFallthroughWhenItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "oneOf": [
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "name",
-    ///        "type"
-    ///      ],
-    ///      "properties": {
-    ///        "name": {
-    ///          "type": "string",
-    ///          "maxLength": 64,
-    ///          "minLength": 1
-    ///        },
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "header"
-    ///        },
-    ///        "value": {
-    ///          "type": "string",
-    ///          "maxLength": 512
-    ///        }
-    ///      }
-    ///    },
-    ///    {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "name",
-    ///        "type"
-    ///      ],
-    ///      "properties": {
-    ///        "name": {
-    ///          "type": "string",
-    ///          "maxLength": 64,
-    ///          "minLength": 1
-    ///        },
-    ///        "type": {
-    ///          "type": "string",
-    ///          "const": "query"
-    ///        },
-    ///        "value": {
-    ///          "type": "string",
-    ///          "maxLength": 512
-    ///        }
-    ///      }
-    ///    }
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(tag = "type")]
     pub enum OnrezaBuildOutputManifestRoutesItemFallthroughWhenItem {
         #[serde(rename = "header")]
         Header {
             name: OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName,
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             value:
                 ::std::option::Option<OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue>,
         },
         #[serde(rename = "query")]
         Query {
             name: OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName,
-            #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             value:
                 ::std::option::Option<OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue>,
         },
     }
     ///`OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 64,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName(::std::string::String);
@@ -7600,16 +3866,6 @@ pub mod manifest {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemName
     {
@@ -7633,16 +3889,6 @@ pub mod manifest {
         }
     }
     ///`OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 512
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue(::std::string::String);
@@ -7674,16 +3920,6 @@ pub mod manifest {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue
     {
@@ -7709,16 +3945,6 @@ pub mod manifest {
         }
     }
     ///`OnrezaBuildOutputManifestRoutesItemLayer`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaBuildOutputManifestRoutesItemLayer(::std::string::String);
@@ -7748,14 +3974,6 @@ pub mod manifest {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String> for OnrezaBuildOutputManifestRoutesItemLayer {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for OnrezaBuildOutputManifestRoutesItemLayer {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -7777,24 +3995,6 @@ pub mod manifest {
         }
     }
     ///`OnrezaBuildOutputManifestRoutesItemMethodsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "GET",
-    ///    "POST",
-    ///    "PUT",
-    ///    "DELETE",
-    ///    "PATCH",
-    ///    "HEAD",
-    ///    "OPTIONS"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -7857,16 +4057,6 @@ pub mod manifest {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaBuildOutputManifestRoutesItemMethodsItem
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaBuildOutputManifestRoutesItemMethodsItem
     {
@@ -7878,17 +4068,6 @@ pub mod manifest {
         }
     }
     ///`OnrezaBuildOutputManifestRoutesItemPattern`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 500,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaBuildOutputManifestRoutesItemPattern(::std::string::String);
@@ -7921,16 +4100,6 @@ pub mod manifest {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaBuildOutputManifestRoutesItemPattern
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String> for OnrezaBuildOutputManifestRoutesItemPattern {
         type Error = self::error::ConversionError;
         fn try_from(
@@ -7951,8 +4120,6 @@ pub mod manifest {
                 })
         }
     }
-}
-pub mod runtime_artifact_graph {
     /// Error types.
     pub mod error {
         /// Error from a `TryFrom` or `FromStr` implementation.
@@ -7979,540 +4146,9 @@ pub mod runtime_artifact_graph {
             }
         }
     }
+}
+pub mod runtime_artifact_graph {
     ///Internal immutable contract for one application artifact, bounded dependency materializations, and declared runtime layer mounts.
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "$id": "https://docs.onreza.ru/schemas/runtime-artifact-graph-v2.schema.json",
-    ///  "title": "ONREZA Runtime Artifact Graph V2",
-    ///  "description": "Internal immutable contract for one application artifact, bounded dependency materializations, and declared runtime layer mounts.",
-    ///  "type": "object",
-    ///  "required": [
-    ///    "dependencyMaterializationManifest",
-    ///    "runtimeArtifactGraph"
-    ///  ],
-    ///  "properties": {
-    ///    "dependencyMaterializationManifest": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "blobDescriptor",
-    ///        "canonicalizationPolicyDigest",
-    ///        "compatibility",
-    ///        "expandedBytes",
-    ///        "expandedFileCount",
-    ///        "generatorDigest",
-    ///        "kind",
-    ///        "logicalTreeDigest",
-    ///        "nativeObjectCount",
-    ///        "regularFileCount",
-    ///        "schemaVersion",
-    ///        "symlinkCount"
-    ///      ],
-    ///      "properties": {
-    ///        "blobDescriptor": {
-    ///          "type": "object",
-    ///          "required": [
-    ///            "digest",
-    ///            "mediaType",
-    ///            "size"
-    ///          ],
-    ///          "properties": {
-    ///            "digest": {
-    ///              "type": "string",
-    ///              "pattern": "^sha256:[0-9a-f]{64}$"
-    ///            },
-    ///            "mediaType": {
-    ///              "type": "string",
-    ///              "const": "application/vnd.onreza.dependency.erofs.v1"
-    ///            },
-    ///            "size": {
-    ///              "type": "integer",
-    ///              "maximum": 9007199254740991.0,
-    ///              "minimum": 0.0
-    ///            }
-    ///          },
-    ///          "additionalProperties": false
-    ///        },
-    ///        "canonicalizationPolicyDigest": {
-    ///          "type": "string",
-    ///          "pattern": "^sha256:[0-9a-f]{64}$"
-    ///        },
-    ///        "compatibility": {
-    ///          "type": "object",
-    ///          "required": [
-    ///            "abi",
-    ///            "architecture",
-    ///            "buildPolicyGeneration",
-    ///            "libc",
-    ///            "os",
-    ///            "packageManager",
-    ///            "packageManagerVersion",
-    ///            "runnerRootfsDigest",
-    ///            "runtimeFamily",
-    ///            "runtimeVersion"
-    ///          ],
-    ///          "properties": {
-    ///            "abi": {
-    ///              "type": "string",
-    ///              "maxLength": 128,
-    ///              "minLength": 1
-    ///            },
-    ///            "architecture": {
-    ///              "type": "string",
-    ///              "enum": [
-    ///                "x86_64",
-    ///                "aarch64"
-    ///              ]
-    ///            },
-    ///            "buildPolicyGeneration": {
-    ///              "type": "integer",
-    ///              "maximum": 2147483647.0,
-    ///              "exclusiveMinimum": 0.0
-    ///            },
-    ///            "libc": {
-    ///              "type": "string",
-    ///              "enum": [
-    ///                "glibc",
-    ///                "musl"
-    ///              ]
-    ///            },
-    ///            "os": {
-    ///              "type": "string",
-    ///              "const": "linux"
-    ///            },
-    ///            "packageManager": {
-    ///              "type": "string",
-    ///              "maxLength": 64,
-    ///              "minLength": 1
-    ///            },
-    ///            "packageManagerVersion": {
-    ///              "type": "string",
-    ///              "maxLength": 128,
-    ///              "minLength": 1
-    ///            },
-    ///            "runnerRootfsDigest": {
-    ///              "type": "string",
-    ///              "pattern": "^sha256:[0-9a-f]{64}$"
-    ///            },
-    ///            "runtimeFamily": {
-    ///              "type": "string",
-    ///              "maxLength": 64,
-    ///              "minLength": 1
-    ///            },
-    ///            "runtimeVersion": {
-    ///              "type": "string",
-    ///              "maxLength": 128,
-    ///              "minLength": 1
-    ///            }
-    ///          },
-    ///          "additionalProperties": false
-    ///        },
-    ///        "expandedBytes": {
-    ///          "type": "integer",
-    ///          "maximum": 9007199254740991.0,
-    ///          "minimum": 0.0
-    ///        },
-    ///        "expandedFileCount": {
-    ///          "type": "integer",
-    ///          "maximum": 2147483647.0,
-    ///          "minimum": 0.0
-    ///        },
-    ///        "generatorDigest": {
-    ///          "type": "string",
-    ///          "pattern": "^sha256:[0-9a-f]{64}$"
-    ///        },
-    ///        "kind": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "JAVASCRIPT_NODE_MODULES",
-    ///            "PYTHON_SITE_PACKAGES"
-    ///          ]
-    ///        },
-    ///        "logicalTreeDigest": {
-    ///          "type": "string",
-    ///          "pattern": "^[0-9a-f]{64}$"
-    ///        },
-    ///        "nativeObjectCount": {
-    ///          "type": "integer",
-    ///          "maximum": 2147483647.0,
-    ///          "minimum": 0.0
-    ///        },
-    ///        "regularFileCount": {
-    ///          "type": "integer",
-    ///          "maximum": 2147483647.0,
-    ///          "minimum": 0.0
-    ///        },
-    ///        "schemaVersion": {
-    ///          "type": "string",
-    ///          "const": "DEPENDENCY_MATERIALIZATION_V1.0"
-    ///        },
-    ///        "symlinkCount": {
-    ///          "type": "integer",
-    ///          "maximum": 2147483647.0,
-    ///          "minimum": 0.0
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "runtimeArtifactGraph": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "application",
-    ///        "dependencies",
-    ///        "graphDigest",
-    ///        "runtimeLayers",
-    ///        "schemaVersion"
-    ///      ],
-    ///      "properties": {
-    ///        "application": {
-    ///          "type": "object",
-    ///          "required": [
-    ///            "artifactId",
-    ///            "blobDescriptor",
-    ///            "manifestDigest"
-    ///          ],
-    ///          "properties": {
-    ///            "artifactId": {
-    ///              "type": "string",
-    ///              "pattern": "^[0-9a-f]{64}$"
-    ///            },
-    ///            "blobDescriptor": {
-    ///              "type": "object",
-    ///              "required": [
-    ///                "digest",
-    ///                "mediaType",
-    ///                "size"
-    ///              ],
-    ///              "properties": {
-    ///                "digest": {
-    ///                  "type": "string",
-    ///                  "pattern": "^sha256:[0-9a-f]{64}$"
-    ///                },
-    ///                "mediaType": {
-    ///                  "type": "string",
-    ///                  "const": "application/vnd.onreza.source-bundle.tar+zstd.v1"
-    ///                },
-    ///                "size": {
-    ///                  "type": "integer",
-    ///                  "maximum": 9007199254740991.0,
-    ///                  "minimum": 0.0
-    ///                }
-    ///              },
-    ///              "additionalProperties": false
-    ///            },
-    ///            "manifestDigest": {
-    ///              "type": "string",
-    ///              "pattern": "^[0-9a-f]{64}$"
-    ///            }
-    ///          },
-    ///          "additionalProperties": false
-    ///        },
-    ///        "dependencies": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "blobDescriptor",
-    ///              "compatibility",
-    ///              "kind",
-    ///              "manifestDigest",
-    ///              "materializationId",
-    ///              "mountPoint"
-    ///            ],
-    ///            "properties": {
-    ///              "blobDescriptor": {
-    ///                "type": "object",
-    ///                "required": [
-    ///                  "digest",
-    ///                  "mediaType",
-    ///                  "size"
-    ///                ],
-    ///                "properties": {
-    ///                  "digest": {
-    ///                    "type": "string",
-    ///                    "pattern": "^sha256:[0-9a-f]{64}$"
-    ///                  },
-    ///                  "mediaType": {
-    ///                    "type": "string",
-    ///                    "const": "application/vnd.onreza.dependency.erofs.v1"
-    ///                  },
-    ///                  "size": {
-    ///                    "type": "integer",
-    ///                    "maximum": 9007199254740991.0,
-    ///                    "minimum": 0.0
-    ///                  }
-    ///                },
-    ///                "additionalProperties": false
-    ///              },
-    ///              "compatibility": {
-    ///                "type": "object",
-    ///                "required": [
-    ///                  "abi",
-    ///                  "architecture",
-    ///                  "buildPolicyGeneration",
-    ///                  "libc",
-    ///                  "os",
-    ///                  "packageManager",
-    ///                  "packageManagerVersion",
-    ///                  "runnerRootfsDigest",
-    ///                  "runtimeFamily",
-    ///                  "runtimeVersion"
-    ///                ],
-    ///                "properties": {
-    ///                  "abi": {
-    ///                    "type": "string",
-    ///                    "maxLength": 128,
-    ///                    "minLength": 1
-    ///                  },
-    ///                  "architecture": {
-    ///                    "type": "string",
-    ///                    "enum": [
-    ///                      "x86_64",
-    ///                      "aarch64"
-    ///                    ]
-    ///                  },
-    ///                  "buildPolicyGeneration": {
-    ///                    "type": "integer",
-    ///                    "maximum": 2147483647.0,
-    ///                    "exclusiveMinimum": 0.0
-    ///                  },
-    ///                  "libc": {
-    ///                    "type": "string",
-    ///                    "enum": [
-    ///                      "glibc",
-    ///                      "musl"
-    ///                    ]
-    ///                  },
-    ///                  "os": {
-    ///                    "type": "string",
-    ///                    "const": "linux"
-    ///                  },
-    ///                  "packageManager": {
-    ///                    "type": "string",
-    ///                    "maxLength": 64,
-    ///                    "minLength": 1
-    ///                  },
-    ///                  "packageManagerVersion": {
-    ///                    "type": "string",
-    ///                    "maxLength": 128,
-    ///                    "minLength": 1
-    ///                  },
-    ///                  "runnerRootfsDigest": {
-    ///                    "type": "string",
-    ///                    "pattern": "^sha256:[0-9a-f]{64}$"
-    ///                  },
-    ///                  "runtimeFamily": {
-    ///                    "type": "string",
-    ///                    "maxLength": 64,
-    ///                    "minLength": 1
-    ///                  },
-    ///                  "runtimeVersion": {
-    ///                    "type": "string",
-    ///                    "maxLength": 128,
-    ///                    "minLength": 1
-    ///                  }
-    ///                },
-    ///                "additionalProperties": false
-    ///              },
-    ///              "kind": {
-    ///                "type": "string",
-    ///                "enum": [
-    ///                  "JAVASCRIPT_NODE_MODULES",
-    ///                  "PYTHON_SITE_PACKAGES"
-    ///                ]
-    ///              },
-    ///              "manifestDigest": {
-    ///                "type": "string",
-    ///                "pattern": "^[0-9a-f]{64}$"
-    ///              },
-    ///              "materializationId": {
-    ///                "type": "string",
-    ///                "pattern": "^[0-9a-f]{64}$"
-    ///              },
-    ///              "mountPoint": {
-    ///                "type": "string",
-    ///                "maxLength": 512,
-    ///                "minLength": 1
-    ///              }
-    ///            },
-    ///            "additionalProperties": false
-    ///          },
-    ///          "maxItems": 16
-    ///        },
-    ///        "graphDigest": {
-    ///          "type": "string",
-    ///          "pattern": "^[0-9a-f]{64}$"
-    ///        },
-    ///        "runtimeLayers": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "applicationRoot",
-    ///              "dependencyMaterializationIds",
-    ///              "entrypoint",
-    ///              "layerName",
-    ///              "runtimeConfig"
-    ///            ],
-    ///            "properties": {
-    ///              "applicationRoot": {
-    ///                "type": "string",
-    ///                "maxLength": 512,
-    ///                "minLength": 1
-    ///              },
-    ///              "dependencyBindings": {
-    ///                "type": "object",
-    ///                "required": [
-    ///                  "mounts"
-    ///                ],
-    ///                "properties": {
-    ///                  "mounts": {
-    ///                    "type": "array",
-    ///                    "items": {
-    ///                      "type": "object",
-    ///                      "required": [
-    ///                        "materializationId",
-    ///                        "mountPoint"
-    ///                      ],
-    ///                      "properties": {
-    ///                        "materializationId": {
-    ///                          "type": "string",
-    ///                          "pattern": "^[0-9a-f]{64}$"
-    ///                        },
-    ///                        "mountPoint": {
-    ///                          "type": "string",
-    ///                          "maxLength": 512,
-    ///                          "minLength": 1
-    ///                        }
-    ///                      },
-    ///                      "additionalProperties": false
-    ///                    },
-    ///                    "maxItems": 8
-    ///                  }
-    ///                },
-    ///                "additionalProperties": false
-    ///              },
-    ///              "dependencyMaterializationIds": {
-    ///                "type": "array",
-    ///                "items": {
-    ///                  "type": "string",
-    ///                  "pattern": "^[0-9a-f]{64}$"
-    ///                },
-    ///                "maxItems": 8
-    ///              },
-    ///              "entrypoint": {
-    ///                "type": "string",
-    ///                "maxLength": 512,
-    ///                "minLength": 1
-    ///              },
-    ///              "launch": {
-    ///                "type": "object",
-    ///                "required": [
-    ///                  "args",
-    ///                  "cwd",
-    ///                  "profile"
-    ///                ],
-    ///                "properties": {
-    ///                  "args": {
-    ///                    "type": "array",
-    ///                    "items": {
-    ///                      "type": "string",
-    ///                      "maxLength": 4096
-    ///                    },
-    ///                    "maxItems": 64
-    ///                  },
-    ///                  "cwd": {
-    ///                    "type": "string",
-    ///                    "maxLength": 512,
-    ///                    "minLength": 1
-    ///                  },
-    ///                  "profile": {
-    ///                    "type": "string",
-    ///                    "enum": [
-    ///                      "BUN",
-    ///                      "CPYTHON_3_14",
-    ///                      "EXECUTABLE"
-    ///                    ]
-    ///                  },
-    ///                  "readiness": {
-    ///                    "type": "object",
-    ///                    "required": [
-    ///                      "protocol"
-    ///                    ],
-    ///                    "properties": {
-    ///                      "path": {
-    ///                        "type": "string",
-    ///                        "maxLength": 2048,
-    ///                        "minLength": 1
-    ///                      },
-    ///                      "protocol": {
-    ///                        "type": "string",
-    ///                        "enum": [
-    ///                          "TCP",
-    ///                          "HTTP"
-    ///                        ]
-    ///                      }
-    ///                    },
-    ///                    "additionalProperties": false
-    ///                  }
-    ///                },
-    ///                "additionalProperties": false
-    ///              },
-    ///              "layerName": {
-    ///                "type": "string",
-    ///                "maxLength": 64,
-    ///                "minLength": 1
-    ///              },
-    ///              "runtimeConfig": {
-    ///                "type": "object",
-    ///                "properties": {
-    ///                  "maxConcurrency": {
-    ///                    "type": "integer",
-    ///                    "maximum": 100.0,
-    ///                    "exclusiveMinimum": 0.0
-    ///                  },
-    ///                  "memoryMb": {
-    ///                    "type": "integer",
-    ///                    "maximum": 8192.0,
-    ///                    "minimum": 32.0
-    ///                  },
-    ///                  "runtimeFamily": {
-    ///                    "type": "string",
-    ///                    "enum": [
-    ///                      "JAVASCRIPT",
-    ///                      "PYTHON"
-    ///                    ]
-    ///                  },
-    ///                  "timeoutMs": {
-    ///                    "type": "integer",
-    ///                    "maximum": 9007199254740991.0,
-    ///                    "exclusiveMinimum": 0.0
-    ///                  }
-    ///                },
-    ///                "additionalProperties": false
-    ///              }
-    ///            },
-    ///            "additionalProperties": false
-    ///          },
-    ///          "maxItems": 10
-    ///        },
-    ///        "schemaVersion": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "RUNTIME_ARTIFACT_GRAPH_V2.0",
-    ///            "RUNTIME_ARTIFACT_GRAPH_V2.1"
-    ///          ]
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2 {
@@ -8523,174 +4159,6 @@ pub mod runtime_artifact_graph {
         pub runtime_artifact_graph: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraph,
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifest`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "blobDescriptor",
-    ///    "canonicalizationPolicyDigest",
-    ///    "compatibility",
-    ///    "expandedBytes",
-    ///    "expandedFileCount",
-    ///    "generatorDigest",
-    ///    "kind",
-    ///    "logicalTreeDigest",
-    ///    "nativeObjectCount",
-    ///    "regularFileCount",
-    ///    "schemaVersion",
-    ///    "symlinkCount"
-    ///  ],
-    ///  "properties": {
-    ///    "blobDescriptor": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "digest",
-    ///        "mediaType",
-    ///        "size"
-    ///      ],
-    ///      "properties": {
-    ///        "digest": {
-    ///          "type": "string",
-    ///          "pattern": "^sha256:[0-9a-f]{64}$"
-    ///        },
-    ///        "mediaType": {
-    ///          "type": "string",
-    ///          "const": "application/vnd.onreza.dependency.erofs.v1"
-    ///        },
-    ///        "size": {
-    ///          "type": "integer",
-    ///          "maximum": 9007199254740991.0,
-    ///          "minimum": 0.0
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "canonicalizationPolicyDigest": {
-    ///      "type": "string",
-    ///      "pattern": "^sha256:[0-9a-f]{64}$"
-    ///    },
-    ///    "compatibility": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "abi",
-    ///        "architecture",
-    ///        "buildPolicyGeneration",
-    ///        "libc",
-    ///        "os",
-    ///        "packageManager",
-    ///        "packageManagerVersion",
-    ///        "runnerRootfsDigest",
-    ///        "runtimeFamily",
-    ///        "runtimeVersion"
-    ///      ],
-    ///      "properties": {
-    ///        "abi": {
-    ///          "type": "string",
-    ///          "maxLength": 128,
-    ///          "minLength": 1
-    ///        },
-    ///        "architecture": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "x86_64",
-    ///            "aarch64"
-    ///          ]
-    ///        },
-    ///        "buildPolicyGeneration": {
-    ///          "type": "integer",
-    ///          "maximum": 2147483647.0,
-    ///          "exclusiveMinimum": 0.0
-    ///        },
-    ///        "libc": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "glibc",
-    ///            "musl"
-    ///          ]
-    ///        },
-    ///        "os": {
-    ///          "type": "string",
-    ///          "const": "linux"
-    ///        },
-    ///        "packageManager": {
-    ///          "type": "string",
-    ///          "maxLength": 64,
-    ///          "minLength": 1
-    ///        },
-    ///        "packageManagerVersion": {
-    ///          "type": "string",
-    ///          "maxLength": 128,
-    ///          "minLength": 1
-    ///        },
-    ///        "runnerRootfsDigest": {
-    ///          "type": "string",
-    ///          "pattern": "^sha256:[0-9a-f]{64}$"
-    ///        },
-    ///        "runtimeFamily": {
-    ///          "type": "string",
-    ///          "maxLength": 64,
-    ///          "minLength": 1
-    ///        },
-    ///        "runtimeVersion": {
-    ///          "type": "string",
-    ///          "maxLength": 128,
-    ///          "minLength": 1
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "expandedBytes": {
-    ///      "type": "integer",
-    ///      "maximum": 9007199254740991.0,
-    ///      "minimum": 0.0
-    ///    },
-    ///    "expandedFileCount": {
-    ///      "type": "integer",
-    ///      "maximum": 2147483647.0,
-    ///      "minimum": 0.0
-    ///    },
-    ///    "generatorDigest": {
-    ///      "type": "string",
-    ///      "pattern": "^sha256:[0-9a-f]{64}$"
-    ///    },
-    ///    "kind": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "JAVASCRIPT_NODE_MODULES",
-    ///        "PYTHON_SITE_PACKAGES"
-    ///      ]
-    ///    },
-    ///    "logicalTreeDigest": {
-    ///      "type": "string",
-    ///      "pattern": "^[0-9a-f]{64}$"
-    ///    },
-    ///    "nativeObjectCount": {
-    ///      "type": "integer",
-    ///      "maximum": 2147483647.0,
-    ///      "minimum": 0.0
-    ///    },
-    ///    "regularFileCount": {
-    ///      "type": "integer",
-    ///      "maximum": 2147483647.0,
-    ///      "minimum": 0.0
-    ///    },
-    ///    "schemaVersion": {
-    ///      "type": "string",
-    ///      "const": "DEPENDENCY_MATERIALIZATION_V1.0"
-    ///    },
-    ///    "symlinkCount": {
-    ///      "type": "integer",
-    ///      "maximum": 2147483647.0,
-    ///      "minimum": 0.0
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifest {
@@ -8718,36 +4186,6 @@ pub mod runtime_artifact_graph {
         pub symlink_count: i64,
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptor`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "digest",
-    ///    "mediaType",
-    ///    "size"
-    ///  ],
-    ///  "properties": {
-    ///    "digest": {
-    ///      "type": "string",
-    ///      "pattern": "^sha256:[0-9a-f]{64}$"
-    ///    },
-    ///    "mediaType": {
-    ///      "type": "string",
-    ///      "const": "application/vnd.onreza.dependency.erofs.v1"
-    ///    },
-    ///    "size": {
-    ///      "type": "integer",
-    ///      "maximum": 9007199254740991.0,
-    ///      "minimum": 0.0
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptor {
@@ -8758,16 +4196,6 @@ pub mod runtime_artifact_graph {
         pub size: i64,
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^sha256:[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest(
@@ -8815,16 +4243,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestBlobDescriptorDigest
     {
@@ -8850,16 +4268,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^sha256:[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest(
@@ -8904,15 +4312,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCanonicalizationPolicyDigest {
         type Error = self::error::ConversionError;
@@ -8936,82 +4335,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibility`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "abi",
-    ///    "architecture",
-    ///    "buildPolicyGeneration",
-    ///    "libc",
-    ///    "os",
-    ///    "packageManager",
-    ///    "packageManagerVersion",
-    ///    "runnerRootfsDigest",
-    ///    "runtimeFamily",
-    ///    "runtimeVersion"
-    ///  ],
-    ///  "properties": {
-    ///    "abi": {
-    ///      "type": "string",
-    ///      "maxLength": 128,
-    ///      "minLength": 1
-    ///    },
-    ///    "architecture": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "x86_64",
-    ///        "aarch64"
-    ///      ]
-    ///    },
-    ///    "buildPolicyGeneration": {
-    ///      "type": "integer",
-    ///      "maximum": 2147483647.0,
-    ///      "exclusiveMinimum": 0.0
-    ///    },
-    ///    "libc": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "glibc",
-    ///        "musl"
-    ///      ]
-    ///    },
-    ///    "os": {
-    ///      "type": "string",
-    ///      "const": "linux"
-    ///    },
-    ///    "packageManager": {
-    ///      "type": "string",
-    ///      "maxLength": 64,
-    ///      "minLength": 1
-    ///    },
-    ///    "packageManagerVersion": {
-    ///      "type": "string",
-    ///      "maxLength": 128,
-    ///      "minLength": 1
-    ///    },
-    ///    "runnerRootfsDigest": {
-    ///      "type": "string",
-    ///      "pattern": "^sha256:[0-9a-f]{64}$"
-    ///    },
-    ///    "runtimeFamily": {
-    ///      "type": "string",
-    ///      "maxLength": 64,
-    ///      "minLength": 1
-    ///    },
-    ///    "runtimeVersion": {
-    ///      "type": "string",
-    ///      "maxLength": 128,
-    ///      "minLength": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibility {
@@ -9033,17 +4356,6 @@ pub mod runtime_artifact_graph {
         pub runtime_version: OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion,
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 128,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi(
@@ -9090,16 +4402,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityAbi
     {
@@ -9125,19 +4427,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityArchitecture`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "x86_64",
-    ///    "aarch64"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -9186,16 +4475,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityArchitecture
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityArchitecture
     {
@@ -9207,19 +4486,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityLibc`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "glibc",
-    ///    "musl"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -9268,16 +4534,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityLibc
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityLibc
     {
@@ -9289,17 +4545,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 64,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager(
@@ -9344,16 +4589,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManager
     {
@@ -9379,17 +4614,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 128,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion(
@@ -9435,15 +4659,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityPackageManagerVersion {
         type Error = self::error::ConversionError;
@@ -9467,16 +4682,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^sha256:[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest(
@@ -9521,15 +4726,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRunnerRootfsDigest {
         type Error = self::error::ConversionError;
@@ -9553,17 +4749,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 64,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily(
@@ -9610,16 +4795,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeFamily
     {
@@ -9645,17 +4820,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 128,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion(
@@ -9700,16 +4864,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestCompatibilityRuntimeVersion
     {
@@ -9735,16 +4889,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^sha256:[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest(
@@ -9792,16 +4936,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestGeneratorDigest
     {
@@ -9827,19 +4961,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestKind`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "JAVASCRIPT_NODE_MODULES",
-    ///    "PYTHON_SITE_PACKAGES"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -9884,16 +5005,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestKind
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestKind
     {
@@ -9905,16 +5016,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest(
@@ -9960,16 +5061,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2DependencyMaterializationManifestLogicalTreeDigest
     {
@@ -9995,364 +5086,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraph`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "application",
-    ///    "dependencies",
-    ///    "graphDigest",
-    ///    "runtimeLayers",
-    ///    "schemaVersion"
-    ///  ],
-    ///  "properties": {
-    ///    "application": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "artifactId",
-    ///        "blobDescriptor",
-    ///        "manifestDigest"
-    ///      ],
-    ///      "properties": {
-    ///        "artifactId": {
-    ///          "type": "string",
-    ///          "pattern": "^[0-9a-f]{64}$"
-    ///        },
-    ///        "blobDescriptor": {
-    ///          "type": "object",
-    ///          "required": [
-    ///            "digest",
-    ///            "mediaType",
-    ///            "size"
-    ///          ],
-    ///          "properties": {
-    ///            "digest": {
-    ///              "type": "string",
-    ///              "pattern": "^sha256:[0-9a-f]{64}$"
-    ///            },
-    ///            "mediaType": {
-    ///              "type": "string",
-    ///              "const": "application/vnd.onreza.source-bundle.tar+zstd.v1"
-    ///            },
-    ///            "size": {
-    ///              "type": "integer",
-    ///              "maximum": 9007199254740991.0,
-    ///              "minimum": 0.0
-    ///            }
-    ///          },
-    ///          "additionalProperties": false
-    ///        },
-    ///        "manifestDigest": {
-    ///          "type": "string",
-    ///          "pattern": "^[0-9a-f]{64}$"
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "dependencies": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "object",
-    ///        "required": [
-    ///          "blobDescriptor",
-    ///          "compatibility",
-    ///          "kind",
-    ///          "manifestDigest",
-    ///          "materializationId",
-    ///          "mountPoint"
-    ///        ],
-    ///        "properties": {
-    ///          "blobDescriptor": {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "digest",
-    ///              "mediaType",
-    ///              "size"
-    ///            ],
-    ///            "properties": {
-    ///              "digest": {
-    ///                "type": "string",
-    ///                "pattern": "^sha256:[0-9a-f]{64}$"
-    ///              },
-    ///              "mediaType": {
-    ///                "type": "string",
-    ///                "const": "application/vnd.onreza.dependency.erofs.v1"
-    ///              },
-    ///              "size": {
-    ///                "type": "integer",
-    ///                "maximum": 9007199254740991.0,
-    ///                "minimum": 0.0
-    ///              }
-    ///            },
-    ///            "additionalProperties": false
-    ///          },
-    ///          "compatibility": {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "abi",
-    ///              "architecture",
-    ///              "buildPolicyGeneration",
-    ///              "libc",
-    ///              "os",
-    ///              "packageManager",
-    ///              "packageManagerVersion",
-    ///              "runnerRootfsDigest",
-    ///              "runtimeFamily",
-    ///              "runtimeVersion"
-    ///            ],
-    ///            "properties": {
-    ///              "abi": {
-    ///                "type": "string",
-    ///                "maxLength": 128,
-    ///                "minLength": 1
-    ///              },
-    ///              "architecture": {
-    ///                "type": "string",
-    ///                "enum": [
-    ///                  "x86_64",
-    ///                  "aarch64"
-    ///                ]
-    ///              },
-    ///              "buildPolicyGeneration": {
-    ///                "type": "integer",
-    ///                "maximum": 2147483647.0,
-    ///                "exclusiveMinimum": 0.0
-    ///              },
-    ///              "libc": {
-    ///                "type": "string",
-    ///                "enum": [
-    ///                  "glibc",
-    ///                  "musl"
-    ///                ]
-    ///              },
-    ///              "os": {
-    ///                "type": "string",
-    ///                "const": "linux"
-    ///              },
-    ///              "packageManager": {
-    ///                "type": "string",
-    ///                "maxLength": 64,
-    ///                "minLength": 1
-    ///              },
-    ///              "packageManagerVersion": {
-    ///                "type": "string",
-    ///                "maxLength": 128,
-    ///                "minLength": 1
-    ///              },
-    ///              "runnerRootfsDigest": {
-    ///                "type": "string",
-    ///                "pattern": "^sha256:[0-9a-f]{64}$"
-    ///              },
-    ///              "runtimeFamily": {
-    ///                "type": "string",
-    ///                "maxLength": 64,
-    ///                "minLength": 1
-    ///              },
-    ///              "runtimeVersion": {
-    ///                "type": "string",
-    ///                "maxLength": 128,
-    ///                "minLength": 1
-    ///              }
-    ///            },
-    ///            "additionalProperties": false
-    ///          },
-    ///          "kind": {
-    ///            "type": "string",
-    ///            "enum": [
-    ///              "JAVASCRIPT_NODE_MODULES",
-    ///              "PYTHON_SITE_PACKAGES"
-    ///            ]
-    ///          },
-    ///          "manifestDigest": {
-    ///            "type": "string",
-    ///            "pattern": "^[0-9a-f]{64}$"
-    ///          },
-    ///          "materializationId": {
-    ///            "type": "string",
-    ///            "pattern": "^[0-9a-f]{64}$"
-    ///          },
-    ///          "mountPoint": {
-    ///            "type": "string",
-    ///            "maxLength": 512,
-    ///            "minLength": 1
-    ///          }
-    ///        },
-    ///        "additionalProperties": false
-    ///      },
-    ///      "maxItems": 16
-    ///    },
-    ///    "graphDigest": {
-    ///      "type": "string",
-    ///      "pattern": "^[0-9a-f]{64}$"
-    ///    },
-    ///    "runtimeLayers": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "object",
-    ///        "required": [
-    ///          "applicationRoot",
-    ///          "dependencyMaterializationIds",
-    ///          "entrypoint",
-    ///          "layerName",
-    ///          "runtimeConfig"
-    ///        ],
-    ///        "properties": {
-    ///          "applicationRoot": {
-    ///            "type": "string",
-    ///            "maxLength": 512,
-    ///            "minLength": 1
-    ///          },
-    ///          "dependencyBindings": {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "mounts"
-    ///            ],
-    ///            "properties": {
-    ///              "mounts": {
-    ///                "type": "array",
-    ///                "items": {
-    ///                  "type": "object",
-    ///                  "required": [
-    ///                    "materializationId",
-    ///                    "mountPoint"
-    ///                  ],
-    ///                  "properties": {
-    ///                    "materializationId": {
-    ///                      "type": "string",
-    ///                      "pattern": "^[0-9a-f]{64}$"
-    ///                    },
-    ///                    "mountPoint": {
-    ///                      "type": "string",
-    ///                      "maxLength": 512,
-    ///                      "minLength": 1
-    ///                    }
-    ///                  },
-    ///                  "additionalProperties": false
-    ///                },
-    ///                "maxItems": 8
-    ///              }
-    ///            },
-    ///            "additionalProperties": false
-    ///          },
-    ///          "dependencyMaterializationIds": {
-    ///            "type": "array",
-    ///            "items": {
-    ///              "type": "string",
-    ///              "pattern": "^[0-9a-f]{64}$"
-    ///            },
-    ///            "maxItems": 8
-    ///          },
-    ///          "entrypoint": {
-    ///            "type": "string",
-    ///            "maxLength": 512,
-    ///            "minLength": 1
-    ///          },
-    ///          "launch": {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "args",
-    ///              "cwd",
-    ///              "profile"
-    ///            ],
-    ///            "properties": {
-    ///              "args": {
-    ///                "type": "array",
-    ///                "items": {
-    ///                  "type": "string",
-    ///                  "maxLength": 4096
-    ///                },
-    ///                "maxItems": 64
-    ///              },
-    ///              "cwd": {
-    ///                "type": "string",
-    ///                "maxLength": 512,
-    ///                "minLength": 1
-    ///              },
-    ///              "profile": {
-    ///                "type": "string",
-    ///                "enum": [
-    ///                  "BUN",
-    ///                  "CPYTHON_3_14",
-    ///                  "EXECUTABLE"
-    ///                ]
-    ///              },
-    ///              "readiness": {
-    ///                "type": "object",
-    ///                "required": [
-    ///                  "protocol"
-    ///                ],
-    ///                "properties": {
-    ///                  "path": {
-    ///                    "type": "string",
-    ///                    "maxLength": 2048,
-    ///                    "minLength": 1
-    ///                  },
-    ///                  "protocol": {
-    ///                    "type": "string",
-    ///                    "enum": [
-    ///                      "TCP",
-    ///                      "HTTP"
-    ///                    ]
-    ///                  }
-    ///                },
-    ///                "additionalProperties": false
-    ///              }
-    ///            },
-    ///            "additionalProperties": false
-    ///          },
-    ///          "layerName": {
-    ///            "type": "string",
-    ///            "maxLength": 64,
-    ///            "minLength": 1
-    ///          },
-    ///          "runtimeConfig": {
-    ///            "type": "object",
-    ///            "properties": {
-    ///              "maxConcurrency": {
-    ///                "type": "integer",
-    ///                "maximum": 100.0,
-    ///                "exclusiveMinimum": 0.0
-    ///              },
-    ///              "memoryMb": {
-    ///                "type": "integer",
-    ///                "maximum": 8192.0,
-    ///                "minimum": 32.0
-    ///              },
-    ///              "runtimeFamily": {
-    ///                "type": "string",
-    ///                "enum": [
-    ///                  "JAVASCRIPT",
-    ///                  "PYTHON"
-    ///                ]
-    ///              },
-    ///              "timeoutMs": {
-    ///                "type": "integer",
-    ///                "maximum": 9007199254740991.0,
-    ///                "exclusiveMinimum": 0.0
-    ///              }
-    ///            },
-    ///            "additionalProperties": false
-    ///          }
-    ///        },
-    ///        "additionalProperties": false
-    ///      },
-    ///      "maxItems": 10
-    ///    },
-    ///    "schemaVersion": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "RUNTIME_ARTIFACT_GRAPH_V2.0",
-    ///        "RUNTIME_ARTIFACT_GRAPH_V2.1"
-    ///      ]
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraph {
@@ -10368,55 +5101,6 @@ pub mod runtime_artifact_graph {
         pub schema_version: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphSchemaVersion,
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplication`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "artifactId",
-    ///    "blobDescriptor",
-    ///    "manifestDigest"
-    ///  ],
-    ///  "properties": {
-    ///    "artifactId": {
-    ///      "type": "string",
-    ///      "pattern": "^[0-9a-f]{64}$"
-    ///    },
-    ///    "blobDescriptor": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "digest",
-    ///        "mediaType",
-    ///        "size"
-    ///      ],
-    ///      "properties": {
-    ///        "digest": {
-    ///          "type": "string",
-    ///          "pattern": "^sha256:[0-9a-f]{64}$"
-    ///        },
-    ///        "mediaType": {
-    ///          "type": "string",
-    ///          "const": "application/vnd.onreza.source-bundle.tar+zstd.v1"
-    ///        },
-    ///        "size": {
-    ///          "type": "integer",
-    ///          "maximum": 9007199254740991.0,
-    ///          "minimum": 0.0
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "manifestDigest": {
-    ///      "type": "string",
-    ///      "pattern": "^[0-9a-f]{64}$"
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplication {
@@ -10430,16 +5114,6 @@ pub mod runtime_artifact_graph {
             OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest,
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId(
@@ -10479,16 +5153,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationArtifactId
     {
@@ -10514,36 +5178,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptor`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "digest",
-    ///    "mediaType",
-    ///    "size"
-    ///  ],
-    ///  "properties": {
-    ///    "digest": {
-    ///      "type": "string",
-    ///      "pattern": "^sha256:[0-9a-f]{64}$"
-    ///    },
-    ///    "mediaType": {
-    ///      "type": "string",
-    ///      "const": "application/vnd.onreza.source-bundle.tar+zstd.v1"
-    ///    },
-    ///    "size": {
-    ///      "type": "integer",
-    ///      "maximum": 9007199254740991.0,
-    ///      "minimum": 0.0
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptor {
@@ -10553,16 +5187,6 @@ pub mod runtime_artifact_graph {
         pub size: i64,
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^sha256:[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest(
@@ -10610,16 +5234,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationBlobDescriptorDigest
     {
@@ -10645,16 +5259,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest(
@@ -10700,16 +5304,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphApplicationManifestDigest
     {
@@ -10735,140 +5329,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "blobDescriptor",
-    ///    "compatibility",
-    ///    "kind",
-    ///    "manifestDigest",
-    ///    "materializationId",
-    ///    "mountPoint"
-    ///  ],
-    ///  "properties": {
-    ///    "blobDescriptor": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "digest",
-    ///        "mediaType",
-    ///        "size"
-    ///      ],
-    ///      "properties": {
-    ///        "digest": {
-    ///          "type": "string",
-    ///          "pattern": "^sha256:[0-9a-f]{64}$"
-    ///        },
-    ///        "mediaType": {
-    ///          "type": "string",
-    ///          "const": "application/vnd.onreza.dependency.erofs.v1"
-    ///        },
-    ///        "size": {
-    ///          "type": "integer",
-    ///          "maximum": 9007199254740991.0,
-    ///          "minimum": 0.0
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "compatibility": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "abi",
-    ///        "architecture",
-    ///        "buildPolicyGeneration",
-    ///        "libc",
-    ///        "os",
-    ///        "packageManager",
-    ///        "packageManagerVersion",
-    ///        "runnerRootfsDigest",
-    ///        "runtimeFamily",
-    ///        "runtimeVersion"
-    ///      ],
-    ///      "properties": {
-    ///        "abi": {
-    ///          "type": "string",
-    ///          "maxLength": 128,
-    ///          "minLength": 1
-    ///        },
-    ///        "architecture": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "x86_64",
-    ///            "aarch64"
-    ///          ]
-    ///        },
-    ///        "buildPolicyGeneration": {
-    ///          "type": "integer",
-    ///          "maximum": 2147483647.0,
-    ///          "exclusiveMinimum": 0.0
-    ///        },
-    ///        "libc": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "glibc",
-    ///            "musl"
-    ///          ]
-    ///        },
-    ///        "os": {
-    ///          "type": "string",
-    ///          "const": "linux"
-    ///        },
-    ///        "packageManager": {
-    ///          "type": "string",
-    ///          "maxLength": 64,
-    ///          "minLength": 1
-    ///        },
-    ///        "packageManagerVersion": {
-    ///          "type": "string",
-    ///          "maxLength": 128,
-    ///          "minLength": 1
-    ///        },
-    ///        "runnerRootfsDigest": {
-    ///          "type": "string",
-    ///          "pattern": "^sha256:[0-9a-f]{64}$"
-    ///        },
-    ///        "runtimeFamily": {
-    ///          "type": "string",
-    ///          "maxLength": 64,
-    ///          "minLength": 1
-    ///        },
-    ///        "runtimeVersion": {
-    ///          "type": "string",
-    ///          "maxLength": 128,
-    ///          "minLength": 1
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "kind": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "JAVASCRIPT_NODE_MODULES",
-    ///        "PYTHON_SITE_PACKAGES"
-    ///      ]
-    ///    },
-    ///    "manifestDigest": {
-    ///      "type": "string",
-    ///      "pattern": "^[0-9a-f]{64}$"
-    ///    },
-    ///    "materializationId": {
-    ///      "type": "string",
-    ///      "pattern": "^[0-9a-f]{64}$"
-    ///    },
-    ///    "mountPoint": {
-    ///      "type": "string",
-    ///      "maxLength": 512,
-    ///      "minLength": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItem {
@@ -10888,36 +5348,6 @@ pub mod runtime_artifact_graph {
         pub mount_point: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint,
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptor`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "digest",
-    ///    "mediaType",
-    ///    "size"
-    ///  ],
-    ///  "properties": {
-    ///    "digest": {
-    ///      "type": "string",
-    ///      "pattern": "^sha256:[0-9a-f]{64}$"
-    ///    },
-    ///    "mediaType": {
-    ///      "type": "string",
-    ///      "const": "application/vnd.onreza.dependency.erofs.v1"
-    ///    },
-    ///    "size": {
-    ///      "type": "integer",
-    ///      "maximum": 9007199254740991.0,
-    ///      "minimum": 0.0
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptor {
@@ -10928,16 +5358,6 @@ pub mod runtime_artifact_graph {
         pub size: i64,
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^sha256:[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest(
@@ -10985,16 +5405,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemBlobDescriptorDigest
     {
@@ -11020,82 +5430,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibility`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "abi",
-    ///    "architecture",
-    ///    "buildPolicyGeneration",
-    ///    "libc",
-    ///    "os",
-    ///    "packageManager",
-    ///    "packageManagerVersion",
-    ///    "runnerRootfsDigest",
-    ///    "runtimeFamily",
-    ///    "runtimeVersion"
-    ///  ],
-    ///  "properties": {
-    ///    "abi": {
-    ///      "type": "string",
-    ///      "maxLength": 128,
-    ///      "minLength": 1
-    ///    },
-    ///    "architecture": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "x86_64",
-    ///        "aarch64"
-    ///      ]
-    ///    },
-    ///    "buildPolicyGeneration": {
-    ///      "type": "integer",
-    ///      "maximum": 2147483647.0,
-    ///      "exclusiveMinimum": 0.0
-    ///    },
-    ///    "libc": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "glibc",
-    ///        "musl"
-    ///      ]
-    ///    },
-    ///    "os": {
-    ///      "type": "string",
-    ///      "const": "linux"
-    ///    },
-    ///    "packageManager": {
-    ///      "type": "string",
-    ///      "maxLength": 64,
-    ///      "minLength": 1
-    ///    },
-    ///    "packageManagerVersion": {
-    ///      "type": "string",
-    ///      "maxLength": 128,
-    ///      "minLength": 1
-    ///    },
-    ///    "runnerRootfsDigest": {
-    ///      "type": "string",
-    ///      "pattern": "^sha256:[0-9a-f]{64}$"
-    ///    },
-    ///    "runtimeFamily": {
-    ///      "type": "string",
-    ///      "maxLength": 64,
-    ///      "minLength": 1
-    ///    },
-    ///    "runtimeVersion": {
-    ///      "type": "string",
-    ///      "maxLength": 128,
-    ///      "minLength": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibility {
@@ -11117,17 +5451,6 @@ pub mod runtime_artifact_graph {
         pub runtime_version: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion,
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 128,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi(
@@ -11174,16 +5497,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityAbi
     {
@@ -11209,19 +5522,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityArchitecture`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "x86_64",
-    ///    "aarch64"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -11271,15 +5571,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityArchitecture {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityArchitecture {
         type Error = self::error::ConversionError;
@@ -11290,19 +5581,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityLibc`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "glibc",
-    ///    "musl"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -11351,16 +5629,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityLibc
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityLibc
     {
@@ -11372,17 +5640,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 64,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager(
@@ -11428,15 +5685,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManager {
         type Error = self::error::ConversionError;
@@ -11460,17 +5708,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 128,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion(
@@ -11516,15 +5753,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityPackageManagerVersion {
         type Error = self::error::ConversionError;
@@ -11548,16 +5776,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^sha256:[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest(
@@ -11602,15 +5820,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRunnerRootfsDigest {
         type Error = self::error::ConversionError;
@@ -11634,17 +5843,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 64,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily(
@@ -11690,15 +5888,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeFamily {
         type Error = self::error::ConversionError;
@@ -11722,17 +5911,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 128,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion(
@@ -11778,15 +5956,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemCompatibilityRuntimeVersion {
         type Error = self::error::ConversionError;
@@ -11810,19 +5979,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemKind`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "JAVASCRIPT_NODE_MODULES",
-    ///    "PYTHON_SITE_PACKAGES"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -11867,16 +6023,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemKind
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemKind
     {
@@ -11888,16 +6034,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest(
@@ -11943,16 +6079,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemManifestDigest
     {
@@ -11978,16 +6104,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId(
@@ -12033,16 +6149,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMaterializationId
     {
@@ -12068,17 +6174,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 512,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint(
@@ -12125,16 +6220,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItemMountPoint
     {
@@ -12160,16 +6245,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest(::std::string::String);
@@ -12203,16 +6278,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphGraphDigest
     {
@@ -12238,161 +6303,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "applicationRoot",
-    ///    "dependencyMaterializationIds",
-    ///    "entrypoint",
-    ///    "layerName",
-    ///    "runtimeConfig"
-    ///  ],
-    ///  "properties": {
-    ///    "applicationRoot": {
-    ///      "type": "string",
-    ///      "maxLength": 512,
-    ///      "minLength": 1
-    ///    },
-    ///    "dependencyBindings": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "mounts"
-    ///      ],
-    ///      "properties": {
-    ///        "mounts": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "object",
-    ///            "required": [
-    ///              "materializationId",
-    ///              "mountPoint"
-    ///            ],
-    ///            "properties": {
-    ///              "materializationId": {
-    ///                "type": "string",
-    ///                "pattern": "^[0-9a-f]{64}$"
-    ///              },
-    ///              "mountPoint": {
-    ///                "type": "string",
-    ///                "maxLength": 512,
-    ///                "minLength": 1
-    ///              }
-    ///            },
-    ///            "additionalProperties": false
-    ///          },
-    ///          "maxItems": 8
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "dependencyMaterializationIds": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "pattern": "^[0-9a-f]{64}$"
-    ///      },
-    ///      "maxItems": 8
-    ///    },
-    ///    "entrypoint": {
-    ///      "type": "string",
-    ///      "maxLength": 512,
-    ///      "minLength": 1
-    ///    },
-    ///    "launch": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "args",
-    ///        "cwd",
-    ///        "profile"
-    ///      ],
-    ///      "properties": {
-    ///        "args": {
-    ///          "type": "array",
-    ///          "items": {
-    ///            "type": "string",
-    ///            "maxLength": 4096
-    ///          },
-    ///          "maxItems": 64
-    ///        },
-    ///        "cwd": {
-    ///          "type": "string",
-    ///          "maxLength": 512,
-    ///          "minLength": 1
-    ///        },
-    ///        "profile": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "BUN",
-    ///            "CPYTHON_3_14",
-    ///            "EXECUTABLE"
-    ///          ]
-    ///        },
-    ///        "readiness": {
-    ///          "type": "object",
-    ///          "required": [
-    ///            "protocol"
-    ///          ],
-    ///          "properties": {
-    ///            "path": {
-    ///              "type": "string",
-    ///              "maxLength": 2048,
-    ///              "minLength": 1
-    ///            },
-    ///            "protocol": {
-    ///              "type": "string",
-    ///              "enum": [
-    ///                "TCP",
-    ///                "HTTP"
-    ///              ]
-    ///            }
-    ///          },
-    ///          "additionalProperties": false
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    },
-    ///    "layerName": {
-    ///      "type": "string",
-    ///      "maxLength": 64,
-    ///      "minLength": 1
-    ///    },
-    ///    "runtimeConfig": {
-    ///      "type": "object",
-    ///      "properties": {
-    ///        "maxConcurrency": {
-    ///          "type": "integer",
-    ///          "maximum": 100.0,
-    ///          "exclusiveMinimum": 0.0
-    ///        },
-    ///        "memoryMb": {
-    ///          "type": "integer",
-    ///          "maximum": 8192.0,
-    ///          "minimum": 32.0
-    ///        },
-    ///        "runtimeFamily": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "JAVASCRIPT",
-    ///            "PYTHON"
-    ///          ]
-    ///        },
-    ///        "timeoutMs": {
-    ///          "type": "integer",
-    ///          "maximum": 9007199254740991.0,
-    ///          "exclusiveMinimum": 0.0
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItem {
@@ -12400,7 +6310,6 @@ pub mod runtime_artifact_graph {
         pub application_root: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot,
         #[serde(
             rename = "dependencyBindings",
-            default,
             skip_serializing_if = "::std::option::Option::is_none"
         )]
         pub dependency_bindings: ::std::option::Option<
@@ -12411,7 +6320,7 @@ pub mod runtime_artifact_graph {
             OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem,
         >,
         pub entrypoint: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub launch: ::std::option::Option<
             OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunch,
         >,
@@ -12421,17 +6330,6 @@ pub mod runtime_artifact_graph {
         pub runtime_config: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfig,
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 512,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot(
@@ -12478,16 +6376,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemApplicationRoot
     {
@@ -12513,44 +6401,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindings`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "mounts"
-    ///  ],
-    ///  "properties": {
-    ///    "mounts": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "object",
-    ///        "required": [
-    ///          "materializationId",
-    ///          "mountPoint"
-    ///        ],
-    ///        "properties": {
-    ///          "materializationId": {
-    ///            "type": "string",
-    ///            "pattern": "^[0-9a-f]{64}$"
-    ///          },
-    ///          "mountPoint": {
-    ///            "type": "string",
-    ///            "maxLength": 512,
-    ///            "minLength": 1
-    ///          }
-    ///        },
-    ///        "additionalProperties": false
-    ///      },
-    ///      "maxItems": 8
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindings {
@@ -12559,31 +6409,6 @@ pub mod runtime_artifact_graph {
         >,
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindingsMountsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "materializationId",
-    ///    "mountPoint"
-    ///  ],
-    ///  "properties": {
-    ///    "materializationId": {
-    ///      "type": "string",
-    ///      "pattern": "^[0-9a-f]{64}$"
-    ///    },
-    ///    "mountPoint": {
-    ///      "type": "string",
-    ///      "maxLength": 512,
-    ///      "minLength": 1
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindingsMountsItem {
@@ -12593,16 +6418,6 @@ pub mod runtime_artifact_graph {
         pub mount_point: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindingsMountsItemMountPoint,
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindingsMountsItemMaterializationId`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindingsMountsItemMaterializationId(
@@ -12647,15 +6462,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindingsMountsItemMaterializationId {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindingsMountsItemMaterializationId {
         type Error = self::error::ConversionError;
@@ -12679,17 +6485,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindingsMountsItemMountPoint`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 512,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindingsMountsItemMountPoint(
@@ -12735,15 +6530,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindingsMountsItemMountPoint {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyBindingsMountsItemMountPoint {
         type Error = self::error::ConversionError;
@@ -12767,16 +6553,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "pattern": "^[0-9a-f]{64}$"
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem(
@@ -12821,15 +6597,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemDependencyMaterializationIdsItem {
         type Error = self::error::ConversionError;
@@ -12853,17 +6620,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 512,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint(
@@ -12910,16 +6666,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemEntrypoint
     {
@@ -12945,65 +6691,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunch`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "args",
-    ///    "cwd",
-    ///    "profile"
-    ///  ],
-    ///  "properties": {
-    ///    "args": {
-    ///      "type": "array",
-    ///      "items": {
-    ///        "type": "string",
-    ///        "maxLength": 4096
-    ///      },
-    ///      "maxItems": 64
-    ///    },
-    ///    "cwd": {
-    ///      "type": "string",
-    ///      "maxLength": 512,
-    ///      "minLength": 1
-    ///    },
-    ///    "profile": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "BUN",
-    ///        "CPYTHON_3_14",
-    ///        "EXECUTABLE"
-    ///      ]
-    ///    },
-    ///    "readiness": {
-    ///      "type": "object",
-    ///      "required": [
-    ///        "protocol"
-    ///      ],
-    ///      "properties": {
-    ///        "path": {
-    ///          "type": "string",
-    ///          "maxLength": 2048,
-    ///          "minLength": 1
-    ///        },
-    ///        "protocol": {
-    ///          "type": "string",
-    ///          "enum": [
-    ///            "TCP",
-    ///            "HTTP"
-    ///          ]
-    ///        }
-    ///      },
-    ///      "additionalProperties": false
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunch {
@@ -13012,22 +6699,12 @@ pub mod runtime_artifact_graph {
         >,
         pub cwd: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd,
         pub profile: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile,
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub readiness: ::std::option::Option<
             OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadiness,
         >,
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 4096
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem(
@@ -13071,16 +6748,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchArgsItem
     {
@@ -13106,17 +6773,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 512,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd(
@@ -13163,16 +6819,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchCwd
     {
@@ -13198,20 +6844,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "BUN",
-    ///    "CPYTHON_3_14",
-    ///    "EXECUTABLE"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -13264,16 +6896,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile
     {
@@ -13285,54 +6907,16 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadiness`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "required": [
-    ///    "protocol"
-    ///  ],
-    ///  "properties": {
-    ///    "path": {
-    ///      "type": "string",
-    ///      "maxLength": 2048,
-    ///      "minLength": 1
-    ///    },
-    ///    "protocol": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "TCP",
-    ///        "HTTP"
-    ///      ]
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadiness {
-        #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         pub path: ::std::option::Option<
             OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath,
         >,
         pub protocol: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol,
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 2048,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath(
@@ -13379,16 +6963,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessPath
     {
@@ -13414,19 +6988,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "TCP",
-    ///    "HTTP"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -13475,16 +7036,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchReadinessProtocol
     {
@@ -13496,17 +7047,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "maxLength": 64,
-    ///  "minLength": 1
-    ///}
-    /// ```
-    /// </details>
     #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     #[serde(transparent)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName(
@@ -13553,16 +7093,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLayerName
     {
@@ -13588,58 +7118,21 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfig`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "object",
-    ///  "properties": {
-    ///    "maxConcurrency": {
-    ///      "type": "integer",
-    ///      "maximum": 100.0,
-    ///      "exclusiveMinimum": 0.0
-    ///    },
-    ///    "memoryMb": {
-    ///      "type": "integer",
-    ///      "maximum": 8192.0,
-    ///      "minimum": 32.0
-    ///    },
-    ///    "runtimeFamily": {
-    ///      "type": "string",
-    ///      "enum": [
-    ///        "JAVASCRIPT",
-    ///        "PYTHON"
-    ///      ]
-    ///    },
-    ///    "timeoutMs": {
-    ///      "type": "integer",
-    ///      "maximum": 9007199254740991.0,
-    ///      "exclusiveMinimum": 0.0
-    ///    }
-    ///  },
-    ///  "additionalProperties": false
-    ///}
-    /// ```
-    /// </details>
-    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfig {
         #[serde(
             rename = "maxConcurrency",
-            default,
             skip_serializing_if = "::std::option::Option::is_none"
         )]
         pub max_concurrency: ::std::option::Option<::std::num::NonZeroU64>,
         #[serde(
             rename = "memoryMb",
-            default,
             skip_serializing_if = "::std::option::Option::is_none"
         )]
         pub memory_mb: ::std::option::Option<i64>,
         #[serde(
             rename = "runtimeFamily",
-            default,
             skip_serializing_if = "::std::option::Option::is_none"
         )]
         pub runtime_family: ::std::option::Option<
@@ -13647,37 +7140,11 @@ pub mod runtime_artifact_graph {
         >,
         #[serde(
             rename = "timeoutMs",
-            default,
             skip_serializing_if = "::std::option::Option::is_none"
         )]
         pub timeout_ms: ::std::option::Option<::std::num::NonZeroU64>,
     }
-    impl ::std::default::Default
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfig
-    {
-        fn default() -> Self {
-            Self {
-                max_concurrency: Default::default(),
-                memory_mb: Default::default(),
-                runtime_family: Default::default(),
-                timeout_ms: Default::default(),
-            }
-        }
-    }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimeFamily`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "JAVASCRIPT",
-    ///    "PYTHON"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -13728,15 +7195,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimeFamily {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
     for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimeFamily {
         type Error = self::error::ConversionError;
@@ -13747,19 +7205,6 @@ pub mod runtime_artifact_graph {
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphSchemaVersion`
-    ///
-    /// <details><summary>JSON schema</summary>
-    ///
-    /// ```json
-    ///{
-    ///  "type": "string",
-    ///  "enum": [
-    ///    "RUNTIME_ARTIFACT_GRAPH_V2.0",
-    ///    "RUNTIME_ARTIFACT_GRAPH_V2.1"
-    ///  ]
-    ///}
-    /// ```
-    /// </details>
     #[derive(
         ::serde::Deserialize,
         ::serde::Serialize,
@@ -13804,16 +7249,6 @@ pub mod runtime_artifact_graph {
             value.parse()
         }
     }
-    impl ::std::convert::TryFrom<&::std::string::String>
-        for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphSchemaVersion
-    {
-        type Error = self::error::ConversionError;
-        fn try_from(
-            value: &::std::string::String,
-        ) -> ::std::result::Result<Self, self::error::ConversionError> {
-            value.parse()
-        }
-    }
     impl ::std::convert::TryFrom<::std::string::String>
         for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphSchemaVersion
     {
@@ -13822,6 +7257,32 @@ pub mod runtime_artifact_graph {
             value: ::std::string::String,
         ) -> ::std::result::Result<Self, self::error::ConversionError> {
             value.parse()
+        }
+    }
+    /// Error types.
+    pub mod error {
+        /// Error from a `TryFrom` or `FromStr` implementation.
+        pub struct ConversionError(::std::borrow::Cow<'static, str>);
+        impl ::std::error::Error for ConversionError {}
+        impl ::std::fmt::Display for ConversionError {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> Result<(), ::std::fmt::Error> {
+                ::std::fmt::Display::fmt(&self.0, f)
+            }
+        }
+        impl ::std::fmt::Debug for ConversionError {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> Result<(), ::std::fmt::Error> {
+                ::std::fmt::Debug::fmt(&self.0, f)
+            }
+        }
+        impl From<&'static str> for ConversionError {
+            fn from(value: &'static str) -> Self {
+                Self(value.into())
+            }
+        }
+        impl From<String> for ConversionError {
+            fn from(value: String) -> Self {
+                Self(value.into())
+            }
         }
     }
 }

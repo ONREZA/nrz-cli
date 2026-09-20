@@ -1,6 +1,6 @@
 {
   "name": "nrz-cli",
-  "engineVersion": "v0.21.4",
+  "engineVersion": "v0.21.9",
   "sdk": {
     "source": "typescript"
   },

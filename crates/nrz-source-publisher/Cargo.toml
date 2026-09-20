@@ -9,7 +9,7 @@ description = "Shared SOURCE_BUNDLE_V1 publication state machine used by nrz CLI
 nrz-api = { path = "../../api/client" }
 anyhow = "1"
 validator = { version = "0.21", features = ["derive"] }
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1"
 futures = "0.3"
 hex = "0.4"
@@ -32,4 +32,4 @@ axum = "0.8"
 tar = "0.4"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-zstd = "0.13"
+zstd = "0.14"
