@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.41.2] - 2026-09-20
+
+### 🔧 Changed
+
+- **deps:** update deps and dagger to v0.21.9 ([7206904](https://github.com/ONREZA/nrz-cli/commit/72069046cfdd45a87d48f780fcb62b90bcc4646c))
+
 ## [0.41.1] - 2026-09-20
 
 ### 🔧 Changed
