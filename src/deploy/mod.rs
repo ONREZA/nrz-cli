@@ -8,6 +8,7 @@ mod wire;
 // Shared private types and helpers for deployment commands. Stateful admission
 // and publication orchestration lives in workflow; activation owns status reads
 // and wait deadlines. Public command entrypoints remain re-exported here.
+mod access;
 mod activation;
 #[cfg(test)]
 mod activation_tests;
@@ -189,7 +190,8 @@ struct DeployOutput {
     url: String,
     status: String,
     target: DeployTargetOutput,
-    preview_protected: bool,
+    /// Protection of the returned URL; null when its policy could not be read.
+    preview_protected: Option<bool>,
     runtime_artifact_files: crate::artifact::RuntimeArtifactFileBreakdown,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
@@ -219,10 +221,6 @@ fn deploy_target_environment(production: Option<bool>) -> &'static str {
         Some(false) => "preview",
         None => "default",
     }
-}
-
-fn deploy_preview_protected(production: Option<bool>) -> bool {
-    production != Some(true)
 }
 
 /// JSON output for health check configuration.

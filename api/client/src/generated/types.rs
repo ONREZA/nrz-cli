@@ -4866,7 +4866,7 @@ pub struct EventRequestBody {
 pub struct PostV1buildLogSessionsByIdEventsRequestPath {
     pub id: uuid::Uuid,
 }
-/// Appends one contiguous, idempotent event batch to VictoriaLogs.
+/// Appends one contiguous, idempotent event batch to Sibyl.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct PostV1buildLogSessionsByIdEventsRequest {
     pub path: PostV1buildLogSessionsByIdEventsRequestPath,
@@ -7096,12 +7096,6 @@ pub struct ComputeConfigRequestBody {
     #[serde(rename = "idleTimeoutSeconds")]
     #[validate(range(min = 5i64, max = 300i64))]
     pub idle_timeout_seconds: Option<i64>,
-    #[serde(rename = "maxInstances")]
-    #[validate(range(min = 1i64, max = 10i64))]
-    pub max_instances: Option<i64>,
-    #[serde(rename = "minInstances")]
-    #[validate(range(min = 0i64, max = 5i64))]
-    pub min_instances: Option<i64>,
     #[serde(
         default,
         with = "serde_with::rust::double_option",
@@ -15112,8 +15106,18 @@ pub struct DomainResponseItem {
     #[serde(deserialize_with = "Option::deserialize", rename = "acmeDnsPrecheckAt")]
     #[serialize_always]
     pub acme_dns_precheck_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(rename = "targetCname")]
-    pub target_cname: Option<String>,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "targetCname"
+    )]
+    pub target_cname: Option<Option<String>>,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "wwwTargetCname"
+    )]
+    pub www_target_cname: Option<Option<String>>,
     #[serde(rename = "dnsMode")]
     pub dns_mode: DomainResponseItemDnsMode,
     #[serde(deserialize_with = "Option::deserialize", rename = "managedDnsZone")]
@@ -15437,18 +15441,6 @@ pub struct Deployment200Response {
     )]
     #[serialize_always]
     pub rollback_requested_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(
-        deserialize_with = "Option::deserialize",
-        rename = "pendingAutoRollbackId"
-    )]
-    #[serialize_always]
-    pub pending_auto_rollback_id: Option<uuid::Uuid>,
-    #[serde(
-        deserialize_with = "Option::deserialize",
-        rename = "autoRollbackReason"
-    )]
-    #[serialize_always]
-    pub auto_rollback_reason: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "buildWorkerId")]
     #[serialize_always]
     pub build_worker_id: Option<uuid::Uuid>,
@@ -16155,8 +16147,12 @@ pub struct Domain200ResponseHostname {
     )]
     #[serialize_always]
     pub ownership_verified_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(rename = "targetCname")]
-    pub target_cname: String,
+    #[serde(deserialize_with = "Option::deserialize", rename = "targetCname")]
+    #[serialize_always]
+    pub target_cname: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "wwwTargetCname")]
+    #[serialize_always]
+    pub www_target_cname: Option<String>,
     #[serde(rename = "redirectFromWww")]
     pub redirect_from_www: bool,
     #[serde(
@@ -16186,7 +16182,6 @@ pub struct Domain200Response {
 pub struct Verify200ResponseDelegation {
     pub delegated: bool,
     pub expected: Vec<String>,
-    pub actual: Vec<String>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -16751,12 +16746,6 @@ pub struct ComputeConfig200ResponseConfig {
     #[serde(rename = "idleTimeoutSeconds")]
     #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
     pub idle_timeout_seconds: i64,
-    #[serde(rename = "maxInstances")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub max_instances: i64,
-    #[serde(rename = "minInstances")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub min_instances: i64,
     #[serde(deserialize_with = "Option::deserialize", rename = "healthCheckPath")]
     #[serialize_always]
     pub health_check_path: Option<String>,

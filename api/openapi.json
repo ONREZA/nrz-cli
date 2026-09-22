@@ -2531,7 +2531,16 @@
                             ]
                           },
                           "targetCname": {
-                            "type": "string"
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "wwwTargetCname": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           },
                           "dnsMode": {
                             "type": "string",
@@ -3416,24 +3425,6 @@
                         }
                       ]
                     },
-                    "pendingAutoRollbackId": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "format": "uuid",
-                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "autoRollbackReason": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
                     "buildWorkerId": {
                       "anyOf": [
                         {
@@ -3788,8 +3779,6 @@
                     "isAutomaticRollback",
                     "rollbackFromDeploymentId",
                     "rollbackRequestedAt",
-                    "pendingAutoRollbackId",
-                    "autoRollbackReason",
                     "buildWorkerId",
                     "smokeTestWorkerId",
                     "retryCount",
@@ -5010,7 +4999,7 @@
     "/v1/build-log-sessions/{id}/events": {
       "post": {
         "summary": "Append build log events",
-        "description": "Appends one contiguous, idempotent event batch to VictoriaLogs.",
+        "description": "Appends one contiguous, idempotent event batch to Sibyl.",
         "tags": [
           "Build Logs"
         ],
@@ -6393,7 +6382,16 @@
                             ]
                           },
                           "targetCname": {
-                            "type": "string"
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "wwwTargetCname": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           },
                           "redirectFromWww": {
                             "type": "boolean"
@@ -6484,6 +6482,7 @@
                           "ownershipVerificationToken",
                           "ownershipVerifiedAt",
                           "targetCname",
+                          "wwwTargetCname",
                           "redirectFromWww",
                           "activeDeploymentId",
                           "environment"
@@ -6677,18 +6676,11 @@
                               "items": {
                                 "type": "string"
                               }
-                            },
-                            "actual": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
                             }
                           },
                           "required": [
                             "delegated",
-                            "expected",
-                            "actual"
+                            "expected"
                           ],
                           "additionalProperties": false
                         },
@@ -8992,16 +8984,6 @@
                     "minimum": 5,
                     "maximum": 300
                   },
-                  "maxInstances": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 10
-                  },
-                  "minInstances": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 5
-                  },
                   "healthCheckPath": {
                     "anyOf": [
                       {
@@ -9092,16 +9074,6 @@
                           "minimum": -9007199254740991,
                           "maximum": 9007199254740991
                         },
-                        "maxInstances": {
-                          "type": "integer",
-                          "minimum": -9007199254740991,
-                          "maximum": 9007199254740991
-                        },
-                        "minInstances": {
-                          "type": "integer",
-                          "minimum": -9007199254740991,
-                          "maximum": 9007199254740991
-                        },
                         "healthCheckPath": {
                           "type": [
                             "string",
@@ -9136,8 +9108,6 @@
                         "memoryBaselineMb",
                         "memoryStartupMb",
                         "idleTimeoutSeconds",
-                        "maxInstances",
-                        "minInstances",
                         "healthCheckPath",
                         "websocketEnabled",
                         "websocketMaxDurationSeconds",
