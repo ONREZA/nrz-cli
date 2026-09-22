@@ -9,6 +9,7 @@ use crate::errors::CliError;
 use crate::output;
 
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(20);
+const PREVIEW_ACCESS_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const PRODUCTION_ALIAS_LOOKUP_ATTEMPTS: u8 = 20;
 const PRODUCTION_ALIAS_LOOKUP_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -39,9 +40,9 @@ struct VerificationHeader {
     value: HeaderValue,
 }
 
-struct VerificationResponse {
-    status_code: u16,
-    location: Option<String>,
+pub(super) struct VerificationResponse {
+    pub(super) status_code: u16,
+    pub(super) location: Option<String>,
 }
 
 #[cfg(test)]
@@ -84,7 +85,11 @@ pub(super) async fn verify_deployment(
     })?;
 
     let (response, access_secret_id, used_preview_bypass) =
-        if needs_preview_bypass(&initial_response) {
+        if needs_preview_bypass(&initial_response)
+            && super::access::read(request.api_client, request.deployment_id, &base_url)
+                .await
+                .context("failed to resolve URL protection for deploy verification")?
+        {
             let access = crate::preview::create_preview_access(
                 request.api_client,
                 request.project_id,
@@ -98,8 +103,14 @@ pub(super) async fn verify_deployment(
                 .context("preview access returned an invalid header name")?;
             let value = HeaderValue::from_str(&access.header_value)
                 .context("preview access returned an invalid header value")?;
+            let header = VerificationHeader { name, value };
             (
-                fetch_verification_url(&url, Some(&VerificationHeader { name, value })).await,
+                wait_for_preview_access(
+                    PREVIEW_ACCESS_READY_TIMEOUT,
+                    Duration::from_secs(1),
+                    || fetch_verification_url(&url, Some(&header)),
+                )
+                .await,
                 Some(access.secret_id),
                 true,
             )
@@ -234,6 +245,28 @@ pub(super) fn verification_url(base_url: &str, path: &str) -> anyhow::Result<Str
     Ok(url.to_string())
 }
 
+pub(super) async fn wait_for_preview_access<F, Fut>(
+    timeout: Duration,
+    interval: Duration,
+    mut fetch: F,
+) -> anyhow::Result<VerificationResponse>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<VerificationResponse>>,
+{
+    tokio::time::timeout(timeout, async {
+        loop {
+            let response = fetch().await?;
+            if !matches!(response.status_code, 401 | 403) {
+                return Ok(response);
+            }
+            tokio::time::sleep(interval).await;
+        }
+    })
+    .await
+    .context("temporary preview access did not become available before the deadline")?
+}
+
 async fn fetch_verification_url(
     url: &str,
     header: Option<&VerificationHeader>,
@@ -301,11 +334,12 @@ fn validate_response(
 }
 
 fn needs_preview_bypass(response: &VerificationResponse) -> bool {
-    !(200..300).contains(&response.status_code)
-        && response
-            .location
-            .as_deref()
-            .is_some_and(is_preview_auth_location)
+    matches!(response.status_code, 401 | 403)
+        || (!(200..300).contains(&response.status_code)
+            && response
+                .location
+                .as_deref()
+                .is_some_and(is_preview_auth_location))
 }
 
 #[cfg(test)]
