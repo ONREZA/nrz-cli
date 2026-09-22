@@ -10,6 +10,7 @@ const PROJECT: &str = "00000000-0000-0000-0000-000000000001";
 const ENVIRONMENT: &str = "00000000-0000-0000-0000-000000000002";
 const FUNCTION: &str = "00000000-0000-0000-0000-000000000003";
 const REVISION: &str = "00000000-0000-0000-0000-000000000004";
+const RULES_DEPLOYMENT: &str = "00000000-0000-0000-0000-000000000005";
 
 #[tokio::test]
 async fn functions_and_rules_use_typed_requests_and_responses() {
@@ -27,8 +28,8 @@ async fn functions_and_rules_use_typed_requests_and_responses() {
                     "debugTrace":{"serverTiming":null}, "revision":{"id":REVISION,"functionId":FUNCTION,"sourceSnapshotId":REVISION}}))
             }))
         .route(&format!("{prefix}/functions/publish"), post(|Json(body):Json<Value>| async move {
-            assert_eq!(body, json!({"origin":"CLI","edgeRulesForce":true}));
-            Json(json!({"projectId":PROJECT,"environmentId":ENVIRONMENT,"functionCount":0,"edgeRuleSetPublished":true,"warnings":[]}))
+            assert_eq!(body, json!({"origin":"CLI","edgeRulesForce":true,"edgeRules":{"schemaVersion":"EDGE_RULE_SET_V1","rules":[]}}));
+            Json(json!({"projectId":PROJECT,"environmentId":ENVIRONMENT,"deploymentId":RULES_DEPLOYMENT,"activationStatus":"QUEUED","functionCount":0,"edgeRuleSetPublished":false,"warnings":[]}))
         }))
         .route(&format!("{prefix}/edge-rules"), get(|| async {
             Json(json!({"ruleSet":null,"generatedRuleSets":[],"effectiveImageSources":[]}))
@@ -61,17 +62,17 @@ async fn functions_and_rules_use_typed_requests_and_responses() {
         invocation.invocation.response.unwrap().headers.unwrap(),
         vec![("content-type".to_owned(), "application/json".to_owned())]
     );
-    assert!(
-        client
-            .publish_edge_rules(
-                PROJECT,
-                ENVIRONMENT,
-                serde_json::from_value(json!({"origin":"CLI","edgeRulesForce":true})).unwrap()
-            )
-            .await
-            .unwrap()
-            .edge_rule_set_published
-    );
+    let rules_deployment = client
+        .publish_edge_rules(
+            PROJECT,
+            ENVIRONMENT,
+            serde_json::from_value(json!({"origin":"CLI","edgeRulesForce":true,"edgeRules":{"schemaVersion":"EDGE_RULE_SET_V1","rules":[]}})).unwrap()
+        )
+        .await
+        .unwrap();
+    assert_eq!(rules_deployment.deployment_id.to_string(), RULES_DEPLOYMENT);
+    assert_eq!(rules_deployment.activation_status, "QUEUED");
+    assert!(!rules_deployment.edge_rule_set_published);
     assert!(
         client
             .active_edge_rules(PROJECT, ENVIRONMENT)

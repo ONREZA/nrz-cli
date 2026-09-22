@@ -2466,6 +2466,13 @@ pub struct FunctionsPublishResponse {
     pub project_id: String,
     #[serde(rename = "environmentId")]
     pub environment_id: String,
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: uuid::Uuid,
+    #[serde(rename = "activationStatus")]
+    #[serde(deserialize_with = "FunctionsPublishResponse::deserialize_const_activation_status")]
+    #[serde(serialize_with = "FunctionsPublishResponse::serialize_const_activation_status")]
+    #[default("QUEUED".to_string())]
+    pub activation_status: String,
     #[serde(rename = "publishAttemptId")]
     pub publish_attempt_id: Option<String>,
     #[serde(rename = "functionCount")]
@@ -2480,6 +2487,47 @@ pub struct FunctionsPublishResponse {
     pub runtime_release_version: Option<i64>,
     #[default(Default::default())]
     pub warnings: Vec<FunctionsPublishResponseWarning>,
+}
+impl FunctionsPublishResponse {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_activation_status<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"QUEUED\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_activation_status<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"QUEUED\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
 }
 #[serde_with::skip_serializing_none]
 #[derive(

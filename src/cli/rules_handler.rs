@@ -164,6 +164,14 @@ async fn publish(
         response.project_id == ctx.project_id && response.environment_id == ctx.environment_id,
         "Edge Rules publication response belongs to another environment"
     );
+    let deployment_id = response.deployment_id;
+    anyhow::ensure!(
+        response.activation_status == "QUEUED",
+        "Edge Rules publication response has no queued deployment"
+    );
+    let queued_message = format!(
+        "queued Edge Rules deployment {deployment_id} ({rule_count} rule(s), {image_source_count} image source(s))"
+    );
     let response = serde_json::to_value(response)?;
 
     if json {
@@ -174,11 +182,7 @@ async fn publish(
             result: response,
         });
     } else {
-        output::success(
-            false,
-            format!("published {rule_count} edge rule(s) and {image_source_count} image source(s)"),
-            output::Phase::Rules,
-        );
+        output::success(false, queued_message, output::Phase::Rules);
     }
     Ok(())
 }
