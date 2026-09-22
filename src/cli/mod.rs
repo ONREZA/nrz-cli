@@ -200,7 +200,7 @@ pub struct LogsArgs {
 
 #[derive(Parser)]
 pub struct RollbackArgs {
-    /// Deployment ID to rollback (default: current live)
+    /// Current live deployment to roll back from (default: auto-select)
     #[arg(long)]
     pub deployment_id: Option<String>,
 

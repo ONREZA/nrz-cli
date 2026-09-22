@@ -11,7 +11,7 @@ pub enum RulesCommand {
     /// Pull active Edge Rules into onreza.rules.toml
     Pull(RulesPullArgs),
 
-    /// Publish onreza.rules.toml without running a deployment
+    /// Publish onreza.rules.toml as a deployment from the current application snapshot
     Publish(RulesPublishArgs),
 
     /// Show active Edge Rules metadata for an environment
