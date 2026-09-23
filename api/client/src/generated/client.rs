@@ -314,7 +314,7 @@ impl PlatformClient {
     }
     /// Append build log events
     ///
-    /// Appends one contiguous, idempotent event batch to VictoriaLogs.
+    /// Appends one contiguous, idempotent event batch to Sibyl.
     ///
     /// * Path: `POST /v1/build-log-sessions/{id}/events`
     pub async fn post_v1build_log_sessions_by_id_events(
@@ -1655,7 +1655,7 @@ impl PlatformClientRaw {
     }
     /// Append build log events
     ///
-    /// Appends one contiguous, idempotent event batch to VictoriaLogs.
+    /// Appends one contiguous, idempotent event batch to Sibyl.
     ///
     /// * Path: `POST /v1/build-log-sessions/{id}/events`
     pub async fn post_v1build_log_sessions_by_id_events(

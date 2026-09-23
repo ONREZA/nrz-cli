@@ -50,3 +50,28 @@ fn production_verification_selects_active_production_alias() {
         Some("https://project-workspace.onreza.app".to_string())
     );
 }
+
+#[test]
+fn protected_preview_forbidden_response_requests_access() {
+    assert!(response_needs_preview_bypass(403, None));
+}
+
+#[tokio::test]
+async fn verification_waits_for_new_preview_access_to_reach_edge() {
+    use super::verify::{VerificationResponse, wait_for_preview_access};
+    use std::time::Duration;
+
+    let mut statuses = [401, 403, 200].into_iter();
+    let response = wait_for_preview_access(Duration::from_secs(1), Duration::ZERO, || {
+        let status_code = statuses.next().unwrap();
+        async move {
+            Ok(VerificationResponse {
+                status_code,
+                location: None,
+            })
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(response.status_code, 200);
+}

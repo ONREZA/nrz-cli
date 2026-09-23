@@ -478,7 +478,7 @@ pub async fn run(
 
         // ── Normal flow continues below ─────────────────────────────────
 
-        let deploy_warnings = deploy_plan.warnings.clone();
+        let mut deploy_warnings = deploy_plan.warnings.clone();
         let deploy_runtime_artifact_files = runtime_artifact_files;
         let deploy_health_check = deploy_plan.health_check.clone();
         let deploy_production = deploy_plan.production;
@@ -564,7 +564,16 @@ pub async fn run(
         let status = result?;
         let url = status.url.as_deref().unwrap_or(&deployment.url);
         let target = deploy_target_output(deploy_production);
-        let preview_protected = deploy_preview_protected(deploy_production);
+        let preview_protected = match access::read(&client, &deployment.id, url).await {
+            Ok(protected) => Some(protected),
+            Err(error) => {
+                let warning =
+                    format!("Deployment is live, but URL protection is unknown: {error:#}");
+                output::warn(json, &warning, output::Phase::Deploy);
+                deploy_warnings.push(warning);
+                None
+            }
+        };
         let verification = if args.verify {
             Some(
                 verify::verify_deployment(verify::DeployVerificationRequest {
@@ -612,7 +621,7 @@ pub async fn run(
                 );
             }
             eprintln!();
-            if preview_protected {
+            if preview_protected == Some(true) {
                 crate::preview::print_preview_access_hint(&project_id, Some(&url));
             }
         }

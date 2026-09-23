@@ -2466,6 +2466,13 @@ pub struct FunctionsPublishResponse {
     pub project_id: String,
     #[serde(rename = "environmentId")]
     pub environment_id: String,
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: uuid::Uuid,
+    #[serde(rename = "activationStatus")]
+    #[serde(deserialize_with = "FunctionsPublishResponse::deserialize_const_activation_status")]
+    #[serde(serialize_with = "FunctionsPublishResponse::serialize_const_activation_status")]
+    #[default("QUEUED".to_string())]
+    pub activation_status: String,
     #[serde(rename = "publishAttemptId")]
     pub publish_attempt_id: Option<String>,
     #[serde(rename = "functionCount")]
@@ -2480,6 +2487,47 @@ pub struct FunctionsPublishResponse {
     pub runtime_release_version: Option<i64>,
     #[default(Default::default())]
     pub warnings: Vec<FunctionsPublishResponseWarning>,
+}
+impl FunctionsPublishResponse {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_activation_status<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"QUEUED\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_activation_status<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"QUEUED\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -4866,7 +4914,7 @@ pub struct EventRequestBody {
 pub struct PostV1buildLogSessionsByIdEventsRequestPath {
     pub id: uuid::Uuid,
 }
-/// Appends one contiguous, idempotent event batch to VictoriaLogs.
+/// Appends one contiguous, idempotent event batch to Sibyl.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct PostV1buildLogSessionsByIdEventsRequest {
     pub path: PostV1buildLogSessionsByIdEventsRequestPath,
@@ -7096,12 +7144,6 @@ pub struct ComputeConfigRequestBody {
     #[serde(rename = "idleTimeoutSeconds")]
     #[validate(range(min = 5i64, max = 300i64))]
     pub idle_timeout_seconds: Option<i64>,
-    #[serde(rename = "maxInstances")]
-    #[validate(range(min = 1i64, max = 10i64))]
-    pub max_instances: Option<i64>,
-    #[serde(rename = "minInstances")]
-    #[validate(range(min = 0i64, max = 5i64))]
-    pub min_instances: Option<i64>,
     #[serde(
         default,
         with = "serde_with::rust::double_option",
@@ -15112,8 +15154,18 @@ pub struct DomainResponseItem {
     #[serde(deserialize_with = "Option::deserialize", rename = "acmeDnsPrecheckAt")]
     #[serialize_always]
     pub acme_dns_precheck_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(rename = "targetCname")]
-    pub target_cname: Option<String>,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "targetCname"
+    )]
+    pub target_cname: Option<Option<String>>,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "wwwTargetCname"
+    )]
+    pub www_target_cname: Option<Option<String>>,
     #[serde(rename = "dnsMode")]
     pub dns_mode: DomainResponseItemDnsMode,
     #[serde(deserialize_with = "Option::deserialize", rename = "managedDnsZone")]
@@ -15437,18 +15489,6 @@ pub struct Deployment200Response {
     )]
     #[serialize_always]
     pub rollback_requested_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(
-        deserialize_with = "Option::deserialize",
-        rename = "pendingAutoRollbackId"
-    )]
-    #[serialize_always]
-    pub pending_auto_rollback_id: Option<uuid::Uuid>,
-    #[serde(
-        deserialize_with = "Option::deserialize",
-        rename = "autoRollbackReason"
-    )]
-    #[serialize_always]
-    pub auto_rollback_reason: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "buildWorkerId")]
     #[serialize_always]
     pub build_worker_id: Option<uuid::Uuid>,
@@ -16155,8 +16195,12 @@ pub struct Domain200ResponseHostname {
     )]
     #[serialize_always]
     pub ownership_verified_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(rename = "targetCname")]
-    pub target_cname: String,
+    #[serde(deserialize_with = "Option::deserialize", rename = "targetCname")]
+    #[serialize_always]
+    pub target_cname: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "wwwTargetCname")]
+    #[serialize_always]
+    pub www_target_cname: Option<String>,
     #[serde(rename = "redirectFromWww")]
     pub redirect_from_www: bool,
     #[serde(
@@ -16186,7 +16230,6 @@ pub struct Domain200Response {
 pub struct Verify200ResponseDelegation {
     pub delegated: bool,
     pub expected: Vec<String>,
-    pub actual: Vec<String>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -16751,12 +16794,6 @@ pub struct ComputeConfig200ResponseConfig {
     #[serde(rename = "idleTimeoutSeconds")]
     #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
     pub idle_timeout_seconds: i64,
-    #[serde(rename = "maxInstances")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub max_instances: i64,
-    #[serde(rename = "minInstances")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub min_instances: i64,
     #[serde(deserialize_with = "Option::deserialize", rename = "healthCheckPath")]
     #[serialize_always]
     pub health_check_path: Option<String>,

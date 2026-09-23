@@ -118,6 +118,12 @@ Example:
 nrz deploy --json --token "$NRZ_TOKEN" --workspace my-team --environment production
 ```
 
+Deploy JSON reports `previewProtected` for the returned URL using the Server's
+route type and project policy. Production deployments can still return a protected
+unique URL. If the policy cannot be read, the value is `null` with a warning;
+the deployment remains live. `verification.url` identifies the URL actually tested
+by `--verify`, which uses the production alias for a production deployment.
+
 `nrz deploy --wait-timeout 600` waits up to 600 seconds for activation after
 source publication (default: 120 seconds). This does not change upload timeouts;
 the wait deadline also bounds in-flight status requests. If activation is not confirmed in time, the CLI exits with code
