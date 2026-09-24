@@ -1,6 +1,8 @@
 //! Shared artifact and Edge Rules models generated from the committed schemas.
 //! HTTP requests and responses belong to the OpenAPI-generated nrz-api crate.
 
+#[cfg(test)]
+mod contract_tests;
 mod generated;
 
 pub use generated::*;

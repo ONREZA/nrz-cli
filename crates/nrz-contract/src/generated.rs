@@ -3353,7 +3353,7 @@ pub mod edge_rules {
     }
 }
 pub mod manifest {
-    ///Build output manifest (manifest.json) — the contract between builder/adapter/CLI and the platform. Generated from the Zod source of truth used by the API server and consumed by the Rust CLI contract crate. Cross-field rules (layer/route references, regex compatibility, meta size) are enforced in code, not in this schema.
+    ///Build output manifest (manifest.json) — the contract between builder/adapter/CLI and the platform. Generated from the Valibot source of truth used by the API server and consumed by the Rust CLI contract crate. Cross-field rules (layer/route references, regex compatibility, meta size) are enforced in code, not in this schema.
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
     #[serde(deny_unknown_fields)]
     pub struct OnrezaBuildOutputManifest {
@@ -3456,6 +3456,9 @@ pub mod manifest {
     impl ::std::str::FromStr for OnrezaBuildOutputManifestLayersItemEntry {
         type Err = self::error::ConversionError;
         fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 512usize {
+                return Err("longer than 512 characters".into());
+            }
             if value.chars().count() < 1usize {
                 return Err("shorter than 1 characters".into());
             }
@@ -3638,9 +3641,9 @@ pub mod manifest {
         type Err = self::error::ConversionError;
         fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
             static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
-                ::std::sync::LazyLock::new(|| ::regress::Regex::new("^\\/.*").unwrap());
+                ::std::sync::LazyLock::new(|| ::regress::Regex::new("^/").unwrap());
             if PATTERN.find(value).is_none() {
-                return Err("doesn't match pattern \"^\\/.*\"".into());
+                return Err("doesn't match pattern \"^/\"".into());
             }
             Ok(Self(value.to_string()))
         }

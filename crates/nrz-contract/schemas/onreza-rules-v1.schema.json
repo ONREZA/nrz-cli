@@ -8,8 +8,8 @@
   "required": ["schemaVersion", "rules"],
   "properties": {
     "schemaVersion": {
-      "type": "string",
-      "const": "EDGE_RULE_SET_V1"
+      "const": "EDGE_RULE_SET_V1",
+      "type": "string"
     },
     "rules": {
       "type": "array",
@@ -18,18 +18,18 @@
       }
     },
     "imageSources": {
-      "maxItems": 128,
       "type": "array",
       "items": {
         "$ref": "#/$defs/RemoteImageSourceAuthoring"
-      }
+      },
+      "maxItems": 128
     },
     "source": {
       "type": "object",
       "properties": {
         "origin": {
-          "type": "string",
-          "enum": ["build", "ui"]
+          "enum": ["build", "ui"],
+          "type": "string"
         },
         "revisionId": {
           "type": "string",
@@ -62,8 +62,8 @@
               "type": "object",
               "properties": {
                 "type": {
-                  "type": "string",
-                  "enum": ["exact", "prefix", "glob"]
+                  "enum": ["exact", "prefix", "glob"],
+                  "type": "string"
                 },
                 "value": {
                   "type": "string",
@@ -76,8 +76,8 @@
             "methods": {
               "type": "array",
               "items": {
-                "type": "string",
-                "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+                "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+                "type": "string"
               }
             },
             "host": {
@@ -131,8 +131,8 @@
               }
             },
             "device": {
-              "type": "string",
-              "enum": ["desktop", "mobile", "tablet", "bot"]
+              "enum": ["desktop", "mobile", "tablet", "bot"],
+              "type": "string"
             },
             "sourceIpCidrs": {
               "type": "array",
@@ -144,12 +144,11 @@
             "method": {
               "type": "array",
               "items": {
-                "type": "string",
-                "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+                "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+                "type": "string"
               }
             },
             "any": {
-              "minItems": 1,
               "type": "array",
               "items": {
                 "type": "object",
@@ -158,8 +157,8 @@
                     "type": "object",
                     "properties": {
                       "type": {
-                        "type": "string",
-                        "enum": ["exact", "prefix", "glob"]
+                        "enum": ["exact", "prefix", "glob"],
+                        "type": "string"
                       },
                       "value": {
                         "type": "string",
@@ -172,8 +171,8 @@
                   "methods": {
                     "type": "array",
                     "items": {
-                      "type": "string",
-                      "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+                      "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+                      "type": "string"
                     }
                   },
                   "host": {
@@ -227,8 +226,8 @@
                     }
                   },
                   "device": {
-                    "type": "string",
-                    "enum": ["desktop", "mobile", "tablet", "bot"]
+                    "enum": ["desktop", "mobile", "tablet", "bot"],
+                    "type": "string"
                   },
                   "sourceIpCidrs": {
                     "type": "array",
@@ -240,13 +239,15 @@
                   "method": {
                     "type": "array",
                     "items": {
-                      "type": "string",
-                      "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+                      "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+                      "type": "string"
                     }
                   }
                 },
+                "required": [],
                 "additionalProperties": false
-              }
+              },
+              "minItems": 1
             },
             "not": {
               "type": "object",
@@ -255,8 +256,8 @@
                   "type": "object",
                   "properties": {
                     "type": {
-                      "type": "string",
-                      "enum": ["exact", "prefix", "glob"]
+                      "enum": ["exact", "prefix", "glob"],
+                      "type": "string"
                     },
                     "value": {
                       "type": "string",
@@ -269,8 +270,8 @@
                 "methods": {
                   "type": "array",
                   "items": {
-                    "type": "string",
-                    "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+                    "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+                    "type": "string"
                   }
                 },
                 "host": {
@@ -324,8 +325,8 @@
                   }
                 },
                 "device": {
-                  "type": "string",
-                  "enum": ["desktop", "mobile", "tablet", "bot"]
+                  "enum": ["desktop", "mobile", "tablet", "bot"],
+                  "type": "string"
                 },
                 "sourceIpCidrs": {
                   "type": "array",
@@ -337,14 +338,16 @@
                 "method": {
                   "type": "array",
                   "items": {
-                    "type": "string",
-                    "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+                    "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+                    "type": "string"
                   }
                 }
               },
+              "required": [],
               "additionalProperties": false
             }
           },
+          "required": [],
           "additionalProperties": false
         },
         "action": {
@@ -360,8 +363,8 @@
           "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "allow"
+              "const": "allow",
+              "type": "string"
             }
           },
           "required": ["type"],
@@ -371,8 +374,8 @@
           "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "log"
+              "const": "log",
+              "type": "string"
             }
           },
           "required": ["type"],
@@ -382,8 +385,8 @@
           "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "deny"
+              "const": "deny",
+              "type": "string"
             },
             "statusCode": {
               "type": "integer",
@@ -391,8 +394,8 @@
               "maximum": 599
             },
             "mode": {
-              "type": "string",
-              "enum": ["shadow", "enforce"]
+              "enum": ["shadow", "enforce"],
+              "type": "string"
             }
           },
           "required": ["type"],
@@ -402,8 +405,8 @@
           "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "redirect"
+              "const": "redirect",
+              "type": "string"
             },
             "target": {
               "type": "string",
@@ -425,8 +428,8 @@
           "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "rewrite"
+              "const": "rewrite",
+              "type": "string"
             },
             "target": {
               "type": "string",
@@ -446,8 +449,8 @@
           "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "set_headers"
+              "const": "set_headers",
+              "type": "string"
             },
             "headers": {
               "type": "object",
@@ -467,8 +470,8 @@
           "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "remove_headers"
+              "const": "remove_headers",
+              "type": "string"
             },
             "headers": {
               "type": "array",
@@ -485,13 +488,14 @@
           "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "cache"
+              "const": "cache",
+              "type": "string"
             },
             "ttlSeconds": {
               "type": "integer",
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "exclusiveMinimum": 0
             },
             "swrSeconds": {
               "type": "integer",
@@ -501,8 +505,8 @@
             "vary": {
               "type": "array",
               "items": {
-                "type": "string",
-                "enum": ["geo", "asn", "device", "header", "cookie", "query"]
+                "enum": ["geo", "asn", "device", "header", "cookie", "query"],
+                "type": "string"
               }
             }
           },
@@ -513,8 +517,8 @@
           "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "bypass_cache"
+              "const": "bypass_cache",
+              "type": "string"
             }
           },
           "required": ["type"],
@@ -524,8 +528,8 @@
           "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "pipeline"
+              "const": "pipeline",
+              "type": "string"
             },
             "override": {
               "type": "boolean"
@@ -534,7 +538,6 @@
               "type": "boolean"
             },
             "steps": {
-              "minItems": 1,
               "type": "array",
               "items": {
                 "anyOf": [
@@ -548,8 +551,8 @@
                         "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
                       },
                       "mode": {
-                        "type": "string",
-                        "enum": ["request", "response", "observe"]
+                        "enum": ["request", "response", "observe"],
+                        "type": "string"
                       },
                       "as": {
                         "type": "string",
@@ -557,12 +560,12 @@
                         "maxLength": 64
                       },
                       "failure": {
-                        "type": "string",
-                        "enum": ["closed", "open"]
+                        "enum": ["closed", "open"],
+                        "type": "string"
                       },
                       "cachePosition": {
-                        "type": "string",
-                        "enum": ["before", "after"]
+                        "enum": ["before", "after"],
+                        "type": "string"
                       }
                     },
                     "required": ["use", "mode"],
@@ -572,7 +575,8 @@
                     "$ref": "#/$defs/PipelineHandleStep"
                   }
                 ]
-              }
+              },
+              "minItems": 1
             }
           },
           "required": ["type", "steps"],
@@ -582,8 +586,8 @@
           "type": "object",
           "properties": {
             "type": {
-              "type": "string",
-              "const": "rate_limit"
+              "const": "rate_limit",
+              "type": "string"
             },
             "limit": {
               "type": "integer",
@@ -596,12 +600,12 @@
               "maximum": 600
             },
             "key": {
-              "type": "string",
-              "enum": ["ip", "ip_path", "ip_host", "host"]
+              "enum": ["ip", "ip_path", "ip_host", "host"],
+              "type": "string"
             },
             "mode": {
-              "type": "string",
-              "enum": ["shadow", "enforce"]
+              "enum": ["shadow", "enforce"],
+              "type": "string"
             }
           },
           "required": ["type", "limit", "windowSeconds"],
@@ -636,8 +640,8 @@
           "maxLength": 255
         },
         "protocol": {
-          "type": "string",
-          "const": "https"
+          "const": "https",
+          "type": "string"
         },
         "hostname": {
           "type": "string",
