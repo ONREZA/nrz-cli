@@ -43,6 +43,10 @@ pub(super) fn resolve_runtime_artifact(
     };
 
     validate_node_project_runtime_dependencies(&plan.runtime_root, project_dir)?;
+    let ownership = crate::artifact::RuntimeArtifactSourceOwnership {
+        build_output_prefix: plan.build_output_prefix.clone(),
+        layers: manifest.layers.clone(),
+    };
     let manifest = rewrite_manifest_for_node_project_runtime(manifest, &plan.build_output_prefix)?;
     build_manifest::verify_files(&plan.runtime_root, &manifest)
         .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
@@ -70,9 +74,12 @@ pub(super) fn resolve_runtime_artifact(
     Ok(RuntimeArtifact {
         root_dir: plan.runtime_root,
         manifest,
-        scan: RuntimeArtifactScan::Selected {
-            roots,
-            symlink_roots,
+        scan: RuntimeArtifactScan::Relocated {
+            base: Box::new(RuntimeArtifactScan::Selected {
+                roots,
+                symlink_roots,
+            }),
+            ownership,
         },
     })
 }
@@ -90,6 +97,11 @@ fn resolve_python_runtime_artifact(
                 "Python output directory must be inside the project directory",
             )
         })?;
+    let ownership =
+        (build_output_prefix != ".").then(|| crate::artifact::RuntimeArtifactSourceOwnership {
+            build_output_prefix: build_output_prefix.clone(),
+            layers: manifest.layers.clone(),
+        });
     let manifest = if build_output_prefix == "." {
         manifest
     } else {
@@ -114,7 +126,13 @@ fn resolve_python_runtime_artifact(
     Ok(RuntimeArtifact {
         root_dir: project_dir.to_path_buf(),
         manifest,
-        scan: RuntimeArtifactScan::PythonRuntimeRoot,
+        scan: match ownership {
+            Some(ownership) => RuntimeArtifactScan::Relocated {
+                base: Box::new(RuntimeArtifactScan::PythonRuntimeRoot),
+                ownership,
+            },
+            None => RuntimeArtifactScan::PythonRuntimeRoot,
+        },
     })
 }
 

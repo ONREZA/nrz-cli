@@ -22,6 +22,7 @@ tempfile = "3"
 nrz-api = { path = "api/client" }
 # Public runtime, artifact and publication libraries shared with platform services.
 nrz-contract = { path = "crates/nrz-contract" }
+nrz-runtime-artifact = { path = "crates/nrz-runtime-artifact" }
 nrz-source-bundle = { path = "crates/nrz-source-bundle" }
 nrz-source-publisher = { path = "crates/nrz-source-publisher" }
 

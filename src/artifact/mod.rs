@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -63,10 +63,20 @@ pub(crate) enum RuntimeArtifactScan {
     All,
     NodeRuntimeRoot,
     PythonRuntimeRoot,
+    Relocated {
+        base: Box<RuntimeArtifactScan>,
+        ownership: RuntimeArtifactSourceOwnership,
+    },
     Selected {
         roots: Vec<RuntimeArtifactScanRoot>,
         symlink_roots: Vec<String>,
     },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RuntimeArtifactSourceOwnership {
+    pub(crate) build_output_prefix: String,
+    pub(crate) layers: Vec<crate::build::manifest::Layer>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +129,12 @@ impl RuntimeArtifactScan {
             Self::All | Self::NodeRuntimeRoot | Self::PythonRuntimeRoot => {
                 serde_json::json!({ "mode": "all" })
             }
+            Self::Relocated { base, ownership } => {
+                let mut explanation = base.explain();
+                explanation["sourceOwnershipBuildOutputPrefix"] =
+                    serde_json::json!(ownership.build_output_prefix);
+                explanation
+            }
             Self::Selected {
                 roots,
                 symlink_roots,
@@ -157,11 +173,50 @@ impl RuntimeArtifactScan {
         )
     }
 
+    pub(crate) fn source_layer_match<'a>(
+        &'a self,
+        manifest: &'a Manifest,
+        path: &str,
+    ) -> Option<&'a crate::build::manifest::Layer> {
+        if self.owns_as_dependency(path) {
+            return best_layer_match(&manifest.layers, path);
+        }
+        if let Self::Relocated { ownership, .. } = self {
+            let source_path = if ownership.build_output_prefix == "." {
+                Some(path)
+            } else {
+                path.strip_prefix(&ownership.build_output_prefix)
+                    .and_then(|path| path.strip_prefix('/'))
+            };
+            if let Some(source_path) = source_path {
+                return best_layer_match(&ownership.layers, source_path);
+            }
+        }
+        best_layer_match(&manifest.layers, path)
+    }
+
+    pub(crate) fn symlink_roots(&self) -> Option<&[String]> {
+        match self {
+            Self::Selected { symlink_roots, .. } => Some(symlink_roots),
+            Self::Relocated { base, .. } => base.symlink_roots(),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_python_runtime_root(&self) -> bool {
+        match self {
+            Self::PythonRuntimeRoot => true,
+            Self::Relocated { base, .. } => base.is_python_runtime_root(),
+            _ => false,
+        }
+    }
+
     fn file_category(&self, path: &str) -> RuntimeArtifactFileCategory {
         let (roots, symlink_roots) = match self {
             Self::All => return RuntimeArtifactFileCategory::BuildOutput,
             Self::NodeRuntimeRoot => return node_runtime_root_file_category(path),
             Self::PythonRuntimeRoot => return python_runtime_root_file_category(path),
+            Self::Relocated { base, .. } => return base.file_category(path),
             Self::Selected {
                 roots,
                 symlink_roots,
@@ -337,6 +392,7 @@ pub(crate) fn classify_artifact_files(
     files: Vec<FileEntry>,
     detection: &crate::detect::types::DetectionResult,
     root_scope: ArtifactRootScope,
+    scan: &RuntimeArtifactScan,
 ) -> ArtifactFileCollection {
     let mut classified = Vec::with_capacity(files.len());
     let prerender_paths = prerender_paths(manifest);
@@ -347,6 +403,7 @@ pub(crate) fn classify_artifact_files(
             manifest,
             detection,
             root_scope,
+            scan,
             &file.path,
             &prerender_paths,
         );
@@ -429,6 +486,7 @@ fn classify_file_role(
     manifest: &Manifest,
     detection: &crate::detect::types::DetectionResult,
     root_scope: ArtifactRootScope,
+    scan: &RuntimeArtifactScan,
     path: &str,
     prerender_paths: &HashSet<String>,
 ) -> (ArtifactFileRole, Option<String>, String) {
@@ -464,7 +522,7 @@ fn classify_file_role(
         );
     }
 
-    let Some(layer) = best_layer_match(manifest, path) else {
+    let Some(layer) = scan.source_layer_match(manifest, path) else {
         return (
             ArtifactFileRole::Static,
             static_fallback_layer(manifest),
@@ -508,11 +566,19 @@ fn prerender_paths(manifest: &Manifest) -> HashSet<String> {
 }
 
 fn best_layer_match<'a>(
-    manifest: &'a Manifest,
+    layers: &'a [crate::build::manifest::Layer],
     path: &str,
 ) -> Option<&'a crate::build::manifest::Layer> {
-    manifest
-        .layers
+    // Relocation can make a COMPUTE root cover the whole project while a more
+    // specific STATIC root also contains its entrypoint. Keep the deploy plan
+    // classification aligned with SOURCE_BUNDLE_V1 ownership.
+    if let Some(entrypoint_owner) = layers.iter().find(|layer| {
+        layer.target == LayerTarget::Compute
+            && layer_entrypoint_path(layer).as_deref() == Some(path)
+    }) {
+        return Some(entrypoint_owner);
+    }
+    layers
         .iter()
         .filter(|layer| path_in_root(path, &normalize_layer_root(&layer.directory)))
         .max_by(|left, right| {
@@ -521,6 +587,34 @@ fn best_layer_match<'a>(
                 .cmp(&normalize_layer_root(&right.directory).len())
                 .then_with(|| right.name.cmp(&left.name))
         })
+}
+
+fn layer_entrypoint_path(layer: &crate::build::manifest::Layer) -> Option<String> {
+    let entry = normalize_layer_relative_path(layer.entry.as_deref()?)?;
+    Some(join_layer_path(
+        &normalize_layer_root(&layer.directory),
+        &entry,
+    ))
+}
+
+fn normalize_layer_relative_path(path: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_str()?),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    let entry = parts.join("/").replace('\\', "/");
+    if entry.is_empty()
+        || entry
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return None;
+    }
+    Some(entry)
 }
 
 fn static_fallback_layer(manifest: &Manifest) -> Option<String> {

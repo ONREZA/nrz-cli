@@ -1,5 +1,142 @@
 use super::*;
 
+#[test]
+fn relocated_compute_entrypoint_keeps_compute_ownership_under_static_output() {
+    let project = tempdir().unwrap();
+    fs::write(project.path().join("package.json"), r#"{"type":"module"}"#).unwrap();
+    fs::create_dir_all(project.path().join("dist/api")).unwrap();
+    fs::write(project.path().join("dist/index.html"), "<h1>site</h1>").unwrap();
+    fs::write(
+        project.path().join("dist/api/main.js"),
+        "export default () => 'ok'",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("dist/api/helper.js"),
+        "export const secret = 'server-only'",
+    )
+    .unwrap();
+    fs::create_dir_all(project.path().join("dist/api/public")).unwrap();
+    fs::write(
+        project.path().join("dist/api/public/logo.svg"),
+        "<svg></svg>",
+    )
+    .unwrap();
+
+    let detection = crate::detect::detect_with_framework_override(project.path(), Some("other"));
+    let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "layers": [
+            {"name": "static", "target": "STATIC", "directory": "."},
+            {"name": "api", "target": "COMPUTE", "directory": "api", "entry": "main.js"},
+            {"name": "assets", "target": "STATIC", "directory": "api/public"}
+        ],
+        "routes": [
+            {"pattern": "^/assets/.*$", "layer": "assets"},
+            {"pattern": "^/api/.*$", "layer": "api"},
+            {"pattern": "^/.*$", "layer": "static"}
+        ]
+    }))
+    .unwrap();
+    let artifact = resolve_runtime_artifact(
+        project.path(),
+        project.path(),
+        project.path().join("dist"),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let classified = crate::artifact::classify_artifact_files(
+        &artifact.manifest,
+        scanned,
+        &detection,
+        crate::artifact::ArtifactRootScope::ProjectRoot,
+        &artifact.scan,
+    );
+    let entrypoint_file = classified
+        .files
+        .iter()
+        .find(|file| file.path == "dist/api/main.js")
+        .unwrap();
+    assert_eq!(
+        entrypoint_file.role,
+        crate::artifact::ArtifactFileRole::Compute
+    );
+    assert_eq!(entrypoint_file.layer.as_deref(), Some("api"));
+    let helper_file = classified
+        .files
+        .iter()
+        .find(|file| file.path == "dist/api/helper.js")
+        .unwrap();
+    assert_eq!(helper_file.role, crate::artifact::ArtifactFileRole::Compute);
+    assert_eq!(helper_file.layer.as_deref(), Some("api"));
+    let files = classified.deployable_entries();
+    let plan = source_bundle_v1::build_source_bundle_plan_with_scan(
+        &artifact.root_dir,
+        &artifact.manifest,
+        &files,
+        &artifact.scan,
+        source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap();
+    let entrypoint = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "dist/api/main.js")
+        .unwrap();
+    assert_eq!(
+        entrypoint.role,
+        source_bundle_v1::SourceLogicalManifestFileRole::Compute
+    );
+    assert_eq!(entrypoint.layer_name.as_deref(), Some("api"));
+    let helper = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "dist/api/helper.js")
+        .unwrap();
+    assert_eq!(
+        helper.role,
+        source_bundle_v1::SourceLogicalManifestFileRole::Compute
+    );
+    assert_eq!(helper.layer_name.as_deref(), Some("api"));
+    let logo = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "dist/api/public/logo.svg")
+        .unwrap();
+    assert_eq!(
+        logo.role,
+        source_bundle_v1::SourceLogicalManifestFileRole::Static
+    );
+    assert_eq!(logo.layer_name.as_deref(), Some("assets"));
+    let html = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "dist/index.html")
+        .unwrap();
+    assert_eq!(
+        html.role,
+        source_bundle_v1::SourceLogicalManifestFileRole::Static
+    );
+
+    let wire =
+        serde_json::from_value(serde_json::to_value(&plan.logical_manifest).unwrap()).unwrap();
+    nrz_runtime_artifact::finalize_source_bundle_runtime_graph(
+        &plan.logical_manifest_sha256,
+        &plan.source_sha256,
+        plan.source_size_bytes,
+        &wire,
+    )
+    .unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn node_process_runtime_artifact_prefers_workspace_root_for_hoisted_app_symlink() {

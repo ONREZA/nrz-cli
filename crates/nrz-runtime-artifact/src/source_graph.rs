@@ -68,6 +68,29 @@ pub fn finalize_source_bundle_runtime_graph(
     )
 }
 
+/// Validate the application graph before trusted dependency materialization.
+/// Dependency blobs and their final graph digest remain Agent-owned, but this
+/// rejects source-level layer and entrypoint errors before build handoff.
+pub fn validate_source_bundle_application_graph(
+    logical_manifest_sha256: &str,
+    source_sha256: &str,
+    source_size_bytes: u64,
+    manifest: &SourceLogicalManifest,
+) -> Result<(), RuntimeArtifactError> {
+    dependency_file_layers(manifest)?;
+    let mut application = manifest.clone();
+    application
+        .files
+        .retain(|file| file.role != DEPENDENCY_FILE_ROLE);
+    finalize_source_bundle_runtime_graph(
+        logical_manifest_sha256,
+        source_sha256,
+        source_size_bytes,
+        &application,
+    )?;
+    Ok(())
+}
+
 pub fn finalize_source_bundle_runtime_graph_with_dependencies(
     logical_manifest_sha256: &str,
     source_sha256: &str,
@@ -153,27 +176,7 @@ fn dependency_layers(
         .filter(|layer| layer.target == "COMPUTE")
         .map(|layer| layer.name.as_str())
         .collect::<HashSet<_>>();
-    let dependency_file_layers = manifest
-        .files
-        .iter()
-        .filter(|file| file.role == DEPENDENCY_FILE_ROLE)
-        .map(|file| {
-            file.layer_name.as_deref().ok_or_else(|| {
-                RuntimeArtifactError::Invariant(format!(
-                    "dependency file '{}' has no layerName",
-                    file.path
-                ))
-            })
-        })
-        .collect::<Result<HashSet<_>, _>>()?;
-
-    for layer_name in &dependency_file_layers {
-        if !compute_layers.contains(layer_name) {
-            return Err(RuntimeArtifactError::Invariant(format!(
-                "dependency files reference unknown compute layer '{layer_name}'"
-            )));
-        }
-    }
+    let dependency_file_layers = dependency_file_layers(manifest)?;
 
     let mut result = HashMap::<String, Vec<String>>::new();
     for dependency in dependencies {
@@ -205,6 +208,39 @@ fn dependency_layers(
     }
 
     Ok(result)
+}
+
+fn dependency_file_layers(
+    manifest: &SourceLogicalManifest,
+) -> Result<HashSet<&str>, RuntimeArtifactError> {
+    let compute_layers = manifest
+        .layers
+        .iter()
+        .filter(|layer| layer.target == "COMPUTE")
+        .map(|layer| layer.name.as_str())
+        .collect::<HashSet<_>>();
+    let dependency_file_layers = manifest
+        .files
+        .iter()
+        .filter(|file| file.role == DEPENDENCY_FILE_ROLE)
+        .map(|file| {
+            file.layer_name.as_deref().ok_or_else(|| {
+                RuntimeArtifactError::Invariant(format!(
+                    "dependency file '{}' has no layerName",
+                    file.path
+                ))
+            })
+        })
+        .collect::<Result<HashSet<_>, _>>()?;
+
+    for layer_name in &dependency_file_layers {
+        if !compute_layers.contains(layer_name) {
+            return Err(RuntimeArtifactError::Invariant(format!(
+                "dependency files reference unknown compute layer '{layer_name}'"
+            )));
+        }
+    }
+    Ok(dependency_file_layers)
 }
 
 fn runtime_dependency(
@@ -269,9 +305,11 @@ fn runtime_layer(
                 layer.name
             ))
         })?;
-    if entrypoint_file.role != "compute" {
+    if entrypoint_file.role != "compute"
+        || entrypoint_file.layer_name.as_deref() != Some(layer.name.as_str())
+    {
         return Err(RuntimeArtifactError::Invariant(format!(
-            "compute layer '{}' entrypoint is not owned by compute",
+            "compute layer '{}' entrypoint is not owned by that compute layer",
             layer.name
         )));
     }
@@ -478,6 +516,22 @@ mod tests {
     }
 
     #[test]
+    fn source_graph_rejects_an_entrypoint_owned_by_another_compute_layer() {
+        let mut manifest = manifest();
+        manifest.files[0].layer_name = Some("other".to_string());
+
+        let error =
+            finalize_source_bundle_runtime_graph(&"a".repeat(64), &"b".repeat(64), 1024, &manifest)
+                .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("not owned by that compute layer")
+        );
+    }
+
+    #[test]
     fn source_graph_assigns_dependency_ownership_to_the_runtime_layer() {
         let dependency_manifest = dependency_manifest();
         let graph = finalize_source_bundle_runtime_graph_with_dependencies(
@@ -506,8 +560,14 @@ mod tests {
         let mut manifest = manifest_with_dependency();
         let mut other_layer = manifest.layers[0].clone();
         other_layer.name = "worker".into();
+        other_layer.root_path = Some("worker".into());
+        other_layer.entrypoint = Some("worker/server.js".into());
         manifest.layers.push(other_layer);
-        let mut other_file = manifest.files.last().unwrap().clone();
+        let mut other_entry = manifest.files[0].clone();
+        other_entry.path = "worker/server.js".into();
+        other_entry.layer_name = Some("worker".into());
+        manifest.files.push(other_entry);
+        let mut other_file = manifest.files[1].clone();
         other_file.path = "worker/node_modules/pkg/index.js".into();
         other_file.layer_name = Some("worker".into());
         manifest.files.push(other_file);

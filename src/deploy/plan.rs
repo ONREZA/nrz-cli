@@ -517,6 +517,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         scanned_files,
         &build_artifact.detection,
         artifact_root_scope(&runtime_artifact.root_dir, project_dir),
+        &runtime_artifact.scan,
         json,
     );
     let files = artifact_files.deployable_entries();

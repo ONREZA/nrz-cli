@@ -1713,6 +1713,7 @@ dependencies = [
  "libc",
  "nrz-api",
  "nrz-contract",
+ "nrz-runtime-artifact",
  "nrz-source-bundle",
  "nrz-source-publisher",
  "open",

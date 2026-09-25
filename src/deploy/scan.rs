@@ -33,6 +33,7 @@ pub(super) fn scan_runtime_artifact(
         RuntimeArtifactScan::All
         | RuntimeArtifactScan::NodeRuntimeRoot
         | RuntimeArtifactScan::PythonRuntimeRoot => scan_dir(root_dir),
+        RuntimeArtifactScan::Relocated { base, .. } => scan_runtime_artifact(root_dir, base),
         RuntimeArtifactScan::Selected {
             roots,
             symlink_roots,
@@ -112,6 +113,7 @@ pub(super) fn prepare_deploy_files(
         files,
         detection,
         ArtifactRootScope::ProjectRoot,
+        &RuntimeArtifactScan::All,
         json,
     )
     .deployable_entries())
@@ -122,10 +124,11 @@ pub(super) fn prepare_artifact_files(
     files: Vec<FileEntry>,
     detection: &crate::detect::types::DetectionResult,
     root_scope: ArtifactRootScope,
+    scan: &RuntimeArtifactScan,
     json: bool,
 ) -> crate::artifact::ArtifactFileCollection {
     let collection =
-        crate::artifact::classify_artifact_files(manifest, files, detection, root_scope);
+        crate::artifact::classify_artifact_files(manifest, files, detection, root_scope, scan);
 
     if collection.summary.pruned_files > 0 {
         output::status(

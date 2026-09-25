@@ -169,3 +169,57 @@ fn publishes_archive_before_one_strict_atomic_descriptor() -> anyhow::Result<()>
     assert!(error.to_string().contains("output already exists"));
     Ok(())
 }
+
+#[test]
+fn handoff_rejects_a_source_graph_with_unowned_compute_entrypoint() -> anyhow::Result<()> {
+    let project = tempdir()?;
+    let output = tempdir()?;
+    let source = b"export default () => 'ready';\n";
+    fs::write(project.path().join("server.js"), source)?;
+    let manifest: Manifest = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "layers": [
+            {"name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js"},
+            {"name": "worker", "target": "COMPUTE", "directory": ".", "entry": "server.js"}
+        ],
+        "routes": []
+    }))?;
+    let plan = build_source_bundle_plan(
+        project.path(),
+        &manifest,
+        &[FileEntry {
+            path: "server.js".to_string(),
+            size: source.len() as u64,
+            content_hash: nrz_source_bundle::sha256_hex(source),
+            kind: crate::artifact::ArtifactFileKind::File,
+            symlink_resolved_path: None,
+        }],
+    )?;
+    let publisher = EdgeBuildHandoffOutput::from_values(
+        Some(EDGE_BUILD_HANDOFF_MODE_V1),
+        Some(output.path()),
+        true,
+        Some(Uuid::now_v7()),
+    )?
+    .expect("handoff mode");
+
+    let error = publisher
+        .publish(&plan)
+        .expect_err("invalid source graph must fail");
+    assert!(error.to_string().contains("entrypoint is not owned"));
+    assert_eq!(
+        error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<crate::output::CodedError>())
+            .map(|error| error.code.as_str()),
+        Some("INVALID_RUNTIME_ARTIFACT_GRAPH")
+    );
+    assert!(!output.path().join(EDGE_BUILD_HANDOFF_V1_FILE).exists());
+    assert!(
+        !output
+            .path()
+            .join(EDGE_BUILD_SOURCE_BUNDLE_V1_FILE)
+            .exists()
+    );
+    Ok(())
+}

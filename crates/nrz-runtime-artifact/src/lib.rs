@@ -16,6 +16,7 @@ pub use source_graph::{
     SourceDependencyMaterialization, compute_logical_artifact_id,
     compute_source_logical_artifact_id, finalize_source_bundle_runtime_graph,
     finalize_source_bundle_runtime_graph_with_dependencies,
+    validate_source_bundle_application_graph,
 };
 
 pub const RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION: &str = "RUNTIME_ARTIFACT_GRAPH_V2.0";

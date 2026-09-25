@@ -84,6 +84,21 @@ impl EdgeBuildHandoffOutput {
         &self,
         source_bundle: &SourceBundlePlan,
     ) -> anyhow::Result<EdgeBuildHandoffV1> {
+        let manifest: nrz_source_bundle::SourceLogicalManifest =
+            serde_json::from_value(serde_json::to_value(&source_bundle.logical_manifest)?)
+                .context("failed to decode Edge build source graph")?;
+        nrz_runtime_artifact::validate_source_bundle_application_graph(
+            &source_bundle.logical_manifest_sha256,
+            &source_bundle.source_sha256,
+            source_bundle.source_size_bytes,
+            &manifest,
+        )
+        .map_err(|error| {
+            crate::output::coded_error(
+                "INVALID_RUNTIME_ARTIFACT_GRAPH",
+                format!("Edge build source graph is invalid: {error}"),
+            )
+        })?;
         fs::create_dir_all(&self.root).with_context(|| {
             format!(
                 "failed to create Edge build handoff directory {}",

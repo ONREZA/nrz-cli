@@ -50,7 +50,6 @@ const TAR_SPACE: u8 = 0x20;
 
 #[derive(Debug)]
 pub(crate) struct SourceBundlePlan {
-    #[cfg(test)]
     pub(crate) logical_manifest: SourceLogicalManifest,
     pub(crate) logical_manifest_sha256: String,
     pub(crate) source_sha256: String,
@@ -210,12 +209,6 @@ struct SourceArchivePathIndex {
     symlinks: HashMap<String, String>,
 }
 
-#[derive(Debug)]
-struct LayerMatch<'a> {
-    layer: &'a crate::build::manifest::Layer,
-    root_path: String,
-}
-
 #[cfg(test)]
 pub(crate) fn build_source_bundle_plan(
     output_dir: &Path,
@@ -257,7 +250,6 @@ pub(crate) fn build_source_bundle_plan_with_scan(
     let (source_sha256, source_size_bytes) = write_result?;
 
     Ok(SourceBundlePlan {
-        #[cfg(test)]
         logical_manifest,
         logical_manifest_sha256,
         source_sha256,
@@ -366,7 +358,7 @@ fn project_workspace_dependencies(
     entries: Vec<SourceBundleEntry>,
     scan: &RuntimeArtifactScan,
 ) -> anyhow::Result<Vec<SourceBundleEntry>> {
-    let RuntimeArtifactScan::Selected { symlink_roots, .. } = scan else {
+    let Some(symlink_roots) = scan.symlink_roots() else {
         return Ok(entries);
     };
     if symlink_roots.is_empty() {
@@ -585,11 +577,11 @@ fn build_logical_manifest(
 
     for entry in entries {
         validate_source_path(&entry.path)?;
-        let matched_layer = best_layer_match(manifest, &entry.path)?;
+        let matched_layer = scan.source_layer_match(manifest, &entry.path);
         let (role, layer_name) = file_role(
             manifest,
             &entry.path,
-            matched_layer.as_ref(),
+            matched_layer,
             &prerender_paths,
             scan,
             dependency_packaging,
@@ -698,30 +690,10 @@ fn prerender_paths(manifest: &Manifest) -> anyhow::Result<Vec<String>> {
     Ok(paths)
 }
 
-fn best_layer_match<'a>(
-    manifest: &'a Manifest,
-    path: &str,
-) -> anyhow::Result<Option<LayerMatch<'a>>> {
-    let mut matches = Vec::new();
-    for layer in &manifest.layers {
-        let root_path = normalize_layer_root(&layer.directory)?;
-        if path_in_root(path, &root_path) {
-            matches.push(LayerMatch { layer, root_path });
-        }
-    }
-    matches.sort_by(|a, b| {
-        b.root_path
-            .len()
-            .cmp(&a.root_path.len())
-            .then_with(|| compare_utf8(&a.layer.name, &b.layer.name))
-    });
-    Ok(matches.into_iter().next())
-}
-
 fn file_role(
     manifest: &Manifest,
     path: &str,
-    matched_layer: Option<&LayerMatch<'_>>,
+    matched_layer: Option<&crate::build::manifest::Layer>,
     prerender_paths: &[String],
     scan: &RuntimeArtifactScan,
     dependency_packaging: RuntimeDependencyPackaging,
@@ -730,13 +702,13 @@ fn file_role(
         && scan.owns_as_dependency(path)
     {
         let Some(layer_match) =
-            matched_layer.filter(|matched| matched.layer.target == LayerTarget::Compute)
+            matched_layer.filter(|matched| matched.target == LayerTarget::Compute)
         else {
             bail!("dependency-owned file '{path}' is not assigned to a compute layer");
         };
         return Ok((
             SourceLogicalManifestFileRole::Dependency,
-            Some(layer_match.layer.name.clone()),
+            Some(layer_match.name.clone()),
         ));
     }
 
@@ -759,11 +731,11 @@ fn file_role(
         return Ok((SourceLogicalManifestFileRole::Static, fallback_static));
     };
 
-    let role = match layer_match.layer.target {
+    let role = match layer_match.target {
         LayerTarget::Static => SourceLogicalManifestFileRole::Static,
         LayerTarget::Compute => SourceLogicalManifestFileRole::Compute,
     };
-    Ok((role, Some(layer_match.layer.name.clone())))
+    Ok((role, Some(layer_match.name.clone())))
 }
 
 fn source_layer_from_manifest(
@@ -807,9 +779,7 @@ fn runtime_config_value(
             object.insert("maxConcurrency".to_string(), serde_json::json!(value));
         }
     }
-    if layer.target == LayerTarget::Compute
-        && matches!(scan, RuntimeArtifactScan::PythonRuntimeRoot)
-    {
+    if layer.target == LayerTarget::Compute && scan.is_python_runtime_root() {
         object.insert("runtimeFamily".to_string(), serde_json::json!("PYTHON"));
     }
     if layer.target == LayerTarget::Compute
@@ -839,31 +809,14 @@ fn normalize_layer_root(path: &str) -> anyhow::Result<String> {
 }
 
 fn join_entrypoint(root_path: &str, entry: &str) -> anyhow::Result<String> {
-    let entry = normalize_relative_path(entry)?;
+    let entry = super::normalize_layer_relative_path(entry)
+        .ok_or_else(|| anyhow::anyhow!("unsafe SOURCE_BUNDLE_V1 path: {entry}"))?;
+    validate_source_path(&entry)?;
     if root_path == "." {
         Ok(entry)
     } else {
         Ok(format!("{root_path}/{entry}"))
     }
-}
-
-fn normalize_relative_path(path: &str) -> anyhow::Result<String> {
-    let normalized =
-        Path::new(path)
-            .components()
-            .try_fold(PathBuf::new(), |mut out, component| {
-                match component {
-                    Component::Normal(part) => out.push(part),
-                    Component::CurDir => {}
-                    Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                        bail!("unsafe SOURCE_BUNDLE_V1 path: {path}")
-                    }
-                }
-                Ok::<_, anyhow::Error>(out)
-            })?;
-    let normalized = normalized.to_string_lossy().replace('\\', "/");
-    validate_source_path(&normalized)?;
-    Ok(normalized)
 }
 
 fn path_in_root(path: &str, root: &str) -> bool {

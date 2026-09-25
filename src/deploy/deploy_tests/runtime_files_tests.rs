@@ -116,6 +116,7 @@ fn prepare_deploy_files_keeps_python_dependencies_and_prunes_platform_metadata()
         scanned,
         &detection,
         crate::artifact::ArtifactRootScope::ProjectRoot,
+        &RuntimeArtifactScan::PythonRuntimeRoot,
         true,
     );
     let deployable = collection.deployable_entries();
@@ -249,6 +250,7 @@ fn prepare_deploy_files_keeps_static_build_output_node_modules_assets() {
         scanned,
         &detection,
         crate::artifact::ArtifactRootScope::BuildOutput,
+        &RuntimeArtifactScan::All,
         true,
     )
     .deployable_entries();
@@ -345,6 +347,103 @@ fn python_process_runtime_uses_project_root_with_versioned_dependencies() {
     assert_eq!(artifact.root_dir, dir.path());
     assert_eq!(breakdown.python_site_packages, 1);
     assert!(files.iter().any(|file| file.path == "main.py"));
+}
+
+#[test]
+fn relocated_python_runtime_preserves_compute_file_ownership() {
+    let project = tempdir().unwrap();
+    fs::create_dir_all(project.path().join("dist/api")).unwrap();
+    fs::write(project.path().join("dist/index.html"), "site").unwrap();
+    fs::write(
+        project.path().join("dist/api/main.py"),
+        "from helper import app",
+    )
+    .unwrap();
+    fs::write(project.path().join("dist/api/helper.py"), "app = None").unwrap();
+    let mut detection =
+        crate::detect::detect_with_framework_override(project.path(), Some("other"));
+    detection.metadata.runtime.runtime_type = RuntimeType::Python;
+    let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "layers": [
+            {"name": "static", "target": "STATIC", "directory": "."},
+            {"name": "api", "target": "COMPUTE", "directory": "api", "entry": "main.py"}
+        ],
+        "routes": [
+            {"pattern": "^/api/.*$", "layer": "api"},
+            {"pattern": "^/.*$", "layer": "static"}
+        ]
+    }))
+    .unwrap();
+
+    let artifact = resolve_runtime_artifact(
+        project.path(),
+        project.path(),
+        project.path().join("dist"),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let classified = prepare_artifact_files(
+        &artifact.manifest,
+        scanned,
+        &detection,
+        crate::artifact::ArtifactRootScope::ProjectRoot,
+        &artifact.scan,
+        true,
+    );
+    let files = classified.deployable_entries();
+    let plan = source_bundle_v1::build_source_bundle_plan_with_scan(
+        &artifact.root_dir,
+        &artifact.manifest,
+        &files,
+        &artifact.scan,
+        source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap();
+    for path in ["dist/api/main.py", "dist/api/helper.py"] {
+        let file = plan
+            .logical_manifest
+            .files
+            .iter()
+            .find(|file| file.path == path)
+            .unwrap();
+        assert_eq!(
+            file.role,
+            source_bundle_v1::SourceLogicalManifestFileRole::Compute
+        );
+        assert_eq!(file.layer_name.as_deref(), Some("api"));
+    }
+    let html = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "dist/index.html")
+        .unwrap();
+    assert_eq!(
+        html.role,
+        source_bundle_v1::SourceLogicalManifestFileRole::Static
+    );
+    let wire =
+        serde_json::from_value(serde_json::to_value(&plan.logical_manifest).unwrap()).unwrap();
+    let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph(
+        &plan.logical_manifest_sha256,
+        &plan.source_sha256,
+        plan.source_size_bytes,
+        &wire,
+    )
+    .unwrap();
+    assert_eq!(
+        graph.wire().runtime_layers[0]
+            .launch
+            .as_ref()
+            .unwrap()
+            .profile,
+        nrz_runtime_artifact::RuntimeProfile::Cpython314
+    );
 }
 
 #[test]
