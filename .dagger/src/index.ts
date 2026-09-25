@@ -109,7 +109,8 @@ export class NrzCli {
       .withExec(["sh", "-ceu", "cd .dagger && bun run typecheck && bun test scripts"])
       .sync();
 
-    let ctr = rustContainer(source);
+    let ctr = rustContainer(source)
+      .withFile("/usr/local/bin/bun", dag.container().from(BUN_IMAGE).file("/usr/local/bin/bun"));
     ctr = ctr.withExec([
       "sh",
       "-ceu",
