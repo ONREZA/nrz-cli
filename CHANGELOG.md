@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.41.3] - 2026-09-25
+
+### 🐛 Bug Fixes
+
+- **deploy:** validate edge handoff graph ([d50efb0](https://github.com/ONREZA/nrz-cli/commit/d50efb01abcec385d4b2fca88c29ced07b74d53b))
+- **build:** align artifact schemas with valibot ([0fdb5ab](https://github.com/ONREZA/nrz-cli/commit/0fdb5ab340e0cf6793802035982b5ca66c0e07a0))
+- **cli:** staging policy ([929e70a](https://github.com/ONREZA/nrz-cli/commit/929e70acbd05b86ea88ee2df515548245a486627))
+
 ## [0.41.2] - 2026-09-20
 
 ### 🔧 Changed
