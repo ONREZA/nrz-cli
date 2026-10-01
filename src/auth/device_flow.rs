@@ -56,6 +56,7 @@ pub async fn poll_for_token(
         }
         let request = PostV1deviceTokenRequest {
             body: TokenRequestBody {
+                additional_properties: Default::default(),
                 device_code: device_code.to_string(),
                 grant_type: Some("urn:ietf:params:oauth:grant-type:device_code".to_string()),
             },

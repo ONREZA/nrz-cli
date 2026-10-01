@@ -19,6 +19,7 @@ pub async fn sync_detection_to_api(client: &ApiClient, project_id: &str, result:
         .map(|p| detection_package_manager_to_platform(p.pm_type));
 
     let body = DetectionRequestBody {
+        additional_properties: Default::default(),
         framework: result.framework.clone(),
         framework_name: result.name.clone(),
         framework_version: result.version.clone(),

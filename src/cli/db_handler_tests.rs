@@ -52,6 +52,7 @@ fn create_body_serializes_server_contract_and_validates_size() {
 #[test]
 fn project_attachment_body_serializes_server_contract() {
     let body = nrz_api::AttachmentRequestBody {
+        additional_properties: Default::default(),
         env_var_name: Some("DATABASE_URL".into()),
         auto_inject_db_url: Some(true),
         auto_create_preview_branch: Some(false),

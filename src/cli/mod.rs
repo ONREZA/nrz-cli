@@ -200,9 +200,21 @@ pub struct LogsArgs {
 
 #[derive(Parser)]
 pub struct RollbackArgs {
-    /// Current live deployment to roll back from (default: auto-select)
+    /// Immutable release ID to activate; omit only when using --list
+    #[arg(long, conflicts_with = "list")]
+    pub release_id: Option<String>,
+
+    /// List retained releases for the selected environment
     #[arg(long)]
-    pub deployment_id: Option<String>,
+    pub list: bool,
+
+    /// Platform environment ID or exact name
+    #[arg(long)]
+    pub environment: Option<String>,
+
+    /// Path to project directory containing saved environment context
+    #[arg(long, default_value = ".")]
+    pub dir: String,
 
     /// Project ID (skip auto-detection)
     #[arg(long)]

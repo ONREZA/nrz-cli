@@ -19,7 +19,7 @@ fn deployment_status_still_accepts_cli_lowercase_case() {
 }
 
 #[test]
-fn first_preview_url_uses_preview_deployment_url() {
+fn first_preview_url_uses_preview_environment_address() {
     let deployments = vec![
         deployment(Some(false), Some("https://production.example.com")),
         deployment(Some(true), Some("https://preview.example.com")),

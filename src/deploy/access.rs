@@ -1,6 +1,5 @@
-//! Report the policy of the returned URL, independently of deployment environment.
+//! Report the protection policy for the deployment's Environment address.
 use anyhow::Context;
-use nrz_api::Deployment200ResponseDeploymentUrlAliasType;
 
 use crate::api::ApiClient;
 
@@ -11,23 +10,19 @@ pub(super) async fn read(
 ) -> anyhow::Result<bool> {
     let deployment = client.deployment(deployment_id).await?;
     let returned = deployment
-        .deployment_urls
-        .iter()
-        .find(|candidate| candidate.full_url.trim_end_matches('/') == url.trim_end_matches('/'))
-        .context("returned URL is not present in deployment routes")?;
+        .url
+        .as_deref()
+        .context("environment address is unavailable")?;
+    anyhow::ensure!(
+        returned.trim_end_matches('/') == url.trim_end_matches('/'),
+        "returned URL does not match the deployment environment address"
+    );
     Ok(protection(
-        &returned.alias_type,
+        deployment.is_preview,
         deployment.project.preview_protection_enabled,
     ))
 }
 
-pub(super) fn protection(
-    alias: &Deployment200ResponseDeploymentUrlAliasType,
-    preview_protection_enabled: bool,
-) -> bool {
-    match alias {
-        Deployment200ResponseDeploymentUrlAliasType::ProductionAlias => false,
-        Deployment200ResponseDeploymentUrlAliasType::BranchAlias
-        | Deployment200ResponseDeploymentUrlAliasType::UniqueUrl => preview_protection_enabled,
-    }
+pub(super) fn protection(is_preview: bool, preview_protection_enabled: bool) -> bool {
+    is_preview && preview_protection_enabled
 }

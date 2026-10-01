@@ -119,7 +119,7 @@ async fn admission_preserves_selection_and_rejects_another_scope() {
             let mut context = context_json();
             if wrong_scope { context["workspaceId"] = json!(Uuid::nil()); }
             Json(json!({"protocolVersion":"execution-context-v2","context":context,
-                "deployment":{"id":DEPLOYMENT,"attempt":2,"status":"BUILDING","url":""},
+                "deployment":{"id":DEPLOYMENT,"attempt":2,"status":"BUILDING","url":null},
                 "snapshot":{"fingerprint":format!("v1:{}","a".repeat(64)),"resolvedAt":"2026-09-12T00:00:00Z"}}))
         }));
         let (client, server) = serve(app).await;

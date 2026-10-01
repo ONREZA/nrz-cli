@@ -71,7 +71,11 @@ impl TryFrom<&BuildLogEvent> for EventRequestBodyItem {
     fn try_from(event: &BuildLogEvent) -> anyhow::Result<Self> {
         Ok(Self {
             seq: i64::from(event.seq),
-            timestamp: Some(event.timestamp.parse().context("invalid log timestamp")?),
+            timestamp: {
+                let _: chrono::DateTime<chrono::Utc> =
+                    event.timestamp.parse().context("invalid log timestamp")?;
+                serde_json::json!(event.timestamp)
+            },
             stream: event.stream.into(),
             level: event.level.into(),
             phase: event.phase.into(),

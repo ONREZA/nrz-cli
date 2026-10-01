@@ -215,9 +215,72 @@ impl PlatformClient {
                 .await?,
         )
     }
+    /// List retained environment releases
+    ///
+    /// * Path: `GET /v1/environments/{id}/releases`
+    pub async fn get_v1environments_by_id_releases(
+        &self,
+        request: GetV1environmentsByIdReleasesRequest,
+    ) -> anyhow::Result<GetV1environmentsByIdReleasesResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string())
+            .push("releases");
+        let response = self.client.get(url).query(&request.query).send().await?;
+        Ok(GetV1environmentsByIdReleasesRequest::parse_response(response).await?)
+    }
+    /// Read desired and observed environment serving state
+    ///
+    /// * Path: `GET /v1/environments/{id}/serving`
+    pub async fn get_v1environments_by_id_serving(
+        &self,
+        request: GetV1environmentsByIdServingRequest,
+    ) -> anyhow::Result<GetV1environmentsByIdServingResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string())
+            .push("serving");
+        let response = self.client.get(url).send().await?;
+        Ok(GetV1environmentsByIdServingRequest::parse_response(response).await?)
+    }
+    /// Activate a retained environment release
+    ///
+    /// * Path: `POST /v1/environments/{id}/actions/activate-release`
+    pub async fn post_v1environments_by_id_actions_activate_release(
+        &self,
+        request: PostV1environmentsByIdActionsActivateReleaseRequest,
+    ) -> anyhow::Result<PostV1environmentsByIdActionsActivateReleaseResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string())
+            .push("actions")
+            .push("activate-release");
+        let response = self
+            .client
+            .post(url)
+            .headers(
+                http::HeaderMap::try_from(&request.header).context("building request headers")?,
+            )
+            .json(&request.body)
+            .send()
+            .await?;
+        Ok(PostV1environmentsByIdActionsActivateReleaseRequest::parse_response(response).await?)
+    }
     /// Get deployment
     ///
-    /// Returns deployment details, urls, and project build settings.
+    /// Returns deployment details, its observed serving address when active, and project build settings.
     ///
     /// * Path: `GET /v1/deployments/{id}`
     pub async fn get_v1deployments_by_id(
@@ -253,26 +316,6 @@ impl PlatformClient {
             .push(&request.path.project_id.to_string());
         let response = self.client.get(url).query(&request.query).send().await?;
         Ok(GetV1deploymentsProjectByProjectIdRequest::parse_response(response).await?)
-    }
-    /// Rollback deployment
-    ///
-    /// Creates a rollback deployment from the previous live deployment.
-    ///
-    /// * Path: `POST /v1/deployments/{id}/rollback`
-    pub async fn post_v1deployments_by_id_rollback(
-        &self,
-        request: PostV1deploymentsByIdRollbackRequest,
-    ) -> anyhow::Result<PostV1deploymentsByIdRollbackResponse> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("rollback");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(PostV1deploymentsByIdRollbackRequest::parse_response(response).await?)
     }
     /// Get build log upload policy
     ///
@@ -1556,9 +1599,72 @@ impl PlatformClientRaw {
         let response = self.client.delete(url).send().await?;
         Ok(response)
     }
+    /// List retained environment releases
+    ///
+    /// * Path: `GET /v1/environments/{id}/releases`
+    pub async fn get_v1environments_by_id_releases(
+        &self,
+        request: GetV1environmentsByIdReleasesRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string())
+            .push("releases");
+        let response = self.client.get(url).query(&request.query).send().await?;
+        Ok(response)
+    }
+    /// Read desired and observed environment serving state
+    ///
+    /// * Path: `GET /v1/environments/{id}/serving`
+    pub async fn get_v1environments_by_id_serving(
+        &self,
+        request: GetV1environmentsByIdServingRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string())
+            .push("serving");
+        let response = self.client.get(url).send().await?;
+        Ok(response)
+    }
+    /// Activate a retained environment release
+    ///
+    /// * Path: `POST /v1/environments/{id}/actions/activate-release`
+    pub async fn post_v1environments_by_id_actions_activate_release(
+        &self,
+        request: PostV1environmentsByIdActionsActivateReleaseRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string())
+            .push("actions")
+            .push("activate-release");
+        let response = self
+            .client
+            .post(url)
+            .headers(
+                http::HeaderMap::try_from(&request.header).context("building request headers")?,
+            )
+            .json(&request.body)
+            .send()
+            .await?;
+        Ok(response)
+    }
     /// Get deployment
     ///
-    /// Returns deployment details, urls, and project build settings.
+    /// Returns deployment details, its observed serving address when active, and project build settings.
     ///
     /// * Path: `GET /v1/deployments/{id}`
     pub async fn get_v1deployments_by_id(
@@ -1593,26 +1699,6 @@ impl PlatformClientRaw {
             .push("project")
             .push(&request.path.project_id.to_string());
         let response = self.client.get(url).query(&request.query).send().await?;
-        Ok(response)
-    }
-    /// Rollback deployment
-    ///
-    /// Creates a rollback deployment from the previous live deployment.
-    ///
-    /// * Path: `POST /v1/deployments/{id}/rollback`
-    pub async fn post_v1deployments_by_id_rollback(
-        &self,
-        request: PostV1deploymentsByIdRollbackRequest,
-    ) -> anyhow::Result<reqwest::Response> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("rollback");
-        let response = self.client.post(url).json(&request.body).send().await?;
         Ok(response)
     }
     /// Get build log upload policy

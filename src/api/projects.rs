@@ -9,8 +9,8 @@ impl ApiClient {
             .platform()?
             .get_v1projects(GetV1projectsRequest {
                 query: GetV1projectsRequestQuery {
-                    limit: Some(f64::from(limit)),
-                    offset: Some(f64::from(offset)),
+                    limit: Some(serde_json::json!(limit)),
+                    offset: Some(serde_json::json!(offset)),
                     name: None,
                 },
             })

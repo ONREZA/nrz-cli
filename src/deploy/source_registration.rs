@@ -80,6 +80,7 @@ pub(super) fn source_request_body(
     functions: Option<serde_json::Value>,
 ) -> anyhow::Result<nrz_api::SourceRequestBody> {
     Ok(nrz_api::SourceRequestBody {
+        additional_properties: Default::default(),
         protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL.to_string(),
         attempt: i64::from(attempt),
         operation_id,

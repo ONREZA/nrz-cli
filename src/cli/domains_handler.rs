@@ -110,6 +110,7 @@ async fn add(
         .context("failed to list connected domain zones")?;
     let (zone_id, label) = hostname_zone(domain, &zones.domains)?;
     let body = nrz_api::HostnameRequestBody {
+        additional_properties: Default::default(),
         name: label,
         project_id: project_id.parse().context("invalid project ID")?,
         environment_id: env_id.parse().context("invalid environment ID")?,

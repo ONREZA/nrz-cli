@@ -46,8 +46,8 @@ impl ApiClient {
                     project_id: project_id.parse().context("invalid project ID")?,
                 },
                 query: GetV1deploymentsProjectByProjectIdRequestQuery {
-                    limit: Some(f64::from(limit)),
-                    offset: Some(f64::from(offset)),
+                    limit: Some(serde_json::json!(limit)),
+                    offset: Some(serde_json::json!(offset)),
                     is_preview: None,
                 },
             })
@@ -56,23 +56,6 @@ impl ApiClient {
             response,
             GetV1deploymentsProjectByProjectIdRequest,
             GetV1deploymentsProjectByProjectIdResponse::Ok
-        )
-    }
-
-    pub async fn rollback_deployment(&self, id: &str) -> anyhow::Result<Rollback200Response> {
-        let response = self
-            .platform()?
-            .post_v1deployments_by_id_rollback(PostV1deploymentsByIdRollbackRequest {
-                path: PostV1deploymentsByIdRollbackRequestPath {
-                    id: id.parse().context("invalid deployment ID")?,
-                },
-                body: ReasonRequestBody { reason: None },
-            })
-            .await?;
-        api_success!(
-            response,
-            PostV1deploymentsByIdRollbackRequest,
-            PostV1deploymentsByIdRollbackResponse::Ok
         )
     }
 }

@@ -116,6 +116,7 @@ fn config_dir_for_command(command: &Command) -> PathBuf {
         Command::Dev(args) => Path::new(&args.dir).to_path_buf(),
         Command::Build(args) => Path::new(&args.dir).to_path_buf(),
         Command::Deploy(args) => Path::new(&args.dir).to_path_buf(),
+        Command::Rollback(args) => Path::new(&args.dir).to_path_buf(),
         Command::Context(args) => Path::new(&args.dir).to_path_buf(),
         Command::Config(args) => match &args.command {
             cli::config::ConfigCommand::Explain(args) => Path::new(&args.dir).to_path_buf(),

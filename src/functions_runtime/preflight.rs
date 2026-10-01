@@ -66,7 +66,8 @@ pub(super) async fn preflight_with_runtime(
             })?;
         let handlers = serde_json::from_value(serde_json::json!(result.handlers))?;
         let mut spec = nrz_api::FunctionPublishSpec {
-            source: nrz_api::FunctionPublishSpecSource {
+            source: nrz_api::Source {
+                additional_properties: Default::default(),
                 path: function.entrypoint.clone(),
                 content_text: content.clone(),
             },

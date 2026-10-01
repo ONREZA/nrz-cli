@@ -92,7 +92,7 @@ async fn runtime_logs_encode_search_and_deployment_filters_with_generated_client
         .runtime_logs(
             id,
             nrz_api::GetV1projectsByIdRuntimeLogsRequestQuery {
-                limit: Some(50),
+                limit: Some(serde_json::json!(50)),
                 deployment_id: Some(id.parse().unwrap()),
                 search: Some("a&b + /שלום".into()),
                 ..Default::default()

@@ -12,6 +12,7 @@ pub(super) async fn cmd_config(
 
     if has_updates {
         let body = nrz_api::AttachmentRequestBody {
+            additional_properties: Default::default(),
             env_var_name: args.env_var,
             auto_inject_db_url: args.auto_inject,
             auto_create_preview_branch: args.preview_branches,

@@ -13,7 +13,6 @@ impl TryFrom<nrz_api::RunnerContext200Response> for RunnerContextResponse {
                     .try_into()
                     .context("invalid deployment attempt")?,
                 status: value.deployment.status.to_string(),
-                url: value.deployment.url,
             },
             settings: runner_settings(value.settings)?,
         })
@@ -33,7 +32,6 @@ impl TryFrom<nrz_api::Admit200Response> for AdmissionResponse {
                     .try_into()
                     .context("invalid deployment attempt")?,
                 status: value.deployment.status,
-                url: value.deployment.url,
             },
         })
     }
@@ -95,6 +93,7 @@ pub(super) async fn admit(
         .admit_deployment(
             project_id,
             nrz_api::AdmitRequestBody {
+                additional_properties: Default::default(),
                 protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL.to_string(),
                 environment_id: context
                     .environment_id

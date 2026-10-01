@@ -136,6 +136,7 @@ pub(super) fn spawn_nullable_project_mock() -> String {
                 "/v1/projects/",
                 get(|| async {
                     Json(nrz_api::Project200Response {
+                        additional_properties: Default::default(),
                         projects: vec![nrz_api::Project200ResponseProject {
                             id: "00000000-0000-0000-0000-000000000001".parse().unwrap(),
                             name: "internal-name".to_string(),

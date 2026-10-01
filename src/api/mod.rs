@@ -22,6 +22,7 @@ mod identity;
 mod preview;
 mod projects;
 mod publication;
+mod releases;
 mod runtime_logs;
 
 #[cfg(test)]

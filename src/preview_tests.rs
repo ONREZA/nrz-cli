@@ -2,16 +2,19 @@ use super::*;
 
 fn access() -> ServerPreviewAccess {
     ServerPreviewAccess {
+        additional_properties: Default::default(),
         project_id: "00000000-0000-0000-0000-000000000001".parse().unwrap(),
         secret_id: "00000000-0000-0000-0000-000000000002".parse().unwrap(),
         note: "test".to_string(),
         expires_at: "2026-06-24T17:00:00Z".parse().unwrap(),
         ttl_seconds: 3600,
         header: nrz_api::AccessResponseItemHeader {
+            additional_properties: Default::default(),
             name: BYPASS_HEADER_NAME.to_string(),
             value: "token-value".to_string(),
         },
         query: nrz_api::AccessResponseItemQuery {
+            additional_properties: Default::default(),
             name: "_bypass".to_string(),
             value: "token-value".to_string(),
         },

@@ -20,7 +20,6 @@ pub(super) fn is_activation_observation_error(error: &anyhow::Error) -> bool {
 
 pub(super) struct ActivationWait<'a> {
     pub(super) deployment_id: &'a str,
-    pub(super) url: &'a str,
     pub(super) timeout: Duration,
 }
 
@@ -92,7 +91,7 @@ where
                     .details(serde_json::json!({
                         "deploymentId": request.deployment_id,
                         "lastKnownStatus": status.status,
-                        "url": status.url.as_deref().unwrap_or(request.url),
+                        "url": status.url,
                         "errorCode": status.error_code,
                     }))
                     .into_anyhow());
@@ -107,8 +106,7 @@ where
     let status = last_status.as_ref().map(|status| status.status.as_str());
     let url = last_status
         .as_ref()
-        .and_then(|status| status.url.as_deref())
-        .unwrap_or(request.url);
+        .and_then(|status| status.url.as_deref());
     Err(CliError::new(
         "DEPLOY_WAIT_TIMEOUT",
         format!(
@@ -117,7 +115,7 @@ where
             request.deployment_id,
             request.timeout.as_secs(),
             status.unwrap_or("unknown"),
-            url,
+            url.unwrap_or("unavailable"),
         ),
     )
     .phase(Phase::Deploy)
@@ -138,12 +136,10 @@ fn status_read_error(
     code: &str,
     reason: &str,
 ) -> anyhow::Error {
-    let url = last_status
-        .and_then(|status| status.url.as_deref())
-        .unwrap_or(request.url);
+    let url = last_status.and_then(|status| status.url.as_deref());
     CliError::new(code, format!(
         "could not read deployment {} status ({}): {}. The CLI did not cancel the deployment; check its status in the dashboard.",
-        request.deployment_id, url, reason,
+        request.deployment_id, url.unwrap_or("unavailable"), reason,
     ))
     .phase(Phase::Deploy)
     .details(serde_json::json!({

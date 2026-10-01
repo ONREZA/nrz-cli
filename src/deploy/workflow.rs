@@ -197,7 +197,6 @@ pub async fn run(
                 id: runner.deployment.id.clone(),
                 attempt: runner.deployment.attempt,
                 status: runner.deployment.status.clone(),
-                url: runner.deployment.url.clone().unwrap_or_default(),
             },
             runner.context.clone(),
             materialized,
@@ -549,7 +548,6 @@ pub async fn run(
         let result = wait_for_activation(
             ActivationWait {
                 deployment_id: &deployment.id,
-                url: &deployment.url,
                 timeout: Duration::from_secs(u64::from(args.wait_timeout)),
             },
             || async { client.deployment_status(&deployment.id).await?.try_into() },
@@ -562,26 +560,33 @@ pub async fn run(
         .await;
         finish_spinner(spinner, "");
         let status = result?;
-        let url = status.url.as_deref().unwrap_or(&deployment.url);
+        let url = status.url.as_deref();
         let target = deploy_target_output(deploy_production);
-        let preview_protected = match access::read(&client, &deployment.id, url).await {
-            Ok(protected) => Some(protected),
-            Err(error) => {
-                let warning =
-                    format!("Deployment is live, but URL protection is unknown: {error:#}");
-                output::warn(json, &warning, output::Phase::Deploy);
-                deploy_warnings.push(warning);
-                None
+        let preview_protected = if let Some(url) = url {
+            match access::read(&client, &deployment.id, url).await {
+                Ok(protected) => Some(protected),
+                Err(error) => {
+                    let warning =
+                        format!("Deployment is live, but URL protection is unknown: {error:#}");
+                    output::warn(json, &warning, output::Phase::Deploy);
+                    deploy_warnings.push(warning);
+                    None
+                }
             }
+        } else {
+            None
         };
         let verification = if args.verify {
+            let url = url.ok_or_else(|| output::coded_error(
+                "DEPLOY_URL_UNAVAILABLE",
+                "Deployment is active, but its Environment address is unavailable for verification",
+            ))?;
             Some(
                 verify::verify_deployment(verify::DeployVerificationRequest {
                     api_client: &client,
                     deployment_id: &deployment.id,
                     project_id: &project_id,
                     url,
-                    production: deploy_production == Some(true),
                     health_check: deploy_health_check.as_ref(),
                     json,
                 })
@@ -594,7 +599,7 @@ pub async fn run(
         if json {
             output::json_output(&DeployOutput {
                 deployment_id: deployment.id,
-                url: url.to_string(),
+                url: url.map(str::to_string),
                 status: "live".into(),
                 target,
                 preview_protected,
@@ -604,13 +609,20 @@ pub async fn run(
                 verification,
             });
         } else {
-            let url = output::terminal_line(url);
             eprintln!();
-            eprintln!(
-                "  {} Deployed to {}",
-                console::style("✓").green().bold(),
-                console::style(&url).underlined().bold(),
-            );
+            if let Some(url) = url {
+                let visible_url = output::terminal_line(url);
+                eprintln!(
+                    "  {} Deployed to {}",
+                    console::style("✓").green().bold(),
+                    console::style(&visible_url).underlined().bold(),
+                );
+            } else {
+                eprintln!(
+                    "  {} Deployment activated; Environment address unavailable",
+                    console::style("✓").green().bold()
+                );
+            }
             if let Some(verification) = &verification {
                 let verified_url = output::terminal_line(&verification.url);
                 eprintln!(
@@ -622,7 +634,7 @@ pub async fn run(
             }
             eprintln!();
             if preview_protected == Some(true) {
-                crate::preview::print_preview_access_hint(&project_id, Some(&url));
+                crate::preview::print_preview_access_hint(&project_id, url);
             }
         }
         Ok(())

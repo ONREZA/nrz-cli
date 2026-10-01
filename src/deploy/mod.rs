@@ -129,7 +129,6 @@ struct AdmissionDeployment {
     id: String,
     attempt: u32,
     status: String,
-    url: String,
 }
 
 #[derive(Debug)]
@@ -160,7 +159,6 @@ struct RunnerDeploymentContext {
     id: String,
     attempt: u32,
     status: String,
-    url: Option<String>,
 }
 
 #[derive(Debug)]
@@ -187,7 +185,7 @@ fn require_runner_context_protocol(protocol: &str) -> anyhow::Result<()> {
 #[serde(rename_all = "camelCase")]
 struct DeployOutput {
     deployment_id: String,
-    url: String,
+    url: Option<String>,
     status: String,
     target: DeployTargetOutput,
     /// Protection of the returned URL; null when its policy could not be read.
@@ -417,7 +415,7 @@ fn emit_deploy_plan_explain(json: bool, explain: &plan::DeployPlanExplain) -> an
 
 fn compute_config_body(health_check_path: Option<String>) -> nrz_api::ComputeConfigRequestBody {
     nrz_api::ComputeConfigRequestBody {
-        health_check_path: Some(health_check_path),
+        health_check_path: Some(serde_json::json!(health_check_path)),
         ..Default::default()
     }
 }

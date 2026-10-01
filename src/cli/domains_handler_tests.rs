@@ -76,6 +76,7 @@ async fn generated_domain_operations_use_project_listing_and_zone_relative_attac
         .attach_hostname(
             zone,
             HostnameRequestBody {
+                additional_properties: Default::default(),
                 name: "www".to_string(),
                 project_id: project,
                 environment_id: environment,

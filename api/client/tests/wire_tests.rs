@@ -55,6 +55,8 @@ fn function_invocation_preserves_runtime_extensions_and_recursive_json_values() 
     let response = json!({
         "invocation": { "invocationId": "request-1", "ok": false,
             "protocolVersion": "onreza-functions-poc/v2",
+            "timings": { "totalMs": 1.0, "runtimeExtra": null },
+            "response": { "status": 500, "setCookie": ["session=value"] },
             "error": { "cause": null }, "logs": [{ "message": "failed", "properties": { "value": null } }] },
         "debugTrace": { "stages": [], "serverTiming": null },
         "revision": { "id": "revision-1", "functionId": "function-1", "sourceSnapshotId": "snapshot-1" }

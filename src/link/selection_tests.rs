@@ -37,6 +37,7 @@ async fn interactive_choices_include_projects_after_the_first_page() {
                 101
             };
             Json(nrz_api::Project200Response {
+                additional_properties: Default::default(),
                 projects: (offset..end).map(project).collect(),
                 total: 101,
             })
@@ -56,6 +57,7 @@ async fn project_selection_rejects_incomplete_pagination() {
             "/v1/projects/",
             get(move || async move {
                 Json(nrz_api::Project200Response {
+                    additional_properties: Default::default(),
                     projects: if repeated { vec![project(1)] } else { vec![] },
                     total: 100,
                 })

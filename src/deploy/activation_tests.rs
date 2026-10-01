@@ -13,7 +13,6 @@ use crate::errors::find_cli_error;
 fn request(seconds: u64) -> ActivationWait<'static> {
     ActivationWait {
         deployment_id: "dep-1",
-        url: "https://initial.example.test",
         timeout: Duration::from_secs(seconds),
     }
 }
@@ -114,6 +113,24 @@ async fn timeout_preserves_latest_status_and_url_in_human_and_json_errors() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn latest_status_without_address_has_no_link() {
+    let error = wait_for_activation(
+        request(3),
+        || {
+            let mut response = status("ingesting");
+            response.url = None;
+            ready(Ok(response))
+        },
+        |_| {},
+    )
+    .await
+    .unwrap_err();
+    let json = serde_json::to_value(find_cli_error(&error).unwrap().json()).unwrap();
+    assert!(json["details"]["url"].is_null());
+    assert!(error.to_string().contains("URL: unavailable"));
+}
+
+#[tokio::test(start_paused = true)]
 async fn deadline_also_bounds_a_hung_status_request() {
     let started = Instant::now();
     let error = wait_for_activation(request(5), pending, |_| {})
@@ -124,7 +141,7 @@ async fn deadline_also_bounds_a_hung_status_request() {
     let json = serde_json::to_value(cli.json()).unwrap();
     assert_eq!(json["code"], "DEPLOY_WAIT_TIMEOUT");
     assert!(json["details"]["lastKnownStatus"].is_null());
-    assert_eq!(json["details"]["url"], "https://initial.example.test");
+    assert!(json["details"]["url"].is_null());
 }
 
 #[tokio::test(start_paused = true)]
@@ -227,7 +244,7 @@ async fn non_retryable_status_error_is_reported_without_waiting() {
     let json = serde_json::to_value(find_cli_error(&error).unwrap().json()).unwrap();
     assert_eq!(json["code"], "DEPLOY_STATUS_UNAVAILABLE");
     assert_eq!(json["details"]["deploymentId"], "dep-1");
-    assert_eq!(json["details"]["url"], "https://initial.example.test");
+    assert!(json["details"]["url"].is_null());
 }
 
 #[tokio::test(start_paused = true)]

@@ -47,7 +47,6 @@ async fn generated_status_preserves_failure_authority_despite_unrecognized_diagn
         let error = wait_for_activation(
             ActivationWait {
                 deployment_id: DEPLOYMENT,
-                url: "https://example.test",
                 timeout: Duration::from_secs(2),
             },
             || async { client.deployment_status(DEPLOYMENT).await?.try_into() },

@@ -1,11 +1,11 @@
 diff --git a/book/src/code-generation.md b/book/src/code-generation.md
-index 4075cad..8ca0be1 100644
+index 4075cad..4f71b3e 100644
 --- a/book/src/code-generation.md
 +++ b/book/src/code-generation.md
-@@ -27,6 +27,22 @@ generated Rust code.
- 
+@@ -27,6 +27,29 @@ generated Rust code.
+
  ## Generation Modes
- 
+
 +### Nullable properties and raw responses
 +
 +Optional nullable object properties use `Option<Option<T>>`: `None` omits the
@@ -22,10 +22,17 @@ index 4075cad..8ca0be1 100644
 +`--bidirectional-serde` derives both serde directions for schema models. This
 +supports CLI JSON output, local request fixtures, and response persistence.
 +
++JSON object models preserve additional properties in a flattened map. Omitting
++`additionalProperties` permits arbitrary JSON values, as do `true` and an empty
++schema. An explicit `false` rejects unknown properties; a schema constrains the
++map values to its generated type.
++Multipart form parts correspond to named schema properties; the flattened map
++does not create a form part named `additional_properties`.
++
  The positional `mode` argument selects what you generate.
- 
+
  ```text
-@@ -1235,3 +1251,18 @@ pub struct Widget {
+@@ -1235,3 +1258,18 @@ pub struct Widget {
  | `--only` | *(none)* | Include only specified operations |
  | `--exclude` | *(none)* | Exclude specified operations |
  | `--all-schemas` | `false` | Generate all schemas regardless of usage |
@@ -86,10 +93,23 @@ index 0000000..c3dd42d
 +  }
 +}
 diff --git a/crates/oas3-gen/fixtures/event_stream/client.rs b/crates/oas3-gen/fixtures/event_stream/client.rs
-index 59836bf..b076242 100644
+index 59836bf..cf15f20 100644
 --- a/crates/oas3-gen/fixtures/event_stream/client.rs
 +++ b/crates/oas3-gen/fixtures/event_stream/client.rs
-@@ -46,6 +46,13 @@ impl EventStreamApiClient {
+@@ -8,11 +8,10 @@
+ //!
+ //! API with Server-Sent Events (SSE) endpoint
+
++use super::types::*;
+ use anyhow::Context;
+ use reqwest::{Client, Url};
+ use validator::Validate;
+-
+-use super::types::*;
+ pub const BASE_URL: &str = "https://api.example.com";
+ #[derive(Debug, Clone)]
+ pub struct EventStreamApiClient {
+@@ -46,6 +45,13 @@ impl EventStreamApiClient {
      let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
      Ok(Self { client, base_url: url })
    }
@@ -103,7 +123,7 @@ index 59836bf..b076242 100644
    /// Stream events
    ///
    /// Returns a stream of server-sent events
-@@ -78,3 +85,42 @@ impl EventStreamApiClient {
+@@ -78,3 +84,42 @@ impl EventStreamApiClient {
      TypedEventsRequest::parse_response(response).await
    }
  }
@@ -158,6 +178,45 @@ index b7b9983..3115927 100644
  #![allow(clippy::result_large_err)]
  #![allow(clippy::struct_field_names)]
  #![allow(clippy::too_many_lines)]
+diff --git a/crates/oas3-gen/fixtures/event_stream/types.rs b/crates/oas3-gen/fixtures/event_stream/types.rs
+index 56483b3..58059d2 100644
+--- a/crates/oas3-gen/fixtures/event_stream/types.rs
++++ b/crates/oas3-gen/fixtures/event_stream/types.rs
+@@ -18,6 +18,11 @@ pub struct StreamEvent {
+   pub data: String,
+   /// Event timestamp
+   pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct TypedEvent {
+@@ -25,12 +30,22 @@ pub struct TypedEvent {
+   #[serde(rename = "type")]
+   pub r#type: TypedEventType,
+   pub payload: EventPayload,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct EventPayload {
+   pub id: String,
+   pub name: Option<String>,
+   pub value: Option<i64>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ /// Returns a stream of server-sent events
+ #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 diff --git a/crates/oas3-gen/fixtures/intersection_union/client.rs b/crates/oas3-gen/fixtures/intersection_union/client.rs
 index 65c4350..ae30fce 100644
 --- a/crates/oas3-gen/fixtures/intersection_union/client.rs
@@ -194,10 +253,10 @@ index 036b994..2a37b8d 100644
  #![allow(clippy::struct_field_names)]
  #![allow(clippy::too_many_lines)]
 diff --git a/crates/oas3-gen/fixtures/intersection_union/types.rs b/crates/oas3-gen/fixtures/intersection_union/types.rs
-index eee54ab..a5e9f07 100644
+index eee54ab..64e7c18 100644
 --- a/crates/oas3-gen/fixtures/intersection_union/types.rs
 +++ b/crates/oas3-gen/fixtures/intersection_union/types.rs
-@@ -10,11 +10,8 @@
+@@ -10,12 +10,14 @@
  use serde::{Deserialize, Serialize};
  /// Must be a vehicle with an ID, and must be either a Car or a Boat.
  #[serde_with::skip_serializing_none]
@@ -210,6 +269,12 @@ index eee54ab..a5e9f07 100644
    pub id: String,
    pub wheels: Option<i64>,
    pub sails: Option<i64>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
 diff --git a/crates/oas3-gen/fixtures/petstore.json b/crates/oas3-gen/fixtures/petstore.json
 index 0a1552f..9dc1ec2 100644
 --- a/crates/oas3-gen/fixtures/petstore.json
@@ -235,10 +300,23 @@ index 0a1552f..9dc1ec2 100644
  					}
  				],
 diff --git a/crates/oas3-gen/fixtures/petstore/client.rs b/crates/oas3-gen/fixtures/petstore/client.rs
-index 1b319eb..62792da 100644
+index 1b319eb..a008034 100644
 --- a/crates/oas3-gen/fixtures/petstore/client.rs
 +++ b/crates/oas3-gen/fixtures/petstore/client.rs
-@@ -45,6 +45,13 @@ impl SwaggerPetstoreClient {
+@@ -7,11 +7,10 @@
+ //! Generated by `oas3-gen v0.28.0`
+ //!
+
++use super::types::*;
+ use anyhow::Context;
+ use reqwest::{Client, Url};
+ use validator::Validate;
+-
+-use super::types::*;
+ pub const BASE_URL: &str = "http://petstore.swagger.io/v1";
+ #[derive(Debug, Clone)]
+ pub struct SwaggerPetstoreClient {
+@@ -45,6 +44,13 @@ impl SwaggerPetstoreClient {
      let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
      Ok(Self { client, base_url: url })
    }
@@ -252,7 +330,7 @@ index 1b319eb..62792da 100644
    /// List all pets
    ///
    /// * Path: `GET /{api_version}/pets`
-@@ -142,3 +149,107 @@ impl SwaggerPetstoreClient {
+@@ -142,3 +148,107 @@ impl SwaggerPetstoreClient {
      UploadPetImageRequest::parse_response(response).await
    }
  }
@@ -373,10 +451,10 @@ index 508b12a..a14dd58 100644
  #![allow(clippy::struct_field_names)]
  #![allow(clippy::too_many_lines)]
 diff --git a/crates/oas3-gen/fixtures/petstore/types.rs b/crates/oas3-gen/fixtures/petstore/types.rs
-index 9fafc08..fdc96fe 100644
+index 9fafc08..2c86478 100644
 --- a/crates/oas3-gen/fixtures/petstore/types.rs
 +++ b/crates/oas3-gen/fixtures/petstore/types.rs
-@@ -15,7 +15,6 @@ pub const X_COMPATIBILITY_DATE: http::HeaderName = http::HeaderName::from_static
+@@ -15,22 +15,30 @@ pub const X_COMPATIBILITY_DATE: http::HeaderName = http::HeaderName::from_static
  pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api-version");
  pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
@@ -384,17 +462,83 @@ index 9fafc08..fdc96fe 100644
  pub struct Allergies {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -24,7 +23,6 @@ pub struct Allergies {
+   #[default(Some("allergies"))]
+   #[builder(skip = Some("allergies"))]
    pub r#type: Option<&'static str>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 -#[serde(default)]
  pub struct Diet {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -112,10 +110,9 @@ pub struct Error {
+   #[default(Some("diet"))]
+   #[builder(skip = Some("diet"))]
+   pub r#type: Option<&'static str>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[derive(Debug, Clone, PartialEq)]
+ pub enum Health {
+@@ -79,11 +87,18 @@ impl Health {
+ pub struct VaccineRecord {
+   pub date_administered: chrono::NaiveDate,
+   pub veterinarian: Option<String>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct PetVaccinations {
+   /// Additional properties not defined in the schema.
+   #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
+   pub additional_properties: indexmap::IndexMap<String, Vec<VaccineRecord>>,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+@@ -93,6 +108,11 @@ pub struct Pet {
+   pub allergies: Option<Box<Health>>,
+   pub vaccinations: Option<indexmap::IndexMap<String, Vec<VaccineRecord>>>,
+   pub tag: Option<String>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct Cat {
+@@ -104,6 +124,11 @@ pub struct Cat {
+   pub lives: i32,
+   #[serde(rename = "favoriteToy")]
+   pub favorite_toy: Option<String>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ pub type Pets = Vec<Pet>;
+ pub type Cats = Vec<Cat>;
+@@ -111,11 +136,15 @@ pub type Cats = Vec<Cat>;
+ pub struct Error {
    pub code: i32,
    pub message: String,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
 -#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
 +#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -404,7 +548,7 @@ index 9fafc08..fdc96fe 100644
    pub api_version: String,
  }
  #[serde_with::skip_serializing_none]
-@@ -167,7 +164,6 @@ impl core::convert::TryFrom<ListPetsRequestHeader> for http::HeaderMap {
+@@ -167,7 +196,6 @@ impl core::convert::TryFrom<ListPetsRequestHeader> for http::HeaderMap {
  /// List all pets
  #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
  pub struct ListPetsRequest {
@@ -412,7 +556,7 @@ index 9fafc08..fdc96fe 100644
    pub path: ListPetsRequestPath,
    #[validate(nested)]
    pub query: ListPetsRequestQuery,
-@@ -228,16 +224,14 @@ pub enum ListPetsResponse {
+@@ -228,16 +256,14 @@ pub enum ListPetsResponse {
    ///default: unexpected error
    Unknown(Error),
  }
@@ -430,7 +574,7 @@ index 9fafc08..fdc96fe 100644
    pub path: CreatePetsRequestPath,
  }
  #[bon::bon]
-@@ -409,26 +403,22 @@ pub enum ShowPetByIdResponse {
+@@ -409,26 +435,27 @@ pub enum ShowPetByIdResponse {
    ///default: unexpected error
    Unknown(Error),
  }
@@ -442,6 +586,11 @@ index 9fafc08..fdc96fe 100644
    pub name: String,
    /// The pet's image file
    pub image: Vec<u8>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
 -#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
 +#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -471,11 +620,32 @@ index 5258a4a..a98a22f 100644
  #![allow(clippy::result_large_err)]
  #![allow(clippy::struct_field_names)]
  #![allow(clippy::too_many_lines)]
+diff --git a/crates/oas3-gen/fixtures/petstore_server/server.rs b/crates/oas3-gen/fixtures/petstore_server/server.rs
+index 1850510..3a9d22d 100644
+--- a/crates/oas3-gen/fixtures/petstore_server/server.rs
++++ b/crates/oas3-gen/fixtures/petstore_server/server.rs
+@@ -7,6 +7,7 @@
+ //! Generated by `oas3-gen v0.28.0`
+ //!
+
++use super::types::*;
+ use axum::{
+   Router,
+   extract::{Path, Query, State},
+@@ -14,8 +15,6 @@ use axum::{
+   response::IntoResponse,
+   routing::{get, post},
+ };
+-
+-use super::types::*;
+ pub trait ApiServer: Send + Sync {
+   /// List all pets
+   ///
 diff --git a/crates/oas3-gen/fixtures/petstore_server/types.rs b/crates/oas3-gen/fixtures/petstore_server/types.rs
-index 51615ee..4473b09 100644
+index 51615ee..1dfd98f 100644
 --- a/crates/oas3-gen/fixtures/petstore_server/types.rs
 +++ b/crates/oas3-gen/fixtures/petstore_server/types.rs
-@@ -17,7 +17,6 @@ pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api
+@@ -17,23 +17,31 @@ pub const X_API_VERSION: http::HeaderName = http::HeaderName::from_static("x-api
  pub const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");
  #[serde_with::skip_serializing_none]
  #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
@@ -483,7 +653,14 @@ index 51615ee..4473b09 100644
  pub struct Allergies {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -27,7 +26,6 @@ pub struct Allergies {
+   #[default(Some("allergies"))]
+   #[builder(skip = Some("allergies"))]
+   pub r#type: Option<&'static str>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[serde_with::skip_serializing_none]
  #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
@@ -491,9 +668,69 @@ index 51615ee..4473b09 100644
  pub struct Diet {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -107,10 +105,9 @@ pub struct Error {
+   #[default(Some("diet"))]
+   #[builder(skip = Some("diet"))]
+   pub r#type: Option<&'static str>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[derive(Debug, Clone, PartialEq)]
+ pub enum Health {
+@@ -72,11 +80,18 @@ impl Health {
+ pub struct VaccineRecord {
+   pub date_administered: chrono::NaiveDate,
+   pub veterinarian: Option<String>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct PetVaccinations {
+   /// Additional properties not defined in the schema.
+   #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
+   pub additional_properties: indexmap::IndexMap<String, Vec<VaccineRecord>>,
+ }
+ #[serde_with::skip_serializing_none]
+@@ -87,6 +102,11 @@ pub struct Pet {
+   pub allergies: Option<Box<Health>>,
+   pub vaccinations: Option<indexmap::IndexMap<String, Vec<VaccineRecord>>>,
+   pub tag: Option<String>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[serde_with::skip_serializing_none]
+ #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default, bon::Builder)]
+@@ -99,6 +119,11 @@ pub struct Cat {
+   pub lives: i32,
+   #[serde(rename = "favoriteToy")]
+   pub favorite_toy: Option<String>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ pub type Pets = Vec<Pet>;
+ pub type Cats = Vec<Cat>;
+@@ -106,11 +131,15 @@ pub type Cats = Vec<Cat>;
+ pub struct Error {
    pub code: i32,
    pub message: String,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
 -#[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
 +#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
@@ -503,7 +740,7 @@ index 51615ee..4473b09 100644
    pub api_version: String,
  }
  #[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
-@@ -187,7 +184,6 @@ impl core::convert::TryFrom<http::HeaderMap> for ListPetsRequestHeader {
+@@ -187,7 +216,6 @@ impl core::convert::TryFrom<http::HeaderMap> for ListPetsRequestHeader {
  /// List all pets
  #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
  pub struct ListPetsRequest {
@@ -511,7 +748,7 @@ index 51615ee..4473b09 100644
    pub path: ListPetsRequestPath,
    #[validate(nested)]
    pub query: ListPetsRequestQuery,
-@@ -234,16 +230,14 @@ impl IntoResponse for ListPetsResponse {
+@@ -234,16 +262,14 @@ impl IntoResponse for ListPetsResponse {
      }
    }
  }
@@ -529,7 +766,7 @@ index 51615ee..4473b09 100644
    pub path: CreatePetsRequestPath,
  }
  #[bon::bon]
-@@ -440,26 +434,22 @@ impl IntoResponse for ShowPetByIdResponse {
+@@ -440,26 +466,27 @@ impl IntoResponse for ShowPetByIdResponse {
      }
    }
  }
@@ -541,6 +778,11 @@ index 51615ee..4473b09 100644
    pub name: String,
    /// The pet's image file
    pub image: Vec<u8>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
 -#[derive(Debug, Clone, PartialEq, Deserialize, validator::Validate, oas3_gen_support::Default)]
 +#[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default)]
@@ -559,10 +801,23 @@ index 51615ee..4473b09 100644
  }
  #[bon::bon]
 diff --git a/crates/oas3-gen/fixtures/union_serde/client.rs b/crates/oas3-gen/fixtures/union_serde/client.rs
-index 6aa1807..223c221 100644
+index 6aa1807..ce082a3 100644
 --- a/crates/oas3-gen/fixtures/union_serde/client.rs
 +++ b/crates/oas3-gen/fixtures/union_serde/client.rs
-@@ -46,6 +46,13 @@ impl UnionSerializationTestApiClient {
+@@ -8,11 +8,10 @@
+ //!
+ //! Comprehensive test fixture for union serialization/deserialization
+
++use super::types::*;
+ use anyhow::Context;
+ use reqwest::{Client, Url};
+ use validator::Validate;
+-
+-use super::types::*;
+ pub const BASE_URL: &str = "https://example.com/";
+ #[derive(Debug, Clone)]
+ pub struct UnionSerializationTestApiClient {
+@@ -46,6 +45,13 @@ impl UnionSerializationTestApiClient {
      let url = Url::parse(base_url.as_ref()).context("parsing base url")?;
      Ok(Self { client, base_url: url })
    }
@@ -576,7 +831,7 @@ index 6aa1807..223c221 100644
    /// Send content blocks
    ///
    /// * Path: `POST /content`
-@@ -73,3 +80,37 @@ impl UnionSerializationTestApiClient {
+@@ -73,3 +79,37 @@ impl UnionSerializationTestApiClient {
      GetEventsRequest::parse_response(response).await
    }
  }
@@ -627,7 +882,7 @@ index 63eacf2..cfd975d 100644
  #![allow(clippy::struct_field_names)]
  #![allow(clippy::too_many_lines)]
 diff --git a/crates/oas3-gen/fixtures/union_serde/types.rs b/crates/oas3-gen/fixtures/union_serde/types.rs
-index e841598..d5cc235 100644
+index e841598..66e42f5 100644
 --- a/crates/oas3-gen/fixtures/union_serde/types.rs
 +++ b/crates/oas3-gen/fixtures/union_serde/types.rs
 @@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
@@ -638,7 +893,31 @@ index e841598..d5cc235 100644
  pub struct ContentRequest {
    pub blocks: Vec<ContentBlock>,
    /// Flexible metadata that can be string or object
-@@ -110,24 +109,19 @@ impl ContentBlock {
+@@ -20,6 +19,11 @@ pub struct ContentRequest {
+   /// The size of the generated image. Total pixels must be between 1024x1024 and 2048x2048, with aspect ratio between 1/16 and 16.
+   #[default(Some(Default::default()))]
+   pub image_size: Option<ContentRequestImageSize>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct ContentResponse {
+@@ -27,6 +31,11 @@ pub struct ContentResponse {
+   /// A union of content block types with discriminator
+   pub content: Box<ContentBlock>,
+   pub usage: Option<Usage>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ /// A union of content block types with discriminator
+ #[derive(Debug, Clone, PartialEq)]
+@@ -110,24 +119,24 @@ impl ContentBlock {
    }
  }
  #[serde_with::skip_serializing_none]
@@ -657,6 +936,11 @@ index e841598..d5cc235 100644
    pub text: String,
    pub annotations: Option<Vec<Annotation>>,
    pub recipes: Option<Vec<RecipeList>>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[serde_with::skip_serializing_none]
  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
@@ -664,8 +948,15 @@ index e841598..d5cc235 100644
  pub struct ImageBlock {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -139,53 +133,41 @@ pub struct ImageBlock {
+@@ -137,56 +146,64 @@ pub struct ImageBlock {
+   /// Image source can be base64 or URL
+   pub source: Box<ImageSource>,
    pub alt_text: Option<String>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[serde_with::skip_serializing_none]
 -#[derive(
@@ -682,6 +973,11 @@ index e841598..d5cc235 100644
 -  #[validate(length(min = 1u64))]
    pub code: String,
    pub language: Option<String>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[serde_with::skip_serializing_none]
 -#[derive(
@@ -700,6 +996,11 @@ index e841598..d5cc235 100644
 -  #[validate(length(min = 1u64))]
    pub name: String,
    pub input: indexmap::IndexMap<String, serde_json::Value>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[serde_with::skip_serializing_none]
 -#[derive(
@@ -721,9 +1022,15 @@ index e841598..d5cc235 100644
 +  #[serde(default, with = "serde_with::rust::double_option")]
 +  pub iterations: Option<Option<UsageCounters>>,
    pub is_error: Option<bool>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  /// Tool result can be text or array of content blocks
-@@ -312,7 +294,6 @@ impl ImageSource {
+ #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+@@ -312,7 +329,6 @@ impl ImageSource {
  #[serde_with::serde_as]
  #[serde_with::skip_serializing_none]
  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
@@ -731,7 +1038,17 @@ index e841598..d5cc235 100644
  pub struct Base64ImageSource {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -327,14 +308,13 @@ pub struct Base64ImageSource {
+@@ -322,20 +338,29 @@ pub struct Base64ImageSource {
+   pub media_type: MediaType,
+   #[serde_as(as = "serde_with::base64::Base64")]
+   pub data: Vec<u8>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[serde_with::skip_serializing_none]
  #[derive(
    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
  )]
@@ -745,9 +1062,15 @@ index e841598..d5cc235 100644
 -  #[validate(url, length(min = 1u64))]
 +  #[validate(url)]
    pub url: String,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-@@ -410,10 +390,7 @@ impl<'de> serde::Deserialize<'de> for Annotation {
+ pub enum MediaType {
+@@ -410,10 +435,7 @@ impl<'de> serde::Deserialize<'de> for Annotation {
    }
  }
  #[serde_with::skip_serializing_none]
@@ -759,15 +1082,20 @@ index e841598..d5cc235 100644
  pub struct CitationAnnotation {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -422,7 +399,6 @@ pub struct CitationAnnotation {
+@@ -422,15 +444,18 @@ pub struct CitationAnnotation {
    pub r#type: Option<&'static str>,
    pub start: i64,
    pub end: i64,
 -  #[validate(length(min = 1u64))]
    #[builder(name = build_value)]
    pub build: String,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
-@@ -430,7 +406,6 @@ pub struct CitationAnnotation {
+ #[serde_with::skip_serializing_none]
  #[derive(
    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default, bon::Builder,
  )]
@@ -775,16 +1103,31 @@ index e841598..d5cc235 100644
  pub struct LinkAnnotation {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -439,7 +414,7 @@ pub struct LinkAnnotation {
+@@ -439,12 +464,22 @@ pub struct LinkAnnotation {
    pub r#type: Option<&'static str>,
    pub start: i64,
    pub end: i64,
 -  #[validate(url, length(min = 1u64))]
 +  #[validate(url)]
    pub url: String,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
-@@ -518,7 +493,6 @@ impl Event {
+ pub struct EventList {
+   pub events: Vec<Event>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ /// Streaming event with different types
+ #[derive(Debug, Clone, PartialEq)]
+@@ -518,7 +553,6 @@ impl Event {
    }
  }
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
@@ -792,47 +1135,92 @@ index e841598..d5cc235 100644
  pub struct MessageStartEvent {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -528,7 +502,6 @@ pub struct MessageStartEvent {
+@@ -526,9 +560,13 @@ pub struct MessageStartEvent {
+   #[builder(skip = Some("message_start"))]
+   pub r#type: Option<&'static str>,
    pub message: Message,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 -#[serde(default)]
  pub struct ContentBlockStartEvent {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -540,7 +513,6 @@ pub struct ContentBlockStartEvent {
+@@ -538,9 +576,13 @@ pub struct ContentBlockStartEvent {
+   pub index: i64,
+   /// A union of content block types with discriminator
    pub content_block: Box<ContentBlock>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 -#[serde(default)]
  pub struct ContentBlockDeltaEvent {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -552,7 +524,6 @@ pub struct ContentBlockDeltaEvent {
+@@ -550,9 +592,13 @@ pub struct ContentBlockDeltaEvent {
+   pub index: i64,
+   /// Delta content for streaming
    pub delta: Box<Delta>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 -#[serde(default)]
  pub struct ContentBlockStopEvent {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -562,7 +533,6 @@ pub struct ContentBlockStopEvent {
+@@ -560,24 +606,37 @@ pub struct ContentBlockStopEvent {
+   #[builder(skip = Some("content_block_stop"))]
+   pub r#type: Option<&'static str>,
    pub index: i64,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 -#[serde(default)]
  pub struct MessageStopEvent {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -571,7 +541,6 @@ pub struct MessageStopEvent {
+   #[default(Some("message_stop"))]
+   #[builder(skip = Some("message_stop"))]
    pub r#type: Option<&'static str>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 -#[serde(default)]
  pub struct PingEvent {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -629,7 +598,6 @@ impl Delta {
+   #[default(Some("ping"))]
+   #[builder(skip = Some("ping"))]
+   pub r#type: Option<&'static str>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ /// Delta content for streaming
+ #[derive(Debug, Clone, PartialEq)]
+@@ -629,7 +688,6 @@ impl Delta {
    }
  }
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
@@ -840,15 +1228,58 @@ index e841598..d5cc235 100644
  pub struct TextDelta {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -639,7 +607,6 @@ pub struct TextDelta {
+@@ -637,9 +695,13 @@ pub struct TextDelta {
+   #[builder(skip = Some("text_delta"))]
+   pub r#type: Option<&'static str>,
    pub text: String,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
 -#[serde(default)]
  pub struct InputJsonDelta {
    #[doc(hidden)]
    #[serde(default, rename = "type", skip_deserializing)]
-@@ -815,14 +782,25 @@ pub enum Metadata {
+@@ -647,6 +709,11 @@ pub struct InputJsonDelta {
+   #[builder(skip = Some("input_json_delta"))]
+   pub r#type: Option<&'static str>,
+   pub partial_json: String,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
+ pub struct Message {
+@@ -656,6 +723,11 @@ pub struct Message {
+   pub model: String,
+   pub stop_reason: Option<StopReason>,
+   pub usage: Option<Usage>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
+ pub enum Role {
+@@ -805,6 +877,11 @@ impl core::fmt::Display for StopReason {
+ pub struct Usage {
+   pub input_tokens: i64,
+   pub output_tokens: i64,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ /// Flexible metadata that can be string or object
+ #[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
+@@ -815,19 +892,40 @@ pub enum Metadata {
    Object(indexmap::IndexMap<String, serde_json::Value>),
  }
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
@@ -860,7 +1291,12 @@ index e841598..d5cc235 100644
    #[builder(default = "error".to_string())]
    pub r#type: String,
    pub error: ErrorDetails,
- }
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
++}
 +impl ErrorResponse {
 +  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
 +  fn deserialize_const_type<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
@@ -871,11 +1307,21 @@ index e841598..d5cc235 100644
 +    }
 +    Ok(value)
 +  }
-+}
+ }
  #[derive(Debug, Clone, PartialEq, Deserialize, oas3_gen_support::Default, bon::Builder)]
  pub struct ErrorDetails {
    #[serde(rename = "type")]
-@@ -866,6 +844,7 @@ impl core::fmt::Display for ErrorType {
+   pub r#type: ErrorType,
+   pub message: String,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, oas3_gen_support::Default)]
+ pub enum ErrorType {
+@@ -866,6 +964,7 @@ impl core::fmt::Display for ErrorType {
  pub enum NullableStringOrNumber {
    String(String),
    Number(f64),
@@ -883,7 +1329,7 @@ index e841598..d5cc235 100644
  }
  /// Test union that can be single item or array
  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-@@ -885,11 +864,14 @@ impl ArrayOrSingle {
+@@ -885,18 +984,47 @@ impl ArrayOrSingle {
  }
  #[serde_with::skip_serializing_none]
  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
@@ -901,8 +1347,10 @@ index e841598..d5cc235 100644
    #[default("object".to_string())]
    #[builder(default = "object".to_string())]
    pub r#type: String,
-@@ -897,6 +879,30 @@ pub struct RecipeList {
+   /// Additional properties not defined in the schema.
    #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
    pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
  }
 +impl RecipeList {
@@ -932,7 +1380,7 @@ index e841598..d5cc235 100644
  #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
  #[serde(untagged)]
  pub enum UsageCounters {
-@@ -926,33 +932,82 @@ pub enum HypotheticalVersion {
+@@ -926,33 +1054,92 @@ pub enum HypotheticalVersion {
    Citation(CitationAnnotation),
    Link(LinkAnnotation),
  }
@@ -952,6 +1400,11 @@ index e841598..d5cc235 100644
 +  #[default("counter_a".to_string())]
 +  #[builder(default = "counter_a".to_string())]
 +  pub r#type: String,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
 +}
 +impl UsageCounterA {
 +  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
@@ -993,6 +1446,11 @@ index e841598..d5cc235 100644
 +  #[default("counter_b".to_string())]
 +  #[builder(default = "counter_b".to_string())]
 +  pub r#type: String,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
 +}
 +impl UsageCounterB {
 +  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
@@ -1024,12 +1482,24 @@ index e841598..d5cc235 100644
  pub struct ImageSize {
    /// The width of the generated image.
    #[validate(range(max = 14_142i64, exclusive_min = 0i64))]
+@@ -962,6 +1149,11 @@ pub struct ImageSize {
+   #[validate(range(max = 14_142i64, exclusive_min = 0i64))]
+   #[default(Some(512i64))]
+   pub height: Option<i64>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
+ }
+ #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, oas3_gen_support::Default)]
+ pub enum ImageSizePreset {
 diff --git a/crates/oas3-gen/fixtures/wire_semantics.json b/crates/oas3-gen/fixtures/wire_semantics.json
 new file mode 100644
-index 0000000..f174417
+index 0000000..0e0a1c8
 --- /dev/null
 +++ b/crates/oas3-gen/fixtures/wire_semantics.json
-@@ -0,0 +1,376 @@
+@@ -0,0 +1,392 @@
 +{
 +  "openapi": "3.1.0",
 +  "info": {
@@ -1232,6 +1702,22 @@ index 0000000..f174417
 +          }
 +        }
 +      },
++      "ClosedObject": {
++        "type": "object",
++        "additionalProperties": false,
++        "required": ["known"],
++        "properties": {
++          "known": {"type": "string"}
++        }
++      },
++      "TypedOpenObject": {
++        "type": "object",
++        "additionalProperties": {"type": "string"},
++        "required": ["known"],
++        "properties": {
++          "known": {"type": "string"}
++        }
++      },
 +      "DefaultsModel": {
 +        "type": "object",
 +        "required": [
@@ -1408,10 +1894,10 @@ index 0000000..f174417
 +}
 diff --git a/crates/oas3-gen/fixtures/wire_semantics/client.rs b/crates/oas3-gen/fixtures/wire_semantics/client.rs
 new file mode 100644
-index 0000000..d4f8752
+index 0000000..255c238
 --- /dev/null
 +++ b/crates/oas3-gen/fixtures/wire_semantics/client.rs
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,110 @@
 +//!
 +//! AUTO-GENERATED CODE - DO NOT EDIT!
 +//!
@@ -1421,11 +1907,10 @@ index 0000000..d4f8752
 +//! Generated by `oas3-gen v0.28.0`
 +//!
 +
++use super::types::*;
 +use anyhow::Context;
 +use reqwest::{Client, Url};
 +use validator::Validate;
-+
-+use super::types::*;
 +pub const BASE_URL: &str = "https://example.com/";
 +#[derive(Debug, Clone)]
 +pub struct WireClient {
@@ -1556,10 +2041,10 @@ index 0000000..718765d
 +pub use types::*;
 diff --git a/crates/oas3-gen/fixtures/wire_semantics/types.rs b/crates/oas3-gen/fixtures/wire_semantics/types.rs
 new file mode 100644
-index 0000000..74b6363
+index 0000000..3cde182
 --- /dev/null
 +++ b/crates/oas3-gen/fixtures/wire_semantics/types.rs
-@@ -0,0 +1,427 @@
+@@ -0,0 +1,486 @@
 +//!
 +//! AUTO-GENERATED CODE - DO NOT EDIT!
 +//!
@@ -1603,10 +2088,34 @@ index 0000000..74b6363
 +  pub optional_enum: Option<Option<WireDocumentOptionalTypedEnum>>,
 +  #[serde(default, with = "serde_with::rust::double_option", rename = "optionalTypedEnum")]
 +  pub optional_typed_enum: Option<Option<WireDocumentOptionalTypedEnum>>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
 +}
 +#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 +pub struct RequestOnly {
 +  pub name: String,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
++}
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
++#[serde(deny_unknown_fields)]
++pub struct ClosedObject {
++  pub known: String,
++}
++#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
++pub struct TypedOpenObject {
++  pub known: String,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, String>,
 +}
 +#[serde_with::skip_serializing_none]
 +#[derive(
@@ -1622,6 +2131,11 @@ index 0000000..74b6363
 +  #[serde(rename = "optionalDefault")]
 +  #[default(Some(3i64))]
 +  pub optional_default: Option<i64>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
 +}
 +#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 +#[serde(untagged)]
@@ -1640,6 +2154,11 @@ index 0000000..74b6363
 +  pub pair: (String, i64),
 +  #[serde(default, with = "serde_with::rust::double_option")]
 +  pub single: Option<Option<(bool,)>>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
 +}
 +#[serde_with::skip_serializing_none]
 +#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
@@ -1669,6 +2188,11 @@ index 0000000..74b6363
 +  #[serde(serialize_with = "LiteralDocument::serialize_const_nullable")]
 +  #[default(Some(Some("fixed".to_string())))]
 +  pub nullable: Option<Option<String>>,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
 +}
 +impl LiteralDocument {
 +  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
@@ -1900,6 +2424,11 @@ index 0000000..74b6363
 +#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 +pub struct WireDocumentOptionalArray {
 +  pub count: i64,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
 +}
 +#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 +pub enum WireDocumentOptionalTypedEnum {
@@ -1925,6 +2454,11 @@ index 0000000..74b6363
 +  #[builder(default = "accepted".to_string())]
 +  pub kind: String,
 +  pub id: i64,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
 +}
 +impl LiteralUnionObject {
 +  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
@@ -1958,6 +2492,11 @@ index 0000000..74b6363
 +  #[builder(default = "rejected".to_string())]
 +  pub kind: String,
 +  pub id: i64,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
 +}
 +impl LiteralUnionObject2 {
 +  #[allow(clippy::float_cmp, reason = "JSON Schema constants require exact equality")]
@@ -1986,6 +2525,11 @@ index 0000000..74b6363
 +#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default, bon::Builder)]
 +pub struct AcceptedResponse {
 +  pub accepted: bool,
++  /// Additional properties not defined in the schema.
++  #[serde(flatten)]
++  #[default(Default::default())]
++  #[builder(default = Default::default())]
++  pub additional_properties: indexmap::IndexMap<String, serde_json::Value>,
 +}
 diff --git a/crates/oas3-gen/src/generator/ast/fields.rs b/crates/oas3-gen/src/generator/ast/fields.rs
 index 895271a..cb2aae2 100644
@@ -2017,20 +2561,20 @@ index 895271a..cb2aae2 100644
 -    self.default_value.is_none() && !self.rust_type.nullable
 +    self.default_value.is_none() && (!self.rust_type.nullable || self.required_nullable)
    }
- 
+
    #[must_use]
 @@ -125,7 +130,7 @@ pub trait FieldCollection: Send + Sync {
- 
+
    /// Derives struct-level serde attributes from field characteristics.
    ///
 -  /// Appends `#[serde(default)]` to `base` when any field carries a default value.
 +  /// Schema defaults are annotations and do not permit omission of required properties.
    #[must_use]
    fn struct_serde_attrs(&self, base: Vec<SerdeAttribute>) -> Vec<SerdeAttribute>;
- 
+
 @@ -310,12 +315,7 @@ impl FieldCollection for [FieldDef] {
    }
- 
+
    fn struct_serde_attrs(&self, base: Vec<SerdeAttribute>) -> Vec<SerdeAttribute> {
 -    let default_serde = self
 -      .iter()
@@ -2040,7 +2584,7 @@ index 895271a..cb2aae2 100644
 -    base.into_iter().chain(default_serde).collect()
 +    base
    }
- 
+
    fn struct_outer_attrs(&self) -> Vec<OuterAttr> {
 diff --git a/crates/oas3-gen/src/generator/ast/lints.rs b/crates/oas3-gen/src/generator/ast/lints.rs
 index 4c904e7..b38a987 100644
@@ -2070,6 +2614,25 @@ index 4c904e7..b38a987 100644
          LintAllow::ClippyResultLargeErr,
          LintAllow::ClippyStructFieldNames,
          LintAllow::ClippyTooManyLines,
+diff --git a/crates/oas3-gen/src/generator/ast/mod.rs b/crates/oas3-gen/src/generator/ast/mod.rs
+index d792088..91c5e19 100644
+--- a/crates/oas3-gen/src/generator/ast/mod.rs
++++ b/crates/oas3-gen/src/generator/ast/mod.rs
+@@ -497,8 +497,13 @@ impl StructDef {
+     self.fields.iter().filter(|f| f.is_required())
+   }
+
++  /// Named schema properties available to convenience constructors.
++  /// Hidden discriminators and synthesized additional-property maps are excluded.
+   pub fn user_fields(&self) -> impl Iterator<Item = &FieldDef> {
+-    self.fields.iter().filter(|f| !f.doc_hidden)
++    self
++      .fields
++      .iter()
++      .filter(|f| !f.doc_hidden && !f.serde_attrs.contains(&SerdeAttribute::Flatten))
+   }
+ }
+
 diff --git a/crates/oas3-gen/src/generator/ast/outer_attrs.rs b/crates/oas3-gen/src/generator/ast/outer_attrs.rs
 index 1846edc..794244c 100644
 --- a/crates/oas3-gen/src/generator/ast/outer_attrs.rs
@@ -2088,7 +2651,7 @@ index 1846edc..794244c 100644
 @@ -56,9 +60,11 @@ pub enum SerdeAsFieldAttr {
    },
  }
- 
+
 -impl ToTokens for SerdeAsFieldAttr {
 -  fn to_tokens(&self, tokens: &mut TokenStream) {
 -    let type_str = match self {
@@ -2126,7 +2689,7 @@ index 258d498..a7b56aa 100644
 +++ b/crates/oas3-gen/src/generator/ast/parsed_path.rs
 @@ -198,9 +198,10 @@ impl ParsedPath {
        .collect::<HashMap<_, _>>();
- 
+
      let segments = path_part
 -      .trim_start_matches('/')
 +      .strip_prefix('/')
@@ -2136,7 +2699,7 @@ index 258d498..a7b56aa 100644
 +      .filter(|_| !matches!(path_part, "" | "/"))
        .map(|segment| PathSegment::parse(segment, &param_map))
        .collect::<Result<Vec<_>, _>>()?;
- 
+
 diff --git a/crates/oas3-gen/src/generator/ast/serde_attrs.rs b/crates/oas3-gen/src/generator/ast/serde_attrs.rs
 index 99079e9..8e8fd5c 100644
 --- a/crates/oas3-gen/src/generator/ast/serde_attrs.rs
@@ -2188,7 +2751,7 @@ index 46eaa44..a35566b 100644
 +    if self.optional_nullable {
 +      result = format!("Option<{result}>");
 +    }
- 
+
      result
    }
 @@ -160,6 +167,7 @@ impl TypeRef {
@@ -2206,7 +2769,7 @@ index 46eaa44..a35566b 100644
 +    if self.optional_nullable {
 +      type_tokens = quote! { Option<#type_tokens> };
 +    }
- 
+
      type_tokens.to_tokens(tokens);
    }
 diff --git a/crates/oas3-gen/src/generator/codegen/client.rs b/crates/oas3-gen/src/generator/codegen/client.rs
@@ -2215,7 +2778,7 @@ index 42b10bd..f411055 100644
 +++ b/crates/oas3-gen/src/generator/codegen/client.rs
 @@ -538,6 +538,10 @@ impl ClientMethodFragment {
    }
- 
+
    pub(crate) fn generate(&self) -> anyhow::Result<TokenStream> {
 +    self.generate_with_parsing(true)
 +  }
@@ -2226,7 +2789,7 @@ index 42b10bd..f411055 100644
      };
 @@ -553,8 +557,16 @@ impl ClientMethodFragment {
      let response_fragment = ResponseParsingFragment::new(&self.op);
- 
+
      let vis = self.visibility.to_tokens();
 -    let return_type = response_fragment.success_type();
 -    let parse_block = response_fragment.parse_body();
@@ -2240,7 +2803,7 @@ index 42b10bd..f411055 100644
 +    } else {
 +      quote! { Ok(response) }
 +    };
- 
+
      let request_chain = if body_fragment.needs_conditional() {
        quote! {
 @@ -728,6 +740,16 @@ impl ToTokens for ClientFragment {
@@ -2257,11 +2820,11 @@ index 42b10bd..f411055 100644
 +          .generate_with_parsing(false)
 +          .ok()
 +      });
- 
+
      quote! {
        use anyhow::Context;
 @@ -744,8 +766,23 @@ impl ToTokens for ClientFragment {
- 
+
        impl #client_ident {
          #constructors
 +        /// Uses the same typed requests while retaining the complete HTTP response.
@@ -2290,7 +2853,7 @@ index 0582f65..6ee42b2 100644
 +++ b/crates/oas3-gen/src/generator/codegen/coercion.rs
 @@ -5,6 +5,14 @@ use serde_json::Value;
  use crate::generator::ast::{RustPrimitive, TypeRef};
- 
+
  pub(crate) fn json_to_rust_literal(value: &serde_json::Value, rust_type: &TypeRef) -> TokenStream {
 +  if rust_type.optional_nullable {
 +    let inner_type = TypeRef {
@@ -2450,21 +3013,21 @@ index 31f869e..57817d9 100644
      let impl_block = StructImplBlockFragment::new(self.def, self.visibility);
      let header_map = HeaderMapFragment::new(self.def);
 +    let literal_fields = LiteralFieldsFragment(self.def);
- 
+
      tokens.extend(quote! {
        #definition
 @@ -62,6 +64,7 @@ impl ToTokens for StructFragment<'_> {
        #impl_block
- 
+
        #header_map
 +      #literal_fields
- 
+
      });
- 
+
 @@ -186,11 +189,14 @@ impl ToTokens for StructFieldFragment<'_> {
        )
      };
- 
+
 +    let literal = LiteralFieldFragment::new(self.field, self.struct_def);
 +    let literal_attrs = literal.attributes();
      let validation = self.validation_attrs();
@@ -2473,7 +3036,7 @@ index 31f869e..57817d9 100644
      let builder_attr = generate_builder_attrs(&self.field.builder_attrs);
      let doc_hidden = generate_doc_hidden_attr(self.field.doc_hidden);
 +    let serialize_always = self.field.required_nullable.then(|| quote! { #[serialize_always] });
- 
+
      tokens.extend(quote! {
        #doc_hidden
 @@ -198,6 +204,8 @@ impl ToTokens for StructFieldFragment<'_> {
@@ -2486,13 +3049,55 @@ index 31f869e..57817d9 100644
        #default_val
        #builder_attr
 diff --git a/crates/oas3-gen/src/generator/converter/fields.rs b/crates/oas3-gen/src/generator/converter/fields.rs
-index 446ba4c..8abefb6 100644
+index 446ba4c..5519438 100644
 --- a/crates/oas3-gen/src/generator/converter/fields.rs
 +++ b/crates/oas3-gen/src/generator/converter/fields.rs
+@@ -91,7 +91,8 @@ impl FieldConverter {
+   ///
+   /// Iterates over `schema.properties`, resolves each property's type,
+   /// deduplicates field names, and adds an `additionalProperties` catch-all
+-  /// field when the schema defines one. Returns the fields along with any
++  /// field unless the schema explicitly forbids additional properties.
++  /// An omitted keyword permits arbitrary JSON values. Returns the fields along with any
+   /// inline types extracted from nested object or enum properties.
+   pub(crate) fn build_struct_fields(
+     &self,
+@@ -129,19 +130,18 @@ impl FieldConverter {
+
+     fields = Self::deduplicate_names(fields);
+
+-    if let Some(ref additional) = schema.additional_properties {
+-      match additional {
+-        Schema::Boolean(b) if !b.0 => {}
+-        Schema::Object(_) | Schema::Boolean(_) => {
+-          let value_type = self.type_resolver.additional_properties_type(additional)?;
+-          let map_type_path = self.context.config().map_type_path();
+-          fields.push(
+-            FieldDef::builder()
+-              .additional_properties(map_type_path, &value_type)
+-              .build(),
+-          );
+-        }
+-      }
++    let additional_type = match schema.additional_properties.as_ref() {
++      Some(Schema::Boolean(b)) if !b.0 => None,
++      Some(additional) => Some(self.type_resolver.additional_properties_type(additional)?),
++      None => Some(TypeRef::new(RustPrimitive::Value)),
++    };
++    if let Some(value_type) = additional_type {
++      fields.push(
++        FieldDef::builder()
++          .additional_properties(self.context.config().map_type_path(), &value_type)
++          .default_value(serde_json::json!({}))
++          .build(),
++      );
+     }
+
+     if matches!(kind, StructKind::Schema) && self.context.config().enable_builders() {
 @@ -180,36 +180,55 @@ impl FieldConverter {
- 
+
      let is_nullable_union = prop_schema.has_union() && prop_schema.has_null_variant(self.context.graph().spec());
- 
+
 -    let should_be_optional = !is_required
 -      || prop_schema.default.is_some()
 -      || is_nullable_union
@@ -2500,7 +3105,7 @@ index 446ba4c..8abefb6 100644
 -      || is_odata_optional;
 +    let should_be_optional =
 +      !is_required || is_nullable_union || (is_discriminator && !discriminator_has_enum) || is_odata_optional;
- 
+
 -    let final_type = if should_be_optional && !resolved_type.nullable {
 +    let schema_nullable = resolved_type.nullable || is_nullable_union;
 +    let mut final_type = if should_be_optional && !resolved_type.nullable {
@@ -2509,10 +3114,10 @@ index 446ba4c..8abefb6 100644
        resolved_type
      };
 +    final_type.optional_nullable = schema_nullable && !is_required;
- 
+
      let validation_attrs = Self::extract_all_validation(prop_name, is_required, prop_schema, &final_type);
      let default_value = Self::extract_default_value(prop_schema);
- 
+
      let rust_field_name = FieldNameToken::from_raw(prop_name);
 -    let serde_attrs = if rust_field_name == prop_name {
 +    let mut serde_attrs = if rust_field_name == prop_name {
@@ -2520,7 +3125,7 @@ index 446ba4c..8abefb6 100644
      } else {
        BTreeSet::from([SerdeAttribute::Rename(prop_name.to_string())])
      };
- 
+
 -    let serde_as_attr = self.customization_for_type(&final_type, prop_schema);
 +    let mut serde_as_attr = self.customization_for_type(&final_type, prop_schema);
 +    if final_type.optional_nullable {
@@ -2541,7 +3146,7 @@ index 446ba4c..8abefb6 100644
 +    if prop_schema.const_value.is_some() && !is_discriminator {
 +      serde_attrs.retain(|attr| !matches!(attr, SerdeAttribute::With(_) | SerdeAttribute::DeserializeWith(_)));
 +    }
- 
+
      let field = FieldDef::builder()
        .schema(prop_schema)
        .maybe_default_value(default_value)
@@ -2564,7 +3169,7 @@ index 446ba4c..8abefb6 100644
    ) -> Vec<ValidationAttribute> {
 @@ -300,9 +319,7 @@ impl FieldConverter {
        });
- 
+
        if !is_non_string_format {
 -        if let Some(length_attr) =
 -          ValidationAttribute::length(schema.min_length, schema.max_length, is_required && !type_ref.nullable)
@@ -2572,10 +3177,10 @@ index 446ba4c..8abefb6 100644
 +        if let Some(length_attr) = ValidationAttribute::length(schema.min_length, schema.max_length, false) {
            attrs.push(length_attr);
          }
- 
+
 @@ -324,6 +341,7 @@ impl FieldConverter {
      }
- 
+
      if schema.is_array()
 +      && schema.prefix_items.is_empty()
        && let Some(length_attr) = ValidationAttribute::length(schema.min_items, schema.max_items, false)
@@ -2588,7 +3193,7 @@ index 6fa1d88..fb35d1a 100644
 @@ -156,12 +156,24 @@ pub enum CollectionTypePolicy {
    Hashed,
  }
- 
+
 +/// Configuration for code generation.
 +#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 +pub enum SerdePolicy {
@@ -2610,13 +3215,34 @@ index 6fa1d88..fb35d1a 100644
    #[builder(default)]
    pub enum_case: EnumCasePolicy,
    #[builder(default)]
+diff --git a/crates/oas3-gen/src/generator/converter/requests.rs b/crates/oas3-gen/src/generator/converter/requests.rs
+index 235ae4c..e986c86 100644
+--- a/crates/oas3-gen/src/generator/converter/requests.rs
++++ b/crates/oas3-gen/src/generator/converter/requests.rs
+@@ -11,7 +11,7 @@ use crate::{
+   generator::{
+     ast::{
+       ContentCategory, Documentation, FieldDef, FieldNameToken, MultipartFieldInfo, OperationBody, RustPrimitive,
+-      RustType, StructDef, StructKind, StructMethod, StructToken, TypeRef,
++      RustType, SerdeAttribute, StructDef, StructKind, StructMethod, StructToken, TypeRef,
+     },
+     converter::ConverterContext,
+     naming::{
+@@ -210,6 +210,7 @@ impl BodyInfo {
+     let fields = struct_def
+       .fields
+       .iter()
++      .filter(|field| !field.serde_attrs.contains(&SerdeAttribute::Flatten))
+       .map(|f| MultipartFieldInfo {
+         name: f.name.clone(),
+         nullable: f.rust_type.nullable,
 diff --git a/crates/oas3-gen/src/generator/converter/tests/enums.rs b/crates/oas3-gen/src/generator/converter/tests/enums.rs
 index ae5489a..8f855fa 100644
 --- a/crates/oas3-gen/src/generator/converter/tests/enums.rs
 +++ b/crates/oas3-gen/src/generator/converter/tests/enums.rs
 @@ -1712,11 +1712,7 @@ fn test_anyof_with_nullable_map_type_generates_enum() -> anyhow::Result<()> {
    );
- 
+
    let enum_def = enum_def.unwrap();
 -  assert_eq!(
 -    enum_def.variants.len(),
@@ -2624,7 +3250,7 @@ index ae5489a..8f855fa 100644
 -    "should have 1 variant (the map type, with null filtered out)"
 -  );
 +  assert_eq!(enum_def.variants.len(), 2, "should preserve both map and null variants");
- 
+
    let variant = &enum_def.variants[0];
    assert!(
 diff --git a/crates/oas3-gen/src/generator/converter/tests/metadata_tests.rs b/crates/oas3-gen/src/generator/converter/tests/metadata_tests.rs
@@ -2633,7 +3259,7 @@ index 2d0f447..ebcb344 100644
 +++ b/crates/oas3-gen/src/generator/converter/tests/metadata_tests.rs
 @@ -208,16 +208,10 @@ fn validation_length_skipped_for_non_string_types() {
  }
- 
+
  #[test]
 -fn validation_required_string_implies_min_length() {
 +fn validation_required_string_does_not_imply_min_length() {
@@ -2648,31 +3274,140 @@ index 2d0f447..ebcb344 100644
 -  );
 +  assert!(attrs.is_empty());
  }
- 
+
  #[test]
+diff --git a/crates/oas3-gen/src/generator/converter/tests/operations.rs b/crates/oas3-gen/src/generator/converter/tests/operations.rs
+index 2b77d6c..aff7c09 100644
+--- a/crates/oas3-gen/src/generator/converter/tests/operations.rs
++++ b/crates/oas3-gen/src/generator/converter/tests/operations.rs
+@@ -63,6 +63,38 @@ fn test_basic_get_operation() -> anyhow::Result<()> {
+   Ok(())
+ }
+
++#[test]
++fn multipart_metadata_contains_only_named_schema_properties() -> anyhow::Result<()> {
++  let (converter, _usage) = setup_converter(BTreeMap::new());
++  let operation = serde_json::from_value::<Operation>(json!({
++    "requestBody": {
++      "required": true,
++      "content": {
++        "multipart/form-data": {
++          "schema": {
++            "type": "object",
++            "required": ["image"],
++            "properties": {
++              "image": {"type": "string", "format": "binary"},
++              "label": {"type": "string"}
++            }
++          }
++        }
++      }
++    }
++  }))?;
++  let result = converter.convert(&make_entry("upload", Method::POST, "/upload", operation))?;
++  let body = result.operation_info.body.as_ref().expect("multipart body");
++  let fields = body.multipart_fields.as_ref().expect("multipart fields");
++  assert_eq!(
++    fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(),
++    ["image", "label"]
++  );
++  assert!(fields[0].is_bytes);
++  assert!(fields[1].nullable);
++  Ok(())
++}
++
+ #[test]
+ fn test_multi_content_type_response_splits_by_category() -> anyhow::Result<()> {
+   let (converter, _usage) = setup_converter(BTreeMap::new());
 diff --git a/crates/oas3-gen/src/generator/converter/tests/structs.rs b/crates/oas3-gen/src/generator/converter/tests/structs.rs
-index 898c29b..b7588aa 100644
+index 898c29b..ac4996c 100644
 --- a/crates/oas3-gen/src/generator/converter/tests/structs.rs
 +++ b/crates/oas3-gen/src/generator/converter/tests/structs.rs
-@@ -253,7 +253,7 @@ fn discriminator_handler_detect_parent() {
+@@ -32,6 +32,65 @@ fn create_graph_from_json(
+   Arc::new(graph)
  }
- 
+
++#[test]
++fn additional_properties_defaults_preserve_open_object_fields() -> anyhow::Result<()> {
++  for (additional, expected_type) in [
++    (None, Some("indexmap::IndexMap<String, serde_json::Value>")),
++    (Some(json!(true)), Some("indexmap::IndexMap<String, serde_json::Value>")),
++    (Some(json!({})), Some("indexmap::IndexMap<String, serde_json::Value>")),
++    (
++      Some(json!({"type": "string"})),
++      Some("indexmap::IndexMap<String, String>"),
++    ),
++    (Some(json!(false)), None),
++  ] {
++    let mut document = json!({
++      "type": "object",
++      "required": ["known"],
++      "properties": {"known": {"type": "string"}}
++    });
++    if let Some(additional) = additional {
++      document["additionalProperties"] = additional;
++    }
++    let schema = parse_schema(document.clone());
++    let graph = create_test_graph(BTreeMap::from([("Document".to_string(), schema)]));
++    let context = create_test_context(graph.clone(), default_config());
++    let converter = SchemaConverter::new(&context);
++    let types = converter.convert_schema("Document", graph.get("Document").unwrap())?;
++    let definition = types
++      .iter()
++      .find_map(|ty| match ty {
++        RustType::Struct(definition) => Some(definition),
++        _ => None,
++      })
++      .expect("object struct");
++    let additional = definition
++      .fields
++      .iter()
++      .find(|field| field.name == "additional_properties");
++
++    assert_eq!(
++      additional.map(|field| field.rust_type.to_rust_type()),
++      expected_type.map(str::to_owned),
++      "{document}"
++    );
++    if let Some(additional) = additional {
++      assert!(additional.serde_attrs.contains(&SerdeAttribute::Flatten), "{document}");
++      assert!(!additional.is_required(), "{document}");
++      assert!(
++        !definition.serde_attrs.contains(&SerdeAttribute::DenyUnknownFields),
++        "{document}"
++      );
++    } else {
++      assert!(
++        definition.serde_attrs.contains(&SerdeAttribute::DenyUnknownFields),
++        "{document}"
++      );
++    }
++  }
++  Ok(())
++}
++
+ #[test]
+ fn discriminated_base_struct_renamed() -> anyhow::Result<()> {
+   let entity_schema = parse_schema(json!({
+@@ -253,7 +312,7 @@ fn discriminator_handler_detect_parent() {
+ }
+
  #[test]
 -fn discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<()> {
 +fn discriminated_child_defaults_do_not_default_the_entire_object() -> anyhow::Result<()> {
    let loaf_schema = parse_schema(json!({
      "type": "object",
      "properties": {
-@@ -296,8 +296,8 @@ fn discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<()> {
+@@ -296,8 +355,8 @@ fn discriminated_child_with_defaults_has_serde_default() -> anyhow::Result<()> {
      .expect("Nugget struct should be present");
- 
+
    assert!(
 -    struct_def.serde_attrs.contains(&SerdeAttribute::Default),
 -    "Struct with default field values should have #[serde(default)]"
 +    !struct_def.serde_attrs.contains(&SerdeAttribute::Default),
 +    "A field default must not make the entire object optional"
    );
- 
+
    Ok(())
 diff --git a/crates/oas3-gen/src/generator/converter/type_resolver.rs b/crates/oas3-gen/src/generator/converter/type_resolver.rs
 index d30ccef..1abf51a 100644
@@ -2684,13 +3419,13 @@ index d30ccef..1abf51a 100644
  use itertools::Itertools;
 -use oas3::spec::{ObjectSchema, Schema, SchemaType, Spec};
 +use oas3::spec::{ObjectSchema, Schema, SchemaType, SchemaTypeSet, Spec};
- 
+
  use super::{
    ConversionOutput,
 @@ -119,6 +119,28 @@ impl TypeResolver {
        return self.resolve_ref(ref_path, schema);
      }
- 
+
 +    if let Some(kind) = schema.non_null_type() {
 +      let mut inner = schema.clone();
 +      inner.schema_type = Some(SchemaTypeSet::Single(kind));
@@ -2729,7 +3464,7 @@ index d30ccef..1abf51a 100644
 @@ -490,6 +515,32 @@ impl TypeResolver {
      }
    }
- 
+
 +  /// Resolves fixed-length JSON Schema tuples without erasing positional item types.
 +  fn closed_tuple_type(&self, schema: &ObjectSchema) -> Result<TypeRef> {
 +    let length = u64::try_from(schema.prefix_items.len())?;
@@ -2778,7 +3513,7 @@ index 1cfaafa..ff5fce0 100644
 @@ -187,6 +190,16 @@ impl UnionConverter {
      )?;
      let inline_types = inline_types.into_iter().flatten().collect::<Vec<_>>();
- 
+
 +    if has_null_variant {
 +      let names = variants.iter().map(|variant| variant.name.to_string()).collect();
 +      variants.push(
@@ -2790,7 +3525,7 @@ index 1cfaafa..ff5fce0 100644
 +    }
 +
      let default_mode = self.resolve_default_mode(schema, &mut variants, &inline_types, has_null_variant);
- 
+
      variants = strip_common_affixes(variants);
 @@ -297,9 +310,8 @@ impl UnionConverter {
    ///
@@ -2809,7 +3544,7 @@ index 4a183e3..c5602e2 100644
 --- a/crates/oas3-gen/src/generator/orchestrator.rs
 +++ b/crates/oas3-gen/src/generator/orchestrator.rs
 @@ -68,10 +68,16 @@ impl Orchestrator {
- 
+
    pub fn generate(&self, mode: &dyn GenerationMode, source_path: &str) -> anyhow::Result<GeneratedFinalOutput> {
      let artifacts = self.collect_generation_artifacts();
 +    let mut usage = artifacts.serde_recorder.into_usage_map();
@@ -2836,6 +3571,32 @@ index 01bd907..5e98cbe 100644
    pub mod union_serde;
 +  pub mod wire_semantics;
  }
+diff --git a/crates/oas3-gen/src/tests/event_stream.rs b/crates/oas3-gen/src/tests/event_stream.rs
+index f81d2f2..ce0c4bd 100644
+--- a/crates/oas3-gen/src/tests/event_stream.rs
++++ b/crates/oas3-gen/src/tests/event_stream.rs
+@@ -10,6 +10,7 @@ mod event_stream;
+ #[test]
+ fn test_stream_event_struct_compiles() {
+   let event = StreamEvent {
++    additional_properties: indexmap::IndexMap::default(),
+     id: "evt-123".to_string(),
+     data: r#"{"message":"hello"}"#.to_string(),
+     timestamp: None,
+@@ -29,11 +30,13 @@ fn test_stream_event_deserializes() {
+ #[test]
+ fn test_typed_event_with_enum() {
+   let payload = EventPayload {
++    additional_properties: indexmap::IndexMap::default(),
+     id: "item-1".to_string(),
+     name: Some("Test Item".to_string()),
+     value: Some(42),
+   };
+   let event = TypedEvent {
++    additional_properties: indexmap::IndexMap::default(),
+     r#type: TypedEventType::Created,
+     payload,
+   };
 diff --git a/crates/oas3-gen/src/tests/mod.rs b/crates/oas3-gen/src/tests/mod.rs
 index 7fdb29c..2dfc51d 100644
 --- a/crates/oas3-gen/src/tests/mod.rs
@@ -2845,11 +3606,75 @@ index 7fdb29c..2dfc51d 100644
  #[cfg(test)]
  mod union_serde;
 +mod wire_semantics;
+diff --git a/crates/oas3-gen/src/tests/petstore.rs b/crates/oas3-gen/src/tests/petstore.rs
+index 828141e..b8cb5f9 100644
+--- a/crates/oas3-gen/src/tests/petstore.rs
++++ b/crates/oas3-gen/src/tests/petstore.rs
+@@ -145,6 +145,7 @@ fn test_pet_struct_compiles() {
+ #[test]
+ fn test_error_struct_compiles() {
+   let error = Error {
++    additional_properties: indexmap::IndexMap::default(),
+     code: 404,
+     message: "Not found".to_string(),
+   };
+diff --git a/crates/oas3-gen/src/tests/petstore_server.rs b/crates/oas3-gen/src/tests/petstore_server.rs
+index 398af79..1f1659d 100644
+--- a/crates/oas3-gen/src/tests/petstore_server.rs
++++ b/crates/oas3-gen/src/tests/petstore_server.rs
+@@ -146,6 +146,7 @@ fn test_pet_struct_compiles() {
+ #[test]
+ fn test_error_struct_compiles() {
+   let error = Error {
++    additional_properties: indexmap::IndexMap::default(),
+     code: 404,
+     message: "Not found".to_string(),
+   };
+@@ -197,6 +198,7 @@ fn test_list_pets_response_into_response() {
+   );
+
+   let error_response = ListPetsResponse::Unknown(Error {
++    additional_properties: indexmap::IndexMap::default(),
+     code: 500,
+     message: "Internal error".to_string(),
+   });
 diff --git a/crates/oas3-gen/src/tests/union_serde.rs b/crates/oas3-gen/src/tests/union_serde.rs
-index 044f841..a3488c5 100644
+index 044f841..f9d9619 100644
 --- a/crates/oas3-gen/src/tests/union_serde.rs
 +++ b/crates/oas3-gen/src/tests/union_serde.rs
-@@ -200,7 +200,7 @@ mod tests {
+@@ -7,6 +7,7 @@ mod tests {
+
+   fn text_block(text: &str) -> TextBlock {
+     TextBlock {
++      additional_properties: IndexMap::default(),
+       text: text.to_string(),
+       annotations: None,
+       recipes: None,
+@@ -16,6 +17,7 @@ mod tests {
+
+   fn code_block(code: &str) -> CodeBlock {
+     CodeBlock {
++      additional_properties: IndexMap::default(),
+       code: code.to_string(),
+       language: None,
+       r#type: Some("code"),
+@@ -24,6 +26,7 @@ mod tests {
+
+   fn url_source(url: &str) -> UrlImageSource {
+     UrlImageSource {
++      additional_properties: IndexMap::default(),
+       url: url.to_string(),
+       r#type: Some("url"),
+     }
+@@ -31,6 +34,7 @@ mod tests {
+
+   fn image_block(source: ImageSource) -> ImageBlock {
+     ImageBlock {
++      additional_properties: IndexMap::default(),
+       source: Box::new(source),
+       alt_text: None,
+       r#type: Some("image"),
+@@ -200,7 +204,7 @@ mod tests {
      assert!(
        matches!(
          tr.iterations,
@@ -2858,16 +3683,16 @@ index 044f841..a3488c5 100644
        ),
        "iterations should parse as UsageCounters::A"
      );
-@@ -215,7 +215,7 @@ mod tests {
+@@ -215,7 +219,7 @@ mod tests {
      let ContentBlock::ToolResult(tr) = block else {
        panic!("Expected ToolResultBlock when iterations is null");
      };
 -    assert!(tr.iterations.is_none(), "null iterations should deserialize to None");
 +    assert!(matches!(tr.iterations, Some(None)), "explicit null must remain present");
    }
- 
+
    #[test]
-@@ -228,14 +228,14 @@ mod tests {
+@@ -228,14 +232,14 @@ mod tests {
        "notes": {"difficulty": "easy"}
      });
      let recipe: RecipeList = serde_json::from_value(recipe_json).unwrap();
@@ -2884,7 +3709,7 @@ index 044f841..a3488c5 100644
        &vec!["flour".to_string()],
        "required list mismatch"
      );
-@@ -257,12 +257,12 @@ mod tests {
+@@ -257,12 +261,12 @@ mod tests {
      });
      let nullable_recipe: RecipeList = serde_json::from_value(nullable_json).unwrap();
      assert!(
@@ -2900,13 +3725,208 @@ index 044f841..a3488c5 100644
 +      "explicit null required must remain present"
      );
    }
- 
+
+@@ -446,6 +450,7 @@ mod tests {
+   #[test]
+   fn test_serialize_content_request() {
+     let request = ContentRequest {
++      additional_properties: IndexMap::default(),
+       blocks: vec![
+         ContentBlock::Text(text_block("Hello")),
+         ContentBlock::Code(code_block("x = 1")),
+@@ -464,9 +469,11 @@ mod tests {
+   #[test]
+   fn test_image_size_anyof_union() {
+     let with_struct = ContentRequest {
++      additional_properties: IndexMap::default(),
+       blocks: vec![],
+       metadata: None,
+       image_size: Some(ContentRequestImageSize::ImageSize(ImageSize {
++        additional_properties: IndexMap::default(),
+         width: Some(1024),
+         height: Some(2048),
+       })),
+@@ -476,6 +483,7 @@ mod tests {
+     assert_eq!(json["image_size"]["height"], 2048, "struct variant height mismatch");
+
+     let with_preset = ContentRequest {
++      additional_properties: IndexMap::default(),
+       blocks: vec![],
+       metadata: None,
+       image_size: Some(ContentRequestImageSize::Preset(ImageSizePreset::Auto2k)),
+@@ -503,6 +511,7 @@ mod tests {
+   #[test]
+   fn test_serialize_tool_results() {
+     let string_block = ToolResultBlock {
++      additional_properties: IndexMap::default(),
+       tool_use_id: "tool_123".to_string(),
+       content: ToolResultContent::String("Result".to_string()),
+       is_error: None,
+@@ -515,6 +524,7 @@ mod tests {
+     assert_eq!(json["content"], "Result", "content should be string");
+
+     let array_block = ToolResultBlock {
++      additional_properties: IndexMap::default(),
+       tool_use_id: "tool_456".to_string(),
+       content: ToolResultContent::Array(vec![ToolResultContentBlock::Text(text_block("Text result"))]),
+       is_error: Some(false),
+@@ -531,6 +541,7 @@ mod tests {
+   #[test]
+   fn test_roundtrips() {
+     let text = TextBlock {
++      additional_properties: IndexMap::default(),
+       text: "Round trip test".to_string(),
+       annotations: None,
+       recipes: None,
+@@ -549,6 +560,7 @@ mod tests {
+     assert_eq!(a.text, b.text, "content block roundtrip failed");
+
+     let base64_source = ImageSource::Base64(Base64ImageSource {
++      additional_properties: IndexMap::default(),
+       media_type: MediaType::ImagePng,
+       data: vec![1, 2, 3, 4],
+       r#type: Some("base64"),
+@@ -561,10 +573,12 @@ mod tests {
+     assert_eq!(a.media_type, b.media_type, "image source roundtrip failed");
+
+     let nested = ContentBlock::ToolResult(ToolResultBlock {
++      additional_properties: IndexMap::default(),
+       tool_use_id: "nested_test".to_string(),
+       content: ToolResultContent::Array(vec![
+         ToolResultContentBlock::Text(text_block("Nested text")),
+         ToolResultContentBlock::Image(ImageBlock {
++          additional_properties: IndexMap::default(),
+           source: Box::new(ImageSource::Url(url_source("https://example.com/nested.png"))),
+           alt_text: Some("Nested image".to_string()),
+           r#type: Some("image"),
+@@ -644,10 +658,14 @@ mod tests {
+     let image = ContentBlock::Image(image_block(source));
+     assert!(matches!(image, ContentBlock::Image(_)), "image construction failed");
+
+-    let ping = Event::Ping(PingEvent { r#type: Some("ping") });
++    let ping = Event::Ping(PingEvent {
++      additional_properties: IndexMap::default(),
++      r#type: Some("ping"),
++    });
+     assert!(matches!(ping, Event::Ping(_)), "ping event construction failed");
+
+     let stop = Event::MessageStop(MessageStopEvent {
++      additional_properties: IndexMap::default(),
+       r#type: Some("message_stop"),
+     });
+     assert!(
+@@ -656,6 +674,7 @@ mod tests {
+     );
+
+     let block_stop = Event::ContentBlockStop(ContentBlockStopEvent {
++      additional_properties: IndexMap::default(),
+       index: 5,
+       r#type: Some("content_block_stop"),
+     });
+@@ -665,6 +684,7 @@ mod tests {
+     assert_eq!(e.index, 5, "content block stop index mismatch");
+
+     let text_delta = Delta::Text(TextDelta {
++      additional_properties: IndexMap::default(),
+       text: "chunk".to_string(),
+       r#type: Some("text_delta"),
+     });
+@@ -674,6 +694,7 @@ mod tests {
+     );
+
+     let json_delta = Delta::InputJson(InputJsonDelta {
++      additional_properties: IndexMap::default(),
+       partial_json: "{\"partial\":".to_string(),
+       r#type: Some("input_json_delta"),
+     });
+@@ -722,10 +743,13 @@ mod tests {
+   #[test]
+   fn test_complex_client_request_simulation() {
+     let request = ContentRequest {
++      additional_properties: IndexMap::default(),
+       blocks: vec![
+         ContentBlock::Text(text_block("Please analyze this image and code:")),
+         ContentBlock::Image(ImageBlock {
++          additional_properties: IndexMap::default(),
+           source: Box::new(ImageSource::Base64(Base64ImageSource {
++            additional_properties: IndexMap::default(),
+             media_type: MediaType::ImagePng,
+             data: vec![0x89, 0x50, 0x4E, 0x47],
+             r#type: Some("base64"),
+@@ -735,6 +759,7 @@ mod tests {
+         }),
+         ContentBlock::Code(code_block("def hello():\n    print('world')")),
+         ContentBlock::ToolResult(ToolResultBlock {
++          additional_properties: IndexMap::default(),
+           tool_use_id: "prev_tool".to_string(),
+           content: ToolResultContent::Array(vec![ToolResultContentBlock::Text(text_block("Previous tool output"))]),
+           is_error: None,
+@@ -826,6 +851,7 @@ mod tests {
+     let session_data: IndexMap<String, serde_json::Value> =
+       [("session_id".to_string(), json!("abc123"))].into_iter().collect();
+     let request_with_metadata = ContentRequest {
++      additional_properties: IndexMap::default(),
+       blocks: vec![ContentBlock::Text(text_block("Hello"))],
+       metadata: Some(Metadata::Object(session_data)),
+       image_size: None,
+@@ -952,6 +978,7 @@ mod tests {
+
+     let send_content = SendContentRequest {
+       body: ContentRequest {
++        additional_properties: IndexMap::default(),
+         blocks: vec![ContentBlock::Text(text_block("Test"))],
+         metadata: None,
+         image_size: None,
+@@ -960,6 +987,7 @@ mod tests {
+     assert_eq!(send_content.body.blocks.len(), 1, "body blocks count mismatch");
+
+     let _body: ContentRequest = ContentRequest {
++      additional_properties: IndexMap::default(),
+       blocks: vec![],
+       metadata: None,
+       image_size: None,
+@@ -1003,7 +1031,11 @@ mod tests {
+   #[test]
+   fn test_response_types() {
+     let event_list = EventList {
+-      events: vec![Event::Ping(PingEvent { r#type: Some("ping") })],
++      additional_properties: IndexMap::default(),
++      events: vec![Event::Ping(PingEvent {
++        additional_properties: IndexMap::default(),
++        r#type: Some("ping"),
++      })],
+     };
+     let ok_response = GetEventsResponse::Ok(event_list.clone());
+     let GetEventsResponse::Ok(list) = ok_response else {
+@@ -1018,9 +1050,11 @@ mod tests {
+     );
+
+     let content_resp = ContentResponse {
++      additional_properties: IndexMap::default(),
+       id: "resp_123".to_string(),
+       content: Box::new(ContentBlock::Text(text_block("Response"))),
+       usage: Some(Usage {
++        additional_properties: IndexMap::default(),
+         input_tokens: 10,
+         output_tokens: 20,
+       }),
+@@ -1032,8 +1066,10 @@ mod tests {
+     assert_eq!(resp.id, "resp_123", "response id mismatch");
+
+     let error_resp = ErrorResponse {
++      additional_properties: IndexMap::default(),
+       r#type: "error".to_string(),
+       error: ErrorDetails {
++        additional_properties: IndexMap::default(),
+         r#type: ErrorType::InvalidRequestError,
+         message: "Bad request".to_string(),
+       },
 diff --git a/crates/oas3-gen/src/tests/wire_semantics.rs b/crates/oas3-gen/src/tests/wire_semantics.rs
 new file mode 100644
-index 0000000..51e807a
+index 0000000..f22a84b
 --- /dev/null
 +++ b/crates/oas3-gen/src/tests/wire_semantics.rs
-@@ -0,0 +1,261 @@
+@@ -0,0 +1,291 @@
 +use std::{
 +  io::{Read, Write},
 +  net::TcpListener,
@@ -2950,7 +3970,8 @@ index 0000000..51e807a
 +fn nullable_objects_and_arrays_keep_their_property_types() -> anyhow::Result<()> {
 +  let valid = json!({
 +    "requiredNullable": null, "requiredBytes": null,
-+    "optionalObject": {"name": "nested"}, "optionalArray": [{"count": 2}]
++    "optionalObject": {"name": "nested", "runtimeExtra": null},
++    "optionalArray": [{"count": 2, "runtimeExtra": [null, {"value": true}]}]
 +  });
 +  let value: WireDocument = serde_json::from_value(valid.clone())?;
 +  assert_eq!(value.optional_object.as_ref().unwrap().as_ref().unwrap().name, "nested");
@@ -2966,9 +3987,38 @@ index 0000000..51e807a
 +  let request: RequestOnly = serde_json::from_value(json!({"name": "example"}))?;
 +  assert_eq!(request.name, "example");
 +  assert_eq!(
-+    serde_json::to_value(AcceptedResponse { accepted: true })?,
++    serde_json::to_value(AcceptedResponse {
++      accepted: true,
++      ..Default::default()
++    })?,
 +    json!({"accepted": true})
 +  );
++  Ok(())
++}
++
++#[test]
++fn default_open_objects_preserve_runtime_extensions() -> anyhow::Result<()> {
++  let value = json!({"name": "example", "runtimeExtra": {"values": [null, 3]}});
++  let request: RequestOnly = serde_json::from_value(value.clone())?;
++  assert_eq!(serde_json::to_value(request)?, value);
++  let value = json!({"accepted": true, "runtimeExtra": null});
++  let response: AcceptedResponse = serde_json::from_value(value.clone())?;
++  assert_eq!(serde_json::to_value(response)?, value);
++  Ok(())
++}
++
++#[test]
++fn closed_and_typed_objects_keep_additional_property_constraints() -> anyhow::Result<()> {
++  let value = json!({"known": "present"});
++  let closed: ClosedObject = serde_json::from_value(value.clone())?;
++  assert_eq!(serde_json::to_value(closed)?, value);
++  assert!(serde_json::from_value::<ClosedObject>(json!({"known": "present", "extra": "value"})).is_err());
++  let value = json!({"known": "present", "extra": "value"});
++  let typed: TypedOpenObject = serde_json::from_value(value.clone())?;
++  assert_eq!(serde_json::to_value(typed)?, value);
++  for extra in [json!(null), json!(5), json!({})] {
++    assert!(serde_json::from_value::<TypedOpenObject>(json!({"known": "present", "extra": extra})).is_err());
++  }
 +  Ok(())
 +}
 +
@@ -3179,7 +4229,7 @@ index c8a06fb..932a849 100644
 +  /// Generate both serde directions for schema models, including request and response models
 +  #[arg(long, default_value_t = false, help_heading = "Code Generation")]
 +  pub bidirectional_serde: bool,
- 
+
    /// Custom serde_as type overrides (format: type_name=custom::Path)
    #[arg(
 diff --git a/crates/oas3-gen/src/ui/commands/generate.rs b/crates/oas3-gen/src/ui/commands/generate.rs
@@ -3195,7 +4245,7 @@ index 3eb04f4..65ebd0d 100644
    pub no_ordered_collections: bool,
    pub doc_format: bool,
 @@ -65,6 +66,11 @@ impl GenerateConfig {
- 
+
    fn create_orchestrator(&self, spec: oas3::Spec) -> Orchestrator {
      let config = CodegenConfig::builder()
 +      .serde_policy(if self.bidirectional_serde {
@@ -3227,7 +4277,7 @@ index 0b2dfd8..a75e7b5 100644
 --- a/crates/oas3-gen/src/utils/schema_ext.rs
 +++ b/crates/oas3-gen/src/utils/schema_ext.rs
 @@ -326,8 +326,8 @@ impl SchemaExt for ObjectSchema {
- 
+
    fn is_numeric(&self) -> bool {
      matches!(
 -      &self.schema_type,
@@ -3236,4 +4286,4 @@ index 0b2dfd8..a75e7b5 100644
 +      Some(SchemaType::Number | SchemaType::Integer)
      )
    }
- 
+

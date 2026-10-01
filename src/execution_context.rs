@@ -196,6 +196,7 @@ pub async fn resolve(
         .resolve_execution_context(
             project_id,
             nrz_api::ResolveRequestBody {
+                additional_properties: Default::default(),
                 environment: selector.to_owned(),
                 source_ref: Some(source_ref.map(str::to_owned)),
                 selection_source: wire::selection_source(selection_source)?,
@@ -217,6 +218,7 @@ pub async fn materialize_desired(
         .materialize_execution_context(
             &context.project_id,
             nrz_api::MaterializeRequestBody {
+                additional_properties: Default::default(),
                 environment_id: context
                     .environment_id
                     .parse()
@@ -248,6 +250,7 @@ pub async fn materialize_deployment(
         .materialize_deployment_context(
             deployment_id,
             nrz_api::PurposeRequestBody {
+                additional_properties: Default::default(),
                 purpose: wire::purpose(purpose)?,
             },
         )

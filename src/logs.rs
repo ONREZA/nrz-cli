@@ -24,7 +24,7 @@ pub async fn run(
         .runtime_logs(
             &project_id,
             nrz_api::GetV1projectsByIdRuntimeLogsRequestQuery {
-                limit: Some(i64::from(args.limit)),
+                limit: Some(serde_json::json!(args.limit)),
                 search: args.search,
                 deployment_id: args
                     .deployment_id

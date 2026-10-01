@@ -10,6 +10,8 @@
 
 use serde::{Deserialize, Serialize};
 use validator::Validate;
+static REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new("^(0|[1-9][0-9]*)$").expect("invalid regex"));
 static REGEX_ADMIT_REQUEST_BODY_COMMIT_SHA: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[0-9a-f]+$").expect("invalid regex"));
 static REGEX_ATTACHMENT_REQUEST_BODY_ENV_VAR_NAME: std::sync::LazyLock<regex::Regex> =
@@ -34,14 +36,20 @@ static REGEX_FUNCTION_DECLARATION_NAME: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| {
         regex::Regex::new("^[a-z0-9]+(?:[a-z0-9-]*[a-z0-9])?$").expect("invalid regex")
     });
-static REGEX_FUNCTION_PUBLISH_SPEC_SOURCE_PATH: std::sync::LazyLock<regex::Regex> =
-    std::sync::LazyLock::new(|| {
-        regex::Regex::new("\\.nrz-fn\\.(?:ts|tsx|js|jsx|mjs)$").expect("invalid regex")
-    });
+static REGEX_GET_V1ENVIRONMENTS_BY_ID_RELEASES_REQUEST_QUERY_LIMIT: std::sync::LazyLock<
+    regex::Regex,
+> = std::sync::LazyLock::new(|| {
+    regex::Regex::new("^(?:[1-9]|[1-9][0-9]|100)$").expect("invalid regex")
+});
 static REGEX_GET_V1PROJECTS_REQUEST_QUERY_NAME: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[a-z0-9-]+$").expect("invalid regex"));
 static REGEX_MATERIALIZE200RESPONSE_SNAPSHOT_FINGERPRINT: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^v1:[0-9a-f]{64}$").expect("invalid regex"));
+static REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_ACTIVATE_RELEASE_REQUEST_HEADER_IDEMPOTENCY_KEY:
+    std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+        .expect("invalid regex")
+});
 static REGEX_PREPARE_UPLOAD_REQUEST_BODY_LOGICAL_MANIFEST_SHA256: std::sync::LazyLock<
     regex::Regex,
 > = std::sync::LazyLock::new(|| regex::Regex::new("^[0-9a-f]{64}$").expect("invalid regex"));
@@ -53,6 +61,9 @@ static REGEX_REMOTE_IMAGE_SOURCE_AUTHORING_ID: std::sync::LazyLock<regex::Regex>
     std::sync::LazyLock::new(|| {
         regex::Regex::new("^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$").expect("invalid regex")
     });
+static REGEX_SOURCE_PATH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new("\\.nrz-fn\\.(?:ts|tsx|js|jsx|mjs)$").expect("invalid regex")
+});
 static REGEX_STATUS200RESPONSE_RUNTIME_ARTIFACT_GRAPH_APPLICATION_BLOB_DESCRIPTOR_DIGEST:
     std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^sha256:[0-9a-f]{64}$").expect("invalid regex"));
@@ -64,14 +75,17 @@ static REGEX_TOKEN_REQUEST_BODY_DEVICE_CODE: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[A-Za-z0-9]{40}$").expect("invalid regex"));
 static REGEX_UPLOAD_FAILED_REQUEST_BODY_ERROR_CODE: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[A-Z0-9_]{1,64}$").expect("invalid regex"));
-static REGEX_USER200RESPONSE_EMAIL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(
-    || {
-        regex::Regex::new(
-            "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
-        )
-        .expect("invalid regex")
-    },
-);
+pub const IDEMPOTENCY_KEY: http::HeaderName = http::HeaderName::from_static("idempotency-key");
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum T0 {
+    String(String),
+    Number(f64),
+    Boolean(bool),
+    Array(Vec<T0>),
+    Object(std::collections::HashMap<String, Box<T0>>),
+    Null,
+}
 /// Standard ONREZA API error response for HTTP 400.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApiError400 {
@@ -217,7 +231,6 @@ pub struct ApiErrorFunctionPublishFailed {
 /// ONREZA Functions publication failure details.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ApiErrorFunctionPublishFailureDetails {
     #[serde(
         default,
@@ -244,6 +257,10 @@ pub struct ApiErrorFunctionPublishFailureDetails {
     #[serde(default, with = "serde_with::rust::double_option")]
     pub field: Option<Option<String>>,
     pub message: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Standard ONREZA API error response for EDGE_RULES_DIVERGED.
 #[serde_with::skip_serializing_none]
@@ -388,12 +405,15 @@ pub struct ApiErrorSudoRequired {
 }
 /// Sudo-mode step-up requirement details.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ApiErrorSudoRequiredDetails {
     #[serde(deserialize_with = "ApiErrorSudoRequiredDetails::deserialize_const_reason")]
     #[serde(serialize_with = "ApiErrorSudoRequiredDetails::serialize_const_reason")]
     #[default("step_up_stale".to_string())]
     pub reason: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl ApiErrorSudoRequiredDetails {
     #[allow(
@@ -453,7 +473,6 @@ pub struct ApiErrorProviderReconnectRequired {
 /// External Git provider credential recovery details.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ApiErrorProviderReconnectDetails {
     pub provider: ApiErrorProviderReconnectDetailsProvider,
     pub scope: ApiErrorProviderReconnectDetailsScope,
@@ -461,6 +480,10 @@ pub struct ApiErrorProviderReconnectDetails {
     pub workspace_slug: Option<String>,
     #[serde(rename = "connectionId")]
     pub connection_id: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Standard ONREZA API error response for HTTP 402.
 #[derive(Debug, Clone, PartialEq)]
@@ -544,7 +567,6 @@ pub struct ApiErrorSubscriptionRequired {
 /// Feature entitlement failure details.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ApiErrorFeatureDetails {
     pub feature: String,
     #[serde(rename = "featureLabel")]
@@ -557,6 +579,10 @@ pub struct ApiErrorFeatureDetails {
     pub cta_text: Option<String>,
     #[serde(rename = "ctaUrl")]
     pub cta_url: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Standard ONREZA API error response for PAYMENT_REQUIRED.
 #[serde_with::skip_serializing_none]
@@ -735,7 +761,9 @@ impl ApiError403 {
 }
 /// Standard ONREZA API error response for LIMIT_EXCEEDED.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ApiErrorLimitExceeded {
     #[doc(hidden)]
@@ -745,12 +773,14 @@ pub struct ApiErrorLimitExceeded {
     /// Human-readable localized error message.
     pub message: String,
     /// Quota or plan-limit failure details.
+    #[validate(nested)]
     pub details: Option<ApiErrorLimitDetails>,
 }
 /// Quota or plan-limit failure details.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 pub struct ApiErrorLimitDetails {
     #[serde(rename = "limitType")]
     pub limit_type: String,
@@ -775,6 +805,7 @@ pub struct ApiErrorLimitDetails {
     #[serde(rename = "planSlug")]
     pub plan_slug: Option<String>,
     #[serde(rename = "userBudget")]
+    #[validate(nested)]
     pub user_budget: Option<ApiErrorLimitDetailsUserBudget>,
     #[serde(rename = "usageCredit")]
     pub usage_credit: Option<ApiErrorLimitDetailsUsageCredit>,
@@ -806,6 +837,10 @@ pub struct ApiErrorLimitDetails {
     pub storage_cleanup_purged_count: Option<f64>,
     #[serde(rename = "storageCleanupFailureCount")]
     pub storage_cleanup_failure_count: Option<f64>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Standard ONREZA API error response for FORBIDDEN.
 #[serde_with::skip_serializing_none]
@@ -848,10 +883,13 @@ pub struct ApiErrorTwoFactorSetupRequired {
 /// Workspace 2FA setup requirement details.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ApiErrorTwoFactorSetupDetails {
     #[serde(rename = "workspaceSlug")]
     pub workspace_slug: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Standard ONREZA API error response for AUTH_MIGRATION_REQUIRED.
 #[serde_with::skip_serializing_none]
@@ -870,7 +908,6 @@ pub struct ApiErrorAuthMigrationRequired {
 /// Account authentication migration requirement details.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ApiErrorAuthMigrationDetails {
     #[serde(deserialize_with = "Option::deserialize", rename = "deadlineLabel")]
     #[serialize_always]
@@ -881,6 +918,10 @@ pub struct ApiErrorAuthMigrationDetails {
     pub email_is_synthetic: bool,
     #[serde(rename = "hasYandexId")]
     pub has_yandex_id: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Standard ONREZA API error response for ENV_MATERIALIZATION_FORBIDDEN.
 #[serde_with::skip_serializing_none]
@@ -923,14 +964,19 @@ pub struct ApiErrorPlanCuSizeExceeded {
 /// Managed database compute size plan-limit details.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ApiErrorPlanCuSizeDetails {
     pub allowed: Vec<f64>,
     pub hint: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Standard ONREZA API error response for DATABASE_LIMIT_REACHED.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ApiErrorDatabaseLimitReached {
     #[doc(hidden)]
@@ -940,11 +986,14 @@ pub struct ApiErrorDatabaseLimitReached {
     /// Human-readable localized error message.
     pub message: String,
     /// Quota or plan-limit failure details.
+    #[validate(nested)]
     pub details: Option<ApiErrorLimitDetails>,
 }
 /// Standard ONREZA API error response for BRANCH_LIMIT_REACHED.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ApiErrorBranchLimitReached {
     #[doc(hidden)]
@@ -954,6 +1003,7 @@ pub struct ApiErrorBranchLimitReached {
     /// Human-readable localized error message.
     pub message: String,
     /// Quota or plan-limit failure details.
+    #[validate(nested)]
     pub details: Option<ApiErrorLimitDetails>,
 }
 /// Standard ONREZA API error response for HTTP 404.
@@ -1088,22 +1138,28 @@ impl ApiErrorNotFoundDetails {
 /// Resource lookup failure details.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ApiErrorResourceDetails {
     #[serde(rename = "resourceType")]
     pub resource_type: String,
     #[serde(rename = "resourceId")]
     pub resource_id: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Route lookup failure details.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ApiErrorRouteNotFoundDetails {
     #[serde(deserialize_with = "ApiErrorRouteNotFoundDetails::deserialize_const_reason")]
     #[serde(serialize_with = "ApiErrorRouteNotFoundDetails::serialize_const_reason")]
     #[default("route_not_found".to_string())]
     pub reason: String,
     pub path: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl ApiErrorRouteNotFoundDetails {
     #[allow(
@@ -1487,6 +1543,7 @@ pub struct ApiErrorConflict {
 pub struct ApiErrorGenericDetails {
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
+    #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Standard ONREZA API error response for DNS_ROUTING_RECORD_CONFLICT.
@@ -1680,12 +1737,80 @@ pub struct ApiErrorDatabaseStopped {
 }
 /// Managed database stopped-state details.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ApiErrorDatabaseStoppedDetails {
     #[serde(rename = "databaseId")]
     pub database_id: String,
     pub name: String,
     pub status: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+/// Standard ONREZA API error response for HTTP 410.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ApiError410 {
+    ApiErrorIdempotencyExpired(ApiErrorIdempotencyExpired),
+}
+impl ApiError410 {
+    pub const DISCRIMINATOR_FIELD: &'static str = "code";
+}
+impl Default for ApiError410 {
+    fn default() -> Self {
+        Self::ApiErrorIdempotencyExpired(<ApiErrorIdempotencyExpired>::default())
+    }
+}
+impl serde::Serialize for ApiError410 {
+    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::ApiErrorIdempotencyExpired(v) => v.serialize(serializer),
+        }
+    }
+}
+impl<'de> serde::Deserialize<'de> for ApiError410 {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value
+            .get(Self::DISCRIMINATOR_FIELD)
+            .and_then(|v| v.as_str())
+        {
+            Some("IDEMPOTENCY_EXPIRED") => serde_json::from_value(value)
+                .map(Self::ApiErrorIdempotencyExpired)
+                .map_err(serde::de::Error::custom),
+            None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+            Some(other) => Err(serde::de::Error::custom(format!(
+                "Unknown discriminator value '{}' for field '{}'",
+                other, "code"
+            ))),
+        }
+    }
+}
+impl ApiError410 {
+    /// Standard ONREZA API error response for IDEMPOTENCY_EXPIRED.
+    pub fn error_idempotency_expired(message: String) -> Self {
+        Self::ApiErrorIdempotencyExpired(ApiErrorIdempotencyExpired {
+            message,
+            ..Default::default()
+        })
+    }
+}
+/// Standard ONREZA API error response for IDEMPOTENCY_EXPIRED.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct ApiErrorIdempotencyExpired {
+    #[doc(hidden)]
+    #[serde(default, skip_deserializing)]
+    #[default(Some("IDEMPOTENCY_EXPIRED"))]
+    pub code: Option<&'static str>,
+    /// Human-readable localized error message.
+    pub message: String,
 }
 /// Standard ONREZA API error response for HTTP 413.
 #[derive(Debug, Clone, PartialEq)]
@@ -2092,54 +2217,27 @@ pub struct ApiErrorSourcePresignFailed {
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum Schema02 {
+pub enum T03 {
     String(String),
     Number(f64),
     Boolean(bool),
-    Array(Vec<Schema02>),
-    Object(std::collections::HashMap<String, Box<Schema02>>),
-    Null,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Schema1 {
-    String(String),
-    Number(f64),
-    Boolean(bool),
-    Array(Vec<Schema1>),
-    Object(std::collections::HashMap<String, Box<Schema1>>),
-    Null,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Schema2 {
-    String(String),
-    Number(f64),
-    Boolean(bool),
-    Array(Vec<Schema2>),
-    Object(std::collections::HashMap<String, Box<Schema2>>),
-    Null,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Schema3 {
-    String(String),
-    Number(f64),
-    Boolean(bool),
-    Array(Vec<Schema3>),
-    Object(std::collections::HashMap<String, Box<Schema3>>),
+    Array(Vec<T03>),
+    Object(std::collections::HashMap<String, Box<T03>>),
     Null,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct FunctionListResponse {
     #[validate(nested)]
     pub functions: Vec<FunctionListResponseItem>,
     #[serde(rename = "publishAttempts")]
     #[validate(nested)]
     pub publish_attempts: Vec<FunctionListResponsePublishAttempt>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
@@ -2159,7 +2257,7 @@ pub struct FunctionTestInvokeResponse {
 #[serde(deny_unknown_fields)]
 pub struct FunctionPublishSpec {
     #[validate(nested)]
-    pub source: FunctionPublishSpecSource,
+    pub source: Source,
     #[validate(nested)]
     pub declaration: FunctionDeclaration,
     #[validate(length(min = 1u64, max = 7u64))]
@@ -2189,16 +2287,16 @@ pub struct FunctionDeclaredTrigger {
     #[serde(rename = "type")]
     pub r#type: FunctionDeclaredTriggerType,
     #[serde(default, with = "serde_with::rust::double_option")]
-    pub config: Option<Option<Box<Schema06>>>,
+    pub config: Option<Option<Box<T07>>>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum Schema06 {
+pub enum T07 {
     String(String),
     Number(f64),
     Boolean(bool),
-    Array(Vec<Schema06>),
-    Object(std::collections::HashMap<String, Box<Schema06>>),
+    Array(Vec<T07>),
+    Object(std::collections::HashMap<String, Box<T07>>),
     Null,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
@@ -2460,7 +2558,6 @@ impl RemoteImageSourceAuthoring {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct FunctionsPublishResponse {
     #[serde(rename = "projectId")]
     pub project_id: String,
@@ -2483,10 +2580,19 @@ pub struct FunctionsPublishResponse {
     #[serde(rename = "runtimeReleaseId")]
     pub runtime_release_id: Option<String>,
     #[serde(rename = "runtimeReleaseVersion")]
-    #[validate(range(max = 9_007_199_254_740_991i64, exclusive_min = 0i64))]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
     pub runtime_release_version: Option<i64>,
+    pub warnings: Option<Vec<FunctionsPublishResponseWarning>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
     #[default(Default::default())]
-    pub warnings: Vec<FunctionsPublishResponseWarning>,
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl FunctionsPublishResponse {
     #[allow(
@@ -2533,7 +2639,6 @@ impl FunctionsPublishResponse {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct ActiveEdgeRulesResponse {
     #[serde(deserialize_with = "Option::deserialize", rename = "ruleSet")]
     #[serialize_always]
@@ -2543,6 +2648,10 @@ pub struct ActiveEdgeRulesResponse {
     pub generated_rule_sets: Vec<ActiveEdgeRulesResponseGeneratedRuleSet>,
     #[serde(rename = "effectiveImageSources")]
     pub effective_image_sources: serde_json::Value,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -2785,7 +2894,6 @@ pub struct EdgeRulesStatusResponse {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct ManagedDatabaseBranchListItem {
     #[serde(default, with = "serde_with::rust::double_option")]
     pub ancestor_lsn: Option<Option<String>>,
@@ -2806,7 +2914,7 @@ pub struct ManagedDatabaseBranchListItem {
     pub endpoint_id: Option<Option<String>>,
     #[serde(default, with = "serde_with::rust::double_option")]
     pub expires_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    #[validate(range(min = -2_147_483_648i64, max = 2_147_483_647i64))]
     pub external_generation: i64,
     #[serde(default, with = "serde_with::rust::double_option")]
     pub external_id: Option<Option<String>>,
@@ -2847,25 +2955,29 @@ pub struct ManagedDatabaseBranchListItem {
     pub ancestor_lsn_2: Option<String>,
     #[serde(rename = "isPreviewBranch")]
     pub is_preview_branch: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum Schema08 {
+pub enum T09 {
     String(String),
     Number(f64),
     Boolean(bool),
-    Array(Vec<Schema08>),
-    Object(std::collections::HashMap<String, Box<Schema08>>),
+    Array(Vec<T09>),
+    Object(std::collections::HashMap<String, Box<T09>>),
     Null,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum Schema09 {
+pub enum T010 {
     String(String),
     Number(f64),
     Boolean(bool),
-    Array(Vec<Schema09>),
-    Object(std::collections::HashMap<String, Box<Schema09>>),
+    Array(Vec<T010>),
+    Object(std::collections::HashMap<String, Box<T010>>),
     Null,
 }
 #[derive(
@@ -2874,7 +2986,7 @@ pub enum Schema09 {
 #[serde(deny_unknown_fields)]
 pub struct FunctionPublishSpec2 {
     #[validate(nested)]
-    pub source: FunctionPublishSpecSource,
+    pub source: Source,
     #[validate(nested)]
     pub declaration: FunctionDeclaration2,
     #[validate(length(min = 1u64, max = 7u64))]
@@ -2904,16 +3016,16 @@ pub struct FunctionDeclaredTrigger2 {
     #[serde(rename = "type")]
     pub r#type: FunctionDeclaredTriggerType,
     #[serde(default, with = "serde_with::rust::double_option")]
-    pub config: Option<Option<Box<Schema010>>>,
+    pub config: Option<Option<Box<T011>>>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum Schema010 {
+pub enum T011 {
     String(String),
     Number(f64),
     Boolean(bool),
-    Array(Vec<Schema010>),
-    Object(std::collections::HashMap<String, Box<Schema010>>),
+    Array(Vec<T011>),
+    Object(std::collections::HashMap<String, Box<T011>>),
     Null,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
@@ -3174,10 +3286,8 @@ impl RemoteImageSourceAuthoring3 {
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]
 pub struct GetV1projectsRequestQuery {
-    #[validate(range(min = 1.0, max = 100.0))]
-    pub limit: Option<f64>,
-    #[validate(range(min = 0.0))]
-    pub offset: Option<f64>,
+    pub limit: Option<serde_json::Value>,
+    pub offset: Option<serde_json::Value>,
     #[validate(
         length(min = 1u64, max = 50u64),
         regex(path = "REGEX_GET_V1PROJECTS_REQUEST_QUERY_NAME")
@@ -3235,6 +3345,11 @@ impl GetV1projectsRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1projectsResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -3283,6 +3398,8 @@ pub enum GetV1projectsResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -3358,6 +3475,10 @@ pub struct ProjectRequestBody {
     pub detected_framework: Option<String>,
     #[serde(rename = "detectedComputeType")]
     pub detected_compute_type: Option<Project200ResponseProjectDetectedComputeType>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Creates a project in the current workspace.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
@@ -3410,6 +3531,11 @@ impl PostV1projectsRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1projectsResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -3458,6 +3584,8 @@ pub enum PostV1projectsResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -3527,6 +3655,11 @@ impl GetV1projectsByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1projectsByIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -3575,6 +3708,8 @@ pub enum GetV1projectsByIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -3644,6 +3779,11 @@ impl DeleteV1projectsByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1projectsByIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -3692,6 +3832,8 @@ pub enum DeleteV1projectsByIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -3782,6 +3924,10 @@ pub struct ProjectRequestBody2 {
     pub commit_status_enabled: Option<ProjectRequestBody2IncludeFilesOutsideRoot>,
     #[serde(rename = "gitLfsEnabled")]
     pub git_lfs_enabled: Option<ProjectRequestBody2IncludeFilesOutsideRoot>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PatchV1projectsByIdRequestPath {
@@ -3841,6 +3987,11 @@ impl PatchV1projectsByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PatchV1projectsByIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PatchV1projectsByIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -3889,6 +4040,8 @@ pub enum PatchV1projectsByIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -3921,6 +4074,10 @@ pub struct DetectionRequestBody {
     pub package_manager: Option<ProjectRequestBodyPackageManager>,
     #[validate(length(max = 20u64))]
     pub source: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PostV1projectsByIdDetectionRequestPath {
@@ -3979,6 +4136,11 @@ impl PostV1projectsByIdDetectionRequest {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1projectsByIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdResponse::Gone(data));
         }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
@@ -4064,6 +4226,11 @@ impl GetV1domainsByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1domainsByIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1domainsByIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -4112,6 +4279,8 @@ pub enum GetV1domainsByIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -4187,6 +4356,11 @@ impl DeleteV1domainsByIdPlatformSubdomainsByDomainIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1domainsByIdPlatformSubdomainsByDomainIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1domainsByIdPlatformSubdomainsByDomainIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -4245,6 +4419,456 @@ pub enum DeleteV1domainsByIdPlatformSubdomainsByDomainIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1environmentsByIdReleasesRequestPath {
+    pub id: uuid::Uuid,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1environmentsByIdReleasesRequestQuery {
+    #[serde(rename = "beforeCreatedAt")]
+    pub before_created_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(rename = "beforeReleaseId")]
+    pub before_release_id: Option<uuid::Uuid>,
+    #[validate(regex(path = "REGEX_GET_V1ENVIRONMENTS_BY_ID_RELEASES_REQUEST_QUERY_LIMIT"))]
+    pub limit: Option<String>,
+}
+/// List retained environment releases
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1environmentsByIdReleasesRequest {
+    pub path: GetV1environmentsByIdReleasesRequestPath,
+    #[validate(nested)]
+    pub query: GetV1environmentsByIdReleasesRequestQuery,
+}
+impl GetV1environmentsByIdReleasesRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1environmentsByIdReleasesResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Release200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::InternalServerError(
+                data,
+            ));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::ServiceUnavailable(
+                data,
+            ));
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1environmentsByIdReleasesResponse::Unknown);
+    }
+}
+/// Response types for getV1EnvironmentsByIdReleases
+#[derive(Debug, Clone)]
+pub enum GetV1environmentsByIdReleasesResponse {
+    ///200: Response for status 200
+    Ok(Release200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1environmentsByIdServingRequestPath {
+    pub id: uuid::Uuid,
+}
+/// Read desired and observed environment serving state
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1environmentsByIdServingRequest {
+    pub path: GetV1environmentsByIdServingRequestPath,
+}
+impl GetV1environmentsByIdServingRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1environmentsByIdServingResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Serving200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(GetV1environmentsByIdServingResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::InternalServerError(
+                data,
+            ));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::ServiceUnavailable(
+                data,
+            ));
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1environmentsByIdServingResponse::Unknown);
+    }
+}
+/// Response types for getV1EnvironmentsByIdServing
+#[derive(Debug, Clone)]
+pub enum GetV1environmentsByIdServingResponse {
+    ///200: Response for status 200
+    Ok(Serving200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct ActivateReleaseRequestBody {
+    #[serde(rename = "releaseId")]
+    pub release_id: uuid::Uuid,
+    #[serde(rename = "expectedGeneration")]
+    #[validate(regex(path = "REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION"))]
+    pub expected_generation: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1environmentsByIdActionsActivateReleaseRequestPath {
+    pub id: uuid::Uuid,
+}
+#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1environmentsByIdActionsActivateReleaseRequestHeader {
+    #[validate(regex(
+        path = "REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_ACTIVATE_RELEASE_REQUEST_HEADER_IDEMPOTENCY_KEY"
+    ))]
+    pub idempotency_key: String,
+}
+impl core::convert::TryFrom<&PostV1environmentsByIdActionsActivateReleaseRequestHeader>
+    for http::HeaderMap
+{
+    type Error = http::header::InvalidHeaderValue;
+    fn try_from(
+        headers: &PostV1environmentsByIdActionsActivateReleaseRequestHeader,
+    ) -> core::result::Result<Self, Self::Error> {
+        let mut map = http::HeaderMap::with_capacity(1usize);
+        let header_value = http::HeaderValue::try_from(&headers.idempotency_key)?;
+        map.insert(IDEMPOTENCY_KEY, header_value);
+        Ok(map)
+    }
+}
+impl core::convert::TryFrom<PostV1environmentsByIdActionsActivateReleaseRequestHeader>
+    for http::HeaderMap
+{
+    type Error = http::header::InvalidHeaderValue;
+    fn try_from(
+        headers: PostV1environmentsByIdActionsActivateReleaseRequestHeader,
+    ) -> core::result::Result<Self, Self::Error> {
+        http::HeaderMap::try_from(&headers)
+    }
+}
+/// Activate a retained environment release
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1environmentsByIdActionsActivateReleaseRequest {
+    pub path: PostV1environmentsByIdActionsActivateReleaseRequestPath,
+    #[validate(nested)]
+    pub header: PostV1environmentsByIdActionsActivateReleaseRequestHeader,
+    #[validate(nested)]
+    pub body: ActivateReleaseRequestBody,
+}
+impl PostV1environmentsByIdActionsActivateReleaseRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1environmentsByIdActionsActivateReleaseResponse> {
+        let status = req.status();
+        if status == http::StatusCode::ACCEPTED {
+            let data =
+                oas3_gen_support::Diagnostics::<ActivateRelease202Response>::json_with_diagnostics(
+                    req,
+                )
+                .await?;
+            return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::Accepted(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::Gone(
+                data,
+            ));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsActivateReleaseResponse::InternalServerError(data),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsActivateReleaseResponse::ServiceUnavailable(data),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::Unknown);
+    }
+}
+/// Response types for postV1EnvironmentsByIdActionsActivateRelease
+#[derive(Debug, Clone)]
+pub enum PostV1environmentsByIdActionsActivateReleaseResponse {
+    ///202: Response for status 202
+    Accepted(ActivateRelease202Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -4262,7 +4886,7 @@ pub enum DeleteV1domainsByIdPlatformSubdomainsByDomainIdResponse {
 pub struct GetV1deploymentsByIdRequestPath {
     pub id: uuid::Uuid,
 }
-/// Returns deployment details, urls, and project build settings.
+/// Returns deployment details, its observed serving address when active, and project build settings.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct GetV1deploymentsByIdRequest {
     pub path: GetV1deploymentsByIdRequestPath,
@@ -4314,6 +4938,11 @@ impl GetV1deploymentsByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1deploymentsByIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1deploymentsByIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -4362,6 +4991,8 @@ pub enum GetV1deploymentsByIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -4380,20 +5011,17 @@ pub struct GetV1deploymentsProjectByProjectIdRequestPath {
     pub project_id: uuid::Uuid,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
 pub struct GetV1deploymentsProjectByProjectIdRequestQuery {
-    #[validate(range(min = 1.0, max = 100.0))]
-    pub limit: Option<f64>,
-    #[validate(range(min = 0.0))]
-    pub offset: Option<f64>,
+    pub limit: Option<serde_json::Value>,
+    pub offset: Option<serde_json::Value>,
     #[serde(rename = "isPreview")]
-    pub is_preview: Option<bool>,
+    pub is_preview: Option<serde_json::Value>,
 }
 /// Returns deployments for a project with pagination metadata.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct GetV1deploymentsProjectByProjectIdRequest {
     pub path: GetV1deploymentsProjectByProjectIdRequestPath,
-    #[validate(nested)]
     pub query: GetV1deploymentsProjectByProjectIdRequestQuery,
 }
 impl GetV1deploymentsProjectByProjectIdRequest {
@@ -4449,6 +5077,11 @@ impl GetV1deploymentsProjectByProjectIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1deploymentsProjectByProjectIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1deploymentsProjectByProjectIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -4503,137 +5136,8 @@ pub enum GetV1deploymentsProjectByProjectIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
-    ///413: Response for status 413
-    ContentTooLarge(ApiError413),
-    ///426: Response for status 426
-    UpgradeRequired(ApiError426),
-    ///429: Response for status 429
-    TooManyRequests(ApiError429),
-    ///500: Response for status 500
-    InternalServerError(ApiError500),
-    ///503: Response for status 503
-    ServiceUnavailable(ApiError503),
-    ///default: Unknown response
-    Unknown,
-}
-#[serde_with::skip_serializing_none]
-#[derive(
-    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
-)]
-pub struct ReasonRequestBody {
-    #[validate(length(min = 1u64, max = 500u64))]
-    pub reason: Option<String>,
-}
-#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
-pub struct PostV1deploymentsByIdRollbackRequestPath {
-    pub id: uuid::Uuid,
-}
-/// Creates a rollback deployment from the previous live deployment.
-#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
-pub struct PostV1deploymentsByIdRollbackRequest {
-    pub path: PostV1deploymentsByIdRollbackRequestPath,
-    #[validate(nested)]
-    pub body: ReasonRequestBody,
-}
-impl PostV1deploymentsByIdRollbackRequest {
-    /// Parse the HTTP response into the response enum.
-    pub async fn parse_response(
-        req: reqwest::Response,
-    ) -> anyhow::Result<PostV1deploymentsByIdRollbackResponse> {
-        let status = req.status();
-        if status == http::StatusCode::OK {
-            let data =
-                oas3_gen_support::Diagnostics::<Rollback200Response>::json_with_diagnostics(req)
-                    .await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::Ok(data));
-        }
-        if status == http::StatusCode::BAD_REQUEST {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::BadRequest(data));
-        }
-        if status == http::StatusCode::UNAUTHORIZED {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::Unauthorized(data));
-        }
-        if status == http::StatusCode::PAYMENT_REQUIRED {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::PaymentRequired(data));
-        }
-        if status == http::StatusCode::FORBIDDEN {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::Forbidden(data));
-        }
-        if status == http::StatusCode::NOT_FOUND {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::NotFound(data));
-        }
-        if status == http::StatusCode::REQUEST_TIMEOUT {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::RequestTimeout(data));
-        }
-        if status == http::StatusCode::CONFLICT {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::Conflict(data));
-        }
-        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::ContentTooLarge(data));
-        }
-        if status == http::StatusCode::UPGRADE_REQUIRED {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::UpgradeRequired(data));
-        }
-        if status == http::StatusCode::TOO_MANY_REQUESTS {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::TooManyRequests(data));
-        }
-        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::InternalServerError(
-                data,
-            ));
-        }
-        if status == http::StatusCode::SERVICE_UNAVAILABLE {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
-            return Ok(PostV1deploymentsByIdRollbackResponse::ServiceUnavailable(
-                data,
-            ));
-        }
-        let _ = req.bytes().await?;
-        return Ok(PostV1deploymentsByIdRollbackResponse::Unknown);
-    }
-}
-/// Response types for postV1DeploymentsByIdRollback
-#[derive(Debug, Clone)]
-pub enum PostV1deploymentsByIdRollbackResponse {
-    ///200: Response for status 200
-    Ok(Rollback200Response),
-    ///400: Response for status 400
-    BadRequest(ApiError400),
-    ///401: Response for status 401
-    Unauthorized(ApiError401),
-    ///402: Response for status 402
-    PaymentRequired(ApiError402),
-    ///403: Response for status 403
-    Forbidden(ApiError403),
-    ///404: Response for status 404
-    NotFound(ApiError404),
-    ///408: Response for status 408
-    RequestTimeout(ApiError408),
-    ///409: Response for status 409
-    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -4702,6 +5206,11 @@ impl GetV1buildLogSessionsWorkspacePolicyRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1buildLogSessionsWorkspacePolicyResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1buildLogSessionsWorkspacePolicyResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -4750,6 +5259,8 @@ pub enum GetV1buildLogSessionsWorkspacePolicyResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -4841,6 +5352,11 @@ impl PostV1buildLogSessionsRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1buildLogSessionsResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1buildLogSessionsResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -4889,6 +5405,8 @@ pub enum PostV1buildLogSessionsResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -4972,6 +5490,11 @@ impl PostV1buildLogSessionsByIdEventsRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1buildLogSessionsByIdEventsResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1buildLogSessionsByIdEventsResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -5026,6 +5549,8 @@ pub enum PostV1buildLogSessionsByIdEventsResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -5118,6 +5643,11 @@ impl PostV1buildLogSessionsByIdFinishRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1buildLogSessionsByIdFinishResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1buildLogSessionsByIdFinishResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -5172,6 +5702,8 @@ pub enum PostV1buildLogSessionsByIdFinishResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -5234,6 +5766,11 @@ impl GetV1workspaceDomainsDomainsRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1workspaceDomainsDomainsResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1workspaceDomainsDomainsResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -5286,6 +5823,8 @@ pub enum GetV1workspaceDomainsDomainsResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -5361,6 +5900,11 @@ impl GetV1workspaceDomainsDomainsByZoneIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1workspaceDomainsDomainsByZoneIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1workspaceDomainsDomainsByZoneIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -5409,6 +5953,8 @@ pub enum GetV1workspaceDomainsDomainsByZoneIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -5480,6 +6026,13 @@ impl PostV1workspaceDomainsDomainsByZoneIdVerifyRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1workspaceDomainsDomainsByZoneIdVerifyResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1workspaceDomainsDomainsByZoneIdVerifyResponse::Gone(
+                data,
+            ));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -5532,6 +6085,8 @@ pub enum PostV1workspaceDomainsDomainsByZoneIdVerifyResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -5562,6 +6117,10 @@ pub struct HostnameRequestBody {
     #[serde(rename = "replaceRecordIds")]
     #[validate(length(min = 1u64))]
     pub replace_record_ids: Option<Vec<uuid::Uuid>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PostV1workspaceDomainsDomainsByZoneIdHostnamesRequestPath {
@@ -5627,6 +6186,11 @@ impl PostV1workspaceDomainsDomainsByZoneIdHostnamesRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1workspaceDomainsDomainsByZoneIdHostnamesResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1workspaceDomainsDomainsByZoneIdHostnamesResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -5685,6 +6249,8 @@ pub enum PostV1workspaceDomainsDomainsByZoneIdHostnamesResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -5781,6 +6347,13 @@ impl DeleteV1workspaceDomainsDomainsByZoneIdHostnamesByBindingIdRequest {
                 DeleteV1workspaceDomainsDomainsByZoneIdHostnamesByBindingIdResponse::Conflict(data),
             );
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(
+                DeleteV1workspaceDomainsDomainsByZoneIdHostnamesByBindingIdResponse::Gone(data),
+            );
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -5849,6 +6422,8 @@ pub enum DeleteV1workspaceDomainsDomainsByZoneIdHostnamesByBindingIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -5931,6 +6506,11 @@ impl PostV1previewAccessByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1previewAccessByIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1previewAccessByIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -5979,6 +6559,8 @@ pub enum PostV1previewAccessByIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -6054,6 +6636,11 @@ impl DeleteV1previewAccessByIdBySecretIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1previewAccessByIdBySecretIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -6102,6 +6689,8 @@ pub enum DeleteV1previewAccessByIdBySecretIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -6205,6 +6794,15 @@ impl GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsReq
                 ),
             );
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsResponse::Gone(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -6275,6 +6873,8 @@ pub enum GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunction
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -6424,6 +7024,17 @@ impl PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsBy
                 ),
             );
         }
+        if status == http::StatusCode::GONE {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError410,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsByFunctionIdRevisionsByRevisionIdTestInvokeResponse::Gone(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data = oas3_gen_support::Diagnostics::<
                 ApiError413,
@@ -6505,6 +7116,8 @@ pub enum PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctio
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -6526,7 +7139,6 @@ pub enum PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctio
 pub struct PublishRequestBody {
     pub origin: PublishRequestBodyOrigin,
     #[validate(length(max = 0u64), nested)]
-    #[default(Some(Default::default()))]
     pub functions: Option<Vec<FunctionPublishSpec>>,
     #[serde(rename = "edgeRules")]
     #[validate(nested)]
@@ -6536,7 +7148,6 @@ pub struct PublishRequestBody {
     pub edge_rules_force: Option<bool>,
     #[serde(rename = "generatedEdgeRuleSets")]
     #[validate(length(max = 0u64), nested)]
-    #[default(Some(Default::default()))]
     pub generated_edge_rule_sets: Option<Vec<PublishRequestBodyGeneratedEdgeRuleSet>>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -6635,6 +7246,15 @@ impl PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsPu
                 ),
             );
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsPublishResponse::Gone(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -6705,6 +7325,8 @@ pub enum PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctio
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -6810,6 +7432,15 @@ impl GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRulesReq
                 ),
             );
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRulesResponse::Gone(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -6880,6 +7511,8 @@ pub enum GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRule
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -7046,6 +7679,15 @@ impl PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRulesSt
                 ),
             );
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRulesStatusResponse::Gone(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -7116,6 +7758,8 @@ pub enum PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRul
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -7133,31 +7777,19 @@ pub enum PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRul
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
+#[serde(deny_unknown_fields)]
 pub struct ComputeConfigRequestBody {
     #[serde(rename = "computeMode")]
     pub compute_mode: Option<ComputeConfigRequestBodyComputeMode>,
-    #[serde(rename = "useWorkers")]
-    pub use_workers: Option<bool>,
-    #[serde(rename = "workerCount")]
-    #[validate(range(min = 0i64, max = 8i64))]
-    pub worker_count: Option<i64>,
+    /// Validation: Must be a multiple of 250
+    #[serde(rename = "processCpuLimitMillis")]
+    #[validate(range(min = 250i64, max = 16_000i64))]
+    pub process_cpu_limit_millis: Option<i64>,
     #[serde(rename = "idleTimeoutSeconds")]
-    #[validate(range(min = 5i64, max = 300i64))]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
     pub idle_timeout_seconds: Option<i64>,
-    #[serde(
-        default,
-        with = "serde_with::rust::double_option",
-        rename = "healthCheckPath"
-    )]
-    pub health_check_path: Option<Option<String>>,
-    #[serde(rename = "websocketEnabled")]
-    pub websocket_enabled: Option<bool>,
-    #[serde(
-        default,
-        with = "serde_with::rust::double_option",
-        rename = "websocketMaxDurationSeconds"
-    )]
-    pub websocket_max_duration_seconds: Option<Option<i64>>,
+    #[serde(rename = "healthCheckPath")]
+    pub health_check_path: Option<serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PutV1computeConfigByProjectIdRequestPath {
@@ -7219,6 +7851,11 @@ impl PutV1computeConfigByProjectIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PutV1computeConfigByProjectIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PutV1computeConfigByProjectIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -7271,6 +7908,8 @@ pub enum PutV1computeConfigByProjectIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -7334,6 +7973,11 @@ impl GetV1kaikiDatabasesRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1kaikiDatabasesResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -7382,6 +8026,8 @@ pub enum GetV1kaikiDatabasesResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -7404,7 +8050,13 @@ pub struct DatabaseRequestBody {
     #[validate(length(min = 1u64, max = 63u64))]
     pub db_name: Option<String>,
     #[serde(rename = "pgVersion")]
-    #[validate(range(max = 9_007_199_254_740_991i64, exclusive_min = 0i64))]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
     pub pg_version: Option<i64>,
     #[serde(rename = "cuSize")]
     pub cu_size: Option<Database200ResponseAllowedCuSize>,
@@ -7414,6 +8066,10 @@ pub struct DatabaseRequestBody {
         rename = "suspendTimeoutSeconds"
     )]
     pub suspend_timeout_seconds: Option<Option<i64>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Creates a managed PostgreSQL database and returns the local database row plus the generated password.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
@@ -7468,6 +8124,11 @@ impl PostV1kaikiDatabasesRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1kaikiDatabasesResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kaikiDatabasesResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -7516,6 +8177,8 @@ pub enum PostV1kaikiDatabasesResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -7585,6 +8248,11 @@ impl GetV1kaikiDatabasesByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1kaikiDatabasesByIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -7633,6 +8301,8 @@ pub enum GetV1kaikiDatabasesByIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -7701,6 +8371,11 @@ impl DeleteV1kaikiDatabasesByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1kaikiDatabasesByIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kaikiDatabasesByIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -7751,6 +8426,8 @@ pub enum DeleteV1kaikiDatabasesByIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -7777,6 +8454,10 @@ pub struct DatabaseRequestBody2 {
         rename = "suspendTimeoutSeconds"
     )]
     pub suspend_timeout_seconds: Option<Option<i64>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PatchV1kaikiDatabasesByIdRequestPath {
@@ -7835,6 +8516,11 @@ impl PatchV1kaikiDatabasesByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PatchV1kaikiDatabasesByIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PatchV1kaikiDatabasesByIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -7883,6 +8569,8 @@ pub enum PatchV1kaikiDatabasesByIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -7951,6 +8639,11 @@ impl PostV1kaikiDatabasesByIdStartRequest {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1kaikiDatabasesByIdStopResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kaikiDatabasesByIdStopResponse::Gone(data));
         }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
@@ -8041,6 +8734,11 @@ impl PostV1kaikiDatabasesByIdStopRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1kaikiDatabasesByIdStopResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kaikiDatabasesByIdStopResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -8093,6 +8791,8 @@ pub enum PostV1kaikiDatabasesByIdStopResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -8168,6 +8868,11 @@ impl GetV1kaikiDatabasesByIdConnectionRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1kaikiDatabasesByIdConnectionResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdConnectionResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -8222,6 +8927,8 @@ pub enum GetV1kaikiDatabasesByIdConnectionResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -8295,6 +9002,11 @@ impl GetV1kaikiDatabasesByIdBranchesRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1kaikiDatabasesByIdBranchesResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdBranchesResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -8351,6 +9063,8 @@ pub enum GetV1kaikiDatabasesByIdBranchesResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -8375,6 +9089,10 @@ pub struct BranchRequestBody {
     pub parent_branch_id: Option<String>,
     #[serde(rename = "ancestorLsn")]
     pub ancestor_lsn: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PostV1kaikiDatabasesByIdBranchesRequestPath {
@@ -8438,6 +9156,11 @@ impl PostV1kaikiDatabasesByIdBranchesRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -8492,6 +9215,8 @@ pub enum PostV1kaikiDatabasesByIdBranchesResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -8567,6 +9292,11 @@ impl GetV1kaikiDatabasesByIdBranchesByBranchIdRequest {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::Gone(data));
         }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
@@ -8660,6 +9390,11 @@ impl DeleteV1kaikiDatabasesByIdBranchesByBranchIdRequest {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1kaikiDatabasesByIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kaikiDatabasesByIdResponse::Gone(data));
         }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
@@ -8757,6 +9492,11 @@ impl GetV1kaikiDatabasesByIdBranchesByBranchIdConnectionRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1kaikiDatabasesByIdConnectionResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdConnectionResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -8807,6 +9547,10 @@ pub struct AttachmentRequestBody {
     pub auto_inject_db_url: Option<bool>,
     #[serde(rename = "autoCreatePreviewBranch")]
     pub auto_create_preview_branch: Option<bool>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PatchV1kaikiDatabasesByIdAttachmentsByProjectIdRequestPath {
@@ -8874,6 +9618,11 @@ impl PatchV1kaikiDatabasesByIdAttachmentsByProjectIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PatchV1kaikiDatabasesByIdAttachmentsByProjectIdResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PatchV1kaikiDatabasesByIdAttachmentsByProjectIdResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -8932,6 +9681,8 @@ pub enum PatchV1kaikiDatabasesByIdAttachmentsByProjectIdResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -8992,6 +9743,11 @@ impl GetV1userRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1userResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1userResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -9040,6 +9796,8 @@ pub enum GetV1userResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -9101,6 +9859,11 @@ impl GetV1workspaceRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1workspaceResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1workspaceResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -9149,6 +9912,8 @@ pub enum GetV1workspaceResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -9210,6 +9975,11 @@ impl PostV1deviceRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1deviceResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deviceResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -9258,6 +10028,8 @@ pub enum PostV1deviceResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -9279,6 +10051,10 @@ pub struct TokenRequestBody {
     #[validate(regex(path = "REGEX_TOKEN_REQUEST_BODY_DEVICE_CODE"))]
     pub device_code: String,
     pub grant_type: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Poll device authorization token
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
@@ -9333,6 +10109,11 @@ impl PostV1deviceTokenRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1deviceTokenResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deviceTokenResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -9381,6 +10162,8 @@ pub enum PostV1deviceTokenResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -9450,6 +10233,11 @@ impl GetV1deploymentsByIdStatusRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1deploymentsByIdStatusResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1deploymentsByIdStatusResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -9500,6 +10288,8 @@ pub enum GetV1deploymentsByIdStatusResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -9707,6 +10497,11 @@ impl PostV1deploymentsByIdPrepareUploadRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1deploymentsByIdPrepareUploadResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdPrepareUploadResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -9761,6 +10556,8 @@ pub enum PostV1deploymentsByIdPrepareUploadResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -9848,6 +10645,13 @@ impl PostV1deploymentsByIdRuntimeArtifactsPrepareRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1deploymentsByIdRuntimeArtifactsPrepareResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdRuntimeArtifactsPrepareResponse::Gone(
+                data,
+            ));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -9900,6 +10704,8 @@ pub enum PostV1deploymentsByIdRuntimeArtifactsPrepareResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -9975,6 +10781,13 @@ impl PostV1deploymentsByIdRuntimeArtifactsCompleteRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1deploymentsByIdRuntimeArtifactsCompleteResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdRuntimeArtifactsCompleteResponse::Gone(
+                data,
+            ));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -10033,6 +10846,8 @@ pub enum PostV1deploymentsByIdRuntimeArtifactsCompleteResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -10181,6 +10996,11 @@ impl PostV1deploymentsByIdMultipartCompleteRequest {
                 data,
             ));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdMultipartCompleteResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -10229,6 +11049,8 @@ pub enum PostV1deploymentsByIdMultipartCompleteResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -10377,6 +11199,11 @@ impl PostV1deploymentsByIdUploadFailedRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1deploymentsByIdUploadFailedResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdUploadFailedResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -10431,6 +11258,8 @@ pub enum PostV1deploymentsByIdUploadFailedResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -10582,6 +11411,11 @@ impl PostV1deploymentsByIdUploadCompleteRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1deploymentsByIdUploadCompleteResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdUploadCompleteResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -10630,6 +11464,8 @@ pub enum PostV1deploymentsByIdUploadCompleteResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -10658,6 +11494,10 @@ pub struct ResolveRequestBody {
     pub source_ref: Option<Option<String>>,
     #[serde(rename = "selectionSource")]
     pub selection_source: ResolveRequestBodySelectionSource,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PostV1projectsByIdExecutionContextResolveRequestPath {
@@ -10721,6 +11561,13 @@ impl PostV1projectsByIdExecutionContextResolveRequest {
                 data,
             ));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdExecutionContextResolveResponse::Gone(
+                data,
+            ));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -10771,6 +11618,8 @@ pub enum PostV1projectsByIdExecutionContextResolveResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -10798,6 +11647,10 @@ pub struct MaterializeRequestBody {
     pub purpose: MaterializeRequestBodyPurpose,
     #[serde(rename = "selectionSource")]
     pub selection_source: ResolveRequestBodySelectionSource,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PostV1projectsByIdExecutionContextMaterializeRequestPath {
@@ -10860,6 +11713,13 @@ impl PostV1projectsByIdExecutionContextMaterializeRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1projectsByIdExecutionContextMaterializeResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdExecutionContextMaterializeResponse::Gone(
+                data,
+            ));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -10918,6 +11778,8 @@ pub enum PostV1projectsByIdExecutionContextMaterializeResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -10952,6 +11814,10 @@ pub struct AdmitRequestBody {
     pub commit_sha: String,
     #[serde(rename = "selectionSource")]
     pub selection_source: ResolveRequestBodySelectionSource,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PostV1projectsByIdDeploymentsAdmitRequestPath {
@@ -11017,6 +11883,11 @@ impl PostV1projectsByIdDeploymentsAdmitRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1projectsByIdDeploymentsAdmitResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdDeploymentsAdmitResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -11071,6 +11942,8 @@ pub enum PostV1projectsByIdDeploymentsAdmitResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -11148,6 +12021,11 @@ impl GetV1deploymentsByIdRunnerContextRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1deploymentsByIdRunnerContextResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1deploymentsByIdRunnerContextResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -11202,6 +12080,8 @@ pub enum GetV1deploymentsByIdRunnerContextResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -11218,6 +12098,10 @@ pub enum GetV1deploymentsByIdRunnerContextResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct PurposeRequestBody {
     pub purpose: MaterializeRequestBodyPurpose,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PostV1deploymentsByIdExecutionContextMaterializeRequestPath {
@@ -11279,6 +12163,13 @@ impl PostV1deploymentsByIdExecutionContextMaterializeRequest {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1projectsByIdExecutionContextMaterializeResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdExecutionContextMaterializeResponse::Gone(
+                data,
+            ));
         }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
@@ -11409,6 +12300,11 @@ impl PostV1deploymentsByIdExecutionContextFailBeforeSourceRequest {
                 PostV1deploymentsByIdExecutionContextFailBeforeSourceResponse::Conflict(data),
             );
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdExecutionContextFailBeforeSourceResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -11477,6 +12373,8 @@ pub enum PostV1deploymentsByIdExecutionContextFailBeforeSourceResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -11577,6 +12475,11 @@ impl PostV1deploymentsByIdExecutionContextSkipBeforeSourceRequest {
                 PostV1deploymentsByIdExecutionContextFailBeforeSourceResponse::Conflict(data),
             );
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdExecutionContextFailBeforeSourceResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -11641,6 +12544,10 @@ pub struct SourceRequestBody {
     pub manifest: SourceRequestBodyManifest,
     #[validate(nested)]
     pub functions: Option<SourceRequestBodyFunctions>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PostV1deploymentsByIdSourceRequestPath {
@@ -11700,6 +12607,11 @@ impl PostV1deploymentsByIdSourceRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1deploymentsByIdSourceResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -11752,6 +12664,8 @@ pub enum PostV1deploymentsByIdSourceResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -11770,14 +12684,13 @@ pub struct GetV1projectsByIdRuntimeLogsRequestPath {
     pub id: uuid::Uuid,
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, oas3_gen_support::Default)]
 pub struct GetV1projectsByIdRuntimeLogsRequestQuery {
     #[serde(rename = "deploymentId")]
     pub deployment_id: Option<uuid::Uuid>,
     pub start: Option<String>,
     pub end: Option<String>,
-    #[validate(range(max = 9_007_199_254_740_991i64, exclusive_min = 0i64))]
-    pub limit: Option<i64>,
+    pub limit: Option<serde_json::Value>,
     pub cursor: Option<String>,
     pub order: Option<GetV1projectsByIdRuntimeLogsRequestQueryOrder>,
     pub search: Option<String>,
@@ -11788,7 +12701,6 @@ pub struct GetV1projectsByIdRuntimeLogsRequestQuery {
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct GetV1projectsByIdRuntimeLogsRequest {
     pub path: GetV1projectsByIdRuntimeLogsRequestPath,
-    #[validate(nested)]
     pub query: GetV1projectsByIdRuntimeLogsRequestQuery,
 }
 impl GetV1projectsByIdRuntimeLogsRequest {
@@ -11837,6 +12749,11 @@ impl GetV1projectsByIdRuntimeLogsRequest {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1projectsByIdRuntimeLogsResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdRuntimeLogsResponse::Gone(data));
         }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
@@ -11890,6 +12807,8 @@ pub enum GetV1projectsByIdRuntimeLogsResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -11967,6 +12886,11 @@ impl GetV1projectsByIdEnvRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(GetV1projectsByIdEnvResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdEnvResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -12015,6 +12939,8 @@ pub enum GetV1projectsByIdEnvResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -12056,6 +12982,10 @@ pub struct EnvRequestBody {
     #[serde(rename = "changeCategory")]
     pub change_category: Option<bool>,
     pub confirmed: Option<bool>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct PostV1projectsByIdEnvRequestPath {
@@ -12114,6 +13044,11 @@ impl PostV1projectsByIdEnvRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(PostV1projectsByIdEnvResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdEnvResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -12162,6 +13097,8 @@ pub enum PostV1projectsByIdEnvResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -12242,6 +13179,11 @@ impl DeleteV1projectsByIdEnvByKeyRequest {
                 oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1projectsByIdEnvByKeyResponse::Conflict(data));
         }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdEnvByKeyResponse::Gone(data));
+        }
         if status == http::StatusCode::PAYLOAD_TOO_LARGE {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
@@ -12294,6 +13236,8 @@ pub enum DeleteV1projectsByIdEnvByKeyResponse {
     RequestTimeout(ApiError408),
     ///409: Response for status 409
     Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
     ///426: Response for status 426
@@ -12537,7 +13481,6 @@ impl core::fmt::Display for ApiErrorLimitDetailsBillingV2meterPricingKey {
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ApiErrorLimitDetailsBillingV2meter {
     #[serde(rename = "moduleKey")]
     pub module_key: ApiErrorLimitDetailsBillingV2meterModuleKey,
@@ -12545,20 +13488,33 @@ pub struct ApiErrorLimitDetailsBillingV2meter {
     pub meter_key: String,
     #[serde(rename = "pricingKey")]
     pub pricing_key: ApiErrorLimitDetailsBillingV2meterPricingKey,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 pub struct ApiErrorLimitDetailsUserBudget {
-    #[serde(rename = "extraUsageBudgetRubles")]
-    pub extra_usage_budget_rubles: f64,
+    #[serde(rename = "extraUsageBudgetCents")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub extra_usage_budget_cents: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ApiErrorLimitDetailsUsageCredit {
     #[serde(rename = "includedUsageCreditCents")]
     pub included_usage_credit_cents: f64,
     #[serde(rename = "grossUsageCents")]
     pub gross_usage_cents: f64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(deny_unknown_fields)]
@@ -12589,7 +13545,6 @@ impl core::fmt::Display for FunctionListResponseItemActivationStatus {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct FunctionListResponseItemActivationActiveRevisionSourceSnapshot {
     #[serde(rename = "sourceHash")]
     pub source_hash: String,
@@ -12602,6 +13557,10 @@ pub struct FunctionListResponseItemActivationActiveRevisionSourceSnapshot {
     #[serde(deserialize_with = "Option::deserialize", rename = "createdByUserId")]
     #[serialize_always]
     pub created_by_user_id: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum FunctionListResponseItemActivationActiveRevisionStatus {
@@ -12626,7 +13585,6 @@ impl core::fmt::Display for FunctionListResponseItemActivationActiveRevisionStat
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct FunctionListResponseItemActivationActiveRevision {
     pub id: uuid::Uuid,
     #[serde(rename = "sourceSnapshotId")]
@@ -12651,12 +13609,15 @@ pub struct FunctionListResponseItemActivationActiveRevision {
     #[validate(nested)]
     pub source_snapshot: FunctionListResponseItemActivationActiveRevisionSourceSnapshot,
     pub status: FunctionListResponseItemActivationActiveRevisionStatus,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct FunctionListResponseItemActivation {
     pub id: uuid::Uuid,
     pub status: FunctionListResponseItemActivationStatus,
@@ -12679,6 +13640,10 @@ pub struct FunctionListResponseItemActivation {
     #[serde(rename = "activeRevision")]
     #[validate(nested)]
     pub active_revision: FunctionListResponseItemActivationActiveRevision,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum FunctionListResponseItemTriggerType {
@@ -12724,7 +13689,6 @@ impl core::fmt::Display for FunctionListResponseItemTriggerOnFailure {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct FunctionListResponseItemTrigger {
     pub id: uuid::Uuid,
     #[serde(rename = "revisionId")]
@@ -12742,12 +13706,15 @@ pub struct FunctionListResponseItemTrigger {
     pub config: serde_json::Value,
     #[serde(rename = "createdAt")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct FunctionListResponseItemRevision {
     pub id: uuid::Uuid,
     #[serde(rename = "sourceSnapshotId")]
@@ -12771,10 +13738,13 @@ pub struct FunctionListResponseItemRevision {
     #[serde(rename = "sourceSnapshot")]
     #[validate(nested)]
     pub source_snapshot: FunctionListResponseItemActivationActiveRevisionSourceSnapshot,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct FunctionListResponseItemInvocationSummaryLastInvocation {
     pub id: uuid::Uuid,
     #[serde(rename = "invocationId")]
@@ -12808,12 +13778,15 @@ pub struct FunctionListResponseItemInvocationSummaryLastInvocation {
     pub request_id: Option<String>,
     #[serde(rename = "observedAt")]
     pub observed_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct FunctionListResponseItemInvocationSummaryLast24h {
     #[serde(rename = "invocationCount")]
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
@@ -12830,12 +13803,15 @@ pub struct FunctionListResponseItemInvocationSummaryLast24h {
     #[serde(deserialize_with = "Option::deserialize", rename = "avgDurationMs")]
     #[serialize_always]
     pub avg_duration_ms: Option<f64>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct FunctionListResponseItemInvocationSummary {
     #[serde(deserialize_with = "Option::deserialize", rename = "lastInvocation")]
     #[serialize_always]
@@ -12845,12 +13821,15 @@ pub struct FunctionListResponseItemInvocationSummary {
     pub last_failure: Option<FunctionListResponseItemInvocationSummaryLastInvocation>,
     #[validate(nested)]
     pub last24h: FunctionListResponseItemInvocationSummaryLast24h,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct FunctionListResponseItem {
     pub id: uuid::Uuid,
     pub name: String,
@@ -12868,6 +13847,10 @@ pub struct FunctionListResponseItem {
     #[serialize_always]
     #[validate(nested)]
     pub invocation_summary: Option<FunctionListResponseItemInvocationSummary>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum FunctionListResponsePublishAttemptStatus {
@@ -12889,7 +13872,6 @@ impl core::fmt::Display for FunctionListResponsePublishAttemptStatus {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct FunctionListResponsePublishAttempt {
     pub id: uuid::Uuid,
     #[serde(rename = "projectId")]
@@ -12946,6 +13928,10 @@ pub struct FunctionListResponsePublishAttempt {
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(rename = "completedAt")]
     pub completed_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -12966,6 +13952,7 @@ pub struct FunctionTestInvokeResponseInvocationTimings {
     pub cold_worker_start_ms: Option<f64>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
+    #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
@@ -12982,6 +13969,7 @@ pub struct FunctionTestInvokeResponseInvocationResponse {
     pub body_preview: Option<String>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
+    #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
@@ -13001,6 +13989,7 @@ pub struct FunctionTestInvokeResponseInvocation {
     pub logs: Option<Vec<serde_json::Value>>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
+    #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
@@ -13020,18 +14009,18 @@ pub struct FunctionTestInvokeResponseRevision {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
-pub struct FunctionPublishSpecSource {
+pub struct Source {
     /// Relative self-contained function entry path. Must not contain path traversal, null bytes or node_modules segments, and must end with *.nrz-fn.ts/js/mjs.
-    #[validate(
-        length(min = 1u64, max = 512u64),
-        regex(path = "REGEX_FUNCTION_PUBLISH_SPEC_SOURCE_PATH")
-    )]
+    #[validate(length(min = 1u64, max = 512u64), regex(path = "REGEX_SOURCE_PATH"))]
     pub path: String,
     /// UTF-8 function source text. ONREZA Functions v1 accepts at most 131072 bytes per entry file.
     #[serde(rename = "contentText")]
     #[validate(length(max = 131_072u64))]
     pub content_text: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum FunctionDeclaredTriggerType {
@@ -13640,7 +14629,13 @@ pub struct EdgeRuleActionAuthoringObject5 {
     #[default("cache".to_string())]
     pub r#type: String,
     #[serde(rename = "ttlSeconds")]
-    #[validate(range(max = 9_007_199_254_740_991i64, exclusive_min = 0i64))]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
     pub ttl_seconds: i64,
     #[serde(rename = "swrSeconds")]
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
@@ -14010,7 +15005,6 @@ impl core::fmt::Display for ActiveEdgeRulesResponseRuleSetStatus {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct ActiveEdgeRulesResponseRuleSet {
     pub id: uuid::Uuid,
     #[serde(rename = "environmentId")]
@@ -14039,10 +15033,13 @@ pub struct ActiveEdgeRulesResponseRuleSet {
     pub published_at: chrono::DateTime<chrono::Utc>,
     #[serde(rename = "createdAt")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ActiveEdgeRulesResponseGeneratedRuleSet {
     pub id: uuid::Uuid,
     pub producer: String,
@@ -14052,6 +15049,10 @@ pub struct ActiveEdgeRulesResponseGeneratedRuleSet {
     #[serde(rename = "imageSources")]
     pub image_sources: serde_json::Value,
     pub checksum: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(untagged)]
@@ -14348,10 +15349,13 @@ impl core::fmt::Display for Project200ResponseProjectDetectedComputeType {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Project200ResponseProjectCount {
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub deployments: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Project200ResponseProjectLatestDeploymentStatus {
@@ -14398,7 +15402,6 @@ impl core::fmt::Display for Project200ResponseProjectLatestDeploymentStatus {
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Project200ResponseProjectLatestDeployment {
     pub id: uuid::Uuid,
     pub status: Project200ResponseProjectLatestDeploymentStatus,
@@ -14422,12 +15425,15 @@ pub struct Project200ResponseProjectLatestDeployment {
     pub message: Option<String>,
     #[serde(rename = "commitSha")]
     pub commit_sha: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Project200ResponseProject {
     pub id: uuid::Uuid,
     #[validate(
@@ -14464,16 +15470,23 @@ pub struct Project200ResponseProject {
     #[serde(deserialize_with = "Option::deserialize", rename = "latestDeployment")]
     #[serialize_always]
     pub latest_deployment: Option<Project200ResponseProjectLatestDeployment>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Project200Response {
     #[validate(nested)]
     pub projects: Vec<Project200ResponseProject>,
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub total: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum ProjectRequestBodyInstallCommandSource {
@@ -14555,7 +15568,6 @@ impl core::fmt::Display for Project200Response2SourceType {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Project200Response2 {
     pub id: uuid::Uuid,
     #[validate(
@@ -14587,6 +15599,10 @@ pub struct Project200Response2 {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub message: String,
     pub warnings: Option<Vec<String>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Project200Response3NodeVersion {
@@ -14680,13 +15696,15 @@ impl core::fmt::Display for Project200Response3DeploymentLayerTarget {
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Project200Response3DeploymentLayer {
     pub target: Project200Response3DeploymentLayerTarget,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Project200Response3Deployment {
     pub id: uuid::Uuid,
     #[serde(rename = "isPreview")]
@@ -14726,6 +15744,10 @@ pub struct Project200Response3Deployment {
     )]
     #[serialize_always]
     pub preview_screenshot_url: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Project200Response3EnvVarScopeType {
@@ -14744,7 +15766,6 @@ impl core::fmt::Display for Project200Response3EnvVarScopeType {
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Project200Response3EnvVar {
     pub id: uuid::Uuid,
     pub key: String,
@@ -14752,23 +15773,29 @@ pub struct Project200Response3EnvVar {
     pub scope_type: Project200Response3EnvVarScopeType,
     #[serde(rename = "createdAt")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Project200Response3Count {
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub deployments: i64,
     #[serde(rename = "envVars")]
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub env_vars: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Project200Response3 {
     pub id: uuid::Uuid,
     #[serde(rename = "workspaceId")]
@@ -14907,12 +15934,19 @@ pub struct Project200Response3 {
     pub count: Project200Response3Count,
     #[serde(rename = "hasPreviewPassword")]
     pub has_preview_password: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Project200Response4 {
     pub id: uuid::Uuid,
     pub message: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(untagged)]
@@ -14926,11 +15960,14 @@ pub enum ProjectRequestBody2IncludeFilesOutsideRoot {
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Project200Response5 {
     pub id: uuid::Uuid,
     pub message: String,
     pub warnings: Option<Vec<String>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum DomainResponseItemDnsStatus {
@@ -15054,7 +16091,6 @@ pub struct DomainResponseItemManagedDnsZoneSyncFailure {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct DomainResponseItemManagedDnsZone {
     pub id: uuid::Uuid,
     #[serde(rename = "zoneName")]
@@ -15068,6 +16104,10 @@ pub struct DomainResponseItemManagedDnsZone {
     #[serde(deserialize_with = "Option::deserialize", rename = "nextProvisionAt")]
     #[serialize_always]
     pub next_provision_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum DomainResponseItemEnvironmentType {
@@ -15092,17 +16132,19 @@ impl core::fmt::Display for DomainResponseItemEnvironmentType {
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct DomainResponseItemEnvironment {
     #[serde(rename = "type")]
     pub r#type: DomainResponseItemEnvironmentType,
     pub name: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct DomainResponseItem {
     pub id: uuid::Uuid,
     pub domain: String,
@@ -15177,22 +16219,32 @@ pub struct DomainResponseItem {
     #[serde(rename = "createdAt")]
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub environment: DomainResponseItemEnvironment,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct DomainResponse {
     #[validate(nested)]
     pub domains: Vec<DomainResponseItem>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct DeletedResponse {
     #[serde(deserialize_with = "DeletedResponse::deserialize_const_deleted")]
     #[serde(serialize_with = "DeletedResponse::serialize_const_deleted")]
     #[default(true)]
     pub deleted: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl DeletedResponse {
     #[allow(
@@ -15236,6 +16288,166 @@ impl DeletedResponse {
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Release200ResponseReleaseContentDigestAlgorithm {
+    #[serde(rename = "SHA256")]
+    #[default]
+    Sha256,
+    #[serde(rename = "BLAKE3")]
+    Blake3,
+}
+impl core::fmt::Display for Release200ResponseReleaseContentDigestAlgorithm {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Sha256 => write!(f, "SHA256"),
+            Self::Blake3 => write!(f, "BLAKE3"),
+        }
+    }
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Release200ResponseReleaseContentDigest {
+    pub algorithm: Release200ResponseReleaseContentDigestAlgorithm,
+    #[validate(regex(path = "REGEX_PREPARE_UPLOAD_REQUEST_BODY_LOGICAL_MANIFEST_SHA256"))]
+    pub value: String,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Release200ResponseRelease {
+    #[serde(rename = "releaseId")]
+    pub release_id: uuid::Uuid,
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: uuid::Uuid,
+    #[serde(rename = "createdAt")]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "contentDigest")]
+    #[validate(nested)]
+    pub content_digest: Release200ResponseReleaseContentDigest,
+    #[serde(rename = "sizeBytes")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub size_bytes: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Release200ResponseNextCursor {
+    #[serde(rename = "createdAt")]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "releaseId")]
+    pub release_id: uuid::Uuid,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Release200Response {
+    #[validate(nested)]
+    pub releases: Vec<Release200ResponseRelease>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "nextCursor")]
+    #[serialize_always]
+    pub next_cursor: Option<Release200ResponseNextCursor>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Serving200ResponseAddress {
+    #[validate(url)]
+    pub url: String,
+    pub subdomain: String,
+    pub enabled: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Serving200ResponseDesired {
+    #[validate(regex(path = "REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION"))]
+    pub generation: String,
+    #[serde(deserialize_with = "Option::deserialize", rename = "operationId")]
+    #[serialize_always]
+    pub operation_id: Option<uuid::Uuid>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "releaseId")]
+    #[serialize_always]
+    pub release_id: Option<uuid::Uuid>,
+    pub phase: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub result: Option<String>,
+    #[serde(rename = "activeEverywhere")]
+    pub active_everywhere: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Serving200ResponseObserved {
+    pub known: bool,
+    #[serde(deserialize_with = "Option::deserialize", rename = "releaseId")]
+    #[serialize_always]
+    pub release_id: Option<uuid::Uuid>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "deploymentId")]
+    #[serialize_always]
+    pub deployment_id: Option<uuid::Uuid>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub members: Option<Box<T0>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Serving200Response {
+    #[serde(rename = "environmentId")]
+    pub environment_id: uuid::Uuid,
+    #[validate(nested)]
+    pub address: Serving200ResponseAddress,
+    #[validate(nested)]
+    pub desired: Serving200ResponseDesired,
+    pub observed: Serving200ResponseObserved,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct ActivateRelease202Response {
+    #[serde(rename = "operationId")]
+    pub operation_id: uuid::Uuid,
+    #[serde(rename = "releaseId")]
+    pub release_id: uuid::Uuid,
+    #[serde(rename = "desiredGeneration")]
+    #[validate(regex(path = "REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION"))]
+    pub desired_generation: String,
+    pub status: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Deployment200ResponsePreviewSourceType {
     #[serde(rename = "BRANCH")]
     #[default]
@@ -15269,7 +16481,6 @@ impl core::fmt::Display for Deployment200ResponseRequestedBuildTier {
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Deployment200ResponseProject {
     pub id: uuid::Uuid,
     pub name: String,
@@ -15310,47 +16521,15 @@ pub struct Deployment200ResponseProject {
     pub prioritize_production_builds: bool,
     #[serde(rename = "previewProtectionEnabled")]
     pub preview_protection_enabled: bool,
-}
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum Deployment200ResponseDeploymentUrlAliasType {
-    #[serde(rename = "PRODUCTION_ALIAS")]
-    #[default]
-    ProductionAlias,
-    #[serde(rename = "BRANCH_ALIAS")]
-    BranchAlias,
-    #[serde(rename = "UNIQUE_URL")]
-    UniqueUrl,
-}
-impl core::fmt::Display for Deployment200ResponseDeploymentUrlAliasType {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::ProductionAlias => write!(f, "PRODUCTION_ALIAS"),
-            Self::BranchAlias => write!(f, "BRANCH_ALIAS"),
-            Self::UniqueUrl => write!(f, "UNIQUE_URL"),
-        }
-    }
-}
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
-pub struct Deployment200ResponseDeploymentUrl {
-    pub id: uuid::Uuid,
-    pub subdomain: String,
-    #[serde(rename = "fullUrl")]
-    pub full_url: String,
-    #[serde(rename = "aliasType")]
-    pub alias_type: Deployment200ResponseDeploymentUrlAliasType,
-    #[serde(deserialize_with = "Option::deserialize")]
-    #[serialize_always]
-    pub branch: Option<String>,
-    #[serde(rename = "createdAt")]
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Deployment200Response {
     pub id: uuid::Uuid,
     #[serde(rename = "projectId")]
@@ -15390,7 +16569,7 @@ pub struct Deployment200Response {
     pub error_code: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "errorDetails")]
     #[serialize_always]
-    pub error_details: Option<Box<Schema02>>,
+    pub error_details: Option<Box<T03>>,
     #[serde(deserialize_with = "Option::deserialize", rename = "detectedLanguage")]
     #[serialize_always]
     pub detected_language: Option<String>,
@@ -15402,7 +16581,7 @@ pub struct Deployment200Response {
     pub detected_port: Option<i64>,
     #[serde(deserialize_with = "Option::deserialize", rename = "detectorMetadata")]
     #[serialize_always]
-    pub detector_metadata: Option<Box<Schema1>>,
+    pub detector_metadata: Option<Box<T03>>,
     #[serde(
         deserialize_with = "Option::deserialize",
         rename = "detectorConfidence"
@@ -15411,7 +16590,7 @@ pub struct Deployment200Response {
     pub detector_confidence: Option<f64>,
     #[serde(deserialize_with = "Option::deserialize", rename = "ssrAnalysisResult")]
     #[serialize_always]
-    pub ssr_analysis_result: Option<Box<Schema2>>,
+    pub ssr_analysis_result: Option<Box<T03>>,
     #[serde(deserialize_with = "Option::deserialize", rename = "artifactSizeBytes")]
     #[serialize_always]
     pub artifact_size_bytes: Option<f64>,
@@ -15542,7 +16721,7 @@ pub struct Deployment200Response {
     pub isr_cache_prefix: Option<String>,
     #[serde(deserialize_with = "Option::deserialize")]
     #[serialize_always]
-    pub meta: Option<Box<Schema3>>,
+    pub meta: Option<Box<T03>>,
     #[serde(
         deserialize_with = "Option::deserialize",
         rename = "previewScreenshotUrl"
@@ -15550,12 +16729,13 @@ pub struct Deployment200Response {
     #[serialize_always]
     pub preview_screenshot_url: Option<String>,
     pub project: Deployment200ResponseProject,
-    #[serde(rename = "deploymentUrls")]
-    pub deployment_urls: Vec<Deployment200ResponseDeploymentUrl>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Project200Response6Deployment {
     pub id: uuid::Uuid,
     #[serde(rename = "isPreview")]
@@ -15579,34 +16759,30 @@ pub struct Project200Response6Deployment {
     #[serde(deserialize_with = "Option::deserialize", rename = "finishedAt")]
     #[serialize_always]
     pub finished_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Project200Response6 {
     pub deployments: Vec<Project200Response6Deployment>,
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub total: i64,
-}
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
-pub struct Rollback200Response {
-    pub id: uuid::Uuid,
-    pub status: Project200ResponseProjectLatestDeploymentStatus,
-    pub message: String,
-    #[serde(rename = "rollbackFrom")]
-    pub rollback_from: uuid::Uuid,
-    #[serde(rename = "rollbackTo")]
-    pub rollback_to: uuid::Uuid,
-    #[serde(rename = "rebuildQueued")]
-    pub rebuild_queued: Option<bool>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct EnabledResponse {
     pub enabled: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum BuildLogSessionRequestBodySource {
@@ -15706,7 +16882,6 @@ impl core::fmt::Display for BuildLogSession200ResponseSessionFailurePhase {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct BuildLogSession200ResponseSession {
     pub id: uuid::Uuid,
     #[serde(rename = "projectId")]
@@ -15749,15 +16924,22 @@ pub struct BuildLogSession200ResponseSession {
     pub finished_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(rename = "diagnosticPath")]
     pub diagnostic_path: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct BuildLogSession200Response {
     pub created: bool,
     #[validate(nested)]
     pub session: BuildLogSession200ResponseSession,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum EventRequestBodyItemStream {
@@ -15833,7 +17015,7 @@ impl core::fmt::Display for EventRequestBodyItemOrigin {
 pub struct EventRequestBodyItem {
     #[validate(range(min = 0i64, max = 49_999i64))]
     pub seq: i64,
-    pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    pub timestamp: serde_json::Value,
     pub stream: EventRequestBodyItemStream,
     pub level: EventRequestBodyItemLevel,
     pub phase: BuildLogSession200ResponseSessionFailurePhase,
@@ -15847,7 +17029,6 @@ pub struct EventRequestBodyItem {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Event200Response {
     #[serde(deserialize_with = "Event200Response::deserialize_const_accepted")]
     #[serde(serialize_with = "Event200Response::serialize_const_accepted")]
@@ -15857,6 +17038,10 @@ pub struct Event200Response {
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub next_seq: i64,
     pub replayed: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl Event200Response {
     #[allow(
@@ -15919,11 +17104,14 @@ impl core::fmt::Display for FinishRequestBodyStatus {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Finish200Response {
     pub replayed: Option<bool>,
     #[validate(nested)]
     pub session: BuildLogSession200ResponseSession,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum DomainResponse2ItemConnectionMode {
@@ -15967,11 +17155,13 @@ impl core::fmt::Display for DomainResponse2ItemNameserverConfigStatus {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct DomainResponse2Item {
     pub id: uuid::Uuid,
     #[serde(rename = "zoneName")]
-    #[validate(regex(path = "REGEX_DOMAIN_RESPONSE2ITEM_ZONE_NAME"))]
+    #[validate(
+        length(min = 4u64, max = 253u64),
+        regex(path = "REGEX_DOMAIN_RESPONSE2ITEM_ZONE_NAME")
+    )]
     pub zone_name: String,
     #[serde(rename = "connectionMode")]
     pub connection_mode: DomainResponse2ItemConnectionMode,
@@ -15997,24 +17187,33 @@ pub struct DomainResponse2Item {
     #[serde(rename = "liveHostnameCount")]
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub live_hostname_count: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct DomainResponse2 {
     #[validate(nested)]
     pub domains: Vec<DomainResponse2Item>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Domain200ResponseZone {
     pub id: uuid::Uuid,
     #[serde(rename = "zoneName")]
-    #[validate(regex(path = "REGEX_DOMAIN_RESPONSE2ITEM_ZONE_NAME"))]
+    #[validate(
+        length(min = 4u64, max = 253u64),
+        regex(path = "REGEX_DOMAIN_RESPONSE2ITEM_ZONE_NAME")
+    )]
     pub zone_name: String,
     #[serde(rename = "connectionMode")]
     pub connection_mode: DomainResponse2ItemConnectionMode,
@@ -16043,6 +17242,10 @@ pub struct Domain200ResponseZone {
     pub nameservers: Vec<String>,
     #[serde(rename = "nameserverConfigStatus")]
     pub nameserver_config_status: DomainResponse2ItemNameserverConfigStatus,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Domain200ResponseRecordType {
@@ -16111,7 +17314,6 @@ impl core::fmt::Display for Domain200ResponseRecordType {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Domain200ResponseRecord {
     pub id: uuid::Uuid,
     #[serde(rename = "zoneId")]
@@ -16141,34 +17343,46 @@ pub struct Domain200ResponseRecord {
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(rename = "updatedAt")]
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Domain200ResponseHostnameEnvironmentProject {
     pub id: uuid::Uuid,
     pub name: String,
     #[serde(deserialize_with = "Option::deserialize", rename = "displayName")]
     #[serialize_always]
     pub display_name: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Domain200ResponseHostnameEnvironment {
     pub id: uuid::Uuid,
     #[serde(rename = "type")]
     pub r#type: DomainResponseItemEnvironmentType,
     pub name: String,
     pub project: Domain200ResponseHostnameEnvironmentProject,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Domain200ResponseHostname {
     pub id: uuid::Uuid,
-    #[validate(regex(path = "REGEX_DOMAIN_RESPONSE2ITEM_ZONE_NAME"))]
+    #[validate(
+        length(min = 4u64, max = 253u64),
+        regex(path = "REGEX_DOMAIN_RESPONSE2ITEM_ZONE_NAME")
+    )]
     pub domain: String,
     #[serde(rename = "dnsMode")]
     pub dns_mode: DomainResponseItemDnsMode,
@@ -16212,11 +17426,14 @@ pub struct Domain200ResponseHostname {
     #[serde(deserialize_with = "Option::deserialize")]
     #[serialize_always]
     pub environment: Option<Domain200ResponseHostnameEnvironment>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Domain200Response {
     #[validate(nested)]
     pub zone: Domain200ResponseZone,
@@ -16224,57 +17441,82 @@ pub struct Domain200Response {
     pub records: Vec<Domain200ResponseRecord>,
     #[validate(nested)]
     pub hostnames: Vec<Domain200ResponseHostname>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Verify200ResponseDelegation {
     pub delegated: bool,
     pub expected: Vec<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Verify200Response {
     #[serde(deserialize_with = "Option::deserialize")]
     #[serialize_always]
     pub delegation: Option<Verify200ResponseDelegation>,
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub requeued: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct HostnameResponseItem {
     pub id: uuid::Uuid,
-    #[validate(regex(path = "REGEX_DOMAIN_RESPONSE2ITEM_ZONE_NAME"))]
+    #[validate(
+        length(min = 4u64, max = 253u64),
+        regex(path = "REGEX_DOMAIN_RESPONSE2ITEM_ZONE_NAME")
+    )]
     pub domain: String,
     #[serde(rename = "dnsMode")]
     pub dns_mode: DomainResponseItemDnsMode,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct HostnameResponse {
     #[validate(nested)]
     pub hostname: HostnameResponseItem,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct DeletedResponse2 {
     pub deleted: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct AccessResponseItemHeader {
     #[serde(deserialize_with = "AccessResponseItemHeader::deserialize_const_name")]
     #[serde(serialize_with = "AccessResponseItemHeader::serialize_const_name")]
     #[default("X-ONREZA-Protection-Bypass".to_string())]
     pub name: String,
     pub value: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl AccessResponseItemHeader {
     #[allow(
@@ -16318,13 +17560,16 @@ impl AccessResponseItemHeader {
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct AccessResponseItemQuery {
     #[serde(deserialize_with = "AccessResponseItemQuery::deserialize_const_name")]
     #[serde(serialize_with = "AccessResponseItemQuery::serialize_const_name")]
     #[default("_bypass".to_string())]
     pub name: String,
     pub value: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl AccessResponseItemQuery {
     #[allow(
@@ -16370,7 +17615,6 @@ impl AccessResponseItemQuery {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct AccessResponseItem {
     #[serde(rename = "projectId")]
     pub project_id: uuid::Uuid,
@@ -16380,26 +17624,42 @@ pub struct AccessResponseItem {
     #[serde(rename = "expiresAt")]
     pub expires_at: chrono::DateTime<chrono::Utc>,
     #[serde(rename = "ttlSeconds")]
-    #[validate(range(max = 9_007_199_254_740_991i64, exclusive_min = 0i64))]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
     pub ttl_seconds: i64,
     pub header: AccessResponseItemHeader,
     pub query: AccessResponseItemQuery,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct AccessResponse {
     #[validate(nested)]
     pub access: AccessResponseItem,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct SuccessResponse {
     #[serde(deserialize_with = "SuccessResponse::deserialize_const_success")]
     #[serde(serialize_with = "SuccessResponse::serialize_const_success")]
     #[default(true)]
     pub success: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl SuccessResponse {
     #[allow(
@@ -16776,15 +18036,18 @@ impl core::fmt::Display for ComputeConfigRequestBodyComputeMode {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct ComputeConfig200ResponseConfig {
     #[serde(rename = "computeMode")]
     pub compute_mode: String,
-    #[serde(rename = "useWorkers")]
-    pub use_workers: bool,
-    #[serde(rename = "workerCount")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub worker_count: i64,
+    #[serde(rename = "processCpuLimitMillis")]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
+    pub process_cpu_limit_millis: i64,
     #[serde(deserialize_with = "Option::deserialize", rename = "memoryBaselineMb")]
     #[serialize_always]
     pub memory_baseline_mb: Option<i64>,
@@ -16797,22 +18060,14 @@ pub struct ComputeConfig200ResponseConfig {
     #[serde(deserialize_with = "Option::deserialize", rename = "healthCheckPath")]
     #[serialize_always]
     pub health_check_path: Option<String>,
-    #[serde(rename = "websocketEnabled")]
-    pub websocket_enabled: bool,
-    #[serde(
-        deserialize_with = "Option::deserialize",
-        rename = "websocketMaxDurationSeconds"
-    )]
-    #[serialize_always]
-    pub websocket_max_duration_seconds: Option<i64>,
-    #[serde(rename = "websocketMaxDurationDefault")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub websocket_max_duration_default: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct ComputeConfig200Response {
     #[serde(deserialize_with = "ComputeConfig200Response::deserialize_const_enabled")]
     #[serde(serialize_with = "ComputeConfig200Response::serialize_const_enabled")]
@@ -16820,6 +18075,28 @@ pub struct ComputeConfig200Response {
     pub enabled: bool,
     #[validate(nested)]
     pub config: ComputeConfig200ResponseConfig,
+    #[serde(rename = "cpuHardCapMillis")]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
+    pub cpu_hard_cap_millis: i64,
+    #[serde(rename = "effectiveCpuLimitMillis")]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
+    pub effective_cpu_limit_millis: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl ComputeConfig200Response {
     #[allow(
@@ -16939,21 +18216,24 @@ impl<'de> serde::Deserialize<'de> for Database200ResponseAllowedCuSize {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Database200ResponseComputeShape {
-    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    #[validate(range(min = 0i64, max = 2_147_483_647i64))]
     pub applied_user_backend_limit: i64,
-    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    #[validate(range(min = 0i64, max = 2_147_483_647i64))]
     pub cpu_millicores: i64,
     pub cu: f64,
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub memory_bytes: i64,
-    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    #[validate(range(min = 0i64, max = 2_147_483_647i64))]
     pub milli_cu: i64,
-    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    #[validate(range(min = 0i64, max = 2_147_483_647i64))]
     pub postgres_connection_ceiling: i64,
     pub supports_autoscaling: bool,
     pub supports_fixed: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Database200ResponsePlan {
@@ -16977,7 +18257,6 @@ impl core::fmt::Display for Database200ResponsePlan {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Database200ResponseSuspendTimeoutCapability {
     #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
     pub default: i64,
@@ -16988,6 +18267,10 @@ pub struct Database200ResponseSuspendTimeoutCapability {
     #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
     pub minimum: i64,
     pub null_inherits_default: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Database200ResponseCapacityClassAvailability {
@@ -17013,7 +18296,6 @@ impl core::fmt::Display for Database200ResponseCapacityClassAvailability {
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Database200ResponseCapacityClass {
     #[serde(rename = "placementClass")]
     pub placement_class: String,
@@ -17027,6 +18309,10 @@ pub struct Database200ResponseCapacityClass {
     pub observed_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(rename = "updatedAt")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Database200ResponseDatumStatus {
@@ -17074,7 +18360,6 @@ impl core::fmt::Display for Database200ResponseDatumBranchStatus {
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Database200ResponseDatumBranch {
     pub id: uuid::Uuid,
     #[serde(rename = "managedDatabaseId")]
@@ -17099,9 +18384,12 @@ pub struct Database200ResponseDatumBranch {
     pub status: Database200ResponseDatumBranchStatus,
     #[serde(rename = "createdAt")]
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Database200ResponseDatumProjectAttachment {
     pub id: uuid::Uuid,
     #[serde(rename = "workspaceId")]
@@ -17120,6 +18408,10 @@ pub struct Database200ResponseDatumProjectAttachment {
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(rename = "updatedAt")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Database200ResponseDatumEndpointStatus {
@@ -17144,7 +18436,6 @@ impl core::fmt::Display for Database200ResponseDatumEndpointStatus {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Database200ResponseDatum {
     pub id: uuid::Uuid,
     #[serde(rename = "workspaceId")]
@@ -17209,12 +18500,15 @@ pub struct Database200ResponseDatum {
     pub last_active: Option<String>,
     #[serde(rename = "statusUnavailable")]
     pub status_unavailable: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Database200Response {
     #[serde(rename = "allowedCuSizes")]
     pub allowed_cu_sizes: Vec<Database200ResponseAllowedCuSize>,
@@ -17247,12 +18541,15 @@ pub struct Database200Response {
     pub capacity_status_unavailable: bool,
     #[validate(nested)]
     pub data: Vec<Database200ResponseDatum>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Database200Response2 {
     pub id: uuid::Uuid,
     #[serde(rename = "workspaceId")]
@@ -17307,6 +18604,10 @@ pub struct Database200Response2 {
     #[serialize_always]
     pub suspend_timeout_seconds: Option<i64>,
     pub password: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Database200Response3Permission {
@@ -17416,7 +18717,6 @@ impl core::fmt::Display for Database200Response3KaikiStatus {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Database200Response3 {
     pub id: uuid::Uuid,
     #[serde(rename = "workspaceId")]
@@ -17501,14 +18801,21 @@ pub struct Database200Response3 {
     pub capacity_generated_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(rename = "capacityStatusUnavailable")]
     pub capacity_status_unavailable: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct StatusResponse {
     #[serde(deserialize_with = "StatusResponse::deserialize_const_status")]
     #[serde(serialize_with = "StatusResponse::serialize_const_status")]
     #[default("deleted".to_string())]
     pub status: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl StatusResponse {
     #[allow(
@@ -17555,7 +18862,6 @@ impl StatusResponse {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Database200Response4 {
     pub id: uuid::Uuid,
     #[serde(rename = "workspaceId")]
@@ -17610,16 +18916,23 @@ pub struct Database200Response4 {
     #[serialize_always]
     pub suspend_timeout_seconds: Option<i64>,
     pub password: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Start200ResponseResource {
     #[serde(default, with = "serde_with::rust::double_option")]
     pub resource_generation: Option<Option<i64>>,
     #[serde(default, with = "serde_with::rust::double_option")]
     pub resource_id: Option<Option<String>>,
     pub resource_type: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Start200ResponseStatus {
@@ -17647,12 +18960,15 @@ impl core::fmt::Display for Start200ResponseStatus {
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Start200Response {
     pub operation_id: uuid::Uuid,
     pub operation_type: String,
     pub resource: Start200ResponseResource,
     pub status: Start200ResponseStatus,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Connection200ResponseConnectionTargetsDirectMode {
@@ -17673,7 +18989,6 @@ impl core::fmt::Display for Connection200ResponseConnectionTargetsDirectMode {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Connection200ResponseConnectionTargetsDirect {
     pub host: String,
     #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
@@ -17681,23 +18996,29 @@ pub struct Connection200ResponseConnectionTargetsDirect {
     pub sslmode: String,
     pub mode: Connection200ResponseConnectionTargetsDirectMode,
     pub connection_uri: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Connection200ResponseConnectionTargets {
     #[validate(nested)]
     pub direct: Connection200ResponseConnectionTargetsDirect,
     #[serde(default, with = "serde_with::rust::double_option")]
     #[validate(nested)]
     pub pooled: Option<Option<Connection200ResponseConnectionTargetsDirect>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Connection200Response {
     #[validate(nested)]
     pub connection_targets: Connection200ResponseConnectionTargets,
@@ -17707,13 +19028,16 @@ pub struct Connection200Response {
     pub role_name: String,
     pub password: String,
     pub connection_uri: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 pub type Branch200Response = Vec<ManagedDatabaseBranchListItem>;
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Branch200Response2 {
     #[serde(default, with = "serde_with::rust::double_option")]
     pub ancestor_lsn: Option<Option<String>>,
@@ -17734,7 +19058,7 @@ pub struct Branch200Response2 {
     pub endpoint_id: Option<Option<String>>,
     #[serde(default, with = "serde_with::rust::double_option")]
     pub expires_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    #[validate(range(min = -2_147_483_648i64, max = 2_147_483_647i64))]
     pub external_generation: i64,
     #[serde(default, with = "serde_with::rust::double_option")]
     pub external_id: Option<Option<String>>,
@@ -17761,20 +19085,27 @@ pub struct Branch200Response2 {
     #[serde(default, with = "serde_with::rust::double_option")]
     pub tombstone_retained_until: Option<Option<chrono::DateTime<chrono::Utc>>>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct User200Response {
     pub id: uuid::Uuid,
-    #[validate(email, regex(path = "REGEX_USER200RESPONSE_EMAIL"))]
+    #[validate(email)]
     pub email: String,
     pub name: String,
     #[serde(deserialize_with = "Option::deserialize")]
     #[serialize_always]
     pub username: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Workspace200ResponseRole {
@@ -17859,7 +19190,6 @@ impl core::fmt::Display for Workspace200ResponseSubscriptionCurrentPeriodSettlem
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Workspace200ResponseSubscription {
     #[serde(rename = "planSlug")]
     pub plan_slug: Database200ResponsePlan,
@@ -17876,10 +19206,13 @@ pub struct Workspace200ResponseSubscription {
     pub current_period_end: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(rename = "cancelAtPeriodEnd")]
     pub cancel_at_period_end: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Workspace200Response {
     pub id: uuid::Uuid,
     pub slug: String,
@@ -17897,11 +19230,14 @@ pub struct Workspace200Response {
     #[serde(deserialize_with = "Option::deserialize")]
     #[serialize_always]
     pub subscription: Option<Workspace200ResponseSubscription>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Device200Response {
     #[validate(regex(path = "REGEX_TOKEN_REQUEST_BODY_DEVICE_CODE"))]
     pub device_code: String,
@@ -17911,15 +19247,30 @@ pub struct Device200Response {
     pub verification_uri: String,
     #[validate(url)]
     pub verification_uri_complete: String,
-    #[validate(range(max = 9_007_199_254_740_991i64, exclusive_min = 0i64))]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
     pub expires_in: i64,
-    #[validate(range(max = 9_007_199_254_740_991i64, exclusive_min = 0i64))]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
     pub interval: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Token200Response {
     pub access_token: String,
     #[serde(deserialize_with = "Token200Response::deserialize_const_token_type")]
@@ -17928,8 +19279,18 @@ pub struct Token200Response {
     pub token_type: String,
     pub workspace_slug: String,
     pub workspace_name: String,
-    #[validate(range(max = 9_007_199_254_740_991i64, exclusive_min = 0i64))]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
     pub expires_in: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl Token200Response {
     #[allow(
@@ -17995,9 +19356,12 @@ impl core::fmt::Display for ErrorResponseError {
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct ErrorResponse {
     pub error: ErrorResponseError,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Status200ResponseRuntimeArtifactGraphSchemaVersion {
@@ -18179,7 +19543,13 @@ pub struct Status200ResponseRuntimeArtifactGraphDependencyCompatibility {
     ))]
     pub runner_rootfs_digest: String,
     #[serde(rename = "buildPolicyGeneration")]
-    #[validate(range(max = 2_147_483_647i64, exclusive_min = 0i64))]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 2_147_483_647i64,
+            exclusive_min = 0i64
+        )
+    )]
     pub build_policy_generation: i64,
 }
 impl Status200ResponseRuntimeArtifactGraphDependencyCompatibility {
@@ -18417,13 +19787,21 @@ pub struct Status200ResponseRuntimeArtifactGraphRuntimeLayerRuntimeConfig {
     pub runtime_family:
         Option<Status200ResponseRuntimeArtifactGraphRuntimeLayerRuntimeConfigRuntimeFamily>,
     #[serde(rename = "timeoutMs")]
-    #[validate(range(max = 9_007_199_254_740_991i64, exclusive_min = 0i64))]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
     pub timeout_ms: Option<i64>,
     #[serde(rename = "memoryMb")]
     #[validate(range(min = 32i64, max = 8_192i64))]
     pub memory_mb: Option<i64>,
     #[serde(rename = "maxConcurrency")]
-    #[validate(range(max = 100i64, exclusive_min = 0i64))]
+    #[validate(
+        range(min = -9_007_199_254_740_991i64, max = 100i64, exclusive_min = 0i64)
+    )]
     pub max_concurrency: Option<i64>,
 }
 #[serde_with::skip_serializing_none]
@@ -18475,7 +19853,6 @@ pub struct Status200ResponseRuntimeArtifactGraph {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Status200Response {
     pub id: uuid::Uuid,
     pub status: String,
@@ -18491,7 +19868,7 @@ pub struct Status200Response {
     pub error_code: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "errorDetails")]
     #[serialize_always]
-    pub error_details: Option<Box<Schema08>>,
+    pub error_details: Option<Box<T09>>,
     #[serde(
         deserialize_with = "Option::deserialize",
         rename = "runtimeArtifactGraphDigest"
@@ -18510,6 +19887,10 @@ pub struct Status200Response {
     #[serde(deserialize_with = "Option::deserialize", rename = "readyAt")]
     #[serialize_always]
     pub ready_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
@@ -19849,7 +21230,6 @@ impl core::fmt::Display for ResolveRequestBodySelectionSource {
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Resolve200ResponseContext {
     #[serde(rename = "workspaceId")]
     pub workspace_id: uuid::Uuid,
@@ -19870,9 +21250,12 @@ pub struct Resolve200ResponseContext {
     pub source_ref: Option<String>,
     #[serde(rename = "selectionSource")]
     pub selection_source: ResolveRequestBodySelectionSource,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Resolve200Response {
     #[serde(rename = "protocolVersion")]
     #[serde(deserialize_with = "Resolve200Response::deserialize_const_protocol_version")]
@@ -19880,6 +21263,10 @@ pub struct Resolve200Response {
     #[default("execution-context-v2".to_string())]
     pub protocol_version: String,
     pub context: Resolve200ResponseContext,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl Resolve200Response {
     #[allow(
@@ -19961,7 +21348,6 @@ impl core::fmt::Display for Materialize200ResponseSnapshotSource {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Materialize200ResponseSnapshot {
     #[validate(regex(path = "REGEX_MATERIALIZE200RESPONSE_SNAPSHOT_FINGERPRINT"))]
     pub fingerprint: String,
@@ -19971,11 +21357,14 @@ pub struct Materialize200ResponseSnapshot {
     #[serde(deserialize_with = "Option::deserialize", rename = "deploymentId")]
     #[serialize_always]
     pub deployment_id: Option<uuid::Uuid>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Materialize200Response {
     #[serde(rename = "protocolVersion")]
     #[serde(deserialize_with = "Materialize200Response::deserialize_const_protocol_version")]
@@ -19988,6 +21377,10 @@ pub struct Materialize200Response {
     pub secret_keys: Vec<String>,
     #[validate(nested)]
     pub snapshot: Materialize200ResponseSnapshot,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl Materialize200Response {
     #[allow(
@@ -20030,10 +21423,10 @@ impl Materialize200Response {
         serde::Serialize::serialize(value, serializer)
     }
 }
+#[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Admit200ResponseDeployment {
     pub id: uuid::Uuid,
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
@@ -20042,7 +21435,13 @@ pub struct Admit200ResponseDeployment {
     #[serde(serialize_with = "Admit200ResponseDeployment::serialize_const_status")]
     #[default("BUILDING".to_string())]
     pub status: String,
-    pub url: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub url: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl Admit200ResponseDeployment {
     #[allow(
@@ -20088,17 +21487,19 @@ impl Admit200ResponseDeployment {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Admit200ResponseSnapshot {
     #[validate(regex(path = "REGEX_MATERIALIZE200RESPONSE_SNAPSHOT_FINGERPRINT"))]
     pub fingerprint: String,
     #[serde(rename = "resolvedAt")]
     pub resolved_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Admit200Response {
     #[serde(rename = "protocolVersion")]
     #[serde(deserialize_with = "Admit200Response::deserialize_const_protocol_version")]
@@ -20110,6 +21511,10 @@ pub struct Admit200Response {
     pub deployment: Admit200ResponseDeployment,
     #[validate(nested)]
     pub snapshot: Admit200ResponseSnapshot,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl Admit200Response {
     #[allow(
@@ -20156,7 +21561,6 @@ impl Admit200Response {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct RunnerContext200ResponseDeployment {
     pub id: uuid::Uuid,
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
@@ -20168,12 +21572,15 @@ pub struct RunnerContext200ResponseDeployment {
     #[serde(deserialize_with = "Option::deserialize")]
     #[serialize_always]
     pub url: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct RunnerContext200ResponseSettings {
     #[serde(deserialize_with = "Option::deserialize", rename = "frameworkPreset")]
     #[serialize_always]
@@ -20214,11 +21621,14 @@ pub struct RunnerContext200ResponseSettings {
     )]
     #[serialize_always]
     pub ignored_build_command: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct RunnerContext200Response {
     pub context: Resolve200ResponseContext,
     #[serde(rename = "protocolVersion")]
@@ -20230,6 +21640,10 @@ pub struct RunnerContext200Response {
     pub deployment: RunnerContext200ResponseDeployment,
     #[validate(nested)]
     pub settings: RunnerContext200ResponseSettings,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl RunnerContext200Response {
     #[allow(
@@ -20291,141 +21705,6 @@ impl core::fmt::Display for FailBeforeSourceRequestBodyErrorCode {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObjectBillingV2meter {
-    #[serde(rename = "moduleKey")]
-    pub module_key: ApiErrorLimitDetailsBillingV2meterModuleKey,
-    #[serde(rename = "meterKey")]
-    pub meter_key: String,
-    #[serde(rename = "pricingKey")]
-    pub pricing_key: ApiErrorLimitDetailsBillingV2meterPricingKey,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObjectUserBudget {
-    #[serde(rename = "extraUsageBudgetRubles")]
-    pub extra_usage_budget_rubles: f64,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObjectUsageCredit {
-    #[serde(rename = "includedUsageCreditCents")]
-    pub included_usage_credit_cents: f64,
-    #[serde(rename = "grossUsageCents")]
-    pub gross_usage_cents: f64,
-}
-/// Quota or plan-limit failure details.
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObject {
-    #[serde(rename = "limitType")]
-    pub limit_type: String,
-    #[serde(rename = "controlLayer")]
-    pub control_layer: Option<ApiErrorLimitDetailsControlLayer>,
-    #[serde(rename = "customerVisible")]
-    pub customer_visible: Option<bool>,
-    #[serde(rename = "planBehavior")]
-    pub plan_behavior: Option<ApiErrorLimitDetailsPlanBehavior>,
-    #[serde(
-        default,
-        with = "serde_with::rust::double_option",
-        rename = "billingV2Meter"
-    )]
-    pub billing_v2meter:
-        Option<Option<FailBeforeSourceRequestBodyDiagnosticDetailsObjectBillingV2meter>>,
-    pub current: f64,
-    pub limit: f64,
-    pub remaining: f64,
-    #[serde(rename = "blocksAtLimit")]
-    pub blocks_at_limit: Option<bool>,
-    pub overage: Option<f64>,
-    #[serde(rename = "planSlug")]
-    pub plan_slug: Option<String>,
-    #[serde(rename = "userBudget")]
-    pub user_budget: Option<FailBeforeSourceRequestBodyDiagnosticDetailsObjectUserBudget>,
-    #[serde(rename = "usageCredit")]
-    pub usage_credit: Option<FailBeforeSourceRequestBodyDiagnosticDetailsObjectUsageCredit>,
-    #[serde(rename = "usedMb")]
-    pub used_mb: Option<f64>,
-    #[serde(rename = "reservedMb")]
-    pub reserved_mb: Option<f64>,
-    #[serde(rename = "deploymentSizeMb")]
-    pub deployment_size_mb: Option<f64>,
-    #[serde(rename = "needsFreeMb")]
-    pub needs_free_mb: Option<f64>,
-    #[serde(rename = "usedBytes")]
-    pub used_bytes: Option<String>,
-    #[serde(rename = "reservedBytes")]
-    pub reserved_bytes: Option<String>,
-    #[serde(rename = "deploymentSizeBytes")]
-    pub deployment_size_bytes: Option<String>,
-    #[serde(rename = "limitBytes")]
-    pub limit_bytes: Option<String>,
-    #[serde(rename = "needsFreeBytes")]
-    pub needs_free_bytes: Option<String>,
-    #[serde(rename = "quotaSuppressionVersion")]
-    pub quota_suppression_version: Option<f64>,
-    #[serde(rename = "storageCleanupAttempted")]
-    pub storage_cleanup_attempted: Option<bool>,
-    #[serde(rename = "storageCleanupFreedBytes")]
-    pub storage_cleanup_freed_bytes: Option<String>,
-    #[serde(rename = "storageCleanupPurgedCount")]
-    pub storage_cleanup_purged_count: Option<f64>,
-    #[serde(rename = "storageCleanupFailureCount")]
-    pub storage_cleanup_failure_count: Option<f64>,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObject2Field {
-    pub field: String,
-    pub message: String,
-}
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObject2Issue {
-    pub field: String,
-    pub message: String,
-    pub code: Option<String>,
-    #[serde(
-        default,
-        with = "serde_with::rust::double_option",
-        rename = "recordIndex"
-    )]
-    pub record_index: Option<Option<i64>>,
-}
-/// Validation failure details.
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
-pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObject2 {
-    pub field: Option<String>,
-    pub fields: Option<Vec<FailBeforeSourceRequestBodyDiagnosticDetailsObject2Field>>,
-    pub file: Option<String>,
-    pub source: Option<String>,
-    pub issues: Option<Vec<FailBeforeSourceRequestBodyDiagnosticDetailsObject2Issue>>,
-}
-/// Resource lookup failure details.
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct FailBeforeSourceRequestBodyDiagnosticDetailsResourceType {
-    #[serde(rename = "resourceType")]
-    pub resource_type: String,
-    #[serde(rename = "resourceId")]
-    pub resource_id: Option<String>,
-}
-/// Feature entitlement failure details.
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObject3 {
-    pub feature: String,
-    #[serde(rename = "featureLabel")]
-    pub feature_label: Option<String>,
-    #[serde(rename = "requiredPlan")]
-    pub required_plan: String,
-    #[serde(rename = "currentPlan")]
-    pub current_plan: Option<String>,
-    #[serde(rename = "ctaText")]
-    pub cta_text: Option<String>,
-    #[serde(rename = "ctaUrl")]
-    pub cta_url: Option<String>,
-}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum FailBeforeSourceRequestBodyDiagnosticDetailsObject4ConflictType {
     #[serde(rename = "ACTIVE_PROJECT")]
@@ -20456,47 +21735,10 @@ pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObject4 {
     pub conflict_type: FailBeforeSourceRequestBodyDiagnosticDetailsObject4ConflictType,
     #[serde(rename = "gracePeriodDays")]
     pub grace_period_days: Option<f64>,
-}
-/// External Git provider credential recovery details.
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObject6 {
-    pub provider: ApiErrorProviderReconnectDetailsProvider,
-    pub scope: ApiErrorProviderReconnectDetailsScope,
-    #[serde(rename = "workspaceSlug")]
-    pub workspace_slug: Option<String>,
-    #[serde(rename = "connectionId")]
-    pub connection_id: Option<String>,
-}
-/// ONREZA Functions publication failure details.
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObject7 {
-    #[serde(
-        default,
-        with = "serde_with::rust::double_option",
-        rename = "attemptId"
-    )]
-    pub attempt_id: Option<Option<String>>,
-    pub category: ApiErrorFunctionPublishFailureDetailsCategory,
-    pub origin: ApiErrorFunctionPublishFailureDetailsOrigin,
-    #[serde(rename = "operationId")]
-    pub operation_id: String,
-    #[serde(rename = "projectId")]
-    pub project_id: String,
-    #[serde(rename = "environmentId")]
-    pub environment_id: String,
-    #[serde(
-        default,
-        with = "serde_with::rust::double_option",
-        rename = "deploymentId"
-    )]
-    pub deployment_id: Option<Option<String>>,
-    #[serde(rename = "errorCode")]
-    pub error_code: String,
-    #[serde(default, with = "serde_with::rust::double_option")]
-    pub field: Option<Option<String>>,
-    pub message: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 /// Structured error details. Shape depends on the error code.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
@@ -20504,31 +21746,31 @@ pub struct FailBeforeSourceRequestBodyDiagnosticDetailsObject7 {
 pub enum FailBeforeSourceRequestBodyDiagnosticDetails {
     /// Quota or plan-limit failure details.
     #[default]
-    Object(FailBeforeSourceRequestBodyDiagnosticDetailsObject),
+    Object(ApiErrorLimitDetails),
     /// Validation failure details.
-    Object2(FailBeforeSourceRequestBodyDiagnosticDetailsObject2),
+    Object2(ApiErrorValidationDetails),
     /// Resource lookup failure details.
-    ResourceType(FailBeforeSourceRequestBodyDiagnosticDetailsResourceType),
+    ResourceType(ApiErrorResourceDetails),
     /// Feature entitlement failure details.
-    Object3(FailBeforeSourceRequestBodyDiagnosticDetailsObject3),
+    Object3(ApiErrorFeatureDetails),
     /// State or uniqueness conflict details.
     Object4(FailBeforeSourceRequestBodyDiagnosticDetailsObject4),
     /// DNS records that block an ONREZA-managed hostname route.
     Object5(ApiErrorDnsRoutingRecordConflictDetails),
     /// External Git provider credential recovery details.
-    Object6(FailBeforeSourceRequestBodyDiagnosticDetailsObject6),
+    Object6(ApiErrorProviderReconnectDetails),
     /// ONREZA Functions publication failure details.
-    Object7(FailBeforeSourceRequestBodyDiagnosticDetailsObject7),
-    Object8(std::collections::HashMap<String, Box<Schema09>>),
+    Object7(ApiErrorFunctionPublishFailureDetails),
+    Object8(std::collections::HashMap<String, Box<T010>>),
 }
 impl FailBeforeSourceRequestBodyDiagnosticDetails {
     /// Validation failure details.
     pub fn object2() -> Self {
-        Self::Object2(FailBeforeSourceRequestBodyDiagnosticDetailsObject2::default())
+        Self::Object2(ApiErrorValidationDetails::default())
     }
     /// Resource lookup failure details.
     pub fn resource_type(resource_type: String) -> Self {
-        Self::ResourceType(FailBeforeSourceRequestBodyDiagnosticDetailsResourceType {
+        Self::ResourceType(ApiErrorResourceDetails {
             resource_type,
             ..Default::default()
         })
@@ -20551,10 +21793,13 @@ pub struct FailBeforeSourceRequestBodyDiagnostic {
     pub details: Option<FailBeforeSourceRequestBodyDiagnosticDetails>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct FailBeforeSource200Response {
     pub id: uuid::Uuid,
     pub accepted: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
@@ -20617,14 +21862,30 @@ impl LayerKindObject {
 )]
 pub struct LayerKindObject2Runtime {
     #[serde(rename = "timeoutMs")]
-    #[validate(range(max = 9_007_199_254_740_991i64, exclusive_min = 0i64))]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
     pub timeout_ms: Option<i64>,
     #[serde(rename = "memoryMb")]
     #[validate(range(min = 32i64, max = 8_192i64))]
     pub memory_mb: Option<i64>,
     #[serde(rename = "maxConcurrency")]
-    #[validate(range(max = 9_007_199_254_740_991i64, exclusive_min = 0i64))]
+    #[validate(
+        range(
+            min = -9_007_199_254_740_991i64,
+            max = 9_007_199_254_740_991i64,
+            exclusive_min = 0i64
+        )
+    )]
     pub max_concurrency: Option<i64>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -20640,7 +21901,7 @@ pub struct LayerKindObject2 {
     #[serde(serialize_with = "LayerKindObject2::serialize_const_target")]
     #[default("COMPUTE".to_string())]
     pub target: String,
-    #[validate(length(min = 1u64))]
+    #[validate(length(min = 1u64, max = 512u64))]
     pub entry: String,
     #[validate(nested)]
     pub runtime: Option<LayerKindObject2Runtime>,
@@ -20707,6 +21968,10 @@ pub struct FallthroughWhenKindObject {
     pub name: String,
     #[validate(length(max = 512u64))]
     pub value: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl FallthroughWhenKindObject {
     #[allow(
@@ -20763,6 +22028,10 @@ pub struct FallthroughWhenKindObject2 {
     pub name: String,
     #[validate(length(max = 512u64))]
     pub value: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl FallthroughWhenKindObject2 {
     #[allow(
@@ -20838,7 +22107,9 @@ pub struct SourceRequestBodyManifestRoute {
     #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
     #[default(Some(0i64))]
     pub priority: Option<i64>,
-    #[validate(range(max = 31_536_000i64, exclusive_min = 0i64))]
+    #[validate(
+        range(min = -9_007_199_254_740_991i64, max = 31_536_000i64, exclusive_min = 0i64)
+    )]
     pub revalidate: Option<i64>,
     pub methods: Option<Vec<EdgeRuleAuthoringConditionMethod>>,
     pub headers: Option<std::collections::HashMap<String, String>>,
@@ -20846,6 +22117,10 @@ pub struct SourceRequestBodyManifestRoute {
     #[serde(rename = "fallthroughWhen")]
     #[validate(length(min = 1u64, max = 16u64))]
     pub fallthrough_when: Option<Vec<FallthroughWhenKind>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
@@ -20854,6 +22129,10 @@ pub struct SourceRequestBodyManifestPrerender {
     #[validate(length(min = 1u64))]
     pub layer: String,
     pub pages: std::collections::HashMap<String, serde_json::Value>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -20937,7 +22216,6 @@ pub struct SourceRequestBodyFunctions {
     #[default("DEPLOYMENT".to_string())]
     pub origin: String,
     #[validate(length(max = 1_000u64), nested)]
-    #[default(Some(Default::default()))]
     pub functions: Option<Vec<FunctionPublishSpec2>>,
     #[serde(rename = "edgeRules")]
     #[validate(nested)]
@@ -20947,7 +22225,6 @@ pub struct SourceRequestBodyFunctions {
     pub edge_rules_force: Option<bool>,
     #[serde(rename = "generatedEdgeRuleSets")]
     #[validate(nested)]
-    #[default(Some(Default::default()))]
     pub generated_edge_rule_sets: Option<Vec<SourceRequestBodyFunctionsGeneratedEdgeRuleSet>>,
 }
 impl SourceRequestBodyFunctions {
@@ -20993,7 +22270,6 @@ impl SourceRequestBodyFunctions {
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Source200Response {
     pub id: uuid::Uuid,
     #[serde(deserialize_with = "Source200Response::deserialize_const_status")]
@@ -21003,6 +22279,10 @@ pub struct Source200Response {
     #[serde(deserialize_with = "Option::deserialize")]
     #[serialize_always]
     pub url: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl Source200Response {
     #[allow(
@@ -21071,7 +22351,6 @@ impl core::fmt::Display for EntryKindObjectTraceStatus {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct EntryKindObject {
     #[serde(rename = "eventId")]
     pub event_id: Option<String>,
@@ -21144,15 +22423,22 @@ pub struct EntryKindObject {
     pub handler_exec_us: Option<f64>,
     #[serde(rename = "computeUs")]
     pub compute_us: Option<f64>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct EntryKindObject2 {
     pub timestamp: String,
     pub level: EventRequestBodyItemLevel,
     pub message: String,
     #[serde(rename = "deploymentId")]
     pub deployment_id: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum EntryKindObject3Source {
@@ -21194,7 +22480,6 @@ impl core::fmt::Display for EntryKindObject3FunctionLogLevel {
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct EntryKindObject3 {
     #[serde(rename = "eventId")]
     pub event_id: Option<String>,
@@ -21222,6 +22507,10 @@ pub struct EntryKindObject3 {
     pub function_log_level: Option<EntryKindObject3FunctionLogLevel>,
     #[serde(rename = "functionLogProperties")]
     pub function_log_properties: Option<std::collections::HashMap<String, serde_json::Value>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(untagged)]
@@ -21235,7 +22524,6 @@ pub enum EntryKind {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct RuntimeLog200ResponsePagination {
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub limit: i64,
@@ -21244,6 +22532,10 @@ pub struct RuntimeLog200ResponsePagination {
     #[serde(deserialize_with = "Option::deserialize", rename = "nextCursor")]
     #[serialize_always]
     pub next_cursor: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum RuntimeLog200ResponseFiltersStream {
@@ -21265,23 +22557,29 @@ impl core::fmt::Display for RuntimeLog200ResponseFiltersStream {
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct RuntimeLog200ResponseFilters {
     pub stream: RuntimeLog200ResponseFiltersStream,
     #[serde(rename = "startTime")]
     pub start_time: chrono::DateTime<chrono::Utc>,
     #[serde(rename = "endTime")]
     pub end_time: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct RuntimeLog200Response {
     pub entries: Vec<EntryKind>,
     #[validate(nested)]
     pub pagination: RuntimeLog200ResponsePagination,
     pub filters: RuntimeLog200ResponseFilters,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum GetV1projectsByIdRuntimeLogsRequestQueryOrder {
@@ -21301,7 +22599,6 @@ impl core::fmt::Display for GetV1projectsByIdRuntimeLogsRequestQueryOrder {
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Env200ResponseEnvVarEnvironment {
     pub id: uuid::Uuid,
     #[serde(deserialize_with = "Option::deserialize")]
@@ -21309,10 +22606,13 @@ pub struct Env200ResponseEnvVarEnvironment {
     pub name: Option<String>,
     #[serde(rename = "type")]
     pub r#type: DomainResponseItemEnvironmentType,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Env200ResponseEnvVar {
     pub id: uuid::Uuid,
     pub key: String,
@@ -21334,20 +22634,26 @@ pub struct Env200ResponseEnvVar {
     pub created_at: chrono::DateTime<chrono::Utc>,
     #[serde(rename = "updatedAt")]
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-#[serde(deny_unknown_fields)]
 pub struct Env200Response {
     #[serde(rename = "envVars")]
     pub env_vars: Vec<Env200ResponseEnvVar>,
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub total: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Env200Response2 {
     pub id: uuid::Uuid,
     pub key: String,
@@ -21358,9 +22664,12 @@ pub struct Env200Response2 {
     pub created: bool,
     pub message: String,
     pub warnings: Option<Vec<String>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
 pub struct Env200Response3 {
     #[serde(deserialize_with = "Env200Response3::deserialize_const_deleted")]
     #[serde(serialize_with = "Env200Response3::serialize_const_deleted")]
@@ -21368,6 +22677,10 @@ pub struct Env200Response3 {
     pub deleted: bool,
     pub key: String,
     pub message: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 impl Env200Response3 {
     #[allow(

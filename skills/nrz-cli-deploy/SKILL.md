@@ -43,5 +43,6 @@ nrz env list --environment <environment> --project-id <project_id>
 ```bash
 nrz deployments --project-id <project_id> --limit 5
 nrz logs --project-id <project_id> --limit 200
-nrz rollback --project-id <project_id> --deployment-id <deployment_id>
+nrz rollback --project-id <project_id> --environment <environment> --list
+nrz rollback --project-id <project_id> --environment <environment> --release-id <release_id>
 ```

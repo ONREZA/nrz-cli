@@ -193,16 +193,13 @@ fn compute_config_body_without_path_clears_previous_http_check() {
 }
 
 #[test]
-fn production_unique_url_reports_preview_protection() {
+fn preview_environment_address_reports_preview_protection() {
     let output = DeployOutput {
         deployment_id: "dep_123".to_string(),
-        url: "https://example.test".to_string(),
+        url: Some("https://example.test".to_string()),
         status: "live".to_string(),
-        target: deploy_target_output(Some(true)),
-        preview_protected: Some(super::super::access::protection(
-            &nrz_api::Deployment200ResponseDeploymentUrlAliasType::UniqueUrl,
-            true,
-        )),
+        target: deploy_target_output(Some(false)),
+        preview_protected: Some(super::super::access::protection(true, true)),
         runtime_artifact_files: file_breakdown(),
         warnings: vec![],
         health_check: Some(HealthCheckInfo::Http {
@@ -222,7 +219,7 @@ fn production_unique_url_reports_preview_protection() {
     let value = serde_json::to_value(&output).unwrap();
 
     assert_eq!(value["deploymentId"], "dep_123");
-    assert_eq!(value["target"]["environment"], "production");
+    assert_eq!(value["target"]["environment"], "preview");
     assert_eq!(value["previewProtected"], true);
     assert_eq!(value["runtimeArtifactFiles"]["total"], 20_679);
     assert_eq!(value["healthCheck"]["path"], "/health");

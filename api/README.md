@@ -39,6 +39,10 @@ lengths as Rust tuples. JSON Schema constants are enforced during serialization
 and deserialization, so equal-shaped responses with different `kind` values
 remain distinct Rust enum variants. It never rewrites generated Rust text.
 
+Open object schemas preserve additional JSON properties, including when
+`additionalProperties` is omitted and therefore permits them by default.
+Explicitly closed objects still reject unknown properties.
+
 A future upstream/fork release can replace the source patch after the same
 contract tests pass. `NRZ_OPENAPI_GENERATOR_SOURCE=/path/to/oas3-gen` selects
 a local generator checkout explicitly, without publishing it.
