@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.42.0] - 2026-10-01
+
+### 🔧 Changed
+
+- **deps:** update deps ([ac64976](https://github.com/ONREZA/nrz-cli/commit/ac649766d096b1d0d418c9cfb7ef820af189be6f))
+
+### ♻️ Changed
+
+- **build:** share contract codegen ([9e63388](https://github.com/ONREZA/nrz-cli/commit/9e633883c235de0f8b0172a91bacccb56b69490c))
+
+### ✨ Features
+
+- **cli:** use environment release contracts ([57c342d](https://github.com/ONREZA/nrz-cli/commit/57c342d308a33bbd81f2665f811b46657985ea14))
+
+### 🐛 Bug Fixes
+
+- **ci:** provide bun for runtime tests ([de0b8fc](https://github.com/ONREZA/nrz-cli/commit/de0b8fc136e93f574c5939c79ca026bee597a959))
+
 ## [0.41.3] - 2026-09-25
 
 ### 🐛 Bug Fixes
