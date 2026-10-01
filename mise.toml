@@ -36,11 +36,11 @@ run = "cargo fmt --all --check"
 
 [tasks.clippy]
 description = "Run strict Rust lints"
-run = "cargo clippy --locked --workspace --all-targets --no-deps -- -D warnings"
+run = "cargo clippy --locked --workspace --all-targets --features nrz-contract/codegen --no-deps -- -D warnings"
 
 [tasks.test]
 description = "Run Rust tests"
-run = "cargo test --locked --workspace"
+run = "cargo test --locked --workspace --features nrz-contract/codegen"
 
 [tasks."dagger:scripts"]
 description = "Check Dagger release helper scripts"
@@ -73,8 +73,8 @@ run = [
   "bun scripts/generate-api.ts --check",
   "cargo run --locked -p nrz-contract --features codegen --bin gen-contract -- --check",
   "cargo fmt --all --check",
-  "cargo clippy --locked --workspace --all-targets --no-deps -- -D warnings",
-  "cargo test --locked --workspace",
+  "cargo clippy --locked --workspace --all-targets --features nrz-contract/codegen --no-deps -- -D warnings",
+  "cargo test --locked --workspace --features nrz-contract/codegen",
   "cd .dagger && bun install --frozen-lockfile && bun run typecheck && bun test scripts",
   "actionlint",
   "cargo deny check licenses",

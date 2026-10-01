@@ -25,11 +25,18 @@ The versioned schemas used by these crates are included in
 ```sh
 mise run contracts:generate
 mise run contracts:check
-cargo test --locked --workspace
+cargo test --locked --workspace --features nrz-contract/codegen
 ```
 
 Propose schema changes together with fixtures that demonstrate the intended
 artifact behavior. Maintainers coordinate changes to the platform wire contract.
+Both public artifact models and platform-owned Edge models use the optional
+`nrz-contract::codegen` generator. It reads the canonical schemas directly;
+there is no intermediate draft conversion. Schema ownership and runtime
+validation remain with each consumer. The generator supports the constructs
+used by the committed schemas and rejects unsupported constructs such as
+`prefixItems` instead of silently weakening the generated models.
+
 Generated Rust is not edited by hand. `--check --from <schema directory>` can
 also compare the committed inputs against an explicitly supplied schema export.
 HTTP contracts use the separate [OpenAPI workflow](../api/README.md).

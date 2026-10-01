@@ -5,6 +5,12 @@
 mod contract_tests;
 mod generated;
 
+#[cfg(feature = "codegen")]
+pub mod codegen;
+
+#[cfg(all(test, feature = "codegen"))]
+mod codegen_tests;
+
 pub use generated::*;
 
 pub use edge_rules::OnrezaEdgeRuleSetV1 as EdgeRuleSetAuthoring;

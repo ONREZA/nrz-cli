@@ -121,9 +121,9 @@ export class NrzCli {
       ].join("\n"),
     ]);
     ctr = ctr.withExec(["rustup", "component", "add", "rustfmt", "clippy"]);
-    ctr = ctr.withExec(["cargo", "test", "--locked", "--workspace"]);
+    ctr = ctr.withExec(["cargo", "test", "--locked", "--workspace", "--features", "nrz-contract/codegen"]);
     ctr = ctr.withExec(["cargo", "fmt", "--all", "--check"]);
-    ctr = ctr.withExec(["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--no-deps", "--", "-D", "warnings"]);
+    ctr = ctr.withExec(["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--features", "nrz-contract/codegen", "--no-deps", "--", "-D", "warnings"]);
     await ctr.sync();
     return "CI checks passed";
   }
