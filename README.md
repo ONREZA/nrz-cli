@@ -130,7 +130,8 @@ new activation of the selected immutable release. The request reports an
 operation ID and desired generation; Edge receipt determines when it is live.
 
 `nrz deploy --wait-timeout 600` waits up to 600 seconds for activation after
-source publication (default: 120 seconds). This does not change upload timeouts;
+source publication (default: 1800 seconds, or 30 minutes, to allow queued
+blue-green activation and preparation). This does not change upload timeouts;
 the wait deadline also bounds in-flight status requests. If activation is not confirmed in time, the CLI exits with code
 1 and `DEPLOY_WAIT_TIMEOUT`, including the deployment ID, URL, and last known
 status. The deployment is not cancelled and may still complete on the server;

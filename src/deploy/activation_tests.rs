@@ -27,9 +27,9 @@ fn status(value: &str) -> DeploymentStatusResponse {
 }
 
 #[test]
-fn cli_wait_defaults_to_120_seconds_and_accepts_an_override() {
+fn cli_wait_defaults_to_1800_seconds_and_accepts_an_override() {
     for (arguments, expected) in [
-        (vec!["nrz", "deploy"], 120),
+        (vec!["nrz", "deploy"], 1800),
         (vec!["nrz", "deploy", "--wait-timeout", "600"], 600),
     ] {
         let cli = Cli::try_parse_from(arguments).unwrap();
@@ -58,6 +58,33 @@ fn cli_rejects_invalid_wait_values_and_modes_without_activation_wait() {
         ])
         .is_err()
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn default_wait_covers_queued_blue_green_activation() {
+    let cli = Cli::try_parse_from(["nrz", "deploy"]).unwrap();
+    let Command::Deploy(args) = cli.command else {
+        panic!("expected deploy command");
+    };
+    let started = Instant::now();
+    // A healthy queued update can outlast the old 120-second default while
+    // predecessor grace, preparation and drain complete normally.
+    let activates_after = Duration::from_secs(1530);
+    let result = wait_for_activation(
+        request(u64::from(args.wait_timeout)),
+        || {
+            ready(Ok(status(if started.elapsed() >= activates_after {
+                "live"
+            } else {
+                "smoke_testing"
+            })))
+        },
+        |_| {},
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.status, "live");
+    assert_eq!(started.elapsed(), activates_after);
 }
 
 #[tokio::test(start_paused = true)]
