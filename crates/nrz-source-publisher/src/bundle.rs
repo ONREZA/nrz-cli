@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use bytes::Bytes;
 use futures::StreamExt as _;
 use nrz_source_bundle::{
-    SourceBundleVerificationInput, SourceLogicalManifest, compute_source_artifact_id,
-    verify_source_bundle_stream,
+    SourceBundleVerificationBudget, SourceBundleVerificationInput, SourceLogicalManifest,
+    compute_source_artifact_id, summarize_logical_manifest, verify_source_bundle_stream,
 };
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
@@ -24,6 +24,7 @@ pub struct SourceBundleInput {
     pub source_sha256: String,
     pub source_size_bytes: u64,
     pub logical_manifest_sha256: String,
+    pub verification_budget: SourceBundleVerificationBudget,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +80,7 @@ impl PreparedSourceBundle {
                 source_artifact_id: source_artifact_id.clone(),
                 source_sha256: input.source_sha256.clone(),
                 logical_manifest_sha256: input.logical_manifest_sha256.clone(),
+                budget: input.verification_budget,
             },
             ReaderStream::new(source).map(|item| item.map_err(|error| error.to_string())),
         )
@@ -86,13 +88,8 @@ impl PreparedSourceBundle {
         .map_err(|error| SourcePublicationError::InvalidSourceBundle(error.to_string()))?;
         let manifest: SourceLogicalManifest = serde_json::from_value(verification.logical_manifest)
             .map_err(|error| SourcePublicationError::InvalidSourceBundle(error.to_string()))?;
-        let max_static_file_size_bytes = manifest
-            .files
-            .iter()
-            .filter(|file| file.role == "static")
-            .map(|file| file.size)
-            .max()
-            .unwrap_or(0);
+        let max_static_file_size_bytes =
+            summarize_logical_manifest(&manifest).max_static_file_size_bytes;
         let multipart = if source_uses_multipart(input.source_size_bytes) {
             Some(describe_multipart(&input.path, input.source_size_bytes).await?)
         } else {

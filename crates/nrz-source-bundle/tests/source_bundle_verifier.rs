@@ -1,10 +1,10 @@
 use bytes::Bytes;
 use futures::stream;
 use nrz_source_bundle::{
-    SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH, SourceBundleVerificationInput,
-    canonical_source_logical_manifest_json, compute_logical_manifest_sha256,
-    compute_source_artifact_id, sha256_hex, verify_source_bundle_bytes,
-    verify_source_bundle_stream,
+    SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH, SourceBundleVerificationBudget,
+    SourceBundleVerificationInput, canonical_source_logical_manifest_json,
+    compute_logical_manifest_sha256, compute_source_artifact_id, sha256_hex,
+    verify_source_bundle_bytes, verify_source_bundle_stream,
 };
 use serde_json::{Value, json};
 
@@ -409,6 +409,48 @@ fn locks_shared_manifest_digest_and_source_artifact_vector() {
     );
 }
 
+#[tokio::test]
+async fn rejects_manifest_over_trusted_budget_before_missing_payloads() {
+    let manifest = fixture_manifest();
+    let compressed = bundle(&manifest, &[]);
+    let exact = input_for(manifest, &compressed);
+    for budget in [
+        SourceBundleVerificationBudget {
+            max_file_count: 1,
+            ..exact.budget
+        },
+        SourceBundleVerificationBudget {
+            max_logical_bytes: 37,
+            ..exact.budget
+        },
+        SourceBundleVerificationBudget {
+            max_static_file_bytes: 15,
+            ..exact.budget
+        },
+    ] {
+        let input = SourceBundleVerificationInput {
+            budget,
+            ..exact.clone()
+        };
+        let error = verify_source_bundle_bytes(input, compressed.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(error.error_code, "SOURCE_MANIFEST_BUDGET_EXCEEDED");
+    }
+}
+
+#[tokio::test]
+async fn rejects_stream_manifest_over_trusted_budget_before_bad_payload() {
+    let manifest = fixture_manifest();
+    let compressed = bundle(&manifest, &[("dist/index.html", b"incorrect contents")]);
+    let mut input = input_for(manifest, &compressed);
+    input.budget.max_logical_bytes = 37;
+    let error = verify_source_bundle_stream(input, stream::iter([Ok::<_, String>(compressed)]))
+        .await
+        .unwrap_err();
+    assert_eq!(error.error_code, "SOURCE_MANIFEST_BUDGET_EXCEEDED");
+}
+
 fn fixture_manifest() -> Value {
     serde_json::from_str(include_str!("fixtures/basic-manifest.json")).unwrap()
 }
@@ -422,7 +464,11 @@ fn input_for(manifest: Value, compressed: &Bytes) -> SourceBundleVerificationInp
         &source_sha256,
         None,
     );
+    let budget =
+        SourceBundleVerificationBudget::from_manifest(&serde_json::from_value(manifest).unwrap())
+            .unwrap();
     SourceBundleVerificationInput {
+        budget,
         owner_workspace_id: OWNER_WORKSPACE_ID.to_string(),
         source_artifact_id,
         source_sha256,

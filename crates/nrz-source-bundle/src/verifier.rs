@@ -46,6 +46,37 @@ pub struct SourceBundleVerificationInput {
     pub source_artifact_id: String,
     pub source_sha256: String,
     pub logical_manifest_sha256: String,
+    pub budget: SourceBundleVerificationBudget,
+}
+
+/// Trusted admission limits supplied by the caller, independent of archive metadata.
+/// Zero is a real limit; TAR framing and metadata are accounted separately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceBundleVerificationBudget {
+    pub max_file_count: u64,
+    pub max_logical_bytes: u64,
+    pub max_static_file_bytes: u64,
+}
+
+impl SourceBundleVerificationBudget {
+    /// Derive exact limits from a locally built manifest, before reading its archive.
+    pub fn from_manifest(
+        manifest: &SourceLogicalManifest,
+    ) -> Result<Self, SourceBundleVerificationFailure> {
+        let max_logical_bytes = manifest.files.iter().try_fold(0_u64, |total, file| {
+            total.checked_add(file.size).ok_or_else(|| {
+                failure(
+                    "SOURCE_MANIFEST_BUDGET_EXCEEDED",
+                    "Logical file sizes exceed u64",
+                )
+            })
+        })?;
+        Ok(Self {
+            max_file_count: manifest.files.len() as u64,
+            max_logical_bytes,
+            max_static_file_bytes: summarize_logical_manifest(manifest).max_static_file_size_bytes,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,6 +234,37 @@ fn prepare_verification(
     }
 
     let summary = summarize_logical_manifest(&manifest);
+    let file_count = manifest.files.len() as u64;
+    if file_count > input.budget.max_file_count {
+        return Err(manifest_budget_failure(
+            "maxDeploymentFiles",
+            file_count,
+            input.budget.max_file_count,
+        ));
+    }
+    let mut logical_bytes = 0_u64;
+    for file in &manifest.files {
+        logical_bytes = logical_bytes.checked_add(file.size).ok_or_else(|| {
+            failure(
+                "SOURCE_MANIFEST_BUDGET_EXCEEDED",
+                "Logical file sizes exceed u64",
+            )
+        })?;
+        if logical_bytes > input.budget.max_logical_bytes {
+            return Err(manifest_budget_failure(
+                "maxDeploymentLogicalBytes",
+                logical_bytes,
+                input.budget.max_logical_bytes,
+            ));
+        }
+    }
+    if summary.max_static_file_size_bytes > input.budget.max_static_file_bytes {
+        return Err(manifest_budget_failure(
+            "maxStaticFileSizeBytes",
+            summary.max_static_file_size_bytes,
+            input.budget.max_static_file_bytes,
+        ));
+    }
     let mut expected = HashMap::new();
     for file in manifest.files {
         let normalized = normalize_source_path(&file.path)
@@ -1162,5 +1224,21 @@ fn failure(
         error_code: error_code.into(),
         message: message.into(),
         details: None,
+    }
+}
+
+fn manifest_budget_failure(
+    limit_type: &str,
+    current: u64,
+    limit: u64,
+) -> SourceBundleVerificationFailure {
+    SourceBundleVerificationFailure {
+        error_code: "SOURCE_MANIFEST_BUDGET_EXCEEDED".to_string(),
+        message: format!(
+            "Embedded logical manifest exceeds trusted {limit_type} budget ({current} / {limit})"
+        ),
+        details: Some(
+            serde_json::json!({ "limitType": limit_type, "current": current, "limit": limit }),
+        ),
     }
 }

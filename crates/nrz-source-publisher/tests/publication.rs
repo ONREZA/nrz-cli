@@ -13,9 +13,10 @@ use nrz_api::{
 };
 use nrz_runtime_artifact::finalize_source_bundle_runtime_graph;
 use nrz_source_bundle::{
-    SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH, SOURCE_BUNDLE_V1_SCHEMA_VERSION, SourceLogicalManifest,
-    SourceLogicalManifestEntryType, SourceLogicalManifestFile, SourceLogicalManifestLayer,
-    canonical_source_logical_manifest_json, compute_logical_manifest_sha256, sha256_hex,
+    SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH, SOURCE_BUNDLE_V1_SCHEMA_VERSION,
+    SourceBundleVerificationBudget, SourceLogicalManifest, SourceLogicalManifestEntryType,
+    SourceLogicalManifestFile, SourceLogicalManifestLayer, canonical_source_logical_manifest_json,
+    compute_logical_manifest_sha256, sha256_hex,
 };
 use nrz_source_publisher::{
     DeploymentPublicationStatus, ObjectUploadRequest, ObjectUploadResult, PreparedSourceBundle,
@@ -26,6 +27,51 @@ use nrz_source_publisher::{
 use serde_json::json;
 use tempfile::TempDir;
 use uuid::Uuid;
+
+#[tokio::test]
+async fn prepare_summary_includes_prerender_and_config_file_sizes() {
+    for role in ["prerender", "config"] {
+        let workspace_id = Uuid::now_v7();
+        let (_temp, bundle) = prepared_bundle_with_static_role(workspace_id, role).await;
+        let upload_session_id = Uuid::now_v7();
+        let deployment_id = Uuid::now_v7();
+        let transport = FakeTransport::new(
+            vec![single_prepare_response(
+                &bundle,
+                upload_session_id,
+                "role-summary",
+            )],
+            vec![CliUploadCompleteResponse::Object(
+                nrz_api::UploadComplete200ResponseObject {
+                    deployment_id,
+                    upload_session_id,
+                    ..Default::default()
+                },
+            )],
+            vec![PutOutcome::Success],
+            vec![],
+        );
+        let observer = RecordingObserver::default();
+        publish_source_bundle_upload(request(
+            &transport,
+            &observer,
+            deployment_id,
+            workspace_id,
+            &bundle,
+        ))
+        .await
+        .unwrap();
+        let state = transport.state.lock().unwrap();
+        assert_eq!(
+            state.prepare_requests[0]
+                .logical_manifest_summary
+                .max_static_file_size_bytes
+                .as_str(),
+            "6",
+            "{role}"
+        );
+    }
+}
 
 #[tokio::test]
 async fn publishes_verified_bundle_and_requires_durable_graph_readback() {
@@ -427,6 +473,13 @@ fn fast_path_prepare_response(
 }
 
 async fn prepared_bundle(workspace_id: Uuid) -> (TempDir, PreparedSourceBundle) {
+    prepared_bundle_with_static_role(workspace_id, "static").await
+}
+
+async fn prepared_bundle_with_static_role(
+    workspace_id: Uuid,
+    role: &str,
+) -> (TempDir, PreparedSourceBundle) {
     let temp = tempfile::tempdir().unwrap();
     let static_body = b"ready\n";
     let compute_body = b"export default { fetch() {} };\n";
@@ -442,7 +495,7 @@ async fn prepared_bundle(workspace_id: Uuid) -> (TempDir, PreparedSourceBundle) 
                 link_target: None,
                 executable: false,
                 content_type: Some("text/html".to_string()),
-                role: "static".to_string(),
+                role: role.to_string(),
                 layer_name: Some("static".to_string()),
             },
             SourceLogicalManifestFile {
@@ -507,6 +560,10 @@ async fn prepared_bundle(workspace_id: Uuid) -> (TempDir, PreparedSourceBundle) 
             source_sha256: sha256_hex(&archive),
             source_size_bytes: archive.len() as u64,
             logical_manifest_sha256: compute_logical_manifest_sha256(&manifest),
+            verification_budget: SourceBundleVerificationBudget::from_manifest(
+                &serde_json::from_value(manifest.clone()).unwrap(),
+            )
+            .unwrap(),
         },
     )
     .await
