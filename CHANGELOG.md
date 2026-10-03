@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.42.1] - 2026-10-03
+
+### 🐛 Bug Fixes
+
+- **deploy:** allow queued activation wait ([6fe8673](https://github.com/ONREZA/nrz-cli/commit/6fe86732c6d3177489efa91cfaa865e8da93147d))
+
 ## [0.42.0] - 2026-10-01
 
 ### 🔧 Changed
