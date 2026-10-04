@@ -9,6 +9,13 @@ use serde_json::{Value, json};
 pub fn source_layer_launch(
     config: Option<&Value>,
 ) -> Result<RuntimeLaunchWire, RuntimeArtifactError> {
+    source_layer_launch_for_target(config, None)
+}
+
+pub(crate) fn source_layer_launch_for_target(
+    config: Option<&Value>,
+    runtime_version: Option<&str>,
+) -> Result<RuntimeLaunchWire, RuntimeArtifactError> {
     let profile = if config
         .and_then(|value| value.get("isBinaryEntry"))
         .and_then(Value::as_bool)
@@ -22,7 +29,16 @@ pub fn source_layer_launch(
     {
         "CPYTHON_3_14"
     } else {
-        "BUN"
+        match runtime_version {
+            None => "BUN",
+            Some("node-22") => "NODE_22",
+            Some("node-24") => "NODE_24",
+            Some("node-26") => "NODE_26",
+            Some(version) if version.starts_with("bun-") => "BUN",
+            Some(version) => {
+                return invariant(format!("unsupported JavaScript runtime target '{version}'"));
+            }
+        }
     };
     let mut value = json!({ "profile": profile, "args": [], "cwd": "." });
     if let Some(readiness) = config.and_then(|value| value.get("readiness")) {

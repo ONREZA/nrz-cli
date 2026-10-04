@@ -21,92 +21,111 @@ const DEPENDENCY_BODY: &[u8] = b"export const dependency = true;\n";
 
 #[test]
 fn materializes_dependency_images_and_exact_runtime_graph_from_one_source_bundle() {
-    let temp = TempDir::new().unwrap();
-    let manifest = source_manifest();
-    let source_path = temp.path().join("source.tar.zst");
-    write_source_bundle(&source_path, &manifest);
-    let source_bytes = fs::read(&source_path).unwrap();
-    let logical_manifest = serde_json::to_value(&manifest).unwrap();
-    let logical_manifest_sha256 = compute_logical_manifest_sha256(&logical_manifest);
-    let source_sha256 = sha256_hex(&source_bytes);
-    let toolchain = fake_erofs_toolchain(temp.path());
-    let output_root = temp.path().join("runtime");
+    for (family, version, expected_profile) in [
+        ("bun", "1.4.2", "BUN"),
+        ("javascript", "node-22", "NODE_22"),
+        ("javascript", "node-24", "NODE_24"),
+        ("javascript", "node-26", "NODE_26"),
+    ] {
+        let temp = TempDir::new().unwrap();
+        let mut compatibility = compatibility();
+        compatibility["runtimeFamily"] = json!(family);
+        compatibility["runtimeVersion"] = json!(version);
+        let manifest = source_manifest();
+        let source_path = temp.path().join("source.tar.zst");
+        write_source_bundle(&source_path, &manifest);
+        let source_bytes = fs::read(&source_path).unwrap();
+        let logical_manifest = serde_json::to_value(&manifest).unwrap();
+        let logical_manifest_sha256 = compute_logical_manifest_sha256(&logical_manifest);
+        let source_sha256 = sha256_hex(&source_bytes);
+        let toolchain = fake_erofs_toolchain(temp.path());
+        let output_root = temp.path().join("runtime");
 
-    let result = materialize_source_bundle_runtime(
-        &toolchain,
-        SourceBundleMaterializationRequest {
-            source_path: &source_path,
-            logical_manifest_sha256: &logical_manifest_sha256,
-            source_sha256: &source_sha256,
-            source_size_bytes: source_bytes.len() as u64,
-            manifest: &manifest,
-            output_root: &output_root,
-            policy: SourceBundleMaterializationPolicy {
-                kind: DependencyMaterializationKind::JavaScriptNodeModules,
-                compatibility: compatibility(),
-                tree_limits: tree_limits(),
-                max_total_files: 10,
-                max_total_bytes: 1024,
+        let result = materialize_source_bundle_runtime(
+            &toolchain,
+            SourceBundleMaterializationRequest {
+                source_path: &source_path,
+                logical_manifest_sha256: &logical_manifest_sha256,
+                source_sha256: &source_sha256,
+                source_size_bytes: source_bytes.len() as u64,
+                manifest: &manifest,
+                output_root: &output_root,
+                policy: SourceBundleMaterializationPolicy {
+                    kind: DependencyMaterializationKind::JavaScriptNodeModules,
+                    compatibility,
+                    tree_limits: tree_limits(),
+                    max_total_files: 10,
+                    max_total_bytes: 1024,
+                },
             },
-        },
-    )
-    .unwrap();
+        )
+        .unwrap();
 
-    assert_eq!(result.dependencies.len(), 1);
-    let dependency = &result.dependencies[0];
-    assert_eq!(dependency.layer_name, "server");
-    assert_eq!(dependency.mount_point, "/output/node_modules");
-    assert_eq!(
-        fs::read(&dependency.image_path).unwrap(),
-        b"fake-erofs-v1\n"
-    );
-    assert_eq!(
-        fs::metadata(&dependency.image_path)
-            .unwrap()
-            .permissions()
-            .mode()
-            & 0o777,
-        0o444
-    );
-    assert_eq!(dependency.manifest.wire().expanded_file_count, 1);
-    assert_eq!(
-        dependency.manifest.wire().expanded_bytes,
-        DEPENDENCY_BODY.len() as i64
-    );
-    assert_eq!(
-        dependency
-            .manifest
-            .wire()
-            .canonicalization_policy_digest
-            .as_str(),
-        canonicalization_policy_digest()
-    );
+        assert_eq!(result.dependencies.len(), 1);
+        let dependency = &result.dependencies[0];
+        assert_eq!(dependency.layer_name, "server");
+        assert_eq!(dependency.mount_point, "/output/node_modules");
+        assert_eq!(
+            fs::read(&dependency.image_path).unwrap(),
+            b"fake-erofs-v1\n"
+        );
+        assert_eq!(
+            fs::metadata(&dependency.image_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o444
+        );
+        assert_eq!(dependency.manifest.wire().expanded_file_count, 1);
+        assert_eq!(
+            dependency.manifest.wire().expanded_bytes,
+            DEPENDENCY_BODY.len() as i64
+        );
+        assert_eq!(
+            dependency
+                .manifest
+                .wire()
+                .canonicalization_policy_digest
+                .as_str(),
+            canonicalization_policy_digest()
+        );
 
-    let graph = result.graph.wire();
-    assert_eq!(graph.dependencies.len(), 1);
-    assert_eq!(
-        graph.dependencies[0].mount_point.as_str(),
-        "/output/node_modules"
-    );
-    assert_eq!(
-        graph.dependencies[0].materialization_id.as_str(),
-        dependency.manifest.materialization_id()
-    );
-    assert_eq!(graph.runtime_layers.len(), 1);
-    assert_eq!(graph.runtime_layers[0].layer_name.as_str(), "server");
-    assert_eq!(graph.runtime_layers[0].entrypoint.as_str(), "server.js");
-    assert_eq!(
-        graph.runtime_layers[0].dependency_materialization_ids[0].as_str(),
-        dependency.manifest.materialization_id()
-    );
-    assert_eq!(
-        graph.application.manifest_digest.as_str(),
-        logical_manifest_sha256
-    );
-    assert_eq!(
-        graph.application.blob_descriptor.digest.as_str(),
-        format!("sha256:{source_sha256}")
-    );
+        let graph = result.graph.wire();
+        assert_eq!(
+            graph.runtime_layers[0]
+                .launch
+                .as_ref()
+                .unwrap()
+                .profile
+                .to_string(),
+            expected_profile
+        );
+        assert_eq!(graph.dependencies.len(), 1);
+        assert_eq!(
+            graph.dependencies[0].mount_point.as_str(),
+            "/output/node_modules"
+        );
+        assert_eq!(
+            graph.dependencies[0].materialization_id.as_str(),
+            dependency.manifest.materialization_id()
+        );
+        assert_eq!(graph.runtime_layers.len(), 1);
+        assert_eq!(graph.runtime_layers[0].layer_name.as_str(), "server");
+        assert_eq!(graph.runtime_layers[0].entrypoint.as_str(), "server.js");
+        assert_eq!(
+            graph.runtime_layers[0].dependency_materialization_ids[0].as_str(),
+            dependency.manifest.materialization_id()
+        );
+        assert_eq!(
+            graph.application.manifest_digest.as_str(),
+            logical_manifest_sha256
+        );
+        assert_eq!(
+            graph.application.blob_descriptor.digest.as_str(),
+            format!("sha256:{source_sha256}")
+        );
+    }
 }
 
 #[test]
