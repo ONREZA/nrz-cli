@@ -2,6 +2,29 @@ use nrz_api::{ProjectRequestBody2, Token200Response, User200Response};
 use serde_json::json;
 
 #[test]
+fn compute_config_response_matches_current_server_fields() {
+    for health_check_path in [json!(null), json!("/health")] {
+        let response = json!({
+            "enabled": true,
+            "config": {
+                "computeMode": "RUNTIME", "processCpuLimitMillis": 1000,
+                "idleTimeoutSeconds": 15, "healthCheckPath": health_check_path
+            },
+            "cpuHardCapMillis": 9000, "effectiveCpuLimitMillis": 1000
+        });
+        let parsed: nrz_api::ComputeConfig200Response =
+            serde_json::from_value(response.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), response);
+        let mut missing = response;
+        missing["config"]
+            .as_object_mut()
+            .unwrap()
+            .remove("healthCheckPath");
+        assert!(serde_json::from_value::<nrz_api::ComputeConfig200Response>(missing).is_err());
+    }
+}
+
+#[test]
 fn node_runtime_publication_responses_preserve_launch_profiles() {
     let digest = "a".repeat(64);
     for major in [22, 24, 26] {

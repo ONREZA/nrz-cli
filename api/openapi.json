@@ -9951,30 +9951,6 @@
                           "maximum": 9007199254740991,
                           "exclusiveMinimum": 0
                         },
-                        "memoryBaselineMb": {
-                          "anyOf": [
-                            {
-                              "type": "integer",
-                              "minimum": -9007199254740991,
-                              "maximum": 9007199254740991
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "memoryStartupMb": {
-                          "anyOf": [
-                            {
-                              "type": "integer",
-                              "minimum": -9007199254740991,
-                              "maximum": 9007199254740991
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
                         "idleTimeoutSeconds": {
                           "type": "integer",
                           "minimum": -9007199254740991,
@@ -9994,8 +9970,6 @@
                       "required": [
                         "computeMode",
                         "processCpuLimitMillis",
-                        "memoryBaselineMb",
-                        "memoryStartupMb",
                         "idleTimeoutSeconds",
                         "healthCheckPath"
                       ]
