@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.42.2] - 2026-10-04
+
+### 🐛 Bug Fixes
+
+- **deploy:** enforce source bundle admission caps (#15) ([a3a9a22](https://github.com/ONREZA/nrz-cli/commit/a3a9a221f8375a69ecb394eec13a2e3d7ffb9433))
+
 ## [0.42.1] - 2026-10-03
 
 ### 🐛 Bug Fixes
