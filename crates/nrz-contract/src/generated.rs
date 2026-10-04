@@ -6862,6 +6862,12 @@ pub mod runtime_artifact_graph {
     pub enum OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemLaunchProfile {
         #[serde(rename = "BUN")]
         Bun,
+        #[serde(rename = "NODE_22")]
+        Node22,
+        #[serde(rename = "NODE_24")]
+        Node24,
+        #[serde(rename = "NODE_26")]
+        Node26,
         #[serde(rename = "CPYTHON_3_14")]
         Cpython314,
         #[serde(rename = "EXECUTABLE")]
@@ -6873,6 +6879,9 @@ pub mod runtime_artifact_graph {
         fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
             match *self {
                 Self::Bun => f.write_str("BUN"),
+                Self::Node22 => f.write_str("NODE_22"),
+                Self::Node24 => f.write_str("NODE_24"),
+                Self::Node26 => f.write_str("NODE_26"),
                 Self::Cpython314 => f.write_str("CPYTHON_3_14"),
                 Self::Executable => f.write_str("EXECUTABLE"),
             }
@@ -6885,6 +6894,9 @@ pub mod runtime_artifact_graph {
         fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
             match value {
                 "BUN" => Ok(Self::Bun),
+                "NODE_22" => Ok(Self::Node22),
+                "NODE_24" => Ok(Self::Node24),
+                "NODE_26" => Ok(Self::Node26),
                 "CPYTHON_3_14" => Ok(Self::Cpython314),
                 "EXECUTABLE" => Ok(Self::Executable),
                 _ => Err("invalid value".into()),

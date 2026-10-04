@@ -15,6 +15,7 @@ pub use nrz_contract::{
 pub use source_graph::{
     SourceDependencyMaterialization, compute_logical_artifact_id,
     compute_source_logical_artifact_id, finalize_source_bundle_runtime_graph,
+    finalize_source_bundle_runtime_graph_for_target,
     finalize_source_bundle_runtime_graph_with_dependencies,
     validate_source_bundle_application_graph,
 };
@@ -294,7 +295,13 @@ pub fn verify_runtime_artifact_graph(
             verify_runtime_launch(launch)?;
             if let Some(family) = &layer.runtime_config.runtime_family {
                 let family = family.to_string();
-                if (launch.profile == RuntimeProfile::Bun && family != "JAVASCRIPT")
+                if (matches!(
+                    launch.profile,
+                    RuntimeProfile::Bun
+                        | RuntimeProfile::Node22
+                        | RuntimeProfile::Node24
+                        | RuntimeProfile::Node26
+                ) && family != "JAVASCRIPT")
                     || (launch.profile == RuntimeProfile::Cpython314 && family != "PYTHON")
                 {
                     return invariant("runtime profile conflicts with runtimeFamily");
@@ -335,6 +342,27 @@ pub fn verify_runtime_artifact_graph(
                 return invariant(format!(
                     "runtime layer '{layer_name}' references unknown dependency '{materialization_id}'"
                 ));
+            }
+            if let Some(launch) = &layer.launch {
+                let expected = match launch.profile {
+                    RuntimeProfile::Node22 => Some("node-22"),
+                    RuntimeProfile::Node24 => Some("node-24"),
+                    RuntimeProfile::Node26 => Some("node-26"),
+                    _ => None,
+                };
+                let dependency = wire
+                    .dependencies
+                    .iter()
+                    .find(|value| value.materialization_id.as_str() == materialization_id)
+                    .expect("known dependency");
+                if expected.is_some_and(|version| {
+                    dependency.compatibility.runtime_version.as_str() != version
+                        || dependency.kind.to_string() != "JAVASCRIPT_NODE_MODULES"
+                }) {
+                    return invariant(
+                        "Node launch profile conflicts with dependency runtime target",
+                    );
+                }
             }
             if !layer_dependencies.insert(materialization_id) {
                 return invariant(format!(

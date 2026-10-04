@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use nrz_runtime_artifact::{
     RuntimeArtifactError, SourceDependencyMaterialization,
     VerifiedDependencyMaterializationManifest, VerifiedRuntimeArtifactGraph,
-    finalize_source_bundle_runtime_graph_with_dependencies,
+    finalize_source_bundle_runtime_graph_for_target,
 };
 use nrz_source_bundle::{
     DependencySourceTreeError, PYTHON_314_SITE_PACKAGES_ROOT, SourceLogicalManifest,
@@ -137,12 +137,32 @@ pub fn materialize_source_bundle_runtime(
             manifest: &dependency.manifest,
         })
         .collect::<Vec<_>>();
-    let graph = finalize_source_bundle_runtime_graph_with_dependencies(
+    let graph = finalize_source_bundle_runtime_graph_for_target(
         request.logical_manifest_sha256,
         request.source_sha256,
         request.source_size_bytes,
         request.manifest,
         &graph_dependencies,
+        if request
+            .policy
+            .compatibility
+            .get("runtimeFamily")
+            .and_then(Value::as_str)
+            == Some("bun")
+        {
+            None
+        } else {
+            Some(
+                request
+                    .policy
+                    .compatibility
+                    .get("runtimeVersion")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        RuntimeArtifactError::Invariant("missing trusted runtime version".into())
+                    })?,
+            )
+        },
     )?;
 
     Ok(MaterializedSourceBundleRuntime {

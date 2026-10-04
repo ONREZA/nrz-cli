@@ -201,6 +201,25 @@ fn explicit_bindings_enforce_layer_ownership_and_every_application_mount() {
 }
 
 #[test]
+fn node_launch_profiles_require_matching_dependency_targets() {
+    for major in [22, 24, 26] {
+        let mut value = graph();
+        value["runtimeLayers"][0]["launch"] =
+            json!({"profile": format!("NODE_{major}"), "args": [], "cwd": "."});
+        value["dependencies"][0]["compatibility"]["runtimeVersion"] =
+            json!(format!("node-{major}"));
+        assert!(finalize_runtime_artifact_graph(value.clone(), &[]).is_ok());
+        value["dependencies"][0]["compatibility"]["runtimeVersion"] = json!("node-25");
+        assert!(
+            finalize_runtime_artifact_graph(value, &[])
+                .unwrap_err()
+                .to_string()
+                .contains("conflicts with dependency runtime target")
+        );
+    }
+}
+
+#[test]
 fn launch_is_digest_bound_and_rejects_unsafe_or_contradictory_execution() {
     let mut value = graph();
     value["runtimeLayers"][0]["launch"] = json!({

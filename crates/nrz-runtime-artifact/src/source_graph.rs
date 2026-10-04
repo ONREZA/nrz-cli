@@ -98,6 +98,26 @@ pub fn finalize_source_bundle_runtime_graph_with_dependencies(
     manifest: &SourceLogicalManifest,
     dependencies: &[SourceDependencyMaterialization<'_>],
 ) -> Result<VerifiedRuntimeArtifactGraph, RuntimeArtifactError> {
+    finalize_source_bundle_runtime_graph_for_target(
+        logical_manifest_sha256,
+        source_sha256,
+        source_size_bytes,
+        manifest,
+        dependencies,
+        None,
+    )
+}
+
+/// Trusted builder target controls package export conditions, including layers
+/// with no dependency tree. Direct publication retains its existing profile.
+pub fn finalize_source_bundle_runtime_graph_for_target(
+    logical_manifest_sha256: &str,
+    source_sha256: &str,
+    source_size_bytes: u64,
+    manifest: &SourceLogicalManifest,
+    dependencies: &[SourceDependencyMaterialization<'_>],
+    runtime_version: Option<&str>,
+) -> Result<VerifiedRuntimeArtifactGraph, RuntimeArtifactError> {
     let source_logical_artifact_id =
         compute_source_logical_artifact_id(logical_manifest_sha256, source_sha256);
     let application_paths = manifest
@@ -107,7 +127,7 @@ pub fn finalize_source_bundle_runtime_graph_with_dependencies(
         .map(|file| file.path.clone())
         .collect::<Vec<_>>();
     let dependency_layers = dependency_layers(manifest, dependencies)?;
-    let mut runtime_layers = runtime_layers(manifest, &dependency_layers)?;
+    let mut runtime_layers = runtime_layers(manifest, &dependency_layers, runtime_version)?;
     // Layer ownership is many-to-one: identical immutable dependencies may be
     // shared by several compute layers. The graph stores each descriptor once.
     let mut descriptors: Vec<Value> = Vec::new();
@@ -263,6 +283,7 @@ fn runtime_dependency(
 fn runtime_layers(
     manifest: &SourceLogicalManifest,
     dependency_layers: &HashMap<String, Vec<String>>,
+    runtime_version: Option<&str>,
 ) -> Result<Vec<Value>, RuntimeArtifactError> {
     let mut runtime_layers = Vec::new();
     for layer in &manifest.layers {
@@ -275,6 +296,7 @@ fn runtime_layers(
                     .get(layer.name.as_str())
                     .cloned()
                     .unwrap_or_default(),
+                runtime_version,
             )?),
             target => {
                 return Err(RuntimeArtifactError::Invariant(format!(
@@ -290,6 +312,7 @@ fn runtime_layer(
     manifest: &SourceLogicalManifest,
     layer: &SourceLogicalManifestLayer,
     dependency_materialization_ids: Vec<String>,
+    runtime_version: Option<&str>,
 ) -> Result<Value, RuntimeArtifactError> {
     let application_root = layer.root_path.as_deref().unwrap_or(".");
     let entrypoint = layer.entrypoint.as_deref().ok_or_else(|| {
@@ -327,7 +350,10 @@ fn runtime_layer(
             })?
     };
     let mut runtime_config = layer.runtime_config.clone().unwrap_or_else(|| json!({}));
-    let launch = crate::source_layer_launch(layer.runtime_config.as_ref())?;
+    let launch = crate::launch::source_layer_launch_for_target(
+        layer.runtime_config.as_ref(),
+        runtime_version,
+    )?;
     if let Some(config) = runtime_config.as_object_mut() {
         config.remove(RUNTIME_READINESS_CONFIG_KEY);
         config.remove("isBinaryEntry");
@@ -428,6 +454,46 @@ mod tests {
             executable: false,
         });
         manifest
+    }
+
+    #[test]
+    fn trusted_build_target_selects_node_profiles_without_dependency_trees() {
+        for (version, profile) in [
+            ("node-22", "NODE_22"),
+            ("node-24", "NODE_24"),
+            ("node-26", "NODE_26"),
+            ("bun-1.4", "BUN"),
+        ] {
+            let graph = finalize_source_bundle_runtime_graph_for_target(
+                &"a".repeat(64),
+                &"b".repeat(64),
+                1024,
+                &manifest(),
+                &[],
+                Some(version),
+            )
+            .unwrap();
+            assert_eq!(
+                graph.wire().runtime_layers[0]
+                    .launch
+                    .as_ref()
+                    .unwrap()
+                    .profile
+                    .to_string(),
+                profile
+            );
+        }
+        assert!(
+            finalize_source_bundle_runtime_graph_for_target(
+                &"a".repeat(64),
+                &"b".repeat(64),
+                1024,
+                &manifest(),
+                &[],
+                Some("node-25"),
+            )
+            .is_err()
+        );
     }
 
     #[test]
