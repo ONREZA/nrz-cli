@@ -197,6 +197,7 @@ pub struct SourceBundleSummary {
     pub file_count: i32,
     pub logical_static_bytes: i64,
     pub artifact_size_bytes: i64,
+    pub max_static_file_size_bytes: u64,
 }
 
 pub fn canonical_source_logical_manifest_json(manifest: &Value) -> String {
@@ -225,9 +226,13 @@ pub fn compute_source_artifact_id(
 pub fn summarize_logical_manifest(manifest: &SourceLogicalManifest) -> SourceBundleSummary {
     let mut logical_static_bytes = 0_i64;
     let mut artifact_size_bytes = 0_i64;
+    let mut max_static_file_size_bytes = 0_u64;
 
     for file in &manifest.files {
         let size = i64::try_from(file.size).unwrap_or(i64::MAX);
+        if matches!(file.role.as_str(), "static" | "prerender" | "config") {
+            max_static_file_size_bytes = max_static_file_size_bytes.max(file.size);
+        }
         if file.role == "static" {
             logical_static_bytes = logical_static_bytes.saturating_add(size);
         } else {
@@ -239,6 +244,7 @@ pub fn summarize_logical_manifest(manifest: &SourceLogicalManifest) -> SourceBun
         file_count: i32::try_from(manifest.files.len()).unwrap_or(i32::MAX),
         logical_static_bytes,
         artifact_size_bytes,
+        max_static_file_size_bytes,
     }
 }
 

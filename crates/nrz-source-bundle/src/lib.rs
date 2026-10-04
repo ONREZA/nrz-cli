@@ -23,7 +23,7 @@ pub use manifest::{
     source_runtime_readiness, summarize_logical_manifest,
 };
 pub use verifier::{
-    SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH, SourceBundleVerificationFailure,
-    SourceBundleVerificationInput, SourceBundleVerificationResult, SourceBundleVerificationSummary,
-    verify_source_bundle_bytes, verify_source_bundle_stream,
+    SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH, SourceBundleVerificationBudget,
+    SourceBundleVerificationFailure, SourceBundleVerificationInput, SourceBundleVerificationResult,
+    SourceBundleVerificationSummary, verify_source_bundle_bytes, verify_source_bundle_stream,
 };

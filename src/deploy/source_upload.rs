@@ -25,6 +25,10 @@ pub(super) async fn prepare_upload_and_complete(
     let workspace_id = parse_uuid("workspace id", request.workspace_id)?;
     let project_id = parse_uuid("project id", request.project_id)?;
     let deployment_attempt_id = parse_uuid("deployment attempt id", request.deployment_attempt_id)?;
+    let local_manifest: nrz_source_bundle::SourceLogicalManifest =
+        serde_json::from_value(serde_json::to_value(&request.plan.logical_manifest)?)?;
+    let verification_budget =
+        nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&local_manifest)?;
     let bundle = PreparedSourceBundle::verify(
         workspace_id,
         SourceBundleInput {
@@ -32,6 +36,7 @@ pub(super) async fn prepare_upload_and_complete(
             source_sha256: request.plan.source_sha256.clone(),
             source_size_bytes: request.plan.source_size_bytes,
             logical_manifest_sha256: request.plan.logical_manifest_sha256.clone(),
+            verification_budget,
         },
     )
     .await
