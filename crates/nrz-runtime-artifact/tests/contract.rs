@@ -208,14 +208,25 @@ fn node_launch_profiles_require_matching_dependency_targets() {
             json!({"profile": format!("NODE_{major}"), "args": [], "cwd": "."});
         value["dependencies"][0]["compatibility"]["runtimeVersion"] =
             json!(format!("node-{major}"));
+        value["dependencies"][0]["compatibility"]["runtimeFamily"] = json!("javascript");
         assert!(finalize_runtime_artifact_graph(value.clone(), &[]).is_ok());
-        value["dependencies"][0]["compatibility"]["runtimeVersion"] = json!("node-25");
-        assert!(
-            finalize_runtime_artifact_graph(value, &[])
-                .unwrap_err()
-                .to_string()
-                .contains("conflicts with dependency runtime target")
-        );
+        for (field, invalid) in [
+            ("runtimeVersion", "node-25"),
+            ("runtimeFamily", "bun"),
+            ("runtimeFamily", "python"),
+        ] {
+            let mut mismatch = value.clone();
+            mismatch["dependencies"][0]["compatibility"][field] = json!(invalid);
+            assert!(
+                finalize_runtime_artifact_graph(mismatch, &[])
+                    .unwrap_err()
+                    .to_string()
+                    .contains("conflicts with dependency runtime target")
+            );
+        }
+        value["dependencies"] = json!([]);
+        value["runtimeLayers"][0]["dependencyMaterializationIds"] = json!([]);
+        assert!(finalize_runtime_artifact_graph(value, &[]).is_ok());
     }
 }
 

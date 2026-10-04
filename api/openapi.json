@@ -16257,6 +16257,9 @@
                                       "profile": {
                                         "enum": [
                                           "BUN",
+                                          "NODE_22",
+                                          "NODE_24",
+                                          "NODE_26",
                                           "CPYTHON_3_14",
                                           "EXECUTABLE"
                                         ],
@@ -17573,6 +17576,9 @@
                                   "profile": {
                                     "enum": [
                                       "BUN",
+                                      "NODE_22",
+                                      "NODE_24",
+                                      "NODE_26",
                                       "CPYTHON_3_14",
                                       "EXECUTABLE"
                                     ],
@@ -18439,6 +18445,9 @@
                                   "profile": {
                                     "enum": [
                                       "BUN",
+                                      "NODE_22",
+                                      "NODE_24",
+                                      "NODE_26",
                                       "CPYTHON_3_14",
                                       "EXECUTABLE"
                                     ],
