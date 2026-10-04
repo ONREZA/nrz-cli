@@ -19703,6 +19703,12 @@ pub enum Status200ResponseRuntimeArtifactGraphRuntimeLayerLaunchProfile {
     #[serde(rename = "BUN")]
     #[default]
     Bun,
+    #[serde(rename = "NODE_22")]
+    Node22,
+    #[serde(rename = "NODE_24")]
+    Node24,
+    #[serde(rename = "NODE_26")]
+    Node26,
     #[serde(rename = "CPYTHON_3_14")]
     Cpython314,
     #[serde(rename = "EXECUTABLE")]
@@ -19712,6 +19718,9 @@ impl core::fmt::Display for Status200ResponseRuntimeArtifactGraphRuntimeLayerLau
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Bun => write!(f, "BUN"),
+            Self::Node22 => write!(f, "NODE_22"),
+            Self::Node24 => write!(f, "NODE_24"),
+            Self::Node26 => write!(f, "NODE_26"),
             Self::Cpython314 => write!(f, "CPYTHON_3_14"),
             Self::Executable => write!(f, "EXECUTABLE"),
         }

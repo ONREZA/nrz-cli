@@ -2,6 +2,42 @@ use nrz_api::{ProjectRequestBody2, Token200Response, User200Response};
 use serde_json::json;
 
 #[test]
+fn node_runtime_publication_responses_preserve_launch_profiles() {
+    let digest = "a".repeat(64);
+    for major in [22, 24, 26] {
+        let complete = json!({
+            "deploymentId": "00000000-0000-0000-0000-000000000001",
+            "runtimeArtifactGraphDigest": digest,
+            "runtimeArtifactGraph": {
+                "schemaVersion": "RUNTIME_ARTIFACT_GRAPH_V2.0",
+                "application": {
+                    "artifactId": digest, "manifestDigest": digest,
+                    "blobDescriptor": {
+                        "mediaType": "application/vnd.onreza.source-bundle.tar+zstd.v1",
+                        "digest": format!("sha256:{digest}"), "size": 1024
+                    }
+                },
+                "dependencies": [],
+                "runtimeLayers": [{
+                    "layerName": "server", "applicationRoot": "server",
+                    "dependencyMaterializationIds": [], "entrypoint": "server.js",
+                    "launch": {"profile": format!("NODE_{major}"), "args": [], "cwd": "."},
+                    "runtimeConfig": {"runtimeFamily": "JAVASCRIPT"}
+                }],
+                "graphDigest": digest
+            }
+        });
+        let mut prepare = complete.clone();
+        prepare["uploads"] = json!([]);
+        let parsed: nrz_api::Prepare200Response = serde_json::from_value(prepare.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), prepare);
+        let parsed: nrz_api::Complete200Response =
+            serde_json::from_value(complete.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), complete);
+    }
+}
+
+#[test]
 fn project_patch_preserves_omission_null_and_value() {
     let mut body: ProjectRequestBody2 = serde_json::from_value(json!({})).unwrap();
     assert_eq!(serde_json::to_value(&body).unwrap(), json!({}));

@@ -356,7 +356,8 @@ pub fn verify_runtime_artifact_graph(
                     .find(|value| value.materialization_id.as_str() == materialization_id)
                     .expect("known dependency");
                 if expected.is_some_and(|version| {
-                    dependency.compatibility.runtime_version.as_str() != version
+                    dependency.compatibility.runtime_family.as_str() != "javascript"
+                        || dependency.compatibility.runtime_version.as_str() != version
                         || dependency.kind.to_string() != "JAVASCRIPT_NODE_MODULES"
                 }) {
                     return invariant(
