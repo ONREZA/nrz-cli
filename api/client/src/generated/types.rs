@@ -18048,12 +18048,6 @@ pub struct ComputeConfig200ResponseConfig {
         )
     )]
     pub process_cpu_limit_millis: i64,
-    #[serde(deserialize_with = "Option::deserialize", rename = "memoryBaselineMb")]
-    #[serialize_always]
-    pub memory_baseline_mb: Option<i64>,
-    #[serde(deserialize_with = "Option::deserialize", rename = "memoryStartupMb")]
-    #[serialize_always]
-    pub memory_startup_mb: Option<i64>,
     #[serde(rename = "idleTimeoutSeconds")]
     #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
     pub idle_timeout_seconds: i64,
