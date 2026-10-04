@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.42.3] - 2026-10-04
+
+### 🐛 Bug Fixes
+
+- **build:** validate node publication contracts ([2d8120a](https://github.com/ONREZA/nrz-cli/commit/2d8120a7dd9ec9341f4ab7872c0feb93c984f03d))
+- **deploy:** preserve node launch targets ([c41e55c](https://github.com/ONREZA/nrz-cli/commit/c41e55cfc18436286f2fe6e803490d6a12128c75))
+
 ## [0.42.2] - 2026-10-04
 
 ### 🐛 Bug Fixes
