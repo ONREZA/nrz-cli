@@ -5,8 +5,12 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod execution_compatibility;
 mod launch;
 mod source_graph;
+pub use execution_compatibility::{
+    ExecutionRuntimeFamily, ExecutionRuntimeTarget, verify_execution_runtime_compatibility,
+};
 pub use launch::{
     source_layer_launch, source_layer_launch_for_target, source_layer_runtime_config,
     verify_runtime_launch,
@@ -16,11 +20,13 @@ pub use nrz_contract::{
 };
 
 pub use source_graph::{
-    SourceDependencyMaterialization, compute_logical_artifact_id,
-    compute_source_logical_artifact_id, finalize_source_bundle_runtime_graph,
+    SourceDependencyMaterialization, compile_source_runtime_layer_for_target,
+    compute_logical_artifact_id, compute_source_logical_artifact_id,
+    finalize_source_bundle_runtime_graph, finalize_source_bundle_runtime_graph_for_layer_targets,
     finalize_source_bundle_runtime_graph_for_target,
     finalize_source_bundle_runtime_graph_with_dependencies,
-    validate_source_bundle_application_graph,
+    validate_source_bundle_application_graph, verify_source_runtime_graph_dependencies,
+    verify_source_runtime_layer_for_target,
 };
 
 pub const RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION: &str = "RUNTIME_ARTIFACT_GRAPH_V2.0";

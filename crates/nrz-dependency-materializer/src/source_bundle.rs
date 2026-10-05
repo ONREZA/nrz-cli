@@ -1,11 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use nrz_runtime_artifact::{
     RuntimeArtifactError, SourceDependencyMaterialization,
     VerifiedDependencyMaterializationManifest, VerifiedRuntimeArtifactGraph,
-    finalize_source_bundle_runtime_graph_for_target,
+    compile_source_runtime_layer_for_target,
+    finalize_source_bundle_runtime_graph_for_layer_targets,
 };
 use nrz_source_bundle::{
     DependencySourceTreeError, PYTHON_314_SITE_PACKAGES_ROOT, SourceLogicalManifest,
@@ -71,24 +72,22 @@ pub fn materialize_source_bundle_runtime(
     } else {
         version.to_string()
     };
-    for layer in &request.manifest.layers {
-        nrz_source_bundle::validate_build_runtime_version(
-            layer.runtime_config.as_ref(),
-            Some(&version),
-        )
+    nrz_source_bundle::source_application_runtime(request.manifest)
         .map_err(RuntimeArtifactError::Invariant)?;
-    }
-    if let Some(family) = nrz_source_bundle::source_application_runtime(request.manifest)
-        .map_err(RuntimeArtifactError::Invariant)?
+    let targets = freeze_layer_targets(request.manifest, request.policy.kind, &version)?;
+    for layer in request
+        .manifest
+        .layers
+        .iter()
+        .filter(|layer| layer.target == "COMPUTE")
     {
-        nrz_source_bundle::ApplicationRuntimeIntent {
-            family,
-            args: Vec::new(),
-        }
-        .validate_target(Some(&version))
-        .map_err(RuntimeArtifactError::Invariant)?;
+        // Source semantics remain owned by the shared compiler, before any IO.
+        compile_source_runtime_layer_for_target(
+            layer,
+            &[],
+            targets.get(&layer.name).map(String::as_str),
+        )?;
     }
-    validate_runtime_family(request.manifest, request.policy.kind)?;
     fs::create_dir(request.output_root).map_err(|source| SourceBundleMaterializationError::Io {
         operation: "create runtime materialization root",
         path: request.output_root.to_path_buf(),
@@ -172,13 +171,13 @@ pub fn materialize_source_bundle_runtime(
             manifest: &dependency.manifest,
         })
         .collect::<Vec<_>>();
-    let graph = finalize_source_bundle_runtime_graph_for_target(
+    let graph = finalize_source_bundle_runtime_graph_for_layer_targets(
         request.logical_manifest_sha256,
         request.source_sha256,
         request.source_size_bytes,
         request.manifest,
         &graph_dependencies,
-        Some(&version),
+        &targets,
     )?;
 
     Ok(MaterializedSourceBundleRuntime {
@@ -197,19 +196,31 @@ fn dependency_root_matches_kind(root: &str, kind: DependencyMaterializationKind)
     }
 }
 
-fn validate_runtime_family(
+fn freeze_layer_targets(
     manifest: &SourceLogicalManifest,
     kind: DependencyMaterializationKind,
-) -> Result<(), SourceBundleMaterializationError> {
+    primary_target: &str,
+) -> Result<HashMap<String, String>, SourceBundleMaterializationError> {
     let expected = match kind {
         DependencyMaterializationKind::JavaScriptNodeModules => "JAVASCRIPT",
         DependencyMaterializationKind::PythonSitePackages => "PYTHON",
     };
+    let mut targets = HashMap::new();
+    let mut siblings = Vec::new();
     for layer in manifest
         .layers
         .iter()
         .filter(|layer| layer.target == "COMPUTE")
     {
+        if layer
+            .runtime_config
+            .as_ref()
+            .and_then(|c| c.get("isBinaryEntry"))
+            .and_then(Value::as_bool)
+            == Some(true)
+        {
+            continue;
+        }
         let runtime_family = layer
             .runtime_config
             .as_ref()
@@ -220,7 +231,11 @@ fn validate_runtime_family(
             Some(Value::String(value)) => value.clone(),
             Some(value) => value.to_string(),
         };
-        if actual != expected {
+        if actual == expected {
+            targets.insert(layer.name.clone(), primary_target.to_owned());
+        } else if matches!(actual.as_str(), "JAVASCRIPT" | "PYTHON") {
+            siblings.push((layer, actual));
+        } else {
             return Err(SourceBundleMaterializationError::RuntimeFamilyMismatch {
                 layer_name: layer.name.clone(),
                 expected,
@@ -228,7 +243,32 @@ fn validate_runtime_family(
             });
         }
     }
-    Ok(())
+    if targets.is_empty()
+        && let Some((layer, actual)) = siblings.first()
+    {
+        return Err(SourceBundleMaterializationError::RuntimeFamilyMismatch {
+            layer_name: layer.name.clone(),
+            expected,
+            actual: actual.clone(),
+        });
+    }
+    // One policy still materializes one dependency kind. A sibling with no
+    // dependency tree contributes only its immutable author declaration.
+    for (layer, _) in siblings {
+        let target = layer
+            .runtime_config
+            .as_ref()
+            .and_then(|c| c.get("buildRuntimeVersion"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                RuntimeArtifactError::Invariant(format!(
+                    "managed sibling '{}' requires a frozen build runtime declaration",
+                    layer.name
+                ))
+            })?;
+        targets.insert(layer.name.clone(), target.to_owned());
+    }
+    Ok(targets)
 }
 
 #[derive(Debug, Error)]

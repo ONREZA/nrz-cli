@@ -1243,6 +1243,17 @@ async fn nextjs_standalone_run_with_hint_generates_manifest() {
         super::manifest::LayerTarget::Compute
     );
     assert_eq!(manifest.layers[2].entry.as_deref(), Some("server.js"));
+    let runtime = manifest.layers[2]
+        .runtime
+        .as_ref()
+        .expect("managed SSR build declaration");
+    assert_eq!(runtime.build_runtime_version.as_deref(), Some("bun-1.4.2"));
+    assert!(runtime.application_runtime.is_none());
+    assert!(
+        manifest.layers[..2]
+            .iter()
+            .all(|layer| layer.runtime.is_none())
+    );
     assert_eq!(manifest.routes.len(), 3);
 
     // Verify files were copied correctly

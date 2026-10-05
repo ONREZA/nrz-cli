@@ -129,6 +129,162 @@ fn materializes_dependency_images_and_exact_runtime_graph_from_one_source_bundle
 }
 
 #[test]
+fn primary_dependencies_keep_their_build_target_while_python_sibling_uses_its_frozen_declaration() {
+    let temp = TempDir::new().unwrap();
+    let mut manifest = source_manifest();
+    manifest.layers[0].runtime_config = Some(
+        json!({"applicationRuntime":{"family":"BUN","args":[]},"buildRuntimeVersion":"bun-1.4.2"}),
+    );
+    let mut python = manifest.layers[0].clone();
+    python.name = "python".into();
+    python.root_path = Some("python".into());
+    python.entrypoint = Some("python/main.py".into());
+    python.runtime_config =
+        Some(json!({"runtimeFamily":"PYTHON","buildRuntimeVersion":"python-3.14"}));
+    manifest.layers.push(python);
+    let mut file = source_file("python/main.py", SERVER_BODY, "compute");
+    file.layer_name = Some("python".into());
+    manifest.files.push(file);
+    let source_path = temp.path().join("mixed-source.tar.zst");
+    write_source_bundle(&source_path, &manifest);
+    let bytes = fs::read(&source_path).unwrap();
+    let sha = sha256_hex(&bytes);
+    let manifest_sha = compute_logical_manifest_sha256(&serde_json::to_value(&manifest).unwrap());
+    let mut primary_compatibility = compatibility();
+    primary_compatibility["runtimeFamily"] = json!("bun");
+    primary_compatibility["runtimeVersion"] = json!("1.4.2");
+    let result = materialize_source_bundle_runtime(
+        &fake_erofs_toolchain(temp.path()),
+        SourceBundleMaterializationRequest {
+            source_path: &source_path,
+            logical_manifest_sha256: &manifest_sha,
+            source_sha256: &sha,
+            source_size_bytes: bytes.len() as u64,
+            manifest: &manifest,
+            output_root: &temp.path().join("mixed-runtime"),
+            policy: SourceBundleMaterializationPolicy {
+                kind: DependencyMaterializationKind::JavaScriptNodeModules,
+                compatibility: primary_compatibility.clone(),
+                tree_limits: tree_limits(),
+                max_total_files: 10,
+                max_total_bytes: 1024,
+            },
+        },
+    )
+    .unwrap();
+    assert_eq!(result.dependencies.len(), 1);
+    let layers = &result.graph.wire().runtime_layers;
+    assert_eq!(layers.len(), 2);
+    assert_eq!(
+        layers
+            .iter()
+            .find(|l| l.layer_name.as_str() == "server")
+            .unwrap()
+            .launch
+            .as_ref()
+            .unwrap()
+            .profile
+            .to_string(),
+        "BUN"
+    );
+    let python = layers
+        .iter()
+        .find(|l| l.layer_name.as_str() == "python")
+        .unwrap();
+    assert_eq!(
+        python.launch.as_ref().unwrap().profile.to_string(),
+        "CPYTHON_3_14"
+    );
+    assert!(python.dependency_materialization_ids.is_empty());
+    manifest.layers[1]
+        .runtime_config
+        .as_mut()
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .remove("buildRuntimeVersion");
+    let missing_root = temp.path().join("missing-sibling-runtime");
+    let error = materialize_source_bundle_runtime(
+        &fake_erofs_toolchain(temp.path()),
+        SourceBundleMaterializationRequest {
+            source_path: &temp.path().join("unused-source.tar.zst"),
+            logical_manifest_sha256: &manifest_sha,
+            source_sha256: &sha,
+            source_size_bytes: bytes.len() as u64,
+            manifest: &manifest,
+            output_root: &missing_root,
+            policy: SourceBundleMaterializationPolicy {
+                kind: DependencyMaterializationKind::JavaScriptNodeModules,
+                compatibility: primary_compatibility,
+                tree_limits: tree_limits(),
+                max_total_files: 10,
+                max_total_bytes: 1024,
+            },
+        },
+    )
+    .err()
+    .unwrap();
+    assert!(
+        error
+            .to_string()
+            .contains("frozen build runtime declaration")
+    );
+    assert!(!missing_root.exists());
+}
+
+#[test]
+fn a_sibling_declaration_never_allows_a_foreign_dependency_kind() {
+    let temp = TempDir::new().unwrap();
+    let mut manifest = source_manifest();
+    let mut python = manifest.layers[0].clone();
+    python.name = "python".into();
+    python.root_path = Some("python".into());
+    python.entrypoint = Some("python/main.py".into());
+    python.runtime_config =
+        Some(json!({"runtimeFamily":"PYTHON","buildRuntimeVersion":"python-3.14"}));
+    manifest.layers.push(python);
+    let mut main = source_file("python/main.py", SERVER_BODY, "compute");
+    main.layer_name = Some("python".into());
+    manifest.files.push(main);
+    let mut dependency = source_file(
+        ".onreza/python/3.14/site-packages/pkg/__init__.py",
+        DEPENDENCY_BODY,
+        "dependency",
+    );
+    dependency.layer_name = Some("python".into());
+    manifest.files.push(dependency);
+    let source_path = temp.path().join("foreign-deps.tar.zst");
+    write_source_bundle(&source_path, &manifest);
+    let bytes = fs::read(&source_path).unwrap();
+    let result = materialize_source_bundle_runtime(
+        &fake_erofs_toolchain(temp.path()),
+        SourceBundleMaterializationRequest {
+            source_path: &source_path,
+            logical_manifest_sha256: &compute_logical_manifest_sha256(
+                &serde_json::to_value(&manifest).unwrap(),
+            ),
+            source_sha256: &sha256_hex(&bytes),
+            source_size_bytes: bytes.len() as u64,
+            manifest: &manifest,
+            output_root: &temp.path().join("foreign-runtime"),
+            policy: SourceBundleMaterializationPolicy {
+                kind: DependencyMaterializationKind::JavaScriptNodeModules,
+                compatibility: compatibility(),
+                tree_limits: tree_limits(),
+                max_total_files: 10,
+                max_total_bytes: 1024,
+            },
+        },
+    );
+    assert!(matches!(
+        result,
+        Err(
+            nrz_dependency_materializer::SourceBundleMaterializationError::DependencyKindMismatch { .. }
+        )
+    ));
+}
+
+#[test]
 fn rejects_compute_runtime_family_that_disagrees_with_build_policy() {
     let temp = TempDir::new().unwrap();
     let mut manifest = source_manifest();
@@ -236,6 +392,13 @@ fn materializes_a_manifest_owned_cross_tree_dependency_symlink() {
     );
     append_file(&mut archive, "server/server.js", SERVER_BODY);
     append_file(&mut archive, "node_modules/pkg/index.js", DEPENDENCY_BODY);
+    if manifest
+        .files
+        .iter()
+        .any(|file| file.path == "python/main.py")
+    {
+        append_file(&mut archive, "python/main.py", SERVER_BODY);
+    }
     append_file(
         &mut archive,
         "node_modules/@prisma/client/index.js",
@@ -338,8 +501,17 @@ fn write_source_bundle(path: &Path, manifest: &SourceLogicalManifest) {
         SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH,
         &serde_json::to_vec(manifest).unwrap(),
     );
-    append_file(&mut archive, "server/server.js", SERVER_BODY);
-    append_file(&mut archive, "node_modules/pkg/index.js", DEPENDENCY_BODY);
+    for file in &manifest.files {
+        append_file(
+            &mut archive,
+            &file.path,
+            if file.role == "dependency" {
+                DEPENDENCY_BODY
+            } else {
+                SERVER_BODY
+            },
+        );
+    }
     let encoder = archive.into_inner().unwrap();
     encoder.finish().unwrap();
 }

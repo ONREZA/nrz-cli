@@ -14,7 +14,7 @@ use crate::artifact::{
 use crate::build;
 use crate::build::manifest as build_manifest;
 use crate::cli::{BuildArgs, DeployArgs};
-use crate::detect::types::ComputeType;
+use crate::detect::types::{ComputeType, RuntimeType};
 use crate::output;
 
 pub(super) struct DeployPlanRequest<'a> {
@@ -291,15 +291,17 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         .map_err(|error| {
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
         })?;
-    let build_runtime_version =
-        super::application_runtime::validate_application_runtime_before_build(
-            detection.metadata.application_runtime.as_ref(),
-            effective,
-            request.platform_runner,
-            request.execution_env,
-        )
-        .await?;
-    if let Some(version) = &build_runtime_version {
+    let build_runtime_version = super::validate_application_runtime_before_build(
+        detection.metadata.application_runtime.as_ref(),
+        &detection.metadata.runtime,
+        effective,
+        request.platform_runner,
+        request.execution_env,
+    )
+    .await?;
+    if let Some(version) = &build_runtime_version
+        && detection.metadata.runtime.runtime_type != RuntimeType::Python
+    {
         detection.metadata.runtime.version = Some(version.clone());
     }
 
@@ -448,6 +450,12 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         match entry {
             Some(entry) => {
                 let mut auto = build_manifest::generate_compute_manifest(&entry);
+                let target = super::canonical_build_runtime_target(
+                    &build_artifact.detection.metadata.runtime,
+                    request.platform_runner,
+                    Some(&auto),
+                    effective.node_version(),
+                )?;
                 super::apply_application_runtime_manifest(
                     &mut auto,
                     build_artifact
@@ -455,7 +463,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
                         .metadata
                         .application_runtime
                         .as_ref(),
-                    build_runtime_version.as_deref(),
+                    target.as_deref(),
                 )?;
                 build_manifest::validate(&auto)
                     .map_err(|error| output::with_default_code(error, "INVALID_MANIFEST"))?;

@@ -159,8 +159,8 @@ fn source_bundle_assigns_dependency_ownership_only_for_trusted_materialization()
     assert_eq!(embedded_dependency.layer_name.as_deref(), Some("server"));
 }
 
-#[test]
-fn python_bundle_separates_site_packages_and_declares_runtime_family() {
+#[tokio::test]
+async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".onreza/python/3.14/site-packages/orjson")).unwrap();
     fs::write(dir.path().join("main.py"), b"import orjson").unwrap();
@@ -170,13 +170,34 @@ fn python_bundle_separates_site_packages_and_declares_runtime_family() {
         b"loads = lambda value: value",
     )
     .unwrap();
-    let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version": 1,
-        "layers": [
-            { "name": "server", "target": "COMPUTE", "directory": ".", "entry": "main.py" }
-        ],
-        "routes": []
-    }))
+    let mut manifest: crate::build::manifest::Manifest =
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "layers": [
+                { "name": "server", "target": "COMPUTE", "directory": ".", "entry": "main.py" }
+            ],
+            "routes": []
+        }))
+        .unwrap();
+    let detection = crate::detect::detect_with_framework_override(dir.path(), None);
+    let effective = nrz::config::EffectiveProjectConfig::from_project_config(
+        dir.path().to_owned(),
+        nrz::config::ProjectConfig::default(),
+    );
+    let target = crate::deploy::validate_application_runtime_before_build(
+        detection.metadata.application_runtime.as_ref(),
+        &detection.metadata.runtime,
+        &effective,
+        false,
+        &[],
+    )
+    .await
+    .unwrap();
+    crate::deploy::apply_application_runtime_manifest(
+        &mut manifest,
+        detection.metadata.application_runtime.as_ref(),
+        target.as_deref(),
+    )
     .unwrap();
     let files = scan_dir(dir.path()).unwrap();
 
@@ -206,8 +227,362 @@ fn python_bundle_separates_site_packages_and_declares_runtime_family() {
     assert_eq!(dependency.role, SourceLogicalManifestFileRole::Dependency);
     assert_eq!(
         plan.logical_manifest.layers[0].runtime_config,
-        Some(serde_json::json!({"runtimeFamily": "PYTHON"}))
+        Some(serde_json::json!({"runtimeFamily": "PYTHON", "buildRuntimeVersion": "python-3.14"}))
     );
+}
+
+#[tokio::test]
+async fn python_bundle_without_dependencies_freezes_provided_build_manifest_target() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("main.py"), b"print('hello')").unwrap();
+    fs::create_dir(dir.path().join(".onreza")).unwrap();
+    fs::write(
+        dir.path().join(".onreza/manifest.json"),
+        serde_json::to_vec(&crate::build::manifest::generate_compute_manifest(
+            "main.py",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let detection = crate::detect::detect_with_framework_override(dir.path(), None);
+    let effective = nrz::config::EffectiveProjectConfig::from_project_config(
+        dir.path().to_owned(),
+        nrz::config::ProjectConfig::default(),
+    );
+    let build = crate::build::run_with_effective_config(
+        crate::cli::BuildArgs {
+            dir: dir.path().to_string_lossy().into_owned(),
+            skip_validation: false,
+        },
+        true,
+        &effective,
+        Some(&detection),
+        false,
+        dir.path(),
+    )
+    .await
+    .unwrap();
+    let manifest = build.manifest.unwrap();
+    let plan = build_source_bundle_plan_with_scan(
+        dir.path(),
+        &manifest,
+        &scan_dir(dir.path()).unwrap(),
+        &RuntimeArtifactScan::PythonRuntimeRoot,
+        RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap();
+    let config = plan.logical_manifest.layers[0]
+        .runtime_config
+        .as_ref()
+        .unwrap();
+    assert_eq!(config["runtimeFamily"], "PYTHON");
+    assert_eq!(config["buildRuntimeVersion"], "python-3.14");
+    assert_eq!(detection.metadata.runtime.version.as_deref(), Some("3.14"));
+    assert!(
+        plan.logical_manifest
+            .files
+            .iter()
+            .all(|file| file.role != SourceLogicalManifestFileRole::Dependency)
+    );
+    let source: nrz_source_bundle::SourceLogicalManifest =
+        serde_json::from_value(serde_json::to_value(&plan.logical_manifest).unwrap()).unwrap();
+    let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph_for_layer_targets(
+        &plan.logical_manifest_sha256,
+        &plan.source_sha256,
+        plan.source_size_bytes,
+        &source,
+        &[],
+        &std::collections::HashMap::from([("server".into(), "python-3.14".into())]),
+    )
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(graph.wire()).unwrap()["runtimeLayers"][0]["launch"]["profile"],
+        "CPYTHON_3_14"
+    );
+}
+
+#[tokio::test]
+async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitted_selection() {
+    let directory = tempdir().unwrap();
+    fs::write(directory.path().join("index.html"), b"<html></html>").unwrap();
+    fs::write(directory.path().join("server.js"), b"console.log('hello')").unwrap();
+    fs::create_dir(directory.path().join(".onreza")).unwrap();
+    let detection = crate::detect::detect_with_framework_override(directory.path(), None);
+    assert!(detection.metadata.application_runtime.is_none());
+    assert_eq!(
+        detection.metadata.runtime.runtime_type,
+        crate::detect::types::RuntimeType::Static
+    );
+    for admitted in [false, true] {
+        for witness in [None, Some("node-24"), Some("node-22")] {
+            let mut manifest = crate::build::manifest::generate_compute_manifest("server.js");
+            manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
+                application_runtime: Some(nrz_source_bundle::ApplicationRuntimeIntent {
+                    family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
+                    args: vec![],
+                }),
+                build_runtime_version: witness.map(str::to_owned),
+                ..Default::default()
+            });
+            fs::write(
+                directory.path().join(".onreza/manifest.json"),
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap();
+            let mut config = nrz::config::ProjectConfig::default();
+            config.build.output_dirs = Some(vec![".".into()]);
+            let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
+                directory.path().to_owned(),
+                config,
+            );
+            if admitted {
+                effective.bind_admitted_node_version("NODE_24").unwrap();
+            }
+            let result = crate::build::run_with_effective_config(
+                crate::cli::BuildArgs {
+                    dir: directory.path().to_string_lossy().into_owned(),
+                    skip_validation: false,
+                },
+                true,
+                &effective,
+                Some(&detection),
+                false,
+                directory.path(),
+            )
+            .await;
+            if admitted && witness == Some("node-22") {
+                assert!(result.is_err());
+                continue;
+            }
+            let built = result.unwrap().manifest.unwrap();
+            let plan = build_source_bundle_plan_with_scan(
+                directory.path(),
+                &built,
+                &scan_dir(directory.path()).unwrap(),
+                &RuntimeArtifactScan::NodeRuntimeRoot,
+                RuntimeDependencyPackaging::TrustedMaterialization,
+                None,
+            )
+            .unwrap();
+            let config = plan.logical_manifest.layers[0]
+                .runtime_config
+                .as_ref()
+                .unwrap();
+            assert_eq!(config["applicationRuntime"]["family"], "NODE");
+            if admitted {
+                assert_eq!(config["buildRuntimeVersion"], "node-24");
+            } else {
+                assert_eq!(
+                    config
+                        .get("buildRuntimeVersion")
+                        .and_then(serde_json::Value::as_str),
+                    witness
+                );
+            }
+        }
+    }
+    for family in [None, Some(nrz_source_bundle::ApplicationRuntimeFamily::Bun)] {
+        let mut manifest = crate::build::manifest::generate_compute_manifest("server.js");
+        manifest.layers[0].runtime = family.map(|family| crate::build::manifest::RuntimeConfig {
+            application_runtime: Some(nrz_source_bundle::ApplicationRuntimeIntent {
+                family,
+                args: vec![],
+            }),
+            ..Default::default()
+        });
+        fs::write(
+            directory.path().join(".onreza/manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let mut config = nrz::config::ProjectConfig::default();
+        config.build.output_dirs = Some(vec![".".into()]);
+        let effective = nrz::config::EffectiveProjectConfig::from_project_config(
+            directory.path().to_owned(),
+            config,
+        );
+        let built = crate::build::run_with_effective_config(
+            crate::cli::BuildArgs {
+                dir: directory.path().to_string_lossy().into_owned(),
+                skip_validation: false,
+            },
+            true,
+            &effective,
+            Some(&detection),
+            false,
+            directory.path(),
+        )
+        .await
+        .unwrap()
+        .manifest
+        .unwrap();
+        let source = build_source_bundle_plan_with_scan(
+            directory.path(),
+            &built,
+            &scan_dir(directory.path()).unwrap(),
+            &RuntimeArtifactScan::NodeRuntimeRoot,
+            RuntimeDependencyPackaging::TrustedMaterialization,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            source.logical_manifest.layers[0]
+                .runtime_config
+                .as_ref()
+                .unwrap()["buildRuntimeVersion"],
+            "bun-1.4.2"
+        );
+    }
+}
+
+#[tokio::test]
+async fn managed_build_declarations_preserve_frozen_targets_and_static_publication() {
+    const CASE: &str = "ONREZA_PYTHON_PRODUCER_SELECTION_TEST";
+    let Ok(selected) = std::env::var(CASE) else {
+        for selected in [
+            "python-3.14",
+            "python-3.13",
+            "bun-1.4.2",
+            "node-24",
+            "MISSING",
+        ] {
+            let mut child = tokio::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "artifact::source_bundle_v1_tests::managed_build_declarations_preserve_frozen_targets_and_static_publication"]);
+            child.env(CASE, selected);
+            child.env("PATH", "/nonexistent");
+            if selected == "MISSING" {
+                child.env_remove("ONREZA_RUNTIME_VERSION");
+            } else {
+                child.env("ONREZA_RUNTIME_VERSION", selected);
+            }
+            let result = child.output().await.unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stdout)
+            );
+        }
+        return;
+    };
+    let directory = tempdir().unwrap();
+    fs::write(directory.path().join("main.py"), b"print('hello')").unwrap();
+    let detection = crate::detect::detect_with_framework_override(directory.path(), None);
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.output_dirs = Some(vec![".".into()]);
+    let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
+        directory.path().to_owned(),
+        config,
+    );
+    effective.apply_platform_runner_settings(&nrz::config::ProjectBuildSettings {
+        application_runtime: Some(None),
+        ..Default::default()
+    });
+    let result = crate::deploy::validate_application_runtime_before_build(
+        None,
+        &detection.metadata.runtime,
+        &effective,
+        true,
+        &[],
+    )
+    .await;
+    if selected == "python-3.14" {
+        assert_eq!(result.unwrap().as_deref(), Some("python-3.14"));
+    } else {
+        assert!(result.is_err());
+    }
+    // Implicit JavaScript keeps the Builder selection without inventing a
+    // launcher declaration; static-only publication does not need a runtime.
+    fs::write(directory.path().join("index.html"), b"<html></html>").unwrap();
+    fs::remove_file(directory.path().join("main.py")).unwrap();
+    fs::write(directory.path().join("server.js"), b"console.log('hello')").unwrap();
+    let javascript = crate::detect::detect_with_framework_override(directory.path(), None);
+    assert_eq!(
+        javascript.metadata.runtime.runtime_type,
+        crate::detect::types::RuntimeType::Static
+    );
+    fs::create_dir(directory.path().join(".onreza")).unwrap();
+    let manifest_path = directory.path().join(".onreza/manifest.json");
+    for (managed, family) in [
+        (true, None),
+        (
+            true,
+            Some(nrz_source_bundle::ApplicationRuntimeFamily::Node),
+        ),
+        (true, Some(nrz_source_bundle::ApplicationRuntimeFamily::Bun)),
+        (false, None),
+    ] {
+        let mut manifest = if managed {
+            crate::build::manifest::generate_compute_manifest("server.js")
+        } else {
+            crate::build::manifest::generate_static_manifest()
+        };
+        if managed {
+            manifest.layers[0].runtime =
+                family.map(|family| crate::build::manifest::RuntimeConfig {
+                    application_runtime: Some(nrz_source_bundle::ApplicationRuntimeIntent {
+                        family,
+                        args: vec![],
+                    }),
+                    ..Default::default()
+                });
+        }
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let result = crate::build::run_with_effective_config(
+            crate::cli::BuildArgs {
+                dir: directory.path().to_string_lossy().into_owned(),
+                skip_validation: false,
+            },
+            true,
+            &effective,
+            Some(&javascript),
+            false,
+            directory.path(),
+        )
+        .await;
+        let permitted = match family {
+            Some(nrz_source_bundle::ApplicationRuntimeFamily::Node) => selected == "node-24",
+            Some(nrz_source_bundle::ApplicationRuntimeFamily::Bun) => selected == "bun-1.4.2",
+            None => matches!(selected.as_str(), "bun-1.4.2" | "node-24"),
+        };
+        if managed && !permitted {
+            assert!(result.is_err());
+            continue;
+        }
+        let manifest = result.unwrap().manifest.unwrap();
+        if managed {
+            let runtime = manifest.layers[0].runtime.as_ref().unwrap();
+            assert_eq!(
+                runtime.build_runtime_version.as_deref(),
+                Some(selected.as_str())
+            );
+            assert_eq!(
+                runtime
+                    .application_runtime
+                    .as_ref()
+                    .map(|intent| intent.family),
+                family
+            );
+            let source = build_source_bundle_plan_with_scan(
+                directory.path(),
+                &manifest,
+                &scan_dir(directory.path()).unwrap(),
+                &RuntimeArtifactScan::NodeRuntimeRoot,
+                RuntimeDependencyPackaging::TrustedMaterialization,
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                source.logical_manifest.layers[0]
+                    .runtime_config
+                    .as_ref()
+                    .unwrap()["buildRuntimeVersion"],
+                selected
+            );
+        } else {
+            assert!(manifest.layers[0].runtime.is_none());
+        }
+    }
 }
 
 #[cfg(unix)]

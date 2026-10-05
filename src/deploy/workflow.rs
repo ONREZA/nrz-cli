@@ -384,43 +384,24 @@ pub async fn run(
     let mut skipped_by_ignored_build_step = false;
     let deploy_result = async {
         if runner_context.is_none() {
-            let detection = crate::detect::detect_with_framework_override(
-                &command_context.project_dir,
-                command_context.effective.framework_override(),
-            );
-            let intent =
-                crate::detect::application_runtime::resolve_application_runtime_with_config(
-                    &crate::detect::fs::LocalFs::new(&command_context.project_dir),
-                    &detection.framework,
-                    command_context.config.deploy.runtime,
-                    command_context.config.deploy.entry.clone(),
-                    command_context.config.deploy.args.clone(),
-                )
-                .map_err(|error| {
-                    output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
-                })?;
-            if intent.is_some_and(|intent| {
-                intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Node
-            }) {
-                let frozen = wire::load_runner_context(&client, deployment.id.parse()?).await?;
-                if frozen.context.project_id != execution_context.project_id
-                    || frozen.context.workspace_id != execution_context.workspace_id
-                    || frozen.context.environment_id != execution_context.environment_id
-                    || frozen.deployment.attempt != deployment.attempt
-                {
-                    return Err(output::coded_error(
-                        "APPLICATION_RUNTIME_INVALID",
-                        "admitted Node context scope changed before building",
-                    ));
-                }
-                command_context.effective.bind_admitted_node_version(
-                    frozen
-                        .settings
-                        .node_version
-                        .as_deref()
-                        .context("admitted deployment has no Node version")?,
-                )?;
+            let frozen = wire::load_runner_context(&client, deployment.id.parse()?).await?;
+            if frozen.context.project_id != execution_context.project_id
+                || frozen.context.workspace_id != execution_context.workspace_id
+                || frozen.context.environment_id != execution_context.environment_id
+                || frozen.deployment.attempt != deployment.attempt
+            {
+                return Err(output::coded_error(
+                    "APPLICATION_RUNTIME_INVALID",
+                    "admitted deployment context scope changed before building",
+                ));
             }
+            command_context.effective.bind_admitted_node_version(
+                frozen
+                    .settings
+                    .node_version
+                    .as_deref()
+                    .context("admitted deployment has no Node version")?,
+            )?;
         }
         if let Some(runner) = &runner_context {
             match ignored_build::evaluate(IgnoredBuildRequest {

@@ -18,6 +18,9 @@ mod workflow;
 pub use workflow::run;
 
 mod application_runtime;
+pub(crate) use application_runtime::{
+    canonical_build_runtime_target, validate_application_runtime_before_build,
+};
 mod build_logs;
 #[cfg(test)]
 mod build_logs_tests;

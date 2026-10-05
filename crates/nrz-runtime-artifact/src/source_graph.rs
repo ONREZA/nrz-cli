@@ -1,5 +1,6 @@
 use nrz_source_bundle::{
     SOURCE_BUNDLE_V1_SCHEMA_VERSION, SourceLogicalManifest, SourceLogicalManifestLayer,
+    normalize_source_path,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -8,8 +9,9 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     RUNTIME_ARTIFACT_GRAPH_MOUNT_BINDINGS_SCHEMA_VERSION, RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION,
-    RuntimeArtifactError, SOURCE_BUNDLE_MEDIA_TYPE, VerifiedDependencyMaterializationManifest,
-    VerifiedRuntimeArtifactGraph, finalize_runtime_artifact_graph,
+    RuntimeArtifactError, RuntimeLayerWire, RuntimeProfile, SOURCE_BUNDLE_MEDIA_TYPE,
+    VerifiedDependencyMaterializationManifest, VerifiedRuntimeArtifactGraph,
+    finalize_runtime_artifact_graph,
 };
 
 const SOURCE_BUNDLE_ARTIFACT_KIND: &str = "SOURCE_BUNDLE_V1";
@@ -119,6 +121,7 @@ pub fn finalize_source_bundle_runtime_graph_with_dependencies(
 
 /// Trusted builder target controls package export conditions, including layers
 /// with no dependency tree. Direct publication retains its existing profile.
+// DEPRECATED: retained/nonmanaged callers keep the single-target contract.
 pub fn finalize_source_bundle_runtime_graph_for_target(
     logical_manifest_sha256: &str,
     source_sha256: &str,
@@ -126,6 +129,76 @@ pub fn finalize_source_bundle_runtime_graph_for_target(
     manifest: &SourceLogicalManifest,
     dependencies: &[SourceDependencyMaterialization<'_>],
     runtime_version: Option<&str>,
+) -> Result<VerifiedRuntimeArtifactGraph, RuntimeArtifactError> {
+    finalize_source_bundle_runtime_graph_with_targets(
+        logical_manifest_sha256,
+        source_sha256,
+        source_size_bytes,
+        manifest,
+        dependencies,
+        runtime_version,
+        None,
+    )
+}
+
+/// Compile every managed layer against publication-owned frozen inputs. The
+/// existing conflicting BUN/NODE declaration boundary remains unchanged.
+pub fn finalize_source_bundle_runtime_graph_for_layer_targets(
+    logical_manifest_sha256: &str,
+    source_sha256: &str,
+    source_size_bytes: u64,
+    manifest: &SourceLogicalManifest,
+    dependencies: &[SourceDependencyMaterialization<'_>],
+    runtime_versions: &HashMap<String, String>,
+) -> Result<VerifiedRuntimeArtifactGraph, RuntimeArtifactError> {
+    nrz_source_bundle::source_application_runtime(manifest)
+        .map_err(RuntimeArtifactError::Invariant)?;
+    let managed = manifest.layers.iter().filter(|layer| {
+        layer.target == "COMPUTE"
+            && layer
+                .runtime_config
+                .as_ref()
+                .and_then(|config| config.get("isBinaryEntry"))
+                .and_then(Value::as_bool)
+                != Some(true)
+    });
+    let mut expected = HashSet::new();
+    for layer in managed {
+        expected.insert(layer.name.as_str());
+        if !runtime_versions.contains_key(&layer.name) {
+            return Err(RuntimeArtifactError::Invariant(format!(
+                "managed layer '{}' has no frozen build runtime target",
+                layer.name
+            )));
+        }
+    }
+    if runtime_versions
+        .keys()
+        .any(|name| !expected.contains(name.as_str()))
+    {
+        return Err(RuntimeArtifactError::Invariant(
+            "frozen runtime target map has an unknown/nonmanaged layer".into(),
+        ));
+    }
+    finalize_source_bundle_runtime_graph_with_targets(
+        logical_manifest_sha256,
+        source_sha256,
+        source_size_bytes,
+        manifest,
+        dependencies,
+        None,
+        Some(runtime_versions),
+    )
+}
+
+fn finalize_source_bundle_runtime_graph_with_targets(
+    logical_manifest_sha256: &str,
+    source_sha256: &str,
+    source_size_bytes: u64,
+    manifest: &SourceLogicalManifest,
+    dependencies: &[SourceDependencyMaterialization<'_>],
+    runtime_version: Option<&str>,
+    runtime_versions: Option<&HashMap<String, String>>,
 ) -> Result<VerifiedRuntimeArtifactGraph, RuntimeArtifactError> {
     let source_logical_artifact_id =
         compute_source_logical_artifact_id(logical_manifest_sha256, source_sha256);
@@ -136,7 +209,12 @@ pub fn finalize_source_bundle_runtime_graph_for_target(
         .map(|file| file.path.clone())
         .collect::<Vec<_>>();
     let dependency_layers = dependency_layers(manifest, dependencies)?;
-    let mut runtime_layers = runtime_layers(manifest, &dependency_layers, runtime_version)?;
+    let mut runtime_layers = runtime_layers(
+        manifest,
+        &dependency_layers,
+        runtime_version,
+        runtime_versions,
+    )?;
     // Layer ownership is many-to-one: identical immutable dependencies may be
     // shared by several compute layers. The graph stores each descriptor once.
     let mut descriptors: Vec<Value> = Vec::new();
@@ -199,28 +277,12 @@ fn dependency_layers(
     manifest: &SourceLogicalManifest,
     dependencies: &[SourceDependencyMaterialization<'_>],
 ) -> Result<HashMap<String, Vec<String>>, RuntimeArtifactError> {
-    let compute_layers = manifest
-        .layers
-        .iter()
-        .filter(|layer| layer.target == "COMPUTE")
-        .map(|layer| layer.name.as_str())
-        .collect::<HashSet<_>>();
-    let dependency_file_layers = dependency_file_layers(manifest)?;
-
+    verify_dependency_layers(
+        manifest,
+        dependencies.iter().map(|dependency| dependency.layer_name),
+    )?;
     let mut result = HashMap::<String, Vec<String>>::new();
     for dependency in dependencies {
-        if !compute_layers.contains(dependency.layer_name) {
-            return Err(RuntimeArtifactError::Invariant(format!(
-                "dependency materialization references unknown compute layer '{}'",
-                dependency.layer_name
-            )));
-        }
-        if !dependency_file_layers.contains(dependency.layer_name) {
-            return Err(RuntimeArtifactError::Invariant(format!(
-                "dependency materialization for layer '{}' has no dependency-owned source files",
-                dependency.layer_name
-            )));
-        }
         let ids = result.entry(dependency.layer_name.to_string()).or_default();
         let id = dependency.manifest.materialization_id().to_string();
         if !ids.contains(&id) {
@@ -228,15 +290,60 @@ fn dependency_layers(
         }
     }
 
+    Ok(result)
+}
+
+/// Check source dependency ownership against an already verified graph. The
+/// graph verifier owns materialization identities, compatibility and mount bindings.
+pub fn verify_source_runtime_graph_dependencies(
+    manifest: &SourceLogicalManifest,
+    graph: &VerifiedRuntimeArtifactGraph,
+) -> Result<(), RuntimeArtifactError> {
+    verify_dependency_layers(
+        manifest,
+        graph
+            .wire()
+            .runtime_layers
+            .iter()
+            .filter(|layer| !layer.dependency_materialization_ids.is_empty())
+            .map(|layer| layer.layer_name.as_str()),
+    )
+}
+
+fn verify_dependency_layers<'a>(
+    manifest: &SourceLogicalManifest,
+    layer_names: impl Iterator<Item = &'a str>,
+) -> Result<(), RuntimeArtifactError> {
+    let compute_layers = manifest
+        .layers
+        .iter()
+        .filter(|layer| layer.target == "COMPUTE")
+        .map(|layer| layer.name.as_str())
+        .collect::<HashSet<_>>();
+    let dependency_file_layers = dependency_file_layers(manifest)?;
+    let mut materialized_layers = HashSet::new();
+    for layer_name in layer_names {
+        if !compute_layers.contains(layer_name) {
+            return Err(RuntimeArtifactError::Invariant(format!(
+                "dependency materialization references unknown compute layer '{layer_name}'"
+            )));
+        }
+        if !dependency_file_layers.contains(layer_name) {
+            return Err(RuntimeArtifactError::Invariant(format!(
+                "dependency materialization for layer '{layer_name}' has no dependency-owned source files"
+            )));
+        }
+        materialized_layers.insert(layer_name);
+    }
     for layer_name in dependency_file_layers {
-        if !result.contains_key(layer_name) {
+        if !materialized_layers.contains(layer_name) {
             return Err(RuntimeArtifactError::Invariant(format!(
                 "dependency-owned source files for layer '{layer_name}' have no materialization"
             )));
         }
     }
 
-    Ok(result)
+    Ok(())
 }
 
 fn dependency_file_layers(
@@ -293,6 +400,7 @@ fn runtime_layers(
     manifest: &SourceLogicalManifest,
     dependency_layers: &HashMap<String, Vec<String>>,
     runtime_version: Option<&str>,
+    runtime_versions: Option<&HashMap<String, String>>,
 ) -> Result<Vec<Value>, RuntimeArtifactError> {
     let mut runtime_layers = Vec::new();
     for layer in &manifest.layers {
@@ -305,7 +413,10 @@ fn runtime_layers(
                     .get(layer.name.as_str())
                     .cloned()
                     .unwrap_or_default(),
-                runtime_version,
+                runtime_versions
+                    .and_then(|targets| targets.get(&layer.name))
+                    .map(String::as_str)
+                    .or(runtime_version),
             )?),
             target => {
                 return Err(RuntimeArtifactError::Invariant(format!(
@@ -323,7 +434,6 @@ fn runtime_layer(
     dependency_materialization_ids: Vec<String>,
     runtime_version: Option<&str>,
 ) -> Result<Value, RuntimeArtifactError> {
-    let application_root = layer.root_path.as_deref().unwrap_or(".");
     let entrypoint = layer.entrypoint.as_deref().ok_or_else(|| {
         RuntimeArtifactError::Invariant(format!("compute layer '{}' has no entrypoint", layer.name))
     })?;
@@ -345,6 +455,30 @@ fn runtime_layer(
             layer.name
         )));
     }
+    compile_source_runtime_layer_for_target(layer, &dependency_materialization_ids, runtime_version)
+}
+
+/// Compile the shared source-to-runtime semantics against a trusted build target.
+/// Publication and consumers retain their own authenticated file ownership checks.
+/// Dependency IDs come from materialization or a verified graph, never source claims.
+pub fn compile_source_runtime_layer_for_target(
+    layer: &SourceLogicalManifestLayer,
+    dependency_materialization_ids: &[String],
+    runtime_version: Option<&str>,
+) -> Result<Value, RuntimeArtifactError> {
+    if layer.target != "COMPUTE" {
+        return Err(RuntimeArtifactError::Invariant(
+            "runtime layer is not COMPUTE".into(),
+        ));
+    }
+    let application_root = layer.root_path.as_deref().unwrap_or(".");
+    if application_root != "." {
+        normalize_source_path(application_root).map_err(RuntimeArtifactError::Invariant)?;
+    }
+    let entrypoint = layer.entrypoint.as_deref().ok_or_else(|| {
+        RuntimeArtifactError::Invariant(format!("compute layer '{}' has no entrypoint", layer.name))
+    })?;
+    normalize_source_path(entrypoint).map_err(RuntimeArtifactError::Invariant)?;
     let relative_entrypoint = if application_root == "." {
         entrypoint
     } else {
@@ -362,6 +496,19 @@ fn runtime_layer(
         layer.runtime_config.as_ref(),
         runtime_version,
     )?;
+    if matches!(
+        launch.profile,
+        RuntimeProfile::Node22 | RuntimeProfile::Node24 | RuntimeProfile::Node26
+    ) && layer
+        .runtime_config
+        .as_ref()
+        .and_then(|config| config.get("runtimeFamily"))
+        .is_some_and(|family| family.as_str() != Some("JAVASCRIPT"))
+    {
+        return Err(RuntimeArtifactError::Invariant(
+            "Node launch conflicts with source runtime family".into(),
+        ));
+    }
     let runtime_config = crate::launch::source_layer_runtime_config(layer.runtime_config.as_ref())?;
     Ok(json!({
         "layerName": layer.name,
@@ -371,6 +518,31 @@ fn runtime_layer(
         "launch": launch,
         "runtimeConfig": runtime_config
     }))
+}
+
+/// Compare the complete compiled layer without dropping explicit nulls or fields.
+/// Dependency bindings remain authenticated graph claims: SOURCE_BUNDLE carries
+/// file ownership, not materialization identities or mount descriptors.
+pub fn verify_source_runtime_layer_for_target(
+    layer: &SourceLogicalManifestLayer,
+    runtime: &RuntimeLayerWire,
+    runtime_version: Option<&str>,
+) -> Result<(), RuntimeArtifactError> {
+    let ids = runtime
+        .dependency_materialization_ids
+        .iter()
+        .map(|id| id.as_str().to_owned())
+        .collect::<Vec<_>>();
+    let mut expected = compile_source_runtime_layer_for_target(layer, &ids, runtime_version)?;
+    if let Some(bindings) = &runtime.dependency_bindings {
+        expected["dependencyBindings"] = serde_json::to_value(bindings)?;
+    }
+    if expected != serde_json::to_value(runtime)? {
+        return Err(RuntimeArtifactError::Invariant(
+            "graph runtime differs from source layer".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -619,6 +791,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(graph.wire().dependencies.len(), 1);
+        verify_source_runtime_graph_dependencies(&manifest_with_dependency(), &graph).unwrap();
+        assert!(verify_source_runtime_graph_dependencies(&manifest(), &graph).is_err());
         assert_eq!(
             graph.wire().runtime_layers[0].dependency_materialization_ids[0].as_str(),
             dependency_manifest.materialization_id()
@@ -694,6 +868,10 @@ mod tests {
         let value = serde_json::to_value(graph.wire()).unwrap();
         let restored = crate::verify_runtime_artifact_graph(value, &["server.js".into()]).unwrap();
         assert_eq!(restored.graph_digest(), graph.graph_digest());
+        verify_source_runtime_graph_dependencies(&manifest, &restored).unwrap();
+        for (source, runtime) in manifest.layers.iter().zip(&restored.wire().runtime_layers) {
+            verify_source_runtime_layer_for_target(source, runtime, None).unwrap();
+        }
     }
 
     #[test]

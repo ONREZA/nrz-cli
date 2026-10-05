@@ -563,6 +563,11 @@ pub(crate) fn apply_application_runtime_manifest(
             .and_then(|runtime| runtime.application_runtime.as_ref())
         {
             intent.validate().map_err(anyhow::Error::msg)?;
+            if build_runtime_version.is_some() {
+                intent
+                    .validate_target(build_runtime_version)
+                    .map_err(anyhow::Error::msg)?;
+            }
             if declaration.is_some_and(|declaration| declaration.intent() != *intent) {
                 return Err(output::coded_error(
                     "APPLICATION_RUNTIME_INVALID",
@@ -570,6 +575,12 @@ pub(crate) fn apply_application_runtime_manifest(
                 ));
             }
         } else if let Some(declaration) = declaration {
+            if build_runtime_version.is_some() {
+                declaration
+                    .intent()
+                    .validate_target(build_runtime_version)
+                    .map_err(anyhow::Error::msg)?;
+            }
             layer
                 .runtime
                 .get_or_insert_with(Default::default)
