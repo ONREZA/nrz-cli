@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.42.5] - 2026-10-05
+
+### 🐛 Bug Fixes
+
+- **deploy:** freeze source runtime declarations ([517ef7c](https://github.com/ONREZA/nrz-cli/commit/517ef7cd5fa1dd08ce2e13c55ea607da3d42f981))
+- **deploy:** share source runtime validation ([13baa46](https://github.com/ONREZA/nrz-cli/commit/13baa4667da24d8654523e1ab9ae1f50c58e2e79))
+
 ## [0.42.4] - 2026-10-05
 
 ### 🐛 Bug Fixes
