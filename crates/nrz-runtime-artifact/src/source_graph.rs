@@ -1,6 +1,5 @@
 use nrz_source_bundle::{
-    RUNTIME_READINESS_CONFIG_KEY, SOURCE_BUNDLE_V1_SCHEMA_VERSION, SourceLogicalManifest,
-    SourceLogicalManifestLayer,
+    SOURCE_BUNDLE_V1_SCHEMA_VERSION, SourceLogicalManifest, SourceLogicalManifestLayer,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -359,17 +358,11 @@ fn runtime_layer(
                 ))
             })?
     };
-    let mut runtime_config = layer.runtime_config.clone().unwrap_or_else(|| json!({}));
     let launch = crate::launch::source_layer_launch_for_target(
         layer.runtime_config.as_ref(),
         runtime_version,
     )?;
-    if let Some(config) = runtime_config.as_object_mut() {
-        config.remove(RUNTIME_READINESS_CONFIG_KEY);
-        config.remove("isBinaryEntry");
-        config.remove(nrz_source_bundle::APPLICATION_RUNTIME_CONFIG_KEY);
-        config.remove("buildRuntimeVersion");
-    }
+    let runtime_config = crate::launch::source_layer_runtime_config(layer.runtime_config.as_ref())?;
     Ok(json!({
         "layerName": layer.name,
         "applicationRoot": application_root,

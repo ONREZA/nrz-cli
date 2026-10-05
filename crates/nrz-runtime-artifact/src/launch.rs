@@ -12,7 +12,8 @@ pub fn source_layer_launch(
     source_layer_launch_for_target(config, None)
 }
 
-pub(crate) fn source_layer_launch_for_target(
+/// Compile against an independently admitted target, never the source's build witness.
+pub fn source_layer_launch_for_target(
     config: Option<&Value>,
     runtime_version: Option<&str>,
 ) -> Result<RuntimeLaunchWire, RuntimeArtifactError> {
@@ -65,6 +66,23 @@ pub(crate) fn source_layer_launch_for_target(
     let launch = serde_json::from_value(value)?;
     verify_runtime_launch(&launch)?;
     Ok(launch)
+}
+
+/// Project source configuration after launch declarations have been consumed.
+pub fn source_layer_runtime_config(config: Option<&Value>) -> Result<Value, RuntimeArtifactError> {
+    let mut config = config.cloned().unwrap_or_else(|| json!({}));
+    let object = config.as_object_mut().ok_or_else(|| {
+        RuntimeArtifactError::Invariant("source runtimeConfig must be an object".into())
+    })?;
+    for key in [
+        nrz_source_bundle::RUNTIME_READINESS_CONFIG_KEY,
+        "isBinaryEntry",
+        nrz_source_bundle::APPLICATION_RUNTIME_CONFIG_KEY,
+        "buildRuntimeVersion",
+    ] {
+        object.remove(key);
+    }
+    Ok(config)
 }
 
 pub fn verify_runtime_launch(launch: &RuntimeLaunchWire) -> Result<(), RuntimeArtifactError> {

@@ -7,7 +7,10 @@ use thiserror::Error;
 
 mod launch;
 mod source_graph;
-pub use launch::{source_layer_launch, verify_runtime_launch};
+pub use launch::{
+    source_layer_launch, source_layer_launch_for_target, source_layer_runtime_config,
+    verify_runtime_launch,
+};
 pub use nrz_contract::{
     RuntimeLaunchWire, RuntimeLayerWire, RuntimeProfile, RuntimeReadinessProtocol,
 };

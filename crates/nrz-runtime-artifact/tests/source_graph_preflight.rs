@@ -3,6 +3,85 @@ use nrz_source_bundle::SourceLogicalManifest;
 use serde_json::json;
 
 #[test]
+fn source_launch_and_runtime_config_match_the_materialized_graph() {
+    for (family, target, profile, args) in [
+        ("BUN", "bun-1.4.2", "BUN", json!([])),
+        ("NODE", "node-22", "NODE_22", json!(["--port", "8080"])),
+        ("NODE", "node-24", "NODE_24", json!(["--port", "8080"])),
+        ("NODE", "node-26", "NODE_26", json!(["--port", "8080"])),
+    ] {
+        let config = json!({
+            "applicationRuntime": {"family": family, "args": args},
+            "buildRuntimeVersion": target,
+            "readiness": {"protocol": "TCP"}
+        });
+        let mut source = manifest("server");
+        source.files.retain(|file| file.role != "dependency");
+        source.layers[0].runtime_config = Some(config.clone());
+        let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph_for_target(
+            &"a".repeat(64),
+            &"b".repeat(64),
+            1024,
+            &source,
+            &[],
+            Some(target),
+        )
+        .unwrap();
+        let layer = &graph.wire().runtime_layers[0];
+        let launch =
+            nrz_runtime_artifact::source_layer_launch_for_target(Some(&config), Some(target))
+                .unwrap();
+        assert_eq!(launch, *layer.launch.as_ref().unwrap());
+        assert_eq!(launch.profile.to_string(), profile);
+        assert_eq!(serde_json::to_value(&launch.args).unwrap(), args);
+        assert_eq!(
+            serde_json::to_value(&layer.runtime_config).unwrap(),
+            json!({})
+        );
+        assert_eq!(
+            nrz_runtime_artifact::source_layer_runtime_config(Some(&config)).unwrap(),
+            serde_json::to_value(&layer.runtime_config).unwrap()
+        );
+        assert!(
+            nrz_runtime_artifact::source_layer_launch_for_target(Some(&config), Some("bun-1.4.3"))
+                .unwrap_err()
+                .to_string()
+                .contains("build runtime version")
+        );
+    }
+}
+
+#[test]
+fn source_runtime_config_projection_preserves_runtime_limits_and_rejects_non_objects() {
+    let config = json!({
+        "readiness": {"protocol": "TCP"},
+        "isBinaryEntry": false,
+        "applicationRuntime": {"family": "BUN", "args": []},
+        "buildRuntimeVersion": "bun-1.4.2",
+        "runtimeFamily": "JAVASCRIPT",
+        "memoryMb": 256,
+        "timeoutMs": 30000,
+        "maxConcurrency": 5
+    });
+    assert_eq!(
+        nrz_runtime_artifact::source_layer_runtime_config(Some(&config)).unwrap(),
+        json!({
+            "runtimeFamily": "JAVASCRIPT",
+            "memoryMb": 256,
+            "timeoutMs": 30000,
+            "maxConcurrency": 5
+        })
+    );
+    assert_eq!(
+        nrz_runtime_artifact::source_layer_runtime_config(None).unwrap(),
+        json!({})
+    );
+    for config in [json!(null), json!([]), json!("invalid")] {
+        assert!(nrz_runtime_artifact::source_layer_runtime_config(Some(&config)).is_err());
+    }
+}
+
+#[test]
 fn declared_bun_runtime_preserves_args_and_rejects_node_target() {
     let mut source = manifest("server");
     source.files.retain(|file| file.role != "dependency");
