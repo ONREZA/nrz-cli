@@ -33,6 +33,45 @@ fn compute_manifest() -> crate::build::manifest::Manifest {
     .unwrap()
 }
 
+#[test]
+fn source_bundle_retains_prebuild_launcher_args_and_version_witness() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("server.js"), "console.log('ok')").unwrap();
+    let mut manifest = compute_manifest();
+    let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
+        family: nrz_source_bundle::ApplicationRuntimeFamily::Bun,
+        entry: Some("server.js".into()),
+        args: vec!["--port".into(), "8080".into()],
+    };
+    crate::deploy::apply_application_runtime_manifest(
+        &mut manifest,
+        Some(&declaration),
+        Some("bun-1.4.2"),
+    )
+    .unwrap();
+    let plan =
+        build_source_bundle_plan(dir.path(), &manifest, &scan_dir(dir.path()).unwrap()).unwrap();
+    let config = plan.logical_manifest.layers[0]
+        .runtime_config
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        config["applicationRuntime"],
+        serde_json::json!({"family":"BUN","args":["--port","8080"]})
+    );
+    assert_eq!(config["buildRuntimeVersion"], "bun-1.4.2");
+    let mut contradictory = declaration;
+    contradictory.family = nrz_source_bundle::ApplicationRuntimeFamily::Node;
+    assert!(
+        crate::deploy::apply_application_runtime_manifest(
+            &mut manifest,
+            Some(&contradictory),
+            Some("node-24")
+        )
+        .is_err()
+    );
+}
+
 #[tokio::test]
 async fn source_bundle_plan_is_deterministic_and_uses_identity_file_hashes() {
     let dir = tempdir().unwrap();

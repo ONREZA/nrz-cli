@@ -69,6 +69,7 @@ fn python_detection(
         version: None,
         suggested_compute: ComputeType::Process,
         metadata: DetectionMetadata {
+            application_runtime: None,
             uses_typescript: None,
             config_files: dependency_file.into_iter().map(str::to_string).collect(),
             runtime: RuntimeInfo {

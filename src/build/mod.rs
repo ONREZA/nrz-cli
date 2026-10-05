@@ -147,6 +147,8 @@ pub(crate) async fn run_with_effective_config(
     workspace_root: &Path,
 ) -> anyhow::Result<BuildResult> {
     let project_dir = effective.project_dir();
+    let pre_resolved_runtime =
+        detection.map(|detection| detection.metadata.application_runtime.clone());
 
     let internal_detection;
     let detection = match detection {
@@ -158,6 +160,19 @@ pub(crate) async fn run_with_effective_config(
             );
             &internal_detection
         }
+    };
+    let application_runtime = match pre_resolved_runtime {
+        Some(runtime) => runtime,
+        None => crate::detect::application_runtime::resolve_application_runtime_with_config(
+            &crate::detect::fs::LocalFs::new(project_dir),
+            &detection.framework,
+            effective.config().deploy.runtime,
+            effective.config().deploy.entry.clone(),
+            effective.config().deploy.args.clone(),
+        )
+        .map_err(|error| {
+            output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
+        })?,
     };
     let fw_dirs = crate::frameworks::compute_aware_output_dirs(detection);
     let output_directory_hint = effective
@@ -180,7 +195,7 @@ pub(crate) async fn run_with_effective_config(
     )?;
     tracing::info!(?output_dir, has_manifest, "found output directory");
 
-    let (loaded_manifest, manifest_source) = if has_manifest {
+    let (mut loaded_manifest, manifest_source) = if has_manifest {
         let manifest_path = output_dir.join(".onreza/manifest.json");
         let manifest = manifest::load_and_validate(&manifest_path)
             .map_err(|e| output::with_default_code(e, "INVALID_MANIFEST"))?;
@@ -346,6 +361,13 @@ pub(crate) async fn run_with_effective_config(
         (None, BuildManifestSource::Absent)
     };
 
+    if let Some(manifest) = &mut loaded_manifest {
+        crate::deploy::apply_application_runtime_manifest(
+            manifest,
+            application_runtime.as_ref(),
+            detection.metadata.runtime.version.as_deref(),
+        )?;
+    }
     Ok(BuildResult {
         output_dir,
         manifest: loaded_manifest,

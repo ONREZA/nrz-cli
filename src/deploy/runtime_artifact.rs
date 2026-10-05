@@ -548,6 +548,51 @@ pub(super) fn is_windows_drive_absolute(path: &str) -> bool {
         && (bytes[2] == b'/' || bytes[2] == b'\\')
 }
 
+pub(crate) fn apply_application_runtime_manifest(
+    manifest: &mut crate::build::manifest::Manifest,
+    declaration: Option<&nrz_source_bundle::ApplicationRuntimeDeclaration>,
+    build_runtime_version: Option<&str>,
+) -> anyhow::Result<()> {
+    for layer in &mut manifest.layers {
+        if layer.target != crate::build::manifest::LayerTarget::Compute {
+            continue;
+        }
+        if let Some(intent) = layer
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.application_runtime.as_ref())
+        {
+            intent.validate().map_err(anyhow::Error::msg)?;
+            if declaration.is_some_and(|declaration| declaration.intent() != *intent) {
+                return Err(output::coded_error(
+                    "APPLICATION_RUNTIME_INVALID",
+                    "build manifest application runtime conflicts with the pre-build declaration",
+                ));
+            }
+        } else if let Some(declaration) = declaration {
+            layer
+                .runtime
+                .get_or_insert_with(Default::default)
+                .application_runtime = Some(declaration.intent());
+        }
+        if let Some(version) = build_runtime_version {
+            let runtime = layer.runtime.get_or_insert_with(Default::default);
+            if runtime
+                .build_runtime_version
+                .as_deref()
+                .is_some_and(|declared| declared != version)
+            {
+                return Err(output::coded_error(
+                    "APPLICATION_RUNTIME_INVALID",
+                    "build manifest runtime version differs from validated pre-build runtime",
+                ));
+            }
+            runtime.build_runtime_version = Some(version.to_string());
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn sanitize_config_entry(entry: &str) -> anyhow::Result<String> {
     let trimmed = entry.trim();
     if trimmed.is_empty() {
@@ -630,6 +675,14 @@ pub(super) fn ensure_process_entry(
             sanitize_config_entry(e)
                 .map_err(|err| output::with_default_code(err, "INVALID_DEPLOY_ENTRY"))?,
         )
+    } else if let Some(entry) = detection
+        .metadata
+        .application_runtime
+        .as_ref()
+        .and_then(|runtime| runtime.entry.as_deref())
+    {
+        Some(crate::detect::resolve_application_entry(entry, output_dir, project_dir)
+            .ok_or_else(|| output::coded_error("MISSING_PROCESS_ENTRY", format!("Declared application entry {entry} is missing from build output; set [deploy] entry to its output-relative path")))?)
     } else {
         if detection.framework == "astro" && !output_dir.join("server/entry.mjs").is_file() {
             return Err(output::coded_error(

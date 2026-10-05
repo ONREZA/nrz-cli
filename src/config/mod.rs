@@ -118,6 +118,11 @@ pub struct BuildSection {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DeploySection {
+    /// Application launcher, independent of install/build commands.
+    #[serde(serialize_with = "serialize_runtime_family")]
+    pub runtime: Option<nrz_source_bundle::ApplicationRuntimeFamily>,
+    /// Arguments after the application entry (not interpreter flags).
+    pub args: Option<Vec<String>>,
     /// Compute type override: "static", "process".
     pub compute: Option<String>,
     /// Explicit entry point for PROCESS deployments (e.g. "server.ts").
@@ -128,6 +133,19 @@ pub struct DeploySection {
     pub health_check_path: Option<HealthCheckPathConfig>,
     /// Monorepo app/workspace to deploy (name, directory basename, or path).
     pub app: Option<String>,
+}
+
+fn serialize_runtime_family<S: serde::Serializer>(
+    family: &Option<nrz_source_bundle::ApplicationRuntimeFamily>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use nrz_source_bundle::ApplicationRuntimeFamily;
+    family
+        .map(|family| match family {
+            ApplicationRuntimeFamily::Bun => "bun",
+            ApplicationRuntimeFamily::Node => "node",
+        })
+        .serialize(serializer)
 }
 
 /// Managed database (kaiki) configuration.
@@ -286,6 +304,8 @@ impl ProjectConfig {
                     .or(parent.build.output_directory),
             },
             deploy: DeploySection {
+                runtime: child.deploy.runtime.or(parent.deploy.runtime),
+                args: child.deploy.args.or(parent.deploy.args),
                 compute: child.deploy.compute.or(parent.deploy.compute),
                 entry: child.deploy.entry.or(parent.deploy.entry),
                 health_check_path: child
@@ -458,6 +478,14 @@ impl IgnoredBuildBehavior {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectBuildSettings {
+    #[serde(default)]
+    pub node_version: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_runtime_presence",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub application_runtime: Option<Option<nrz_source_bundle::ApplicationRuntimeDeclaration>>,
     pub framework_preset: Option<String>,
     pub root_directory: String,
     pub git_lfs_enabled: Option<bool>,
@@ -471,6 +499,12 @@ pub struct ProjectBuildSettings {
     pub ignored_build_behavior: Option<IgnoredBuildBehavior>,
     pub ignored_build_folder: Option<String>,
     pub ignored_build_command: Option<String>,
+}
+
+fn deserialize_runtime_presence<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<nrz_source_bundle::ApplicationRuntimeDeclaration>>, D::Error> {
+    Option::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -594,6 +628,8 @@ pub struct EffectiveConfigExplanation {
 
 #[derive(Debug, Clone)]
 pub struct EffectiveProjectConfig {
+    node_version: Option<String>,
+    application_runtime: Option<Option<nrz_source_bundle::ApplicationRuntimeDeclaration>>,
     project_dir: PathBuf,
     config: ProjectConfig,
     project_id: Option<String>,
@@ -634,6 +670,8 @@ impl EffectiveProjectConfig {
             });
 
         Self {
+            node_version: None,
+            application_runtime: None,
             project_dir,
             config,
             project_id,
@@ -687,6 +725,7 @@ impl EffectiveProjectConfig {
         let Some(settings) = settings else {
             return;
         };
+        self.node_version.clone_from(&settings.node_version);
 
         if self.framework_override.is_none()
             && let Some(framework) =
@@ -723,6 +762,9 @@ impl EffectiveProjectConfig {
     }
 
     pub fn apply_platform_runner_settings(&mut self, settings: &ProjectBuildSettings) {
+        self.node_version.clone_from(&settings.node_version);
+        self.application_runtime
+            .clone_from(&settings.application_runtime);
         self.framework_override =
             normalize_authoritative_framework(settings.framework_preset.as_deref())
                 .map(str::to_string);
@@ -747,6 +789,24 @@ impl EffectiveProjectConfig {
 
     pub fn project_dir(&self) -> &Path {
         &self.project_dir
+    }
+
+    pub fn node_version(&self) -> Option<&str> {
+        self.node_version.as_deref()
+    }
+
+    pub fn bind_admitted_node_version(&mut self, node_version: &str) -> anyhow::Result<()> {
+        if !matches!(node_version, "NODE_22" | "NODE_24" | "NODE_26") {
+            anyhow::bail!("admitted Node version is unsupported");
+        }
+        self.node_version = Some(node_version.to_string());
+        Ok(())
+    }
+
+    pub fn platform_application_runtime(
+        &self,
+    ) -> Option<&Option<nrz_source_bundle::ApplicationRuntimeDeclaration>> {
+        self.application_runtime.as_ref()
     }
 
     pub fn config(&self) -> &ProjectConfig {

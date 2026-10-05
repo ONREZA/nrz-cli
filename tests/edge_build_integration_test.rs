@@ -18,6 +18,7 @@ use support::cli::{nrz, stdout_json};
 struct EdgeBuildApiState {
     deployment_id: String,
     requests: Arc<Mutex<Vec<String>>>,
+    application_runtime: serde_json::Value,
 }
 
 impl EdgeBuildApiState {
@@ -35,7 +36,7 @@ async fn edge_build_runner_context(
 ) -> Json<serde_json::Value> {
     state.record(Method::GET, &uri);
     Json(json!({
-        "protocolVersion": "runner-context-v4",
+        "protocolVersion": "runner-context-v5",
         "context": {
             "workspaceId": "00000000-0000-0000-0000-000000000001",
             "workspaceSlug": "edge",
@@ -56,12 +57,14 @@ async fn edge_build_runner_context(
             "url": null
         },
         "settings": {
+            "nodeVersion": "NODE_22",
+            "applicationRuntime": state.application_runtime,
             "frameworkPreset": null,
             "rootDirectory": ".",
             "gitLfsEnabled": false,
             "packageManager": "NPM",
-            "installCommand": null,
-            "installCommandSource": "PRESET",
+            "installCommand": if state.application_runtime.is_null() {None} else {Some("touch installer-started")},
+            "installCommandSource": if state.application_runtime.is_null() {"PRESET"} else {"USER"},
             "buildCommand": null,
             "buildCommandSource": "PRESET",
             "outputDirectory": null,
@@ -117,10 +120,18 @@ async fn reject_unexpected_edge_build_request(
 }
 
 fn spawn_edge_build_handoff_mock(deployment_id: &str) -> (String, Arc<Mutex<Vec<String>>>) {
+    spawn_edge_build_handoff_mock_with_intent(deployment_id, serde_json::Value::Null)
+}
+
+fn spawn_edge_build_handoff_mock_with_intent(
+    deployment_id: &str,
+    application_runtime: serde_json::Value,
+) -> (String, Arc<Mutex<Vec<String>>>) {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let state = EdgeBuildApiState {
         deployment_id: deployment_id.to_string(),
         requests: Arc::clone(&requests),
+        application_runtime,
     };
     let app = Router::new()
         .route(
@@ -134,6 +145,60 @@ fn spawn_edge_build_handoff_mock(deployment_id: &str) -> (String, Arc<Mutex<Vec<
         .fallback(reject_unexpected_edge_build_request)
         .with_state(state);
     (support::api_mock::spawn(app), requests)
+}
+
+#[test]
+fn changed_source_runtime_is_rejected_before_the_installer_executes() {
+    let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
+    let (api_url, _) = spawn_edge_build_handoff_mock_with_intent(
+        deployment_id,
+        json!({"family":"NODE","entry":"server.ts","args":[]}),
+    );
+    let project = tempfile::tempdir().unwrap();
+    let output_dir = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("onreza.toml"),
+        "[deploy]\nruntime='bun'\nentry='server.ts'\nargs=[]\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("server.ts"),
+        "Bun.serve({fetch:()=>new Response('ok')})",
+    )
+    .unwrap();
+    let output = nrz()
+        .current_dir(project.path())
+        .env("NRZ_API_URL", api_url)
+        .env("NRZ_RUNNER", "PLATFORM")
+        .env("ONREZA_RUNTIME_OS", "linux")
+        .env("ONREZA_RUNTIME_ARCH", "x86_64")
+        .env("ONREZA_RUNTIME_LIBC", "glibc")
+        .env("ONREZA_RUNTIME_VERSION", "bun-1.4.2")
+        .env("NRZ_EDGE_BUILD_HANDOFF", "V1")
+        .env("NRZ_LOG_UPLOAD", "0")
+        .env("ONREZA_OUTPUT_DIR", output_dir.path())
+        .args([
+            "--json",
+            "--token",
+            "runner-token",
+            "deploy",
+            project.path().to_str().unwrap(),
+            "--resume-deployment",
+            deployment_id,
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let result = stdout_json(&output);
+    assert_eq!(result["code"], "APPLICATION_RUNTIME_INVALID");
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap()
+            .contains("frozen deployment snapshot")
+    );
+    assert!(!project.path().join("installer-started").exists());
+    assert!(!output_dir.path().join("source-bundle-v1.tar.zst").exists());
 }
 
 #[test]

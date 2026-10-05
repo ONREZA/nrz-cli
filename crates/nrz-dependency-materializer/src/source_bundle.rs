@@ -53,6 +53,41 @@ pub fn materialize_source_bundle_runtime(
     toolchain: &ErofsToolchain,
     request: SourceBundleMaterializationRequest<'_>,
 ) -> Result<MaterializedSourceBundleRuntime, SourceBundleMaterializationError> {
+    let version = request
+        .policy
+        .compatibility
+        .get("runtimeVersion")
+        .and_then(Value::as_str)
+        .ok_or_else(|| RuntimeArtifactError::Invariant("missing trusted runtime version".into()))?;
+    let version = if request
+        .policy
+        .compatibility
+        .get("runtimeFamily")
+        .and_then(Value::as_str)
+        == Some("bun")
+        && !version.starts_with("bun-")
+    {
+        format!("bun-{version}")
+    } else {
+        version.to_string()
+    };
+    for layer in &request.manifest.layers {
+        nrz_source_bundle::validate_build_runtime_version(
+            layer.runtime_config.as_ref(),
+            Some(&version),
+        )
+        .map_err(RuntimeArtifactError::Invariant)?;
+    }
+    if let Some(family) = nrz_source_bundle::source_application_runtime(request.manifest)
+        .map_err(RuntimeArtifactError::Invariant)?
+    {
+        nrz_source_bundle::ApplicationRuntimeIntent {
+            family,
+            args: Vec::new(),
+        }
+        .validate_target(Some(&version))
+        .map_err(RuntimeArtifactError::Invariant)?;
+    }
     validate_runtime_family(request.manifest, request.policy.kind)?;
     fs::create_dir(request.output_root).map_err(|source| SourceBundleMaterializationError::Io {
         operation: "create runtime materialization root",
@@ -143,26 +178,7 @@ pub fn materialize_source_bundle_runtime(
         request.source_size_bytes,
         request.manifest,
         &graph_dependencies,
-        if request
-            .policy
-            .compatibility
-            .get("runtimeFamily")
-            .and_then(Value::as_str)
-            == Some("bun")
-        {
-            None
-        } else {
-            Some(
-                request
-                    .policy
-                    .compatibility
-                    .get("runtimeVersion")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        RuntimeArtifactError::Invariant("missing trusted runtime version".into())
-                    })?,
-            )
-        },
+        Some(&version),
     )?;
 
     Ok(MaterializedSourceBundleRuntime {

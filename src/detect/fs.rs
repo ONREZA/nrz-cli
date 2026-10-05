@@ -336,6 +336,7 @@ fn register_parent_dirs(path: &str, dirs: &mut HashSet<String>) {
 /// Files whose content the server should send in the manifest
 /// for accurate remote detection.
 pub const DETECTION_CONTENT_FILES: &[&str] = &[
+    "onreza.toml",
     "pyproject.toml",
     "requirements.txt",
     "setup.py",

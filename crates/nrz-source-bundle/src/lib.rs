@@ -1,9 +1,16 @@
 //! Shared SOURCE_BUNDLE_V1 manifest and archive verification logic.
 
+pub mod application_runtime;
 pub mod dependency;
 pub mod handoff;
 pub mod manifest;
 pub mod verifier;
+
+pub use application_runtime::{
+    APPLICATION_RUNTIME_CONFIG_KEY, ApplicationRuntimeDeclaration, ApplicationRuntimeFamily,
+    ApplicationRuntimeIntent, layer_application_runtime, source_application_runtime,
+    validate_build_runtime_version,
+};
 
 pub use dependency::{
     DependencySourceTree, DependencySourceTreeError, DependencySourceTreeSpec,

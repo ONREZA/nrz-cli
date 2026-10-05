@@ -278,6 +278,31 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
 
     super::validate_prebuild_compute_intent(project_dir, request.explicit_compute)?;
 
+    let mut detection =
+        crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
+    detection.metadata.application_runtime =
+        crate::detect::application_runtime::resolve_application_runtime_with_config(
+            &crate::detect::fs::LocalFs::new(project_dir),
+            &detection.framework,
+            effective.config().deploy.runtime,
+            effective.config().deploy.entry.clone(),
+            effective.config().deploy.args.clone(),
+        )
+        .map_err(|error| {
+            output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
+        })?;
+    let build_runtime_version =
+        super::application_runtime::validate_application_runtime_before_build(
+            detection.metadata.application_runtime.as_ref(),
+            effective,
+            request.platform_runner,
+            request.execution_env,
+        )
+        .await?;
+    if let Some(version) = &build_runtime_version {
+        detection.metadata.runtime.version = Some(version.clone());
+    }
+
     if !args.skip_build && !args.skip_install {
         super::run_install_step(
             project_dir,
@@ -311,9 +336,6 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         crate::frameworks::clear_before_build(project_dir)?;
         super::run_build_step(cmd, project_dir, json, &build_env, request.build_logs)?;
     }
-
-    let detection =
-        crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
 
     output::status(
         json,
@@ -425,7 +447,16 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         }
         match entry {
             Some(entry) => {
-                let auto = build_manifest::generate_compute_manifest(&entry);
+                let mut auto = build_manifest::generate_compute_manifest(&entry);
+                super::apply_application_runtime_manifest(
+                    &mut auto,
+                    build_artifact
+                        .detection
+                        .metadata
+                        .application_runtime
+                        .as_ref(),
+                    build_runtime_version.as_deref(),
+                )?;
                 build_manifest::validate(&auto)
                     .map_err(|error| output::with_default_code(error, "INVALID_MANIFEST"))?;
                 build_manifest::verify_files(&build_artifact.output_dir, &auto)

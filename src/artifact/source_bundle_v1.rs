@@ -769,6 +769,12 @@ fn runtime_config_value(
 ) -> Option<serde_json::Value> {
     let mut object = serde_json::Map::new();
     if let Some(runtime) = layer.runtime.as_ref() {
+        if let Some(version) = &runtime.build_runtime_version {
+            object.insert("buildRuntimeVersion".into(), serde_json::json!(version));
+        }
+        if let Some(intent) = &runtime.application_runtime {
+            object.insert("applicationRuntime".into(), serde_json::json!(intent));
+        }
         if let Some(value) = runtime.timeout_ms {
             object.insert("timeoutMs".to_string(), serde_json::json!(value));
         }

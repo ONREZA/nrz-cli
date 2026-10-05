@@ -167,6 +167,44 @@ fn rejects_compute_runtime_family_that_disagrees_with_build_policy() {
 }
 
 #[test]
+fn runtime_intent_and_version_mismatch_fail_before_any_materialization_io() {
+    for runtime in [
+        json!({"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}),
+        json!({"applicationRuntime":{"family":"BUN","args":[]}}),
+    ] {
+        let temp = TempDir::new().unwrap();
+        let mut manifest = source_manifest();
+        manifest.files.retain(|file| file.role != "dependency");
+        manifest.layers[0].runtime_config = Some(runtime);
+        let output_root = temp.path().join("runtime");
+        let toolchain = fake_erofs_toolchain(temp.path());
+        let mut compatibility = compatibility();
+        compatibility["runtimeFamily"] = json!("javascript");
+        compatibility["runtimeVersion"] = json!("node-24");
+        let result = materialize_source_bundle_runtime(
+            &toolchain,
+            SourceBundleMaterializationRequest {
+                source_path: &temp.path().join("unused.tar.zst"),
+                logical_manifest_sha256: &"a".repeat(64),
+                source_sha256: &"b".repeat(64),
+                source_size_bytes: 1,
+                manifest: &manifest,
+                output_root: &output_root,
+                policy: SourceBundleMaterializationPolicy {
+                    kind: DependencyMaterializationKind::JavaScriptNodeModules,
+                    compatibility,
+                    tree_limits: tree_limits(),
+                    max_total_files: 10,
+                    max_total_bytes: 1024,
+                },
+            },
+        );
+        assert!(result.err().unwrap().to_string().contains("application"));
+        assert!(!output_root.exists());
+    }
+}
+
+#[test]
 fn materializes_a_manifest_owned_cross_tree_dependency_symlink() {
     const LINK_TARGET: &str = "../../../node_modules/@prisma/client";
     let temp = TempDir::new().unwrap();

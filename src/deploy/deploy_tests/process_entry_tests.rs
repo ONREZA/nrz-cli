@@ -20,6 +20,37 @@ fn ensure_process_entry_resolves_module_field() {
 }
 
 #[test]
+fn explicit_bun_start_path_precedes_main_but_keeps_config_entry_authority() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r#"{"main":"other.js","scripts":{"start":"bun server.ts --port 8080"}}"#,
+    )
+    .unwrap();
+    for file in ["other.js", "server.ts", "configured.js"] {
+        fs::write(dir.path().join(file), "console.log('ok')").unwrap();
+    }
+    let mut detection = make_detection("other", None);
+    detection.metadata.application_runtime =
+        crate::detect::application_runtime::resolve_application_runtime(
+            &crate::detect::fs::LocalFs::new(dir.path()),
+            "other",
+        )
+        .unwrap();
+    let (entry, _) = ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
+    assert_eq!(entry.as_deref(), Some("server.ts"));
+    let (entry, _) = ensure_process_entry(
+        dir.path(),
+        dir.path(),
+        Some("configured.js"),
+        &detection,
+        true,
+    )
+    .unwrap();
+    assert_eq!(entry.as_deref(), Some("configured.js"));
+}
+
+#[test]
 fn ensure_process_entry_ambiguous_candidates_errors_for_non_strict_framework() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("runtime")).unwrap();

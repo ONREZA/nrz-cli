@@ -20710,7 +20710,7 @@
                       ]
                     },
                     "protocolVersion": {
-                      "const": "runner-context-v4",
+                      "const": "runner-context-v5",
                       "type": "string"
                     },
                     "deployment": {
@@ -20797,6 +20797,53 @@
                           ],
                           "type": "string"
                         },
+                        "nodeVersion": {
+                          "enum": [
+                            "NODE_22",
+                            "NODE_24",
+                            "NODE_26"
+                          ],
+                          "type": "string"
+                        },
+                        "applicationRuntime": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "family": {
+                                  "enum": [
+                                    "BUN",
+                                    "NODE"
+                                  ],
+                                  "type": "string"
+                                },
+                                "entry": {
+                                  "type": "string",
+                                  "maxLength": 4096,
+                                  "pattern": "^[^\\u0000]*$",
+                                  "minLength": 1
+                                },
+                                "args": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "maxLength": 4096,
+                                    "pattern": "^[^\\u0000]*$"
+                                  },
+                                  "maxItems": 64
+                                }
+                              },
+                              "required": [
+                                "family",
+                                "args"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "installCommand": {
                           "anyOf": [
                             {
@@ -20876,6 +20923,8 @@
                         "rootDirectory",
                         "gitLfsEnabled",
                         "packageManager",
+                        "nodeVersion",
+                        "applicationRuntime",
                         "installCommand",
                         "installCommandSource",
                         "buildCommand",

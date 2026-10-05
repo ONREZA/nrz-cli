@@ -52,7 +52,12 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
             )
         })?;
 
-        let result = detect::detect_with_fs(&vfs);
+        let mut result = detect::detect_with_fs(&vfs);
+        result.metadata.application_runtime =
+            detect::application_runtime::resolve_application_runtime(&vfs, &result.framework)
+                .map_err(|error| {
+                    output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
+                })?;
         return output_result(&result, &args, json);
     }
 
@@ -61,7 +66,12 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
         .canonicalize()
         .with_context(|| format!("directory not found: {}", args.dir))?;
 
-    let result = detect::detect(&project_dir);
+    let mut result = detect::detect(&project_dir);
+    result.metadata.application_runtime = detect::application_runtime::resolve_application_runtime(
+        &detect::fs::LocalFs::new(&project_dir),
+        &result.framework,
+    )
+    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
 
     // --save: persist framework to onreza.toml
     if args.save && result.framework != "other" {

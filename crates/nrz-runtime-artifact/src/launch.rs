@@ -16,6 +16,21 @@ pub(crate) fn source_layer_launch_for_target(
     config: Option<&Value>,
     runtime_version: Option<&str>,
 ) -> Result<RuntimeLaunchWire, RuntimeArtifactError> {
+    nrz_source_bundle::validate_build_runtime_version(config, runtime_version)
+        .map_err(RuntimeArtifactError::Invariant)?;
+    let application = nrz_source_bundle::layer_application_runtime(config)
+        .map_err(RuntimeArtifactError::Invariant)?;
+    if let Some(intent) = &application {
+        intent
+            .validate_target(runtime_version)
+            .map_err(RuntimeArtifactError::Invariant)?;
+        if config.is_some_and(|value| {
+            value.get("runtimeFamily") == Some(&json!("PYTHON"))
+                || value.get("isBinaryEntry") == Some(&json!(true))
+        }) {
+            return invariant("application runtime conflicts with Python or binary entry");
+        }
+    }
     let profile = if config
         .and_then(|value| value.get("isBinaryEntry"))
         .and_then(Value::as_bool)
@@ -41,6 +56,9 @@ pub(crate) fn source_layer_launch_for_target(
         }
     };
     let mut value = json!({ "profile": profile, "args": [], "cwd": "." });
+    if let Some(application) = application {
+        value["args"] = json!(application.args);
+    }
     if let Some(readiness) = config.and_then(|value| value.get("readiness")) {
         value["readiness"] = readiness.clone();
     }

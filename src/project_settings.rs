@@ -8,7 +8,7 @@ use nrz::config::ProjectBuildSettings;
 use crate::api::ApiClient;
 
 pub(crate) enum ProjectSettingsFetch {
-    Applied(ProjectBuildSettings),
+    Applied(Box<ProjectBuildSettings>),
     TransientFailure { message: String },
 }
 
@@ -21,6 +21,8 @@ pub(crate) async fn fetch(
         .await
         .context("failed to fetch project settings")?;
     Ok(ProjectBuildSettings {
+        node_version: Some(project.node_version.to_string()),
+        application_runtime: None,
         framework_preset: project.framework_preset,
         root_directory: project.root_directory,
         git_lfs_enabled: Some(project.git_lfs_enabled),
@@ -42,7 +44,7 @@ pub(crate) async fn fetch_for_effective_config(
     project_id: &str,
 ) -> anyhow::Result<ProjectSettingsFetch> {
     match fetch(client, project_id).await {
-        Ok(settings) => Ok(ProjectSettingsFetch::Applied(settings)),
+        Ok(settings) => Ok(ProjectSettingsFetch::Applied(Box::new(settings))),
         Err(error) if crate::api::classify_api_retry(&error).is_some() => {
             Ok(ProjectSettingsFetch::TransientFailure {
                 message: error.to_string(),

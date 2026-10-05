@@ -18,17 +18,28 @@ pub(super) struct YarnToolchainPaths<'a> {
 
 pub(super) fn environment_from_process(
     package_manager: &str,
+    node_version: Option<&str>,
     project_dir: &Path,
     source_root: &Path,
 ) -> anyhow::Result<Vec<(String, String)>> {
-    if package_manager != YARN_PACKAGE_MANAGER {
+    if package_manager == "PIP" {
         return Ok(Vec::new());
+    }
+    let node_bin = match node_version {
+        Some("NODE_22") => "/usr/local/bin",
+        Some("NODE_24") => "/opt/node/24/bin",
+        Some("NODE_26") => "/opt/node/26/bin",
+        _ => bail!("platform installer requires the frozen Node version"),
+    };
+    let base_path = std::env::var("PATH").context("PATH is not configured")?;
+    let base_path = format!("{node_bin}:{base_path}");
+    if package_manager != YARN_PACKAGE_MANAGER {
+        return Ok(vec![("PATH".to_string(), base_path)]);
     }
     let classic_bin_dir = std::env::var(YARN_CLASSIC_BIN_DIR_ENV)
         .with_context(|| format!("{YARN_CLASSIC_BIN_DIR_ENV} is not configured"))?;
     let modern_bin_dir = std::env::var(YARN_MODERN_BIN_DIR_ENV)
         .with_context(|| format!("{YARN_MODERN_BIN_DIR_ENV} is not configured"))?;
-    let base_path = std::env::var("PATH").context("PATH is not configured")?;
     validate_toolchain_executables(&classic_bin_dir, "Yarn Classic")?;
     validate_toolchain_executables(&modern_bin_dir, "Yarn Modern")?;
     select_environment(

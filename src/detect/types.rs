@@ -223,6 +223,8 @@ pub struct RuntimeInfo {
 #[serde(rename_all = "camelCase")]
 pub struct DetectionMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub application_runtime: Option<nrz_source_bundle::ApplicationRuntimeDeclaration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub uses_typescript: Option<bool>,
 
     #[serde(skip_serializing_if = "Vec::is_empty")]

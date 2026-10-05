@@ -126,13 +126,43 @@ output_dirs = ["dist"]
 `compute = "process"` и `compute = "static"` выполняются без `.onreza/manifest.json`.
 
 **Приоритет entry point для PROCESS:**
-`[deploy] entry` > авто-определение по фреймворку > `package.json "main"/"module"` > `scripts.start/serve/...` > `index.*` (Bun default) > heuristic scan по build output
+`[deploy] entry` > файл из прямого `scripts.start` с Bun/Node > авто-определение по фреймворку > `package.json "main"/"module"` > остальные script hints > `index.*` > heuristic scan по build output
+
+Приложение выбирает launcher до install/build: `[deploy] runtime = "bun"` или
+`"node"`, либо прямой `scripts.start` вида `bun [run] file` / `node file`.
+Package manager, lockfile и install/build command выбирают инструменты сборки,
+но не launcher приложения. `main`/`module` не вытесняют прямой start.
+`[deploy] args` — буквальные аргументы после entry, а не флаги интерпретатора.
+
+```toml
+[deploy]
+runtime = "bun"
+entry = "dist/server.js"
+args = ["--port", "8080"]
+```
+
+Полная декларация runtime/entry/args задаёт канонический запуск и заменяет
+неподдерживаемый shell/loader start. Известный конфликт Bun/Node между
+декларацией и прямым launcher, конфликт с framework или build manifest
+завершается ошибкой. Без полной декларации shell chains, interpreter flags и
+script aliases в прямом Bun/Node start отвергаются до установки и сборки.
+Максимум — 64 аргумента, каждый до 4096 UTF-8 bytes без NUL; entry — относительный
+путь до 4096 UTF-8 bytes без traversal.
+
+Для локального Node deploy CLI после admission читает frozen NodeVersion и
+проверяет actual local Node major до install/build. Bun проверяется по pinned
+CLI toolchain. Platform runner проверяет frozen intent и trusted runtime target.
+`SOURCE_BUNDLE_V1` сохраняет family/args и `buildRuntimeVersion`; materializer и
+graph compiler отвергают несовпадающий target, в том числе без dependencies.
+Default direct publication без явного intent сохраняет существующий Bun launcher.
 
 Если entry не удалось определить однозначно:
 - для strict-фреймворков (`nextjs`, `nuxt`) деплой завершается ошибкой с actionable подсказкой
 - для остальных деплой тоже завершается ошибкой с просьбой явно задать `[deploy] entry`
 
-CLI не патчит `package.json` в build output для PROCESS. Резолвленный entry передаётся в deployment metadata (`processEntry`) как явная команда запуска. Если entry не найден или найден неоднозначно, деплой останавливается до отправки runtime metadata.
+CLI не патчит `package.json` в build output для PROCESS. Резолвленный entry —
+путь файла, исполняемого закрытым runtime profile, а не shell command.
+Если entry не найден или найден неоднозначно, деплой останавливается до отправки runtime metadata.
 
 Для `Next.js` в `compute = "process"` требуется runnable standalone output:
 - должен существовать `server.js` в корне выбранного output dir (обычно `.next/standalone/server.js`)

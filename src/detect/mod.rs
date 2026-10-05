@@ -1,6 +1,7 @@
 //! Framework detection module — the source of truth for detecting
 //! frameworks, package managers, SSR features, and adapters.
 
+pub mod application_runtime;
 pub mod fs;
 pub mod monorepo;
 pub mod package_json;
@@ -103,6 +104,7 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
         version: None,
         suggested_compute,
         metadata: DetectionMetadata {
+            application_runtime: None,
             uses_typescript: detect_typescript(fs),
             config_files: Vec::new(),
             runtime: RuntimeInfo {
@@ -136,6 +138,7 @@ fn static_html_detection(
         version: None,
         suggested_compute: ComputeType::Static,
         metadata: DetectionMetadata {
+            application_runtime: None,
             uses_typescript: None,
             config_files: Vec::new(),
             runtime: RuntimeInfo {
@@ -259,6 +262,7 @@ fn detection_from_configured_preset(
         version,
         suggested_compute,
         metadata: DetectionMetadata {
+            application_runtime: None,
             uses_typescript: detect_typescript(fs),
             config_files: detect_config_files(fs, preset.slug),
             runtime: RuntimeInfo {
@@ -471,6 +475,7 @@ fn detection_from_rule_match(
         version: matched.version,
         suggested_compute,
         metadata: DetectionMetadata {
+            application_runtime: None,
             uses_typescript: detect_typescript(fs),
             config_files,
             runtime: RuntimeInfo {
@@ -1119,6 +1124,15 @@ fn resolve_package_field(
         });
     }
     None
+}
+
+/// Map a pre-build application declaration to an existing build output file.
+pub fn resolve_application_entry(
+    entry: &str,
+    output_dir: &Path,
+    project_dir: &Path,
+) -> Option<String> {
+    resolve_candidate_path(entry, output_dir, project_dir)
 }
 
 fn looks_like_script_path_token(token: &str) -> bool {

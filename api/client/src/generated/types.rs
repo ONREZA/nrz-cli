@@ -61,6 +61,9 @@ static REGEX_REMOTE_IMAGE_SOURCE_AUTHORING_ID: std::sync::LazyLock<regex::Regex>
     std::sync::LazyLock::new(|| {
         regex::Regex::new("^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$").expect("invalid regex")
     });
+static REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_APPLICATION_RUNTIME_ENTRY: std::sync::LazyLock<
+    regex::Regex,
+> = std::sync::LazyLock::new(|| regex::Regex::new("^[^\\u0000]*$").expect("invalid regex"));
 static REGEX_SOURCE_PATH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new("\\.nrz-fn\\.(?:ts|tsx|js|jsx|mjs)$").expect("invalid regex")
 });
@@ -21580,6 +21583,37 @@ pub struct RunnerContext200ResponseDeployment {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum RunnerContext200ResponseSettingsApplicationRuntimeFamily {
+    #[serde(rename = "BUN")]
+    #[default]
+    Bun,
+    #[serde(rename = "NODE")]
+    Node,
+}
+impl core::fmt::Display for RunnerContext200ResponseSettingsApplicationRuntimeFamily {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Bun => write!(f, "BUN"),
+            Self::Node => write!(f, "NODE"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerContext200ResponseSettingsApplicationRuntime {
+    pub family: RunnerContext200ResponseSettingsApplicationRuntimeFamily,
+    #[validate(
+        length(min = 1u64, max = 4_096u64),
+        regex(path = "REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_APPLICATION_RUNTIME_ENTRY")
+    )]
+    pub entry: Option<String>,
+    #[validate(length(max = 64u64))]
+    pub args: Vec<String>,
+}
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
@@ -21595,6 +21629,15 @@ pub struct RunnerContext200ResponseSettings {
     pub git_lfs_enabled: bool,
     #[serde(rename = "packageManager")]
     pub package_manager: ProjectRequestBodyPackageManager,
+    #[serde(rename = "nodeVersion")]
+    pub node_version: Project200Response3NodeVersion,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "applicationRuntime"
+    )]
+    #[serialize_always]
+    #[validate(nested)]
+    pub application_runtime: Option<RunnerContext200ResponseSettingsApplicationRuntime>,
     #[serde(deserialize_with = "Option::deserialize", rename = "installCommand")]
     #[serialize_always]
     pub install_command: Option<String>,
@@ -21637,7 +21680,7 @@ pub struct RunnerContext200Response {
     #[serde(rename = "protocolVersion")]
     #[serde(deserialize_with = "RunnerContext200Response::deserialize_const_protocol_version")]
     #[serde(serialize_with = "RunnerContext200Response::serialize_const_protocol_version")]
-    #[default("runner-context-v4".to_string())]
+    #[default("runner-context-v5".to_string())]
     pub protocol_version: String,
     #[validate(nested)]
     pub deployment: RunnerContext200ResponseDeployment,
@@ -21657,7 +21700,7 @@ impl RunnerContext200Response {
         deserializer: D,
     ) -> Result<String, D::Error> {
         let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let expected: String = serde_json::from_str::<String>("\"runner-context-v4\"")
+        let expected: String = serde_json::from_str::<String>("\"runner-context-v5\"")
             .map_err(serde::de::Error::custom)?;
         if value != expected {
             return Err(serde::de::Error::custom(
@@ -21679,7 +21722,7 @@ impl RunnerContext200Response {
         value: &String,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        let expected: String = serde_json::from_str::<String>("\"runner-context-v4\"")
+        let expected: String = serde_json::from_str::<String>("\"runner-context-v5\"")
             .map_err(serde::ser::Error::custom)?;
         if value != &expected {
             return Err(serde::ser::Error::custom(

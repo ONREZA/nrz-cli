@@ -90,9 +90,13 @@ impl std::fmt::Display for LayerTarget {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_runtime_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_runtime: Option<nrz_source_bundle::ApplicationRuntimeIntent>,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",

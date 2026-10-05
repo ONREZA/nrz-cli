@@ -1,6 +1,123 @@
 use super::*;
 
 #[test]
+fn detect_preserves_bun_start_runtime_before_build() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"main":"other.js","scripts":{"start":"bun run src/server.ts --port 8080"}}"#,
+    )
+    .unwrap();
+    let output = nrz()
+        .current_dir(&temp)
+        .args(["detect", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        result["metadata"]["applicationRuntime"],
+        serde_json::json!({"family":"BUN","entry":"src/server.ts","args":["--port","8080"]})
+    );
+}
+
+#[test]
+fn remote_runtime_declaration_is_independent_of_installer_and_lockfile() {
+    for (manager, start, config, family, entry, args) in [
+        (
+            "npm@11.0.0",
+            "bun run source.ts",
+            "",
+            "BUN",
+            "source.ts",
+            json!([]),
+        ),
+        (
+            "bun@1.4.2",
+            "node source.js",
+            "",
+            "NODE",
+            "source.js",
+            json!([]),
+        ),
+        (
+            "npm@11.0.0",
+            "bun run source.ts",
+            "[deploy]\nruntime='bun'\nentry='output.js'\nargs=['--literal','a b']\n",
+            "BUN",
+            "output.js",
+            json!(["--literal", "a b"]),
+        ),
+    ] {
+        let package =
+            json!({"packageManager":manager,"main":"unrelated.js","scripts":{"start":start}});
+        let manifest = json!({"tree":["package.json","onreza.toml","bun.lock","package-lock.json"],"files":{"package.json":package.to_string(),"onreza.toml":config}});
+        let output = nrz()
+            .args(["detect", "--stdin", "--json"])
+            .write_stdin(manifest.to_string())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            result["metadata"]["applicationRuntime"],
+            json!({"family":family,"entry":entry,"args":args})
+        );
+    }
+}
+
+#[test]
+fn remote_runtime_rejects_flags_shells_and_conflicting_declarations() {
+    for (start, config) in [
+        ("node --experimental-transform-types source.ts", ""),
+        ("bun source.ts && node other.js", ""),
+        ("cross-env NODE_ENV=production bun source.ts", ""),
+        ("bun source.ts", "[deploy]\nruntime='node'\n"),
+        (
+            "node --loader tsx source.ts",
+            "[deploy]\nruntime='bun'\nentry='output.js'\nargs=[]\n",
+        ),
+    ] {
+        let manifest = json!({"tree":["package.json","onreza.toml"],"files":{"package.json":json!({"scripts":{"start":start}}).to_string(),"onreza.toml":config}});
+        let output = nrz()
+            .args(["detect", "--stdin", "--json"])
+            .write_stdin(manifest.to_string())
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(error["code"], "APPLICATION_RUNTIME_INVALID");
+    }
+}
+
+#[test]
+fn full_runtime_declaration_replaces_unsupported_start_syntax() {
+    let manifest = json!({"tree":["package.json","onreza.toml"],"files":{
+        "package.json":json!({"scripts":{"start":"node --loader tsx src/server.ts"}}).to_string(),
+        "onreza.toml":"[deploy]\nruntime='node'\nentry='dist/server.js'\nargs=['--port','8080']\n"
+    }});
+    let output = nrz()
+        .args(["detect", "--stdin", "--json"])
+        .write_stdin(manifest.to_string())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        result["metadata"]["applicationRuntime"],
+        json!({"family":"NODE","entry":"dist/server.js","args":["--port","8080"]})
+    );
+}
+
+#[test]
 fn detect_nextjs_project() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(

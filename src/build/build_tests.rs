@@ -552,6 +552,7 @@ fn make_detection(
         suggested_compute: crate::detect::types::ComputeType::Process,
         reason: String::new(),
         metadata: crate::detect::types::DetectionMetadata {
+            application_runtime: None,
             uses_typescript: None,
             config_files: vec![],
             runtime: crate::detect::types::RuntimeInfo {
@@ -779,6 +780,7 @@ fn make_static_detection(framework: &str) -> crate::detect::types::DetectionResu
         suggested_compute: crate::detect::types::ComputeType::Static,
         reason: String::new(),
         metadata: crate::detect::types::DetectionMetadata {
+            application_runtime: None,
             uses_typescript: None,
             config_files: vec![],
             runtime: crate::detect::types::RuntimeInfo {

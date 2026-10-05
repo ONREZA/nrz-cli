@@ -79,6 +79,16 @@ pub fn validate_source_bundle_application_graph(
 ) -> Result<(), RuntimeArtifactError> {
     dependency_file_layers(manifest)?;
     let mut application = manifest.clone();
+    nrz_source_bundle::source_application_runtime(manifest)
+        .map_err(RuntimeArtifactError::Invariant)?;
+    // This preflight checks source ownership before a trusted target exists.
+    // Final materialization validates the declaration against that admitted target.
+    for layer in &mut application.layers {
+        if let Some(config) = layer.runtime_config.as_mut().and_then(Value::as_object_mut) {
+            config.remove(nrz_source_bundle::APPLICATION_RUNTIME_CONFIG_KEY);
+            config.remove("buildRuntimeVersion");
+        }
+    }
     application
         .files
         .retain(|file| file.role != DEPENDENCY_FILE_ROLE);
@@ -357,6 +367,8 @@ fn runtime_layer(
     if let Some(config) = runtime_config.as_object_mut() {
         config.remove(RUNTIME_READINESS_CONFIG_KEY);
         config.remove("isBinaryEntry");
+        config.remove(nrz_source_bundle::APPLICATION_RUNTIME_CONFIG_KEY);
+        config.remove("buildRuntimeVersion");
     }
     Ok(json!({
         "layerName": layer.name,
