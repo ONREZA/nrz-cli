@@ -30,6 +30,10 @@ on:
         type: boolean
         required: true
         default: true
+      npm_tag_version:
+        description: Only move the selected npm channel to this already published version
+        type: string
+        required: false
 
 defaults:
   run:
@@ -43,8 +47,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  retag:
+    name: Update npm channel
+    if: inputs.npm_tag_version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Install npm with trusted dist-tag support
+        run: npm install --global npm@11.21.0
+      - name: Select published version and verify channel
+        run: |
+          if [[ "$CHANNEL" == stable ]]; then
+            [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            tag=latest
+          else
+            [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]
+            tag=beta
+          fi
+          npm dist-tag add "@onreza/nrz@$VERSION" "$tag"
+          test "$(npm view "@onreza/nrz@$tag" version)" = "$VERSION"
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ inputs.npm_tag_version }}
   prepare:
     name: Prepare release
+    if: inputs.npm_tag_version == ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
