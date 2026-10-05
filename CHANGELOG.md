@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.42.4] - 2026-10-05
+
+### 🐛 Bug Fixes
+
+- **deploy:** preserve application runtime intent ([519254e](https://github.com/ONREZA/nrz-cli/commit/519254e42157767fcd585fae9e91ed09286dd2ba))
+- **deploy:** sync compute config response ([781aecd](https://github.com/ONREZA/nrz-cli/commit/781aecd73b21b7d58422ec22adcd5900423753c9))
+
 ## [0.42.3] - 2026-10-04
 
 ### 🐛 Bug Fixes
