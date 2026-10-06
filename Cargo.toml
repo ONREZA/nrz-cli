@@ -4,7 +4,7 @@ resolver = "3"
 
 [package]
 name = "nrz"
-version = "0.42.5"
+version = "0.42.6"
 edition = "2024"
 description = "ONREZA platform CLI — dev, build, deploy"
 license = "MIT"

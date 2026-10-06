@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.42.6] - 2026-10-06
+
+### 🐛 Bug Fixes
+
+- **ci:** install npm for build integration ([1bb97a6](https://github.com/ONREZA/nrz-cli/commit/1bb97a6ea79b59cf07ed850ff49a3d070b2872fd))
+- **deploy:** refresh post-build runtime detection ([e05ccf2](https://github.com/ONREZA/nrz-cli/commit/e05ccf2ba01706b442bbad1aed0d2ba1f4ddc5fb))
+- **release:** allow npm channel recovery ([9359de9](https://github.com/ONREZA/nrz-cli/commit/9359de9c838ae11bb42bb8dff7d99da9e1d8a507))
+
 ## [0.42.5] - 2026-10-05
 
 ### 🐛 Bug Fixes
