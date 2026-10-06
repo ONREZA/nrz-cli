@@ -552,6 +552,7 @@ pub(crate) fn apply_application_runtime_manifest(
     manifest: &mut crate::build::manifest::Manifest,
     declaration: Option<&nrz_source_bundle::ApplicationRuntimeDeclaration>,
     build_runtime_version: Option<&str>,
+    framework: &str,
 ) -> anyhow::Result<()> {
     for layer in &mut manifest.layers {
         if layer.target != crate::build::manifest::LayerTarget::Compute {
@@ -562,12 +563,6 @@ pub(crate) fn apply_application_runtime_manifest(
             .as_ref()
             .and_then(|runtime| runtime.application_runtime.as_ref())
         {
-            intent.validate().map_err(anyhow::Error::msg)?;
-            if build_runtime_version.is_some() {
-                intent
-                    .validate_target(build_runtime_version)
-                    .map_err(anyhow::Error::msg)?;
-            }
             if declaration.is_some_and(|declaration| declaration.intent() != *intent) {
                 return Err(output::coded_error(
                     "APPLICATION_RUNTIME_INVALID",
@@ -575,12 +570,6 @@ pub(crate) fn apply_application_runtime_manifest(
                 ));
             }
         } else if let Some(declaration) = declaration {
-            if build_runtime_version.is_some() {
-                declaration
-                    .intent()
-                    .validate_target(build_runtime_version)
-                    .map_err(anyhow::Error::msg)?;
-            }
             layer
                 .runtime
                 .get_or_insert_with(Default::default)
@@ -599,6 +588,46 @@ pub(crate) fn apply_application_runtime_manifest(
                 ));
             }
             runtime.build_runtime_version = Some(version.to_string());
+        }
+        let runtime = layer.runtime.as_ref();
+        let target = build_runtime_version
+            .or_else(|| runtime.and_then(|runtime| runtime.build_runtime_version.as_deref()));
+        let intent = runtime.and_then(|runtime| runtime.application_runtime.as_ref());
+        let family = if let Some(intent) = intent {
+            intent
+                .validate()
+                .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", error))?;
+            if target.is_some() {
+                intent
+                    .validate_target(target)
+                    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", error))?;
+            }
+            Some(intent.family)
+        } else if target.is_some_and(|version| version.starts_with("python-")) {
+            // The artifact owner adds runtimeFamily=PYTHON after this boundary;
+            // canonical_build_runtime_target validates its supported target.
+            None
+        } else {
+            let launch = nrz_runtime_artifact::source_layer_launch_for_target(None, target)
+                .map_err(|error| {
+                    output::coded_error("APPLICATION_RUNTIME_INVALID", error.to_string())
+                })?;
+            match launch.profile {
+                nrz_runtime_artifact::RuntimeProfile::Bun => {
+                    Some(nrz_source_bundle::ApplicationRuntimeFamily::Bun)
+                }
+                nrz_runtime_artifact::RuntimeProfile::Node22
+                | nrz_runtime_artifact::RuntimeProfile::Node24
+                | nrz_runtime_artifact::RuntimeProfile::Node26 => {
+                    Some(nrz_source_bundle::ApplicationRuntimeFamily::Node)
+                }
+                _ => None,
+            }
+        };
+        if let Some(family) = family {
+            crate::detect::application_runtime::validate_framework(framework, family).map_err(
+                |error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")),
+            )?;
         }
     }
     Ok(())

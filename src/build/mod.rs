@@ -31,6 +31,8 @@ struct BuildOutput {
     layers: Vec<LayerInfo>,
     routes: usize,
     output_dir: String,
+    #[serde(rename = "manifestSource")]
+    manifest_source: BuildManifestSource,
     #[serde(skip_serializing_if = "Option::is_none")]
     framework: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -150,17 +152,9 @@ pub(crate) async fn run_with_effective_config(
     let pre_resolved_runtime =
         detection.map(|detection| detection.metadata.application_runtime.clone());
 
-    let internal_detection;
-    let detection = match detection {
-        Some(d) => d,
-        None => {
-            internal_detection = crate::detect::detect_with_framework_override(
-                project_dir,
-                effective.framework_override(),
-            );
-            &internal_detection
-        }
-    };
+    let mut detection = detection.cloned().unwrap_or_else(|| {
+        crate::detect::detect_with_framework_override(project_dir, effective.framework_override())
+    });
     let application_runtime = match pre_resolved_runtime {
         Some(runtime) => runtime,
         None => crate::detect::application_runtime::resolve_application_runtime_with_config(
@@ -174,6 +168,13 @@ pub(crate) async fn run_with_effective_config(
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
         })?,
     };
+    crate::detect::application_runtime::bind_application_runtime(
+        &mut detection,
+        application_runtime.clone(),
+        effective.deploy_entry(),
+    )
+    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
+    let detection = &detection;
     let fw_dirs = crate::frameworks::compute_aware_output_dirs(detection);
     let output_directory_hint = effective
         .output_directory()
@@ -205,64 +206,6 @@ pub(crate) async fn run_with_effective_config(
                 .map_err(|e| output::with_default_code(e, "INVALID_MANIFEST"))?;
         }
 
-        let framework = manifest
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("framework"))
-            .and_then(|f| f.get("name"))
-            .and_then(|n| n.as_str())
-            .map(String::from);
-        let framework_version = manifest
-            .meta
-            .as_ref()
-            .and_then(|m| m.get("framework"))
-            .and_then(|f| f.get("version"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-
-        if json {
-            let data = BuildOutput {
-                layers: manifest
-                    .layers
-                    .iter()
-                    .map(|l| LayerInfo {
-                        name: l.name.clone(),
-                        target: l.target.to_string(),
-                        directory: l.directory.clone(),
-                        entry: l.entry.clone(),
-                    })
-                    .collect(),
-                routes: manifest.routes.len(),
-                output_dir: output_dir.to_string_lossy().into_owned(),
-                framework,
-                framework_version,
-                compatibility: nextjs_adapter_compatibility(&manifest),
-            };
-            if emit_json_result {
-                output::json_output(&data);
-            }
-        } else {
-            let layers_display: Vec<String> = manifest
-                .layers
-                .iter()
-                .map(|l| match &l.entry {
-                    Some(e) => format!("{}({}:{})", l.target, l.directory, e),
-                    None => format!("{}({})", l.target, l.directory),
-                })
-                .collect();
-            eprintln!(
-                "  {} {} layer(s): {}",
-                console::style("✓").green().bold(),
-                manifest.layers.len(),
-                output::terminal_line(&layers_display.join(", ")),
-            );
-            eprintln!(
-                "  {} {} route(s)",
-                console::style("✓").green().bold(),
-                manifest.routes.len(),
-            );
-        }
-        emit_nextjs_adapter_compatibility_status(json, &manifest, output::Phase::Build);
         (Some(manifest), BuildManifestSource::File)
     } else if let Some(auto) = try_generate_nextjs_adapter_manifest(
         workspace_root,
@@ -275,7 +218,6 @@ pub(crate) async fn run_with_effective_config(
             manifest::verify_files(&output_dir, &auto)
                 .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
-        emit_build_output(json, emit_json_result, &auto, &output_dir, Some(detection));
         (Some(auto), BuildManifestSource::Generated)
     } else if is_nextjs_standalone_framework(&detection.framework)
         && (detection
@@ -321,7 +263,6 @@ pub(crate) async fn run_with_effective_config(
             manifest::verify_files(&output_dir, &auto)
                 .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
-        emit_build_output(json, emit_json_result, &auto, &output_dir, Some(detection));
         (Some(auto), BuildManifestSource::Generated)
     } else if let Some(auto) = try_generate_ssr_manifest(detection, &output_dir) {
         output::status(
@@ -337,9 +278,14 @@ pub(crate) async fn run_with_effective_config(
             manifest::verify_files(&output_dir, &auto)
                 .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
-        emit_build_output(json, emit_json_result, &auto, &output_dir, Some(detection));
         (Some(auto), BuildManifestSource::Generated)
-    } else if detection.suggested_compute == crate::detect::types::ComputeType::Static {
+    } else if effective
+        .deploy_compute()
+        .map(crate::deploy::parse_compute_type)
+        .transpose()?
+        .unwrap_or(detection.suggested_compute)
+        == crate::detect::types::ComputeType::Static
+    {
         let auto = manifest::generate_static_manifest();
         output::status(
             json,
@@ -347,7 +293,6 @@ pub(crate) async fn run_with_effective_config(
             "Auto-generated STATIC manifest",
             output::Phase::Build,
         );
-        emit_build_output(json, emit_json_result, &auto, &output_dir, Some(detection));
         (Some(auto), BuildManifestSource::Generated)
     } else {
         if !json {
@@ -371,13 +316,28 @@ pub(crate) async fn run_with_effective_config(
             &detection.metadata.runtime,
             effective.platform_application_runtime().is_some(),
             Some(manifest),
+            application_runtime.as_ref(),
             effective.node_version(),
         )?;
         crate::deploy::apply_application_runtime_manifest(
             manifest,
             application_runtime.as_ref(),
             target.as_deref(),
+            &detection.framework,
         )?;
+    }
+    emit_build_output(
+        json,
+        emit_json_result,
+        loaded_manifest.as_ref(),
+        manifest_source,
+        &output_dir,
+        (manifest_source != BuildManifestSource::File).then_some(detection),
+    );
+    if manifest_source == BuildManifestSource::File
+        && let Some(manifest) = &loaded_manifest
+    {
+        emit_nextjs_adapter_compatibility_status(json, manifest, output::Phase::Build);
     }
     Ok(BuildResult {
         output_dir,
@@ -389,20 +349,19 @@ pub(crate) async fn run_with_effective_config(
 fn emit_build_output(
     json: bool,
     emit_json_result: bool,
-    manifest: &manifest::Manifest,
+    manifest: Option<&manifest::Manifest>,
+    manifest_source: BuildManifestSource,
     output_dir: &Path,
     detection: Option<&crate::detect::types::DetectionResult>,
 ) {
     let framework = manifest
-        .meta
-        .as_ref()
+        .and_then(|manifest| manifest.meta.as_ref())
         .and_then(|meta| meta.pointer("/framework/name"))
         .and_then(serde_json::Value::as_str)
         .map(String::from)
         .or_else(|| detection.map(|d| d.framework.clone()));
     let framework_version = manifest
-        .meta
-        .as_ref()
+        .and_then(|manifest| manifest.meta.as_ref())
         .and_then(|meta| meta.pointer("/framework/version"))
         .and_then(serde_json::Value::as_str)
         .map(String::from)
@@ -411,8 +370,8 @@ fn emit_build_output(
     if json {
         let data = BuildOutput {
             layers: manifest
-                .layers
-                .iter()
+                .into_iter()
+                .flat_map(|manifest| &manifest.layers)
                 .map(|l| LayerInfo {
                     name: l.name.clone(),
                     target: l.target.to_string(),
@@ -420,16 +379,17 @@ fn emit_build_output(
                     entry: l.entry.clone(),
                 })
                 .collect(),
-            routes: manifest.routes.len(),
+            routes: manifest.map_or(0, |manifest| manifest.routes.len()),
             output_dir: output_dir.to_string_lossy().into_owned(),
+            manifest_source,
             framework,
             framework_version,
-            compatibility: nextjs_adapter_compatibility(manifest),
+            compatibility: manifest.and_then(nextjs_adapter_compatibility),
         };
         if emit_json_result {
             output::json_output(&data);
         }
-    } else {
+    } else if let Some(manifest) = manifest {
         let layers_display: Vec<String> = manifest
             .layers
             .iter()

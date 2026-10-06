@@ -451,3 +451,52 @@ fn detect_nonexistent_directory_returns_error() {
         "should return JSON error for nonexistent dir: {stdout}"
     );
 }
+
+#[test]
+fn configured_server_entry_is_a_generic_process_signal_without_runtime_family() {
+    let config = "[deploy]\nentry='server.js'\n";
+    let manifest = json!({"tree":["onreza.toml","index.html","server.js"],"files":{"onreza.toml":config,"index.html":"<h1>server content</h1>","server.js":"console.log('server')"}});
+    let output = nrz()
+        .args(["detect", "--stdin", "--json"])
+        .write_stdin(manifest.to_string())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let result = stdout_json(&output);
+    assert_eq!(result["suggestedCompute"], "PROCESS");
+    assert!(result["metadata"]["applicationRuntime"].is_null());
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("onreza.toml"), config).unwrap();
+    fs::write(temp.path().join("index.html"), "<h1>server content</h1>").unwrap();
+    fs::write(temp.path().join("server.js"), "console.log('server')").unwrap();
+    let local = nrz()
+        .current_dir(temp.path())
+        .args(["detect", "--json"])
+        .output()
+        .unwrap();
+    assert!(local.status.success());
+    let result = stdout_json(&local);
+    assert_eq!(result["suggestedCompute"], "PROCESS");
+    assert!(result["metadata"]["applicationRuntime"].is_null());
+}
+
+#[test]
+fn configured_entry_without_runtime_family_rejects_command_before_inference() {
+    let input = json!({"tree":["onreza.toml","index.html"],"files":{
+        "onreza.toml":"[deploy]\nentry='node server.js'\n", "index.html":"<h1>hello</h1>"
+    }});
+    let output = nrz()
+        .args(["detect", "--stdin", "--json"])
+        .write_stdin(input.to_string())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let result = stdout_json(&output);
+    assert_eq!(result["code"], "APPLICATION_RUNTIME_INVALID");
+    assert!(
+        result["error"]
+            .as_str()
+            .unwrap()
+            .contains("relative file path")
+    );
+}

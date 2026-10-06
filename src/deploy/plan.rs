@@ -280,7 +280,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
 
     let mut detection =
         crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
-    detection.metadata.application_runtime =
+    let application_runtime =
         crate::detect::application_runtime::resolve_application_runtime_with_config(
             &crate::detect::fs::LocalFs::new(project_dir),
             &detection.framework,
@@ -291,6 +291,12 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         .map_err(|error| {
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
         })?;
+    crate::detect::application_runtime::bind_application_runtime(
+        &mut detection,
+        application_runtime,
+        effective.deploy_entry(),
+    )
+    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
     let build_runtime_version = super::validate_application_runtime_before_build(
         detection.metadata.application_runtime.as_ref(),
         &detection.metadata.runtime,
@@ -299,12 +305,6 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         request.execution_env,
     )
     .await?;
-    if let Some(version) = &build_runtime_version
-        && detection.metadata.runtime.runtime_type != RuntimeType::Python
-    {
-        detection.metadata.runtime.version = Some(version.clone());
-    }
-
     if !args.skip_build && !args.skip_install {
         super::run_install_step(
             project_dir,
@@ -337,6 +337,21 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     {
         crate::frameworks::clear_before_build(project_dir)?;
         super::run_build_step(cmd, project_dir, json, &build_env, request.build_logs)?;
+    }
+
+    let application_runtime = detection.metadata.application_runtime;
+    detection =
+        crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
+    crate::detect::application_runtime::bind_application_runtime(
+        &mut detection,
+        application_runtime,
+        effective.deploy_entry(),
+    )
+    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
+    if let Some(version) = &build_runtime_version
+        && detection.metadata.runtime.runtime_type != RuntimeType::Python
+    {
+        detection.metadata.runtime.version = Some(version.clone());
     }
 
     output::status(
@@ -454,6 +469,11 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
                     &build_artifact.detection.metadata.runtime,
                     request.platform_runner,
                     Some(&auto),
+                    build_artifact
+                        .detection
+                        .metadata
+                        .application_runtime
+                        .as_ref(),
                     effective.node_version(),
                 )?;
                 super::apply_application_runtime_manifest(
@@ -464,6 +484,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
                         .application_runtime
                         .as_ref(),
                     target.as_deref(),
+                    &build_artifact.detection.framework,
                 )?;
                 build_manifest::validate(&auto)
                     .map_err(|error| output::with_default_code(error, "INVALID_MANIFEST"))?;

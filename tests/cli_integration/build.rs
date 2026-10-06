@@ -139,3 +139,95 @@ fn build_uses_onreza_toml_from_dir_argument() {
         "expected build progress in stderr, got: {stderr}"
     );
 }
+
+#[test]
+fn standalone_build_preserves_declared_node_in_authored_compute_manifest() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir(temp.path().join(".onreza")).unwrap();
+    fs::write(temp.path().join("onreza.toml"), "[build]\noutput_directory='.'\n[deploy]\nruntime='node'\nentry='server.js'\nargs=['literal argument']\n").unwrap();
+    fs::write(temp.path().join("server.js"), "console.log('server')").unwrap();
+    fs::write(temp.path().join(".onreza/manifest.json"), r#"{"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js"}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#).unwrap();
+    let output = nrz()
+        .current_dir(temp.path())
+        .args(["build", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let result = stdout_json(&output);
+    assert_eq!(result["layers"][0]["target"], "COMPUTE");
+    assert_eq!(result["manifestSource"], "file");
+}
+
+#[test]
+fn standalone_build_runtime_failure_emits_only_one_error_object() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir(temp.path().join(".onreza")).unwrap();
+    fs::write(
+        temp.path().join("onreza.toml"),
+        "[build]\noutput_directory='.'\n[deploy]\nruntime='bun'\nentry='server.js'\nargs=[]\n",
+    )
+    .unwrap();
+    fs::write(temp.path().join("server.js"), "console.log('server')").unwrap();
+    fs::write(temp.path().join(".onreza/manifest.json"), r#"{"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js","runtime":{"applicationRuntime":{"family":"NODE","args":[]}}}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#).unwrap();
+    let output = nrz()
+        .current_dir(temp.path())
+        .args(["build", "--json"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let result = stdout_json(&output);
+    assert_eq!(result["code"], "APPLICATION_RUNTIME_INVALID");
+    assert!(result.get("layers").is_none());
+}
+
+#[test]
+fn standalone_process_build_without_manifest_emits_one_json_summary() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir(temp.path().join("dist")).unwrap();
+    fs::write(
+        temp.path().join("onreza.toml"),
+        "[build]\noutput_directory='dist'\n",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"scripts":{"start":"npm run serve"}}"#,
+    )
+    .unwrap();
+    fs::write(temp.path().join("dist/server.js"), "console.log('server')").unwrap();
+    let output = nrz()
+        .current_dir(temp.path())
+        .args(["build", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let result = stdout_json(&output);
+    assert_eq!(result["manifestSource"], "absent");
+    assert_eq!(result["layers"], json!([]));
+    assert_eq!(result["routes"], 0);
+}
+
+#[test]
+fn standalone_build_explicit_static_keeps_priority_over_declared_server() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("onreza.toml"), "[build]\noutput_directory='.'\n[deploy]\ncompute='static'\nruntime='node'\nentry='server.js'\nargs=[]\n").unwrap();
+    fs::write(temp.path().join("index.html"), "<h1>static export</h1>").unwrap();
+    fs::write(temp.path().join("server.js"), "console.log('server')").unwrap();
+    let output = nrz()
+        .current_dir(temp.path())
+        .args(["build", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let result = stdout_json(&output);
+    assert_eq!(result["layers"][0]["target"], "STATIC");
+    assert_eq!(result["manifestSource"], "generated");
+}

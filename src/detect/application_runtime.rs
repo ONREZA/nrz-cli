@@ -20,17 +20,12 @@ struct RuntimeDeploy {
     args: Option<Vec<String>>,
 }
 
+#[allow(dead_code)] // Public library API; the CLI uses resolve_and_bind_detection.
 pub fn resolve_application_runtime(
     fs: &dyn Fs,
     framework: &str,
 ) -> anyhow::Result<Option<ApplicationRuntimeDeclaration>> {
-    let config = fs
-        .read_file("onreza.toml")
-        .map(|text| toml::from_str::<RuntimeProject>(&text))
-        .transpose()
-        .context("invalid application runtime declaration in onreza.toml")?
-        .unwrap_or_default()
-        .deploy;
+    let config = read_runtime_config(fs)?;
     resolve_application_runtime_with_config(
         fs,
         framework,
@@ -38,6 +33,57 @@ pub fn resolve_application_runtime(
         config.entry,
         config.args,
     )
+}
+
+fn read_runtime_config(fs: &dyn Fs) -> anyhow::Result<RuntimeDeploy> {
+    Ok(fs
+        .read_file("onreza.toml")
+        .map(|text| toml::from_str::<RuntimeProject>(&text))
+        .transpose()
+        .context("invalid application runtime declaration in onreza.toml")?
+        .unwrap_or_default()
+        .deploy)
+}
+
+#[allow(dead_code)] // Shared detect module is also compiled by the public library.
+pub(crate) fn resolve_and_bind_detection(
+    fs: &dyn Fs,
+    detection: &mut super::types::DetectionResult,
+) -> anyhow::Result<()> {
+    let config = read_runtime_config(fs)?;
+    let configured_entry = config.entry.clone();
+    let declaration = resolve_application_runtime_with_config(
+        fs,
+        &detection.framework,
+        config.runtime,
+        config.entry,
+        config.args,
+    )?;
+    bind_application_runtime(detection, declaration, configured_entry.as_deref())
+}
+
+/// Bind frozen launch intent to fresh framework/build-output inference.
+#[allow(dead_code)] // CLI-only binding; keep it out of the public library API.
+pub(crate) fn bind_application_runtime(
+    detection: &mut super::types::DetectionResult,
+    declaration: Option<ApplicationRuntimeDeclaration>,
+    configured_entry: Option<&str>,
+) -> anyhow::Result<()> {
+    if let Some(entry) = configured_entry {
+        normalize_application_entry(entry)?;
+    }
+    if let Some(declaration) = &declaration {
+        validate_framework(&detection.framework, declaration.family)?;
+    }
+    // Generic static fallback must not erase a configured server launch.
+    // Known framework exports and authored manifests retain their own contracts.
+    if (declaration.is_some() || configured_entry.is_some())
+        && matches!(detection.framework.as_str(), "other" | "static-html")
+    {
+        detection.suggested_compute = super::types::ComputeType::Process;
+    }
+    detection.metadata.application_runtime = declaration;
+    Ok(())
 }
 
 pub fn resolve_application_runtime_with_config(
@@ -49,7 +95,9 @@ pub fn resolve_application_runtime_with_config(
 ) -> anyhow::Result<Option<ApplicationRuntimeDeclaration>> {
     let config = RuntimeDeploy {
         runtime,
-        entry,
+        entry: entry
+            .map(|entry| normalize_application_entry(&entry))
+            .transpose()?,
         args,
     };
     let package = fs
@@ -94,14 +142,10 @@ pub fn resolve_application_runtime_with_config(
         }
         return Ok(None);
     };
-    if framework == "python" || (framework == "elysia" && family != ApplicationRuntimeFamily::Bun) {
-        bail!("application runtime conflicts with framework {framework}");
-    }
+    validate_framework(framework, family)?;
     let entry = config
         .entry
-        .or_else(|| start.as_ref().and_then(|start| start.entry.clone()))
-        .map(|entry| normalize_application_entry(&entry))
-        .transpose()?;
+        .or_else(|| start.as_ref().and_then(|start| start.entry.clone()));
     let args = config
         .args
         .unwrap_or_else(|| start.map_or_else(Vec::new, |start| start.args));
@@ -115,6 +159,16 @@ pub fn resolve_application_runtime_with_config(
         .validate()
         .map_err(anyhow::Error::msg)?;
     Ok(Some(declaration))
+}
+
+pub(crate) fn validate_framework(
+    framework: &str,
+    family: ApplicationRuntimeFamily,
+) -> anyhow::Result<()> {
+    if framework == "python" || (framework == "elysia" && family != ApplicationRuntimeFamily::Bun) {
+        bail!("application runtime conflicts with framework {framework}");
+    }
+    Ok(())
 }
 
 pub fn normalize_application_entry(entry: &str) -> anyhow::Result<String> {

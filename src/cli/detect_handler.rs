@@ -53,11 +53,9 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
         })?;
 
         let mut result = detect::detect_with_fs(&vfs);
-        result.metadata.application_runtime =
-            detect::application_runtime::resolve_application_runtime(&vfs, &result.framework)
-                .map_err(|error| {
-                    output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
-                })?;
+        detect::application_runtime::resolve_and_bind_detection(&vfs, &mut result).map_err(
+            |error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")),
+        )?;
         return output_result(&result, &args, json);
     }
 
@@ -67,9 +65,9 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
         .with_context(|| format!("directory not found: {}", args.dir))?;
 
     let mut result = detect::detect(&project_dir);
-    result.metadata.application_runtime = detect::application_runtime::resolve_application_runtime(
+    detect::application_runtime::resolve_and_bind_detection(
         &detect::fs::LocalFs::new(&project_dir),
-        &result.framework,
+        &mut result,
     )
     .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
 

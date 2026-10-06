@@ -129,3 +129,46 @@ fn static_mode_rejects_an_authored_process_runtime() {
     assert!(!output.status.success());
     assert_eq!(stdout_json(&output)["code"], "COMPUTE_MANIFEST_MISMATCH");
 }
+
+#[test]
+fn configured_entry_infers_generic_process_and_preserves_explicit_static() {
+    for compute in [None, Some("static")] {
+        let dir = fixture(compute);
+        fs::write(
+            dir.path().join("index.html"),
+            "<h1>server-owned content</h1>",
+        )
+        .unwrap();
+        let output = nrz()
+            .current_dir(dir.path())
+            .args([
+                "--token",
+                "test-token",
+                "--json",
+                "deploy",
+                "--dry",
+                "--skip-build",
+                "--skip-install",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let plan = stdout_json(&output);
+        assert_eq!(
+            plan["compute"],
+            if compute.is_some() {
+                "STATIC"
+            } else {
+                "PROCESS"
+            }
+        );
+        assert_eq!(
+            plan["runtimeArtifact"]["hasComputeLayer"],
+            compute.is_none()
+        );
+    }
+}

@@ -733,7 +733,7 @@ fn compute_type_from_manifest(manifest: &build_manifest::Manifest) -> ComputeTyp
     }
 }
 
-fn parse_compute_type(s: &str) -> anyhow::Result<ComputeType> {
+pub(crate) fn parse_compute_type(s: &str) -> anyhow::Result<ComputeType> {
     match s.to_lowercase().as_str() {
         "static" => Ok(ComputeType::Static),
         "process" => Ok(ComputeType::Process),

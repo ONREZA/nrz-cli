@@ -47,6 +47,7 @@ fn source_bundle_retains_prebuild_launcher_args_and_version_witness() {
         &mut manifest,
         Some(&declaration),
         Some("bun-1.4.2"),
+        "other",
     )
     .unwrap();
     let plan =
@@ -66,7 +67,8 @@ fn source_bundle_retains_prebuild_launcher_args_and_version_witness() {
         crate::deploy::apply_application_runtime_manifest(
             &mut manifest,
             Some(&contradictory),
-            Some("node-24")
+            Some("node-24"),
+            "other",
         )
         .is_err()
     );
@@ -197,6 +199,7 @@ async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
         &mut manifest,
         detection.metadata.application_runtime.as_ref(),
         target.as_deref(),
+        &detection.framework,
     )
     .unwrap();
     let files = scan_dir(dir.path()).unwrap();
@@ -1273,4 +1276,87 @@ fn source_bundle_plan_rejects_legacy_manifest_middleware() {
         ),
         "{err}"
     );
+}
+
+#[test]
+fn compute_framework_checks_selected_and_authored_runtime_without_fabricating_intent() {
+    for (authored_node, target, witness) in [
+        (false, Some("node-22"), None),
+        (true, None, None),
+        (false, None, Some("node-22")),
+    ] {
+        let mut manifest = compute_manifest();
+        if authored_node {
+            manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
+                application_runtime: Some(nrz_source_bundle::ApplicationRuntimeIntent {
+                    family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
+                    args: vec![],
+                }),
+                ..Default::default()
+            });
+        }
+        if let Some(witness) = witness {
+            manifest.layers[0]
+                .runtime
+                .get_or_insert_with(Default::default)
+                .build_runtime_version = Some(witness.into());
+        }
+        let error = crate::deploy::apply_application_runtime_manifest(
+            &mut manifest,
+            None,
+            target,
+            "elysia",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("conflicts with framework elysia")
+        );
+        assert_eq!(
+            error
+                .downcast_ref::<crate::output::CodedError>()
+                .unwrap()
+                .code
+                .as_str(),
+            "APPLICATION_RUNTIME_INVALID"
+        );
+    }
+    let mut manifest = compute_manifest();
+    crate::deploy::apply_application_runtime_manifest(
+        &mut manifest,
+        None,
+        Some("bun-1.4.2"),
+        "elysia",
+    )
+    .unwrap();
+    assert!(
+        manifest.layers[0]
+            .runtime
+            .as_ref()
+            .unwrap()
+            .application_runtime
+            .is_none()
+    );
+    let mut contradictory: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js",
+            "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"bun-1.4.2"}}],"routes":[]
+    })).unwrap();
+    let error =
+        crate::deploy::apply_application_runtime_manifest(&mut contradictory, None, None, "other")
+            .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("conflicts with admitted runtime target")
+    );
+    let mut manifest = static_manifest();
+    crate::deploy::apply_application_runtime_manifest(
+        &mut manifest,
+        None,
+        Some("node-22"),
+        "elysia",
+    )
+    .unwrap();
+    assert!(manifest.layers[0].runtime.is_none());
 }

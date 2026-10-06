@@ -39,18 +39,21 @@ pub(crate) fn canonical_build_runtime_target(
     runtime: &RuntimeInfo,
     platform_runner: bool,
     manifest: Option<&crate::build::manifest::Manifest>,
+    declaration: Option<&ApplicationRuntimeDeclaration>,
     admitted_node_version: Option<&str>,
 ) -> anyhow::Result<Option<String>> {
-    let authored_node = manifest.is_some_and(|manifest| {
-        manifest.layers.iter().any(|layer| {
-            layer.target == crate::build::manifest::LayerTarget::Compute
-                && layer
-                    .runtime
-                    .as_ref()
-                    .and_then(|runtime| runtime.application_runtime.as_ref())
-                    .is_some_and(|intent| intent.family == ApplicationRuntimeFamily::Node)
-        })
-    });
+    let authored_node = declaration
+        .is_some_and(|declaration| declaration.family == ApplicationRuntimeFamily::Node)
+        || manifest.is_some_and(|manifest| {
+            manifest.layers.iter().any(|layer| {
+                layer.target == crate::build::manifest::LayerTarget::Compute
+                    && layer
+                        .runtime
+                        .as_ref()
+                        .and_then(|runtime| runtime.application_runtime.as_ref())
+                        .is_some_and(|intent| intent.family == ApplicationRuntimeFamily::Node)
+            })
+        });
     if authored_node && !platform_runner && runtime.runtime_type != RuntimeType::Python {
         // Standalone builds preserve the author's declaration. Direct publication
         // binds the independently admitted snapshot before reaching this boundary.
@@ -123,6 +126,7 @@ pub(crate) async fn validate_application_runtime_before_build(
             return canonical_build_runtime_target(
                 runtime,
                 platform_runner,
+                None,
                 None,
                 effective.node_version(),
             );

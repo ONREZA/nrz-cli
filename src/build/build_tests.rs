@@ -22,6 +22,7 @@ fn build_output_serializes_nextjs_compatibility_report() {
         }],
         routes: 1,
         output_dir: ".next/standalone".to_string(),
+        manifest_source: crate::artifact::BuildManifestSource::Generated,
         framework: Some("nextjs".to_string()),
         framework_version: Some("16.2.9".to_string()),
         compatibility: Some(serde_json::json!({
@@ -3195,4 +3196,34 @@ fn prisma_copy_rejects_symlinked_destination_parent() {
         "{error}"
     );
     assert!(!outside.path().join("client-deadbeef").exists());
+}
+
+#[tokio::test]
+async fn standalone_authored_compute_binds_declared_node_without_fabricating_build_target() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join(".onreza")).unwrap();
+    std::fs::write(dir.path().join("server.js"), "console.log('server')").unwrap();
+    std::fs::write(dir.path().join(".onreza/manifest.json"), r#"{"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js"}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#).unwrap();
+    let config = toml::from_str("[build]\noutput_directory='.'\n[deploy]\nruntime='node'\nentry='server.js'\nargs=['literal argument']\n").unwrap();
+    let result = run(
+        BuildArgs {
+            dir: dir.path().to_string_lossy().into_owned(),
+            skip_validation: false,
+        },
+        true,
+        &config,
+    )
+    .await
+    .unwrap();
+    let manifest = result.manifest.unwrap();
+    let runtime = manifest.layers[0].runtime.as_ref().unwrap();
+    assert_eq!(
+        runtime.application_runtime.as_ref().unwrap().family,
+        nrz_source_bundle::ApplicationRuntimeFamily::Node
+    );
+    assert_eq!(
+        runtime.application_runtime.as_ref().unwrap().args,
+        ["literal argument"]
+    );
+    assert!(runtime.build_runtime_version.is_none());
 }
