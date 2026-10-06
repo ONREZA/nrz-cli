@@ -116,7 +116,7 @@ export class NrzCli {
       "-ceu",
       [
         "apt-get update",
-        "apt-get install -y --no-install-recommends nodejs",
+        "apt-get install -y --no-install-recommends nodejs npm",
         "rm -rf /var/lib/apt/lists/*",
       ].join("\n"),
     ]);
