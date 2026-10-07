@@ -6,6 +6,8 @@ async fn selected_python_output_named_like_backend_state_survives_verified_publi
         for output in [
             "build/lib",
             "build/lib/authored",
+            "build/lib.linux-x86_64-cpython-314",
+            "build/lib.linux-x86_64-cpython-314/authored",
             "build/bdist.fixture/runtime",
         ] {
             let project = tempfile::tempdir().unwrap();
@@ -18,9 +20,22 @@ async fn selected_python_output_named_like_backend_state_survives_verified_publi
                     format!("{}/demo/__init__.py", minor.site_packages_root()),
                     "# INSTALLED_PROJECT_WHEEL",
                 ),
+                (
+                    format!(
+                        "{}/demo/build/lib.linux-x86_64-cpython-314/resource.txt",
+                        minor.site_packages_root()
+                    ),
+                    "INSTALLED_PACKAGE_RESOURCE",
+                ),
+                (
+                    "resources/build/lib.linux-x86_64-cpython-314/source.txt".to_string(),
+                    "PROJECT_SOURCE_RESOURCE",
+                ),
+                ("build/lib.data".to_string(), "AUTHORED_LITERAL_FILE"),
             ];
             let excluded = [
                 "build/bdist.unselected/installer.txt",
+                "build/lib.win-amd64-cpython-312/demo/native.pyd",
                 "src/demo.egg-info/PKG-INFO",
                 ".venv/pyvenv.cfg",
                 ".onreza/python/build/wheels/debris.whl",
@@ -80,6 +95,42 @@ async fn selected_python_output_named_like_backend_state_survives_verified_publi
             }
         }
     }
+}
+
+#[tokio::test]
+async fn unpackaged_python_backend_named_resources_remain_application_assets() {
+    let project = tempfile::tempdir().unwrap();
+    let retained = [
+        ("main.py".to_string(), "print('UNPACKAGED_SCRIPT')"),
+        (
+            "build/lib.linux-x86_64-cpython-314/resource.txt".to_string(),
+            "AUTHORED_APPLICATION_ASSET",
+        ),
+    ];
+    for (path, body) in &retained {
+        let path = project.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let mut detection = crate::detect::detect(project.path());
+    crate::detect::application_runtime::resolve_and_bind_detection(
+        &crate::detect::fs::LocalFs::new(project.path()),
+        &mut detection,
+    )
+    .unwrap();
+    let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version":1,"routes":[{"pattern":"^/.*$","layer":"python"}],"layers":[{"name":"python","target":"COMPUTE","directory":".","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":nrz_source_bundle::PythonMinor::default().target()}}]
+    })).unwrap();
+    let artifact = resolve_runtime_artifact(
+        project.path(),
+        project.path(),
+        project.path().into(),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+    assert_python_scan_archive(&artifact, &detection, &retained, &[]).await;
 }
 
 #[tokio::test]

@@ -331,7 +331,13 @@ fn real_native_library_closure_rejects_missing_direct_and_transitive_libraries()
             String::from_utf8_lossy(&result.stderr)
         );
     }
-    validate_output(output.path(), NativeRecipe::DartServer, Some("server")).unwrap();
+    validate_output(
+        output.path(),
+        output.path(),
+        NativeRecipe::DartServer,
+        Some("server"),
+    )
+    .unwrap();
     let bar = std::fs::read(output.path().join("lib/libbar.so")).unwrap();
     let mut header_only = vec![0; 512];
     header_only[..64].copy_from_slice(&bar[..64]);
@@ -340,13 +346,27 @@ fn real_native_library_closure_rejects_missing_direct_and_transitive_libraries()
     header_only[56..64].fill(0);
     std::fs::write(output.path().join("lib/libbar.so"), header_only).unwrap();
     assert!(
-        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        validate_output(
+            output.path(),
+            output.path(),
+            NativeRecipe::DartServer,
+            Some("server")
+        )
+        .is_err(),
         "shared ELF without loadable segments was accepted"
     );
     std::fs::write(output.path().join("lib/libbar.so"), bar).unwrap();
     // A bundled SONAME takes precedence over the qualified Compute fallback.
     file(output.path(), "lib/libc.so.6", "not ELF");
-    assert!(validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err());
+    assert!(
+        validate_output(
+            output.path(),
+            output.path(),
+            NativeRecipe::DartServer,
+            Some("server")
+        )
+        .is_err()
+    );
     std::fs::remove_file(output.path().join("lib/libc.so.6")).unwrap();
 
     let compile = |args: &[&str]| {
@@ -373,7 +393,13 @@ fn real_native_library_closure_rejects_missing_direct_and_transitive_libraries()
         "lib/libfoo.so",
     ]);
     assert!(
-        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        validate_output(
+            output.path(),
+            output.path(),
+            NativeRecipe::DartServer,
+            Some("server")
+        )
+        .is_err(),
         "parent RUNPATH incorrectly inherited by libfoo"
     );
     compile(&[
@@ -384,7 +410,13 @@ fn real_native_library_closure_rejects_missing_direct_and_transitive_libraries()
         "-o",
         "server",
     ]);
-    validate_output(output.path(), NativeRecipe::DartServer, Some("server")).unwrap();
+    validate_output(
+        output.path(),
+        output.path(),
+        NativeRecipe::DartServer,
+        Some("server"),
+    )
+    .unwrap();
     compile(&[
         "-shared",
         "-fPIC",
@@ -438,7 +470,13 @@ fn real_native_library_closure_rejects_missing_direct_and_transitive_libraries()
     }
     std::os::unix::fs::symlink("../vendor/libfoo.so", output.path().join("lib/libfoo.so")).unwrap();
     assert!(
-        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        validate_output(
+            output.path(),
+            output.path(),
+            NativeRecipe::DartServer,
+            Some("server")
+        )
+        .is_err(),
         "ORIGIN incorrectly used canonical library directory"
     );
     std::os::unix::fs::symlink("../vendor/libbar.so", output.path().join("lib/libbar.so")).unwrap();
@@ -478,7 +516,13 @@ fn real_native_library_closure_rejects_missing_direct_and_transitive_libraries()
         "-o",
         "bin/server",
     ]);
-    validate_output(output.path(), NativeRecipe::DartServer, Some("bin/server")).unwrap();
+    validate_output(
+        output.path(),
+        output.path(),
+        NativeRecipe::DartServer,
+        Some("bin/server"),
+    )
+    .unwrap();
     let outside = tempfile::tempdir().unwrap();
     std::fs::create_dir(outside.path().join("child")).unwrap();
     std::os::unix::fs::symlink(outside.path().join("child"), output.path().join("liblink"))
@@ -492,7 +536,13 @@ fn real_native_library_closure_rejects_missing_direct_and_transitive_libraries()
         "server",
     ]);
     assert!(
-        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        validate_output(
+            output.path(),
+            output.path(),
+            NativeRecipe::DartServer,
+            Some("server")
+        )
+        .is_err(),
         "symlink followed by parent was lexically erased"
     );
     std::fs::create_dir(output.path().join("unused")).unwrap();
@@ -505,7 +555,13 @@ fn real_native_library_closure_rejects_missing_direct_and_transitive_libraries()
         "server",
     ]);
     assert!(
-        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        validate_output(
+            output.path(),
+            output.path(),
+            NativeRecipe::DartServer,
+            Some("server")
+        )
+        .is_err(),
         "empty traversed directory would disappear from the archive"
     );
     compile(&[
@@ -523,7 +579,13 @@ fn real_native_library_closure_rejects_missing_direct_and_transitive_libraries()
     )
     .unwrap();
     assert!(
-        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        validate_output(
+            output.path(),
+            output.path(),
+            NativeRecipe::DartServer,
+            Some("server")
+        )
+        .is_err(),
         "missing transitive libbar was accepted"
     );
     std::fs::rename(
@@ -537,12 +599,24 @@ fn real_native_library_closure_rejects_missing_direct_and_transitive_libraries()
     )
     .unwrap();
     assert!(
-        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        validate_output(
+            output.path(),
+            output.path(),
+            NativeRecipe::DartServer,
+            Some("server")
+        )
+        .is_err(),
         "missing direct libfoo was accepted"
     );
     std::fs::rename(output.path().join("lib"), output.path().join("lib.saved")).unwrap();
     assert!(
-        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        validate_output(
+            output.path(),
+            output.path(),
+            NativeRecipe::DartServer,
+            Some("server")
+        )
+        .is_err(),
         "missing ORIGIN directory was accepted"
     );
 }
@@ -572,7 +646,7 @@ fn real_flutter_web_build_is_static_and_keeps_the_pub_lock() {
         lock
     );
     let output = project.path().join(&plan.output_directory);
-    let evidence = validate_output(&output, NativeRecipe::FlutterWeb, None).unwrap();
+    let evidence = validate_output(&output, &output, NativeRecipe::FlutterWeb, None).unwrap();
     assert!(evidence.target.is_none());
     for file in [
         "main.dart.js",
@@ -603,7 +677,7 @@ async fn real_hugo_build_preserves_pages_and_static_assets() {
     .unwrap();
     let output = project.path().join(&plan.output_directory);
     assert!(
-        validate_output(&output, NativeRecipe::HugoStatic, None)
+        validate_output(&output, &output, NativeRecipe::HugoStatic, None)
             .unwrap()
             .target
             .is_none()
@@ -795,14 +869,16 @@ fn hugo_nested_pages_do_not_require_a_home_page() {
     let output = tempfile::tempdir().unwrap();
     file(output.path(), "about/index.html", "<h1>About</h1>");
     assert!(!output.path().join("index.html").exists());
-    let evidence = validate_output(output.path(), NativeRecipe::HugoStatic, None).unwrap();
+    let evidence =
+        validate_output(output.path(), output.path(), NativeRecipe::HugoStatic, None).unwrap();
     assert!(evidence.entry.is_none());
     assert!(evidence.target.is_none());
     let manifest = crate::build::manifest::generate_static_manifest();
     crate::build::manifest::verify_files(output.path(), &manifest).unwrap();
-    assert!(validate_output(output.path(), NativeRecipe::FlutterWeb, None).is_err());
+    assert!(validate_output(output.path(), output.path(), NativeRecipe::FlutterWeb, None).is_err());
     assert!(
         validate_output(
+            &output.path().join("missing"),
             &output.path().join("missing"),
             NativeRecipe::HugoStatic,
             None
@@ -814,16 +890,24 @@ fn hugo_nested_pages_do_not_require_a_home_page() {
 #[test]
 fn static_and_native_outputs_are_checked_before_publication() {
     let output = tempfile::tempdir().unwrap();
-    assert!(validate_output(output.path(), NativeRecipe::FlutterWeb, None).is_err());
+    assert!(validate_output(output.path(), output.path(), NativeRecipe::FlutterWeb, None).is_err());
     file(output.path(), "index.html", "<html></html>");
     assert!(
-        validate_output(output.path(), NativeRecipe::FlutterWeb, None)
+        validate_output(output.path(), output.path(), NativeRecipe::FlutterWeb, None)
             .unwrap()
             .target
             .is_none()
     );
     file(output.path(), "server", "#!/bin/sh\necho ready");
-    assert!(validate_output(output.path(), NativeRecipe::GoServer, Some("server")).is_err());
+    assert!(
+        validate_output(
+            output.path(),
+            output.path(),
+            NativeRecipe::GoServer,
+            Some("server")
+        )
+        .is_err()
+    );
     for entry in [
         "../server",
         "/server",
@@ -831,7 +915,15 @@ fn static_and_native_outputs_are_checked_before_publication() {
         "a\\server",
         "C:/server",
     ] {
-        assert!(validate_output(output.path(), NativeRecipe::GoServer, Some(entry)).is_err());
+        assert!(
+            validate_output(
+                output.path(),
+                output.path(),
+                NativeRecipe::GoServer,
+                Some(entry)
+            )
+            .is_err()
+        );
     }
 }
 
@@ -844,10 +936,15 @@ fn native_entry_symlink_cannot_escape_the_output_root() {
     std::os::unix::fs::symlink(outside.path().join("server"), output.path().join("server"))
         .unwrap();
     assert!(
-        validate_output(output.path(), NativeRecipe::GoServer, Some("server"))
-            .unwrap_err()
-            .to_string()
-            .contains("escapes")
+        validate_output(
+            output.path(),
+            output.path(),
+            NativeRecipe::GoServer,
+            Some("server")
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("escapes")
     );
 }
 
@@ -891,6 +988,7 @@ async fn real_go_executable_reads_artifact_assets_and_literal_argv() {
         "go:embed must carry source assets inside the binary"
     );
     let evidence = validate_output(
+        &output,
         &output,
         NativeRecipe::GoServer,
         plan.executable_entry.as_deref(),
@@ -962,6 +1060,7 @@ async fn real_dart_bundle_reads_artifact_assets_and_literal_argv() {
         include_str!("../../tests/fixtures/native-dart/assets/message.txt"),
     );
     let evidence = validate_output(
+        &output,
         &output,
         NativeRecipe::DartServer,
         plan.executable_entry.as_deref(),

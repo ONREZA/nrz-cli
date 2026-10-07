@@ -419,13 +419,17 @@ pub fn has_entry(fs: &dyn Fs) -> bool {
         .any(|path| fs.exists(path) && !fs.is_dir(path))
 }
 
+pub(crate) fn has_application_entry(fs: &dyn Fs) -> bool {
+    has_entry(fs) || super::python_launch::has_declared_console_scripts(fs)
+}
+
 pub fn detect_python(fs: &dyn Fs) -> Option<DetectionResult> {
     let entry_point = PYTHON_ENTRY_CANDIDATES
         .iter()
         .find(|path| fs.exists(path) && !fs.is_dir(path))
         .copied();
     let has_manifest = dependency_manifest(fs).is_some();
-    if fs.exists("package.json") && (entry_point.is_none() || !has_manifest) {
+    if fs.exists("package.json") && (!has_application_entry(fs) || !has_manifest) {
         return None;
     }
     let pyproject_project = fs

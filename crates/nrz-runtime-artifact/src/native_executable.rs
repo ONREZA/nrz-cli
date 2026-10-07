@@ -475,21 +475,39 @@ fn resolve_artifact_path(
     path: &Path,
     members: &mut BTreeSet<PathBuf>,
 ) -> Result<PathBuf, RuntimeArtifactError> {
-    // Check the original path: normalizing before resolving symlinks changes OS
-    // semantics and can conceal an escape through a link followed by `..`.
-    let canonical = std::fs::canonicalize(path).map_err(fs_error)?;
-    if !canonical.starts_with(root) {
-        return invariant("native library path escapes the artifact");
-    }
+    resolved_library_path(root, path, members)?
+        .ok_or_else(|| fs_error(std::io::ErrorKind::NotFound.into()))
+}
+
+// Search directories may be absent, but lexical bounds and every existing
+// symlink ancestor still have to be validated before the loader ignores them.
+fn resolved_library_path(
+    root: &Path,
+    path: &Path,
+    members: &mut BTreeSet<PathBuf>,
+) -> Result<Option<PathBuf>, RuntimeArtifactError> {
     let relative = path.strip_prefix(root).map_err(|_| {
         RuntimeArtifactError::Invariant("native library path escapes the artifact".into())
     })?;
+    let mut depth = 0;
+    for component in relative.components() {
+        match component {
+            Component::Normal(_) => depth += 1,
+            Component::ParentDir if depth == 0 => {
+                return invariant("native library path escapes the artifact");
+            }
+            Component::ParentDir => depth -= 1,
+            Component::CurDir => {}
+            _ => return invariant("native library path escapes the artifact"),
+        }
+    }
     let mut pending = relative
         .components()
         .map(|part| part.as_os_str().to_owned())
         .collect::<VecDeque<_>>();
     let mut prefix = root.to_path_buf();
     let mut links = 0;
+    let mut aliases = BTreeSet::new();
     while let Some(part) = pending.pop_front() {
         if part == "." {
             continue;
@@ -502,13 +520,17 @@ fn resolve_artifact_path(
             continue;
         }
         prefix.push(part);
-        let metadata = std::fs::symlink_metadata(&prefix).map_err(fs_error)?;
+        let metadata = match std::fs::symlink_metadata(&prefix) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(fs_error(error)),
+        };
         if metadata.file_type().is_symlink() {
             links += 1;
             if links > 128 {
                 return invariant("native artifact library symlink chain exceeds its bound");
             }
-            members.insert(prefix.strip_prefix(root).unwrap().to_path_buf());
+            aliases.insert(prefix.strip_prefix(root).unwrap().to_path_buf());
             let target = std::fs::read_link(&prefix).map_err(fs_error)?;
             if target.is_absolute() || has_intermediate_parent(&target) {
                 return invariant(
@@ -521,10 +543,17 @@ fn resolve_artifact_path(
             }
         }
     }
+    // Check the original path: normalizing before resolving symlinks changes OS
+    // semantics and can conceal an escape through a link followed by `..`.
+    let canonical = std::fs::canonicalize(path).map_err(fs_error)?;
+    if !canonical.starts_with(root) {
+        return invariant("native library path escapes the artifact");
+    }
     if prefix != canonical {
         return invariant("native artifact library path changed while resolving");
     }
-    Ok(prefix)
+    members.extend(aliases);
+    Ok(Some(prefix))
 }
 
 fn loader_paths(
@@ -573,7 +602,9 @@ fn loader_paths(
             }
             cwd.join(path)
         };
-        resolve_artifact_path(root, &candidate, members)?;
+        if resolved_library_path(root, &candidate, members)?.is_none() {
+            continue;
+        }
         if !candidate.is_dir() {
             return invariant("native artifact library path is not a directory");
         }

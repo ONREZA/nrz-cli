@@ -144,6 +144,8 @@ output_dirs = ["dist"]
 
 Явный запуск имеет приоритет над автодетектом. Единственный console script
 из `pyproject.toml` запускается как callable, даже при наличии веб-фреймворка.
+Объявленные console scripts сохраняют выбор Python рядом с Go/Dart helper или
+JavaScript tooling; несколько scripts требуют явного выбора application.
 Если зависимости содержат условия, включения других requirements-файлов
 или формируются package backend (`setup.py` либо dynamic dependencies в
 `pyproject.toml`),

@@ -275,23 +275,44 @@ pub(crate) fn build_source_bundle_plan_with_scan(
         // including publication from hosts without POSIX executable bits.
         file.executable = true;
     }
-    let logical_manifest =
+    let mut logical_manifest =
         build_logical_manifest(manifest, &entries, scan, dependency_packaging, readiness)?;
+    let mut native_owners = HashMap::new();
     for (layer, closure) in native_closures {
         for path in closure {
             let path = path
                 .to_str()
                 .context("native library path must be UTF-8")?
                 .replace('\\', "/");
-            if !logical_manifest.files.iter().any(|file| {
-                file.path == path
-                    && file.layer_name.as_deref() == Some(layer.as_str())
-                    && file.role == SourceLogicalManifestFileRole::Compute
-            }) {
+            if let Some(previous) = native_owners.insert(path.clone(), layer)
+                && previous != layer
+            {
                 bail!(
-                    "native library closure member '{path}' is not archived by its owning compute layer '{layer}'"
+                    "native library closure member '{path}' is claimed by multiple compute layers '{previous}' and '{layer}'"
                 );
             }
+        }
+    }
+    for (path, layer) in native_owners {
+        let file = logical_manifest.files.iter_mut().find(|file| file.path == path)
+            .with_context(|| format!("native library closure member '{path}' is not archived by its owning compute layer '{layer}'"))?;
+        // SDK-verified closure membership can supply custody only for an
+        // archived file without a matching source layer. The generic static
+        // fallback is not authored custody; explicit layers, prerender files
+        // and dependency materializations retain their existing ownership.
+        if scan.source_layer_match(manifest, &path).is_none()
+            && !scan.owns_as_dependency(&path)
+            && file.role == SourceLogicalManifestFileRole::Static
+        {
+            file.role = SourceLogicalManifestFileRole::Compute;
+            file.layer_name = Some(layer.clone());
+        }
+        if file.layer_name.as_deref() != Some(layer.as_str())
+            || file.role != SourceLogicalManifestFileRole::Compute
+        {
+            bail!(
+                "native library closure member '{path}' is not archived by its owning compute layer '{layer}'"
+            );
         }
     }
     ensure_manifest_covers_entries(&logical_manifest, &entries)?;

@@ -98,7 +98,8 @@ fn scan_python_root(
             let backend_output = pruning.project_package
                 && (relative == Path::new("build/lib")
                     || relative == Path::new("build/bdist")
-                    || relative.parent() == Some(Path::new("build")) && name.starts_with("bdist."));
+                    || relative.parent() == Some(Path::new("build"))
+                        && (name.starts_with("bdist.") || ft.is_dir() && name.starts_with("lib.")));
             let project_build_only = !staged_dependency
                 && (inherited_project_build_only
                     || name.ends_with(".egg-info")

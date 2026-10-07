@@ -161,12 +161,16 @@ pub(crate) fn resolve_launch_for_framework(
     }
 }
 
-fn console_application(fs: &dyn Fs) -> anyhow::Result<Option<String>> {
+pub(crate) fn has_declared_console_scripts(fs: &dyn Fs) -> bool {
+    console_scripts(fs).is_ok_and(|scripts| scripts.is_some_and(|scripts| !scripts.is_empty()))
+}
+
+fn console_scripts(fs: &dyn Fs) -> anyhow::Result<Option<toml::Table>> {
     let Some(text) = fs.read_file("pyproject.toml") else {
         return Ok(None);
     };
     let project: toml::Value = toml::from_str(&text)?;
-    let scripts = project
+    Ok(project
         .get("project")
         .and_then(|value| value.get("scripts"))
         .or_else(|| {
@@ -175,8 +179,12 @@ fn console_application(fs: &dyn Fs) -> anyhow::Result<Option<String>> {
                 .and_then(|value| value.get("poetry"))
                 .and_then(|value| value.get("scripts"))
         })
-        .and_then(toml::Value::as_table);
-    let Some(scripts) = scripts else {
+        .and_then(toml::Value::as_table)
+        .cloned())
+}
+
+fn console_application(fs: &dyn Fs) -> anyhow::Result<Option<String>> {
+    let Some(scripts) = console_scripts(fs)? else {
         return Ok(None);
     };
     if scripts.len() > 1 {

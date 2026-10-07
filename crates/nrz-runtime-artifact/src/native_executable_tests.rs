@@ -284,6 +284,98 @@ fn bundled_library_transitive_version_needs_use_the_compute_baseline() {
 }
 
 #[test]
+fn absent_contained_loader_directories_do_not_hide_resolved_libraries() {
+    let artifact = Artifact::new();
+    std::fs::create_dir(artifact.0.join("lib")).unwrap();
+    std::fs::write(
+        artifact.0.join("lib/libfoo.so"),
+        versioned_elf(None, Some("FOO_1"), None, false),
+    )
+    .unwrap();
+    for path in [
+        "$ORIGIN/lib:$ORIGIN/optional",
+        "$ORIGIN/optional:$ORIGIN/lib",
+    ] {
+        std::fs::write(
+            artifact.0.join("server"),
+            versioned_elf(Some(("libfoo.so", "FOO_1")), None, Some(path), true),
+        )
+        .unwrap();
+        artifact.check().unwrap();
+    }
+
+    for path in [
+        "$ORIGIN/../missing",
+        "../missing",
+        "/__nrz_missing_outside__",
+    ] {
+        std::fs::write(
+            artifact.0.join("server"),
+            versioned_elf(Some(("libfoo.so", "FOO_1")), None, Some(path), true),
+        )
+        .unwrap();
+        assert!(artifact.check().is_err(), "outside missing path: {path}");
+    }
+    std::fs::write(
+        artifact.0.join("server"),
+        versioned_elf(
+            Some(("libfoo.so", "FOO_1")),
+            None,
+            Some("$ORIGIN/optional"),
+            true,
+        ),
+    )
+    .unwrap();
+    assert!(
+        artifact
+            .check()
+            .unwrap_err()
+            .to_string()
+            .contains("libfoo.so")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_loader_directory_does_not_bypass_existing_symlink_ancestry() {
+    let artifact = Artifact::new();
+    let outside = Artifact::new();
+    std::os::unix::fs::symlink(&outside.0, artifact.0.join("escape")).unwrap();
+    std::fs::write(
+        artifact.0.join("server"),
+        versioned_elf(None, None, Some("$ORIGIN/escape/missing"), true),
+    )
+    .unwrap();
+    assert!(artifact.check().is_err());
+    std::os::unix::fs::symlink(outside.0.join("missing"), artifact.0.join("dangling")).unwrap();
+    std::fs::write(
+        artifact.0.join("server"),
+        versioned_elf(None, None, Some("$ORIGIN/dangling"), true),
+    )
+    .unwrap();
+    assert!(artifact.check().is_err());
+
+    std::os::unix::fs::symlink("missing-inside", artifact.0.join("optional-link")).unwrap();
+    std::fs::write(
+        artifact.0.join("server"),
+        versioned_elf(None, None, Some("$ORIGIN/optional-link"), true),
+    )
+    .unwrap();
+    artifact.check().unwrap();
+
+    std::fs::write(artifact.0.join("not-a-directory"), "plain file").unwrap();
+    std::fs::write(
+        artifact.0.join("server"),
+        versioned_elf(None, None, Some("$ORIGIN/not-a-directory/missing"), true),
+    )
+    .unwrap();
+    assert!(
+        artifact.check().is_err(),
+        "non-NotFound lookup errors must reject"
+    );
+}
+
+#[test]
 fn dynamic_entry_requires_an_interpreter_while_shared_providers_do_not() {
     let artifact = Artifact::new();
     let entry = versioned_elf(Some(("libc.so.6", "GLIBC_2.2.5")), None, None, true);
@@ -351,12 +443,14 @@ fn real_native_entry_interpreter_qualification() {
         .map(PathBuf::from)
         .unwrap_or_else(|| artifact.0.clone());
     std::fs::create_dir_all(&root).unwrap();
-    if !root.join("dynamic-entry").is_file() {
+    if !root.join("dynamic-entry").is_file() || !root.join("optional-runpath-entry").is_file() {
         build_native_entry_fixtures(&root);
     }
     for (name, dynamic) in [
         ("dynamic-entry", true),
         ("dynamic-exec", true),
+        ("optional-runpath-entry", true),
+        ("optional-rpath-entry", true),
         ("static-entry", false),
         ("static-pie-entry", false),
     ] {
@@ -371,13 +465,10 @@ fn real_native_entry_interpreter_qualification() {
         }
         assert_eq!(requirements.interpreter.is_some(), dynamic, "{name}");
         assert_eq!(!requirements.libraries.is_empty(), dynamic, "{name}");
-        let (_, members) =
-            NativeExecutableRequirements::verify_artifact_closure(&root, &path, &root).unwrap();
-        if dynamic {
-            assert!(members.contains(&PathBuf::from("lib/libanswer.so")));
-        }
-        let output = std::process::Command::new(path)
+        let output = std::process::Command::new(&path)
             .current_dir(&root)
+            .env_remove("LD_LIBRARY_PATH")
+            .env_remove("LD_PRELOAD")
             .output()
             .unwrap();
         assert!(
@@ -393,6 +484,33 @@ fn real_native_entry_interpreter_qualification() {
                 b"NATIVE_STATIC_OK\n".as_slice()
             }
         );
+        if name.starts_with("optional-") {
+            eprintln!("{name}: actual trusted loader passed with absent optional directories");
+        }
+        let (_, members) =
+            NativeExecutableRequirements::verify_artifact_closure(&root, &path, &root).unwrap();
+        if dynamic {
+            assert!(members.contains(&PathBuf::from("lib/libanswer.so")));
+        }
+    }
+    for (name, runnable) in [
+        ("outside-search-entry", true),
+        ("unresolved-search-entry", false),
+    ] {
+        let path = root.join(name);
+        let output = std::process::Command::new(&path)
+            .current_dir(&root)
+            .env_remove("LD_LIBRARY_PATH")
+            .env_remove("LD_PRELOAD")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.success(), runnable, "{name}");
+        let error =
+            NativeExecutableRequirements::verify_artifact_closure(&root, &path, &root).unwrap_err();
+        if !runnable {
+            assert!(error.to_string().contains("libanswer.so"), "{error}");
+            assert!(String::from_utf8_lossy(&output.stderr).contains("libanswer.so"));
+        }
     }
     let provider = std::fs::read(root.join("lib/libanswer.so")).unwrap();
     let elf = Elf::parse(&provider).unwrap();
@@ -488,6 +606,42 @@ fn build_native_entry_fixtures(root: &std::path::Path) {
             "-Wl,-rpath,$ORIGIN/lib",
             "-o",
             "dynamic-exec",
+        ],
+        vec![
+            "-pie",
+            "main.c",
+            "-Llib",
+            "-lanswer",
+            "-Wl,-rpath,$ORIGIN/lib:$ORIGIN/optional",
+            "-o",
+            "optional-runpath-entry",
+        ],
+        vec![
+            "-pie",
+            "main.c",
+            "-Llib",
+            "-lanswer",
+            "-Wl,--disable-new-dtags,-rpath,$ORIGIN/optional:$ORIGIN/lib",
+            "-o",
+            "optional-rpath-entry",
+        ],
+        vec![
+            "-pie",
+            "main.c",
+            "-Llib",
+            "-lanswer",
+            "-Wl,-rpath,$ORIGIN/../__nrz_absent_outside__:$ORIGIN/lib",
+            "-o",
+            "outside-search-entry",
+        ],
+        vec![
+            "-pie",
+            "main.c",
+            "-Llib",
+            "-lanswer",
+            "-Wl,-rpath,$ORIGIN/optional",
+            "-o",
+            "unresolved-search-entry",
         ],
         vec!["-static", "static.c", "-o", "static-entry"],
         vec!["-static-pie", "static.c", "-o", "static-pie-entry"],

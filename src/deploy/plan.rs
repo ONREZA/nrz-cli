@@ -544,12 +544,16 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
                     })
             })
             .map(|layer| {
-                (
+                Ok((
                     build_result.output_dir.join(&layer.directory),
-                    layer.entry.as_deref(),
-                )
+                    layer
+                        .entry
+                        .as_deref()
+                        .map(|entry| super::join_runtime_artifact_paths(&layer.directory, entry))
+                        .transpose()?,
+                ))
             })
-            .collect::<Vec<_>>();
+            .collect::<anyhow::Result<Vec<_>>>()?;
         if entries.is_empty()
             && !build_result.manifest.as_ref().is_some_and(|manifest| {
                 manifest
@@ -560,20 +564,26 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         {
             entries.push((
                 build_result.output_dir.clone(),
-                effective.deploy_entry().or_else(|| {
-                    detection
-                        .metadata
-                        .build_info
-                        .as_ref()
-                        .and_then(|info| info.entry_point.as_deref())
-                }),
+                effective
+                    .deploy_entry()
+                    .or_else(|| {
+                        detection
+                            .metadata
+                            .build_info
+                            .as_ref()
+                            .and_then(|info| info.entry_point.as_deref())
+                    })
+                    .map(str::to_owned),
             ));
         }
-        for (root, entry) in entries {
-            let evidence =
-                super::native_build::validate_output(&root, recipe, entry).map_err(|error| {
-                    output::coded_error("NATIVE_OUTPUT_INVALID", format!("{error:#}"))
-                })?;
+        for (launch_cwd, entry) in entries {
+            let evidence = super::native_build::validate_output(
+                &build_result.output_dir,
+                &launch_cwd,
+                recipe,
+                entry.as_deref(),
+            )
+            .map_err(|error| output::coded_error("NATIVE_OUTPUT_INVALID", format!("{error:#}")))?;
             tracing::debug!(
                 entry = evidence.entry.as_deref(),
                 target = evidence.target,

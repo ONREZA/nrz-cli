@@ -97,6 +97,116 @@ fn native_source_bundle_requires_archived_libraries_owned_by_its_compute_layer()
         build_source_bundle_plan(dir.path(), &manifest, &files).is_err(),
         "foreign layer library ownership was accepted"
     );
+
+    // A verified closure may live beside the launch cwd within the artifact.
+    manifest.layers.remove(0);
+    manifest.layers[0].directory = "bin".into();
+    fs::create_dir(dir.path().join("bin")).unwrap();
+    let compiled = std::process::Command::new("cc")
+        .args([
+            "main.c",
+            "-Llib",
+            "-lfoo",
+            "-Wl,-rpath,$ORIGIN/../lib",
+            "-o",
+            "bin/server",
+        ])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let files = scan_dir(dir.path()).unwrap();
+    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+    let library = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "lib/libfoo.so")
+        .unwrap();
+    assert_eq!(library.layer_name.as_deref(), Some("native"));
+    assert_eq!(library.role, SourceLogicalManifestFileRole::Compute);
+    fs::create_dir(dir.path().join("public")).unwrap();
+    fs::write(dir.path().join("public/index.html"), "PUBLIC_ASSET").unwrap();
+    let files = scan_dir(dir.path()).unwrap();
+    let mut public: crate::build::manifest::Manifest =
+        serde_json::from_value(serde_json::to_value(&manifest).unwrap()).unwrap();
+    public.layers.insert(
+        0,
+        serde_json::from_value(serde_json::json!({
+            "name":"public", "target":"STATIC", "directory":"public"
+        }))
+        .unwrap(),
+    );
+    let public_plan = build_source_bundle_plan(dir.path(), &public, &files).unwrap();
+    for (path, role, owner) in [
+        (
+            "lib/libfoo.so",
+            SourceLogicalManifestFileRole::Compute,
+            "native",
+        ),
+        (
+            "public/index.html",
+            SourceLogicalManifestFileRole::Static,
+            "public",
+        ),
+    ] {
+        let file = public_plan
+            .logical_manifest
+            .files
+            .iter()
+            .find(|file| file.path == path)
+            .unwrap();
+        assert_eq!(file.role, role);
+        assert_eq!(file.layer_name.as_deref(), Some(owner));
+    }
+    let excluded = files
+        .iter()
+        .filter(|file| file.path != "lib/libfoo.so")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        build_source_bundle_plan(dir.path(), &manifest, &excluded).is_err(),
+        "unarchived sibling library was accepted"
+    );
+    for target in ["STATIC", "COMPUTE"] {
+        let mut foreign: crate::build::manifest::Manifest =
+            serde_json::from_value(serde_json::to_value(&manifest).unwrap()).unwrap();
+        foreign.layers.insert(
+            0,
+            serde_json::from_value(serde_json::json!({
+                "name":"foreign", "target":target, "directory":"lib", "entry":"main.js"
+            }))
+            .unwrap(),
+        );
+        assert!(
+            build_source_bundle_plan(dir.path(), &foreign, &files).is_err(),
+            "foreign {target} sibling ownership was stolen"
+        );
+    }
+    fs::create_dir(dir.path().join("worker")).unwrap();
+    fs::copy(
+        dir.path().join("bin/server"),
+        dir.path().join("worker/server"),
+    )
+    .unwrap();
+    let mut sibling = manifest.layers[0].clone();
+    sibling.name = "worker".into();
+    sibling.directory = "worker".into();
+    manifest.layers.push(sibling);
+    let files = scan_dir(dir.path()).unwrap();
+    for reverse in [false, true] {
+        if reverse {
+            manifest.layers.reverse();
+        }
+        assert!(
+            build_source_bundle_plan(dir.path(), &manifest, &files).is_err(),
+            "ambiguous native sibling closure was accepted"
+        );
+    }
 }
 
 #[test]

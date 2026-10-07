@@ -998,6 +998,89 @@ fn source_build_context_separates_static_python_tools_and_serving() {
 }
 
 #[test]
+fn python_console_scripts_own_launch_beside_native_helpers() {
+    for scripts in [
+        "[project.scripts]\nserve='company.web:main'",
+        "[tool.poetry.scripts]\nserve={reference='company.web:main',type='console'}",
+        "[project.scripts]\nserve='company.web:main'\nworker='company.worker:main'",
+    ] {
+        for helper in ["go", "dart"] {
+            for javascript_tooling in [false, true] {
+                let project = tempfile::tempdir().unwrap();
+                std::fs::write(
+                    project.path().join("pyproject.toml"),
+                    format!(
+                        "[project]\nname='company'\nversion='1.0.0'\ndependencies=[]\n{scripts}\n"
+                    ),
+                )
+                .unwrap();
+                if scripts.contains("tool.poetry") {
+                    std::fs::write(project.path().join("poetry.lock"), "").unwrap();
+                }
+                std::fs::create_dir(project.path().join("company")).unwrap();
+                std::fs::write(project.path().join("company/web.py"), "def main(): pass\n")
+                    .unwrap();
+                if helper == "go" {
+                    std::fs::write(project.path().join("go.mod"), "module example.org/helper\n")
+                        .unwrap();
+                    std::fs::create_dir_all(project.path().join("cmd/helper")).unwrap();
+                    std::fs::write(
+                        project.path().join("cmd/helper/main.go"),
+                        "package main\nfunc main() {}\n",
+                    )
+                    .unwrap();
+                } else {
+                    std::fs::write(project.path().join("pubspec.yaml"), "name: helper\n").unwrap();
+                    std::fs::create_dir(project.path().join("bin")).unwrap();
+                    std::fs::write(project.path().join("bin/helper.dart"), "void main() {}\n")
+                        .unwrap();
+                }
+                if javascript_tooling {
+                    std::fs::write(
+                        project.path().join("package.json"),
+                        r#"{"scripts":{"build":"echo tooling"}}"#,
+                    )
+                    .unwrap();
+                }
+                let fs = LocalFs::new(project.path());
+                let mut detection = detect_with_fs(&fs);
+                assert_eq!(
+                    detection.framework, "python",
+                    "{helper}, {scripts}, JS={javascript_tooling}"
+                );
+                let bound =
+                    super::application_runtime::resolve_and_bind_detection(&fs, &mut detection);
+                if scripts.contains("worker=") {
+                    assert!(
+                        bound
+                            .unwrap_err()
+                            .to_string()
+                            .contains("multiple declared Python console scripts")
+                    );
+                } else {
+                    bound.unwrap();
+                    let runtime = detection
+                        .metadata
+                        .source_build_context
+                        .unwrap()
+                        .application_runtime
+                        .unwrap();
+                    assert_eq!(
+                        runtime.family,
+                        nrz_source_bundle::ApplicationRuntimeFamily::Python
+                    );
+                    assert_eq!(
+                        runtime.entry.as_deref(),
+                        Some(super::python_launch::PYTHON_BOOTSTRAP_ENTRY)
+                    );
+                    assert_eq!(runtime.args, ["CALLABLE", "company.web:main"]);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn source_build_context_defaults_follow_compiler_manager_and_python_minors() {
     use nrz_source_bundle::BuildToolchainFamily;
     let project = tempfile::tempdir().unwrap();

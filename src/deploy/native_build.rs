@@ -639,6 +639,7 @@ pub(crate) fn ensure_no_native_hooks(project_dir: &Path) -> anyhow::Result<()> {
 
 pub(crate) fn validate_output(
     output_dir: &Path,
+    launch_cwd: &Path,
     recipe: NativeRecipe,
     entry: Option<&str>,
 ) -> anyhow::Result<NativeOutputEvidence> {
@@ -671,7 +672,7 @@ pub(crate) fn validate_output(
         nrz_runtime_artifact::NativeExecutableRequirements::verify_artifact_closure(
             output_dir,
             &binary_path,
-            output_dir,
+            launch_cwd,
         )?;
     Ok(NativeOutputEvidence {
         entry: Some(entry.into()),

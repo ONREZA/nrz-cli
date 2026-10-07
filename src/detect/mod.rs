@@ -85,13 +85,7 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
         result => result,
     };
     if let Some(result) = python::detect_python(fs)
-        && (native.is_none()
-            || result.framework != "python"
-            || result
-                .metadata
-                .build_info
-                .as_ref()
-                .is_some_and(|build| build.entry_point.is_some()))
+        && (native.is_none() || result.framework != "python" || python::has_application_entry(fs))
     {
         return result;
     }
