@@ -820,6 +820,12 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         &runtime_artifact.scan,
         json,
     );
+    super::validate_retained_python_runtime_dependencies(
+        project_dir,
+        &runtime_artifact,
+        &artifact_files,
+        &build_artifact.detection,
+    )?;
     let files = artifact_files.deployable_entries();
     if authored_install_executed {
         super::python_toolchain::validate_authored_python_dependency_output(

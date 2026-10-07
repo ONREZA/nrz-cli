@@ -75,7 +75,32 @@ pub fn source_layer_launch_for_target(
     }
     let launch = serde_json::from_value(value)?;
     verify_runtime_launch(&launch)?;
+    if let Some(family) = config
+        .and_then(|config| config.get("runtimeFamily"))
+        .and_then(Value::as_str)
+    {
+        verify_runtime_launch_family(launch.profile, family)?;
+    }
     Ok(launch)
+}
+
+pub(crate) fn verify_runtime_launch_family(
+    profile: RuntimeProfile,
+    family: &str,
+) -> Result<(), RuntimeArtifactError> {
+    use nrz_source_bundle::ApplicationRuntimeFamily as Family;
+    let application_family = match profile {
+        RuntimeProfile::Bun => Family::Bun,
+        RuntimeProfile::Node22 | RuntimeProfile::Node24 | RuntimeProfile::Node26 => Family::Node,
+        RuntimeProfile::Cpython312 | RuntimeProfile::Cpython313 | RuntimeProfile::Cpython314 => {
+            Family::Python
+        }
+        RuntimeProfile::Executable => Family::Executable,
+    };
+    if !application_family.matches_legacy_runtime_family(family) {
+        return invariant("runtime profile conflicts with runtimeFamily");
+    }
+    Ok(())
 }
 
 /// Project source configuration after launch declarations have been consumed.

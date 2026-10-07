@@ -35,37 +35,8 @@ pub(super) fn resolve_runtime_artifact_with_manifest_source(
     json: bool,
     manifest_source: crate::artifact::BuildManifestSource,
 ) -> anyhow::Result<RuntimeArtifact> {
-    let python_minor = detection
-        .metadata
-        .source_build_context
-        .as_ref()
-        .and_then(|context| context.build_toolchain.resolved_python_minor())
-        .or_else(|| {
-            detection
-                .metadata
-                .application_runtime()
-                .filter(|runtime| {
-                    runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
-                })
-                .and_then(|runtime| runtime.python_version)
-        })
-        .unwrap_or_default();
-    let python_runtime = detection
-        .metadata
-        .application_runtime()
-        .is_some_and(|runtime| {
-            runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
-        })
-        || manifest.layers.iter().any(|layer| {
-            layer.target == build_manifest::LayerTarget::Compute
-                && layer
-                    .runtime
-                    .as_ref()
-                    .and_then(|runtime| runtime.application_runtime.as_ref())
-                    .is_some_and(|runtime| {
-                        runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
-                    })
-        });
+    let python_minor = selected_python_runtime_minor(detection);
+    let python_runtime = has_python_runtime(&manifest, detection);
     let mut javascript_dependency_closure = false;
     let javascript_dependency_owner =
         declared_javascript_dependency_owner(project_dir, &build_output_dir, &manifest, detection);
@@ -264,6 +235,134 @@ fn validate_compute_entry_ownership(
     Ok(())
 }
 
+fn selected_python_runtime_minor(
+    detection: &crate::detect::types::DetectionResult,
+) -> nrz_source_bundle::PythonMinor {
+    detection
+        .metadata
+        .source_build_context
+        .as_ref()
+        .and_then(|context| context.build_toolchain.resolved_python_minor())
+        .or_else(|| {
+            detection
+                .metadata
+                .application_runtime()
+                .filter(|runtime| {
+                    runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+                })
+                .and_then(|runtime| runtime.python_version)
+        })
+        .unwrap_or_default()
+}
+
+fn has_python_runtime(
+    manifest: &build_manifest::Manifest,
+    detection: &crate::detect::types::DetectionResult,
+) -> bool {
+    use nrz_source_bundle::ApplicationRuntimeFamily;
+    detection
+        .metadata
+        .application_runtime()
+        .is_some_and(|runtime| runtime.family == ApplicationRuntimeFamily::Python)
+        || manifest.layers.iter().any(|layer| {
+            layer.target == build_manifest::LayerTarget::Compute
+                && layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.application_runtime.as_ref())
+                    .is_some_and(|runtime| runtime.family == ApplicationRuntimeFamily::Python)
+        })
+}
+
+fn uses_python_dependency_materialization(
+    detection: &crate::detect::types::DetectionResult,
+) -> bool {
+    use nrz_source_bundle::ApplicationRuntimeFamily as Family;
+    let installed_minor = detection
+        .metadata
+        .source_build_context
+        .as_ref()
+        .and_then(|context| context.build_toolchain.resolved_python_minor());
+    let primary = detection.metadata.application_runtime();
+    let primary_javascript =
+        primary.is_some_and(|runtime| matches!(runtime.family, Family::Node | Family::Bun));
+    installed_minor.is_some() && !primary_javascript
+        || primary.is_some_and(|runtime| runtime.family == Family::Python)
+}
+
+fn requires_authored_python_dependencies(
+    project_dir: &Path,
+    detection: &crate::detect::types::DetectionResult,
+) -> anyhow::Result<bool> {
+    Ok(uses_python_dependency_materialization(detection)
+        && crate::detect::python::requires_dependency_stage(&crate::detect::fs::LocalFs::new(
+            project_dir,
+        ))?)
+}
+
+/// Required dependencies must survive the plan's actual scan and retention.
+/// Directory presence and symlinks without retained targets are not evidence.
+pub(super) fn validate_retained_python_runtime_dependencies(
+    project_dir: &Path,
+    artifact: &RuntimeArtifact,
+    files: &crate::artifact::ArtifactFileCollection,
+    detection: &crate::detect::types::DetectionResult,
+) -> anyhow::Result<()> {
+    if !manifest_has_compute_layer(&artifact.manifest)
+        || !has_python_runtime(&artifact.manifest, detection)
+        || !requires_authored_python_dependencies(project_dir, detection)?
+    {
+        return Ok(());
+    }
+    let minor = selected_python_runtime_minor(detection);
+    let dependency_root = minor.site_packages_root();
+    let retained = artifact
+        .scan
+        .source_layer_match(&artifact.manifest, dependency_root)
+        .is_some_and(|owner| {
+            has_retained_python_dependency_file(dependency_root, &owner.name, files)
+        });
+    if !retained {
+        return Err(output::coded_error(
+            "MISSING_RUNTIME_DEPENDENCIES",
+            format!(
+                "Python PROCESS runtime requires retained dependency files in '{dependency_root}'. Run the install step before deploy, or provide a populated dependency stage before using --skip-install."
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn has_retained_python_dependency_file(
+    dependency_root: &str,
+    owner: &str,
+    files: &crate::artifact::ArtifactFileCollection,
+) -> bool {
+    use crate::artifact::{ArtifactFileKind, ArtifactFileRole};
+    let mut pending = vec![dependency_root.to_string()];
+    let mut visited = HashSet::new();
+    while let Some(root) = pending.pop() {
+        if !visited.insert(root.clone()) {
+            continue;
+        }
+        for file in files.files.iter().filter(|file| {
+            file.role == ArtifactFileRole::Compute
+                && file.layer.as_deref() == Some(owner)
+                && runtime_scan_path_is_covered(&file.path, std::iter::once(root.as_str()))
+        }) {
+            match file.kind {
+                ArtifactFileKind::File => return true,
+                ArtifactFileKind::Symlink => {
+                    if let Some(target) = &file.symlink_resolved_path {
+                        pending.push(target.clone());
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 /// The automatic installer owns one Python minor. A typed serving layer cannot
 /// replace that materialization ABI, including when the primary serves STATIC.
 fn validate_python_layer_dependencies(
@@ -281,14 +380,7 @@ fn validate_python_layer_dependencies(
         .as_ref()
         .and_then(|context| context.build_toolchain.resolved_python_minor());
     let primary = detection.metadata.application_runtime();
-    let primary_javascript =
-        primary.is_some_and(|runtime| matches!(runtime.family, Family::Node | Family::Bun));
-    let python_materialization = installed_minor.is_some() && !primary_javascript
-        || primary.is_some_and(|runtime| runtime.family == Family::Python);
-    let authored_dependencies = python_materialization
-        && crate::detect::python::requires_dependency_stage(&crate::detect::fs::LocalFs::new(
-            project_dir,
-        ))?;
+    let authored_dependencies = requires_authored_python_dependencies(project_dir, detection)?;
     let staged = project_dir
         .join(minor.site_packages_root())
         .read_dir()
@@ -329,7 +421,7 @@ fn validate_python_layer_dependencies(
     }
     let staged_owner = scan.source_layer_match(manifest, minor.site_packages_root());
     let staged_runtime_dependencies = staged
-        && (python_materialization
+        && (uses_python_dependency_materialization(detection)
             || staged_owner
                 .and_then(|layer| layer.runtime.as_ref())
                 .and_then(|runtime| runtime.application_runtime.as_ref())

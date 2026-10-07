@@ -286,6 +286,67 @@ fn python_uv_and_poetry_locks_have_explicit_package_manager_identity() {
 }
 
 #[test]
+fn unpackaged_python_src_imports_do_not_request_project_installation() {
+    use super::python::{
+        PythonDependencyKind, dependency_names, dependency_plan, requires_dependency_stage,
+    };
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join("src/demo")).unwrap();
+    std::fs::write(project.path().join("src/demo/__init__.py"), "VALUE=42\n").unwrap();
+    std::fs::write(
+        project.path().join("src/main.py"),
+        "import demo; print(demo.VALUE)\n",
+    )
+    .unwrap();
+    let input = LocalFs::new(project.path());
+    for (requirements, requires_stage, names) in [
+        ("", false, vec![]),
+        ("# no dependencies\n", false, vec![]),
+        ("packaging==26.3\n", true, vec!["packaging"]),
+        ("./wheels/acme-1.0-py3-none-any.whl\n", true, vec![]),
+    ] {
+        std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
+        let plan = dependency_plan(&input).unwrap().unwrap();
+        assert_eq!(plan.kind, PythonDependencyKind::Requirements);
+        assert!(plan.project_name.is_none());
+        assert!(
+            !plan.install_project,
+            "import layout without packaging metadata requested own-project installation"
+        );
+        assert_eq!(requires_dependency_stage(&input).unwrap(), requires_stage);
+        assert_eq!(
+            dependency_names(&input)
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            names
+        );
+        let mut detection = detect(project.path());
+        super::application_runtime::resolve_and_bind_detection(&input, &mut detection).unwrap();
+        let runtime = detection
+            .metadata
+            .source_build_context
+            .unwrap()
+            .application_runtime
+            .unwrap();
+        assert_eq!(
+            runtime.family,
+            nrz_source_bundle::ApplicationRuntimeFamily::Python
+        );
+        assert_eq!(runtime.entry.as_deref(), Some("src/main.py"));
+    }
+    std::fs::write(
+        project.path().join("pyproject.toml"),
+        "[tool.ruff]\nline-length=88\n",
+    )
+    .unwrap();
+    assert!(
+        !dependency_plan(&input).unwrap().unwrap().install_project,
+        "tool-only pyproject must not supply package metadata"
+    );
+}
+
+#[test]
 fn python_src_package_is_materialized_but_nonpackage_poetry_is_not() {
     use super::python::dependency_plan;
     let project = tempfile::tempdir().unwrap();

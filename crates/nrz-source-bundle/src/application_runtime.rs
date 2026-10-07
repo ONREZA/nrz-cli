@@ -5,6 +5,10 @@ use serde_json::Value;
 
 use crate::SourceLogicalManifest;
 
+#[cfg(test)]
+#[path = "application_runtime_tests.rs"]
+mod tests;
+
 pub const APPLICATION_RUNTIME_CONFIG_KEY: &str = "applicationRuntime";
 
 /// Newly built Bun declarations use the supported major; retained execution
@@ -33,6 +37,17 @@ pub enum ApplicationRuntimeFamily {
     Python,
     #[serde(rename = "EXECUTABLE", alias = "executable")]
     Executable,
+}
+
+impl ApplicationRuntimeFamily {
+    /// Legacy managed-family labels cannot describe a native executable launch.
+    pub fn matches_legacy_runtime_family(self, family: &str) -> bool {
+        match self {
+            Self::Bun | Self::Node => family == "JAVASCRIPT",
+            Self::Python => family == "PYTHON",
+            Self::Executable => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -142,11 +157,9 @@ pub fn layer_application_runtime(
     intent.validate()?;
     if let Some(config) = config {
         if let Some(family) = config.get("runtimeFamily") {
-            let consistent = match family.as_str() {
-                Some("PYTHON") => intent.family == ApplicationRuntimeFamily::Python,
-                Some("JAVASCRIPT") => intent.family != ApplicationRuntimeFamily::Python,
-                _ => false,
-            };
+            let consistent = family
+                .as_str()
+                .is_some_and(|family| intent.family.matches_legacy_runtime_family(family));
             if !consistent {
                 return Err("application runtime conflicts with legacy runtime family".into());
             }

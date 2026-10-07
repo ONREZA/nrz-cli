@@ -119,6 +119,38 @@ fn accepts_python_runtime_family_and_rejects_unknown_families() {
 }
 
 #[test]
+fn runtime_launch_profiles_enforce_legacy_family_consistency() {
+    for (profile, compatible) in [
+        ("BUN", Some("JAVASCRIPT")),
+        ("NODE_22", Some("JAVASCRIPT")),
+        ("NODE_24", Some("JAVASCRIPT")),
+        ("NODE_26", Some("JAVASCRIPT")),
+        ("CPYTHON_3_12", Some("PYTHON")),
+        ("CPYTHON_3_13", Some("PYTHON")),
+        ("CPYTHON_3_14", Some("PYTHON")),
+        ("EXECUTABLE", None),
+    ] {
+        let mut value = graph();
+        value.as_object_mut().unwrap().remove("graphDigest");
+        value["dependencies"] = json!([]);
+        value["runtimeLayers"][0]["dependencyMaterializationIds"] = json!([]);
+        value["runtimeLayers"][0]["launch"] = json!({"profile":profile,"args":[],"cwd":"."});
+        assert!(
+            finalize_runtime_artifact_graph(value.clone(), &["server/server.js".into()]).is_ok()
+        );
+        for family in ["JAVASCRIPT", "PYTHON"] {
+            value["runtimeLayers"][0]["runtimeConfig"]["runtimeFamily"] = json!(family);
+            assert_eq!(
+                finalize_runtime_artifact_graph(value.clone(), &["server/server.js".into()])
+                    .is_ok(),
+                compatible == Some(family),
+                "{profile} / {family}"
+            );
+        }
+    }
+}
+
+#[test]
 fn rejects_cross_field_invariants_missing_from_json_schema() {
     let mut counters = materialization_manifest();
     counters["nativeObjectCount"] = json!(11);

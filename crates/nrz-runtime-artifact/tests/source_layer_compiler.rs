@@ -18,6 +18,34 @@ fn manifest(config: Value) -> SourceLogicalManifest {
 }
 
 #[test]
+fn native_source_labels_cannot_compile_to_a_contradictory_runtime_graph() {
+    for typed in [true, false] {
+        for family in ["JAVASCRIPT", "PYTHON"] {
+            let mut config = json!({"isBinaryEntry":true,"runtimeFamily":family});
+            let target = typed.then_some("native-linux-x86_64-glibc");
+            if typed {
+                config["applicationRuntime"] = json!({"family":"EXECUTABLE","args":[]});
+                config["buildRuntimeVersion"] = json!(target.unwrap());
+            }
+            let source = manifest(config);
+            let compiled = compile_source_runtime_layer_for_target(&source.layers[0], &[], target);
+            let graph = finalize_source_bundle_runtime_graph_for_target(
+                &"1".repeat(64),
+                &"2".repeat(64),
+                1,
+                &source,
+                &[],
+                target,
+            );
+            assert!(
+                compiled.is_err() && graph.is_err(),
+                "typed={typed}, family={family}: contradictory native source accepted: compiled={compiled:?}, graph={graph:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn producer_and_consumer_share_complete_layer_semantics() {
     for (config, target) in [
         (json!({}), None),

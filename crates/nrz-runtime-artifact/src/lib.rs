@@ -309,23 +309,7 @@ pub fn verify_runtime_artifact_graph(
         if let Some(launch) = &layer.launch {
             verify_runtime_launch(launch)?;
             if let Some(family) = &layer.runtime_config.runtime_family {
-                let family = family.to_string();
-                if (matches!(
-                    launch.profile,
-                    RuntimeProfile::Bun
-                        | RuntimeProfile::Node22
-                        | RuntimeProfile::Node24
-                        | RuntimeProfile::Node26
-                ) && family != "JAVASCRIPT")
-                    || (matches!(
-                        launch.profile,
-                        RuntimeProfile::Cpython312
-                            | RuntimeProfile::Cpython313
-                            | RuntimeProfile::Cpython314
-                    ) && family != "PYTHON")
-                {
-                    return invariant("runtime profile conflicts with runtimeFamily");
-                }
+                launch::verify_runtime_launch_family(launch.profile, &family.to_string())?;
             }
         }
         if layer.dependency_materialization_ids.len() > MAX_LAYER_DEPENDENCIES {

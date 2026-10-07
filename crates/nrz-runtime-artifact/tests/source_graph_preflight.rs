@@ -214,9 +214,11 @@ fn preflight_preserves_typed_serving_targets_for_python_native_and_mixed_layers(
         source.layers[0].runtime_config = Some(json!({
             "applicationRuntime":{"family":if python { "PYTHON" } else { "EXECUTABLE" },"args":["literal argument"]},
             "buildRuntimeVersion":target,
-            "runtimeFamily":if python { "PYTHON" } else { "JAVASCRIPT" },
             "isBinaryEntry":!python
         }));
+        if python {
+            source.layers[0].runtime_config.as_mut().unwrap()["runtimeFamily"] = json!("PYTHON");
+        }
         assert!(
             nrz_runtime_artifact::source_layer_launch_for_target(
                 source.layers[0].runtime_config.as_ref(),

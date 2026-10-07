@@ -120,9 +120,11 @@ pub fn dependency_plan(fs: &dyn Fs) -> anyhow::Result<Option<PythonDependencyPla
             || pyproject
                 .as_ref()
                 .is_some_and(|value| value.get("build-system").is_some())
-            || fs.list_dir("src").into_iter().any(|path| {
-                fs.is_dir(&format!("src/{path}")) && fs.exists(&format!("src/{path}/__init__.py"))
-            }));
+            || project_name.is_some()
+                && fs.list_dir("src").into_iter().any(|path| {
+                    fs.is_dir(&format!("src/{path}"))
+                        && fs.exists(&format!("src/{path}/__init__.py"))
+                }));
     Ok(Some(PythonDependencyPlan {
         kind,
         manifest,
