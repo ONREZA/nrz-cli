@@ -175,6 +175,8 @@ pub(crate) struct SourceLogicalManifestRoute {
     pub(crate) methods: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) fallthrough_when: Option<Vec<crate::build::manifest::RouteFallthroughCondition>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) headers: Option<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -233,7 +235,39 @@ pub(crate) fn build_source_bundle_plan_with_scan(
     dependency_packaging: RuntimeDependencyPackaging,
     readiness: Option<RuntimeReadinessContract<'_>>,
 ) -> anyhow::Result<SourceBundlePlan> {
-    let entries = source_entries(output_dir, files, scan)?;
+    let mut entries = source_entries(output_dir, files, scan)?;
+    for layer in manifest
+        .layers
+        .iter()
+        .filter(|layer| layer.target == LayerTarget::Compute)
+    {
+        let native = layer
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.application_runtime.as_ref())
+            .is_some_and(|intent| {
+                intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Executable
+            });
+        if !native {
+            continue;
+        }
+        let entry = layer
+            .entry
+            .as_deref()
+            .context("native layer requires an entrypoint")?;
+        let path = join_entrypoint(&normalize_layer_root(&layer.directory)?, entry)?;
+        let file = entries
+            .iter_mut()
+            .find(|file| file.path == path)
+            .context("native entry is absent from the deployment artifact")?;
+        let SourceBundleEntryKind::File { full_path } = &file.kind else {
+            bail!("native entry must be a regular artifact file");
+        };
+        nrz_runtime_artifact::verify_native_executable(&std::fs::read(full_path)?)?;
+        // Artifact execution permission belongs to the declared native entry,
+        // including publication from hosts without POSIX executable bits.
+        file.executable = true;
+    }
     let logical_manifest =
         build_logical_manifest(manifest, &entries, scan, dependency_packaging, readiness)?;
     ensure_manifest_covers_entries(&logical_manifest, &entries)?;
@@ -625,6 +659,12 @@ fn build_logical_manifest(
             priority: route.priority,
             methods: route.methods.clone(),
             fallthrough_when: route.fallthrough_when.clone(),
+            headers: route.headers.as_ref().map(|headers| {
+                headers
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect()
+            }),
         })
         .collect();
 
@@ -774,6 +814,12 @@ fn runtime_config_value(
         }
         if let Some(intent) = &runtime.application_runtime {
             object.insert("applicationRuntime".into(), serde_json::json!(intent));
+            if intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Executable {
+                object.insert("isBinaryEntry".into(), serde_json::json!(true));
+            }
+            if intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Python {
+                object.insert("runtimeFamily".into(), serde_json::json!("PYTHON"));
+            }
         }
         if let Some(value) = runtime.timeout_ms {
             object.insert("timeoutMs".to_string(), serde_json::json!(value));
@@ -785,7 +831,14 @@ fn runtime_config_value(
             object.insert("maxConcurrency".to_string(), serde_json::json!(value));
         }
     }
-    if layer.target == LayerTarget::Compute && scan.is_python_runtime_root() {
+    if layer.target == LayerTarget::Compute
+        && scan.is_python_runtime_root()
+        && layer
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.application_runtime.as_ref())
+            .is_none()
+    {
         object.insert("runtimeFamily".to_string(), serde_json::json!("PYTHON"));
     }
     if layer.target == LayerTarget::Compute

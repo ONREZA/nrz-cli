@@ -1,0 +1,22 @@
+{
+  "schema": "onreza.runtime-toolchains.v1",
+  "bun": "1.4.2",
+  "node": {
+    "supported": [22, 24, 26]
+  },
+  "python": {
+    "supported": ["3.12", "3.13", "3.14"],
+    "default": "3.14",
+    "versions": {
+      "3.12": "3.12.15",
+      "3.13": "3.13.16",
+      "3.14": "3.14.8"
+    }
+  },
+  "installers": {
+    "uv": "0.12.23",
+    "poetry": "2.5.1",
+    "poetryExport": "1.10.1",
+    "packaging": "26.3"
+  }
+}

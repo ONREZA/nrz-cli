@@ -4,10 +4,12 @@
 pub mod application_runtime;
 pub mod fs;
 pub mod monorepo;
+pub mod native;
 pub mod package_json;
 pub mod package_manager;
 pub mod presets;
 pub mod python;
+pub(crate) mod python_launch;
 pub mod ssr;
 pub mod static_html;
 pub mod types;
@@ -19,6 +21,8 @@ mod fs_tests;
 mod mod_tests;
 #[cfg(test)]
 mod monorepo_tests;
+#[cfg(test)]
+mod native_tests;
 #[cfg(test)]
 mod package_json_tests;
 #[cfg(test)]
@@ -65,6 +69,9 @@ pub fn detect_with_framework_override(
 ///
 /// Used by `nrz detect --stdin` with a `VirtualFs` manifest.
 pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
+    if let Some(result) = native::detect_native(fs) {
+        return result;
+    }
     if let Some(result) = python::detect_python(fs) {
         return result;
     }
@@ -190,8 +197,11 @@ fn detect_with_fs_and_framework_override(
         return detected;
     }
 
-    if slug == "python" {
-        return python::detect_configured_python(fs);
+    if python::is_python_framework(&slug) {
+        return python::detect_configured_python_framework(fs, &slug);
+    }
+    if let Some(result) = native::detect_configured_native(fs, &slug) {
+        return result;
     }
 
     let Some(preset) = preset_for_slug(&slug) else {

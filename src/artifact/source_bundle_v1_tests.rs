@@ -39,6 +39,7 @@ fn source_bundle_retains_prebuild_launcher_args_and_version_witness() {
     fs::write(dir.path().join("server.js"), "console.log('ok')").unwrap();
     let mut manifest = compute_manifest();
     let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
+        python_version: None,
         family: nrz_source_bundle::ApplicationRuntimeFamily::Bun,
         entry: Some("server.js".into()),
         args: vec!["--port".into(), "8080".into()],
@@ -208,7 +209,7 @@ async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
         dir.path(),
         &manifest,
         &files,
-        &RuntimeArtifactScan::PythonRuntimeRoot,
+        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
         RuntimeDependencyPackaging::TrustedMaterialization,
         None,
     )
@@ -270,7 +271,7 @@ async fn python_bundle_without_dependencies_freezes_provided_build_manifest_targ
         dir.path(),
         &manifest,
         &scan_dir(dir.path()).unwrap(),
-        &RuntimeArtifactScan::PythonRuntimeRoot,
+        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
         RuntimeDependencyPackaging::TrustedMaterialization,
         None,
     )
@@ -303,6 +304,119 @@ async fn python_bundle_without_dependencies_freezes_provided_build_manifest_targ
         serde_json::to_value(graph.wire()).unwrap()["runtimeLayers"][0]["launch"]["profile"],
         "CPYTHON_3_14"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn mixed_python_node_and_native_bundle_preserves_per_layer_runtime_authority() {
+    use nrz_source_bundle::{
+        ApplicationRuntimeDeclaration, ApplicationRuntimeFamily as Family, PythonMinor,
+    };
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("main.py"), b"print('python')").unwrap();
+    fs::write(dir.path().join("server.js"), b"console.log('node')").unwrap();
+    fs::copy("/bin/true", dir.path().join("native-server")).unwrap();
+    for primary_python in [true, false] {
+        let mut manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
+            "version":1,"routes":[],"layers":[
+                {"name":"python","target":"COMPUTE","directory":".","entry":"main.py",
+                 "runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}},
+                {"name":"node","target":"COMPUTE","directory":".","entry":"server.js",
+                 "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
+                {"name":"native","target":"COMPUTE","directory":".","entry":"native-server",
+                 "runtime":{"applicationRuntime":{"family":"EXECUTABLE","args":[]},"buildRuntimeVersion":"native-linux-x86_64-glibc"}}
+            ]
+        })).unwrap();
+        let (family, entry, target, scan) = if primary_python {
+            (
+                Family::Python,
+                "main.py",
+                "python-3.12",
+                RuntimeArtifactScan::PythonRuntimeRoot(PythonMinor::Python312),
+            )
+        } else {
+            (
+                Family::Node,
+                "server.js",
+                "node-24",
+                RuntimeArtifactScan::NodeRuntimeRoot,
+            )
+        };
+        let declaration = ApplicationRuntimeDeclaration {
+            family,
+            entry: Some(entry.into()),
+            args: vec![],
+            python_version: primary_python.then_some(PythonMinor::Python312),
+        };
+        crate::deploy::apply_application_runtime_manifest(
+            &mut manifest,
+            Some(&declaration),
+            Some(target),
+            "other",
+        )
+        .unwrap();
+        let plan = build_source_bundle_plan_with_scan(
+            dir.path(),
+            &manifest,
+            &scan_dir(dir.path()).unwrap(),
+            &scan,
+            RuntimeDependencyPackaging::TrustedMaterialization,
+            None,
+        )
+        .unwrap();
+        let logical: nrz_source_bundle::SourceLogicalManifest =
+            serde_json::from_value(serde_json::to_value(&plan.logical_manifest).unwrap()).unwrap();
+        let owner = uuid::Uuid::nil().to_string();
+        let input = nrz_source_bundle::SourceBundleVerificationInput {
+            owner_workspace_id: owner.clone(),
+            source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
+                &owner,
+                &plan.logical_manifest_sha256,
+                &plan.source_sha256,
+                None,
+            ),
+            source_sha256: plan.source_sha256.clone(),
+            logical_manifest_sha256: plan.logical_manifest_sha256.clone(),
+            budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical)
+                .unwrap(),
+        };
+        let verified = nrz_source_bundle::verify_source_bundle_bytes(
+            input,
+            fs::read(plan.source_path()).unwrap().into(),
+        )
+        .await
+        .unwrap();
+        let logical: nrz_source_bundle::SourceLogicalManifest =
+            serde_json::from_value(verified.logical_manifest).unwrap();
+        let targets = std::collections::HashMap::from([
+            ("python".into(), "python-3.12".into()),
+            ("node".into(), "node-24".into()),
+            ("native".into(), "native-linux-x86_64-glibc".into()),
+        ]);
+        let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph_for_layer_targets(
+            &plan.logical_manifest_sha256,
+            &plan.source_sha256,
+            plan.source_size_bytes,
+            &logical,
+            &[],
+            &targets,
+        )
+        .unwrap();
+        nrz_runtime_artifact::verify_source_runtime_graph_dependencies(&logical, &graph).unwrap();
+        for (name, profile) in [
+            ("python", "CPYTHON_3_12"),
+            ("node", "NODE_24"),
+            ("native", "EXECUTABLE"),
+        ] {
+            let layer = graph
+                .wire()
+                .runtime_layers
+                .iter()
+                .find(|layer| layer.layer_name.as_str() == name)
+                .unwrap();
+            assert_eq!(layer.launch.as_ref().unwrap().profile.to_string(), profile);
+        }
+    }
 }
 
 #[tokio::test]
@@ -547,6 +661,10 @@ async fn managed_build_declarations_preserve_frozen_targets_and_static_publicati
             Some(nrz_source_bundle::ApplicationRuntimeFamily::Node) => selected == "node-24",
             Some(nrz_source_bundle::ApplicationRuntimeFamily::Bun) => selected == "bun-1.4.2",
             None => matches!(selected.as_str(), "bun-1.4.2" | "node-24"),
+            Some(
+                nrz_source_bundle::ApplicationRuntimeFamily::Python
+                | nrz_source_bundle::ApplicationRuntimeFamily::Executable,
+            ) => false,
         };
         if managed && !permitted {
             assert!(result.is_err());
@@ -964,6 +1082,7 @@ fn canonical_logical_manifest_json_matches_source_bundle_v1_golden() {
             priority: Some(10),
             methods: Some(vec!["GET".into(), "POST".into()]),
             fallthrough_when: None,
+            headers: None,
         }],
         entrypoints: vec!["api/handler.js".into()],
     };

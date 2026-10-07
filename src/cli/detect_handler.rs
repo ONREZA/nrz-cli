@@ -146,6 +146,16 @@ fn print_human(result: &detect::types::DetectionResult) {
         format!("{:?}", result.metadata.runtime.runtime_type).to_lowercase(),
     );
 
+    if result.metadata.runtime.runtime_type == crate::detect::types::RuntimeType::Python
+        && let Some(version) = &result.metadata.runtime.version
+    {
+        eprintln!(
+            "  {} {}",
+            console::style("Python version:").bold(),
+            output::terminal_line(version)
+        );
+    }
+
     if let Some(ref pm) = result.metadata.package_manager {
         let ver = pm
             .version

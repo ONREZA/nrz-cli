@@ -1,0 +1,6 @@
+name: onreza_native_fixture
+environment:
+  sdk: '>=3.13.5 <3.14.0'
+dependencies:
+  code_assets: 1.2.1
+  hooks: 2.0.2

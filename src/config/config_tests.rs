@@ -1025,3 +1025,64 @@ fn health_check_path_true_is_invalid() {
     let result = load(dir.path());
     assert!(result.is_err());
 }
+
+#[test]
+fn a_child_runtime_override_does_not_inherit_parent_python_fields() {
+    use nrz_source_bundle::{ApplicationRuntimeFamily as Family, PythonMinor};
+    let fs = crate::detect::fs::VirtualFs::from_json(
+        r#"{"tree":["server.js","server.dart"],"files":{}}"#,
+    )
+    .unwrap();
+    for module_launch in [true, false] {
+        let mut parent = ProjectConfig::default();
+        parent.deploy.runtime = Some(Family::Python);
+        parent.deploy.python_version = Some(PythonMinor::Python312);
+        if module_launch {
+            parent.deploy.module = Some("main".into());
+        } else {
+            parent.deploy.application = Some("main:app".into());
+            parent.deploy.server = Some("asgi".into());
+        }
+        for (family, entry) in [
+            (Family::Node, "server.js"),
+            (Family::Executable, "server.dart"),
+        ] {
+            let mut child = ProjectConfig::default();
+            child.deploy.runtime = Some(family);
+            child.deploy.entry = Some(entry.into());
+            child.deploy.args = Some(vec![]);
+            let merged = parent.merge_child(child.clone());
+            let declaration =
+                crate::detect::application_runtime::resolve_application_runtime_with_project(
+                    &fs,
+                    "other",
+                    &merged.deploy,
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(declaration.family, family);
+            for field in ["python_version", "module", "application", "server"] {
+                let mut conflicting = child.clone();
+                match field {
+                    "python_version" => {
+                        conflicting.deploy.python_version = Some(PythonMinor::Python313)
+                    }
+                    "module" => conflicting.deploy.module = Some("main".into()),
+                    "application" => conflicting.deploy.application = Some("main:app".into()),
+                    "server" => conflicting.deploy.server = Some("asgi".into()),
+                    _ => unreachable!(),
+                }
+                let explicit_conflict = parent.merge_child(conflicting);
+                assert!(
+                    crate::detect::application_runtime::resolve_application_runtime_with_project(
+                        &fs,
+                        "other",
+                        &explicit_conflict.deploy,
+                    )
+                    .is_err(),
+                    "{family:?} must reject explicit child {field}",
+                );
+            }
+        }
+    }
+}

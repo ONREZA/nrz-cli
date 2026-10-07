@@ -1,0 +1,10 @@
+{
+  "schema": "onreza.native-toolchains.v1",
+  "go": "1.27.1",
+  "dart": "3.13.5",
+  "flutter": "3.47.6",
+  "hugo": "0.167.0",
+  "flutterCommit": "5fc346839b5d0eef006ed8404392afb4dfae428d",
+  "flutterEngine": "692136cb6582dbfc5af3fb33c2515a069f2f66d0",
+  "flutterDart": "3.13.5"
+}

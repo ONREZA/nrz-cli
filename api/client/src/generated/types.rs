@@ -15539,6 +15539,14 @@ pub enum ProjectRequestBodyPackageManager {
     Bun,
     #[serde(rename = "PIP")]
     Pip,
+    #[serde(rename = "UV")]
+    Uv,
+    #[serde(rename = "POETRY")]
+    Poetry,
+    #[serde(rename = "PUB")]
+    Pub,
+    #[serde(rename = "GO")]
+    Go,
 }
 impl core::fmt::Display for ProjectRequestBodyPackageManager {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -15548,6 +15556,10 @@ impl core::fmt::Display for ProjectRequestBodyPackageManager {
             Self::Pnpm => write!(f, "PNPM"),
             Self::Bun => write!(f, "BUN"),
             Self::Pip => write!(f, "PIP"),
+            Self::Uv => write!(f, "UV"),
+            Self::Poetry => write!(f, "POETRY"),
+            Self::Pub => write!(f, "PUB"),
+            Self::Go => write!(f, "GO"),
         }
     }
 }
@@ -16157,6 +16169,12 @@ pub struct DomainResponseItem {
     pub dns_status: DomainResponseItemDnsStatus,
     #[serde(rename = "tlsStatus")]
     pub tls_status: DomainResponseItemTlsStatus,
+    #[serde(rename = "dnsConnected")]
+    pub dns_connected: bool,
+    #[serde(rename = "certificateAvailable")]
+    pub certificate_available: bool,
+    #[serde(rename = "httpsServingReady")]
+    pub https_serving_ready: bool,
     #[serde(deserialize_with = "Option::deserialize", rename = "dnsValidatedAt")]
     #[serialize_always]
     pub dns_validated_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -17187,9 +17205,9 @@ pub struct DomainResponse2Item {
     #[serde(rename = "projectCount")]
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub project_count: i64,
-    #[serde(rename = "liveHostnameCount")]
+    #[serde(rename = "dnsConnectedHostnameCount")]
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
-    pub live_hostname_count: i64,
+    pub dns_connected_hostname_count: i64,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -17394,6 +17412,12 @@ pub struct Domain200ResponseHostname {
     pub dns_status: DomainResponseItemDnsStatus,
     #[serde(rename = "tlsStatus")]
     pub tls_status: DomainResponseItemTlsStatus,
+    #[serde(rename = "dnsConnected")]
+    pub dns_connected: bool,
+    #[serde(rename = "certificateAvailable")]
+    pub certificate_available: bool,
+    #[serde(rename = "httpsServingReady")]
+    pub https_serving_ready: bool,
     #[serde(deserialize_with = "Option::deserialize", rename = "dnsError")]
     #[serialize_always]
     pub dns_error: Option<String>,
@@ -19706,6 +19730,10 @@ pub enum Status200ResponseRuntimeArtifactGraphRuntimeLayerLaunchProfile {
     Node24,
     #[serde(rename = "NODE_26")]
     Node26,
+    #[serde(rename = "CPYTHON_3_12")]
+    Cpython312,
+    #[serde(rename = "CPYTHON_3_13")]
+    Cpython313,
     #[serde(rename = "CPYTHON_3_14")]
     Cpython314,
     #[serde(rename = "EXECUTABLE")]
@@ -19718,6 +19746,8 @@ impl core::fmt::Display for Status200ResponseRuntimeArtifactGraphRuntimeLayerLau
             Self::Node22 => write!(f, "NODE_22"),
             Self::Node24 => write!(f, "NODE_24"),
             Self::Node26 => write!(f, "NODE_26"),
+            Self::Cpython312 => write!(f, "CPYTHON_3_12"),
+            Self::Cpython313 => write!(f, "CPYTHON_3_13"),
             Self::Cpython314 => write!(f, "CPYTHON_3_14"),
             Self::Executable => write!(f, "EXECUTABLE"),
         }
@@ -21590,12 +21620,37 @@ pub enum RunnerContext200ResponseSettingsApplicationRuntimeFamily {
     Bun,
     #[serde(rename = "NODE")]
     Node,
+    #[serde(rename = "PYTHON")]
+    Python,
+    #[serde(rename = "EXECUTABLE")]
+    Executable,
 }
 impl core::fmt::Display for RunnerContext200ResponseSettingsApplicationRuntimeFamily {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Bun => write!(f, "BUN"),
             Self::Node => write!(f, "NODE"),
+            Self::Python => write!(f, "PYTHON"),
+            Self::Executable => write!(f, "EXECUTABLE"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum RunnerContext200ResponseSettingsApplicationRuntimePythonVersion {
+    #[serde(rename = "3.12")]
+    #[default]
+    T312,
+    #[serde(rename = "3.13")]
+    T313,
+    #[serde(rename = "3.14")]
+    T314,
+}
+impl core::fmt::Display for RunnerContext200ResponseSettingsApplicationRuntimePythonVersion {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::T312 => write!(f, "3.12"),
+            Self::T313 => write!(f, "3.13"),
+            Self::T314 => write!(f, "3.14"),
         }
     }
 }
@@ -21606,13 +21661,15 @@ impl core::fmt::Display for RunnerContext200ResponseSettingsApplicationRuntimeFa
 #[serde(deny_unknown_fields)]
 pub struct RunnerContext200ResponseSettingsApplicationRuntime {
     pub family: RunnerContext200ResponseSettingsApplicationRuntimeFamily,
+    #[validate(length(max = 64u64))]
+    pub args: Vec<String>,
+    #[serde(rename = "pythonVersion")]
+    pub python_version: Option<RunnerContext200ResponseSettingsApplicationRuntimePythonVersion>,
     #[validate(
         length(min = 1u64, max = 4_096u64),
         regex(path = "REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_APPLICATION_RUNTIME_ENTRY")
     )]
     pub entry: Option<String>,
-    #[validate(length(max = 64u64))]
-    pub args: Vec<String>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -21902,11 +21959,26 @@ impl LayerKindObject {
         serde::Serialize::serialize(value, serializer)
     }
 }
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct LayerKindObject2RuntimeApplicationRuntime {
+    pub family: RunnerContext200ResponseSettingsApplicationRuntimeFamily,
+    #[validate(length(max = 64u64))]
+    pub args: Vec<String>,
+}
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct LayerKindObject2Runtime {
+    #[serde(rename = "applicationRuntime")]
+    #[validate(nested)]
+    pub application_runtime: Option<LayerKindObject2RuntimeApplicationRuntime>,
+    #[serde(rename = "buildRuntimeVersion")]
+    #[validate(length(min = 1u64, max = 128u64))]
+    pub build_runtime_version: Option<String>,
     #[serde(rename = "timeoutMs")]
     #[validate(
         range(

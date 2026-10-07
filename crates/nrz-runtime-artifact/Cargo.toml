@@ -7,6 +7,7 @@ description = "Shared runtime artifact graph identity used by nrz CLI binary bui
 
 [dependencies]
 hex = "0.4"
+goblin = "0.10.7"
 nrz-contract = { path = "../nrz-contract" }
 nrz-source-bundle = { path = "../nrz-source-bundle" }
 serde_json = "1"

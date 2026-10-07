@@ -563,6 +563,34 @@ pub(crate) fn apply_application_runtime_manifest(
             .as_ref()
             .and_then(|runtime| runtime.application_runtime.as_ref())
         {
+            if declaration.is_some_and(|declaration| {
+                (declaration.family != intent.family
+                    || declaration.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+                        && layer
+                            .runtime
+                            .as_ref()
+                            .and_then(|runtime| runtime.build_runtime_version.as_deref())
+                            .zip(build_runtime_version)
+                            .is_some_and(|(sibling, primary)| sibling != primary))
+                    && !(layer.directory == "."
+                        && declaration.entry.is_some()
+                        && declaration.entry.as_deref() == layer.entry.as_deref())
+            }) {
+                let target = layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.build_runtime_version.as_deref())
+                    .ok_or_else(|| {
+                        output::coded_error(
+                            "APPLICATION_RUNTIME_INVALID",
+                            "a sibling runtime requires its own frozen build target",
+                        )
+                    })?;
+                intent
+                    .validate_target(Some(target))
+                    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", error))?;
+                continue;
+            }
             if declaration.is_some_and(|declaration| declaration.intent() != *intent) {
                 return Err(output::coded_error(
                     "APPLICATION_RUNTIME_INVALID",
@@ -693,6 +721,8 @@ pub(super) fn looks_like_shell_command_entry(entry: &str) -> bool {
                 | "npx"
                 | "python"
                 | "python3"
+                | "python3.12"
+                | "python3.13"
                 | "python3.14"
         )
 }

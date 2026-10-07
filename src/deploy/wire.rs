@@ -40,21 +40,15 @@ impl TryFrom<nrz_api::Admit200Response> for AdmissionResponse {
 fn runner_settings(
     value: nrz_api::RunnerContext200ResponseSettings,
 ) -> anyhow::Result<ProjectBuildSettings> {
-    let application_runtime =
-        value
-            .application_runtime
-            .map(|intent| nrz_source_bundle::ApplicationRuntimeDeclaration {
-                family: match intent.family {
-                    nrz_api::RunnerContext200ResponseSettingsApplicationRuntimeFamily::Bun => {
-                        nrz_source_bundle::ApplicationRuntimeFamily::Bun
-                    }
-                    nrz_api::RunnerContext200ResponseSettingsApplicationRuntimeFamily::Node => {
-                        nrz_source_bundle::ApplicationRuntimeFamily::Node
-                    }
-                },
-                entry: intent.entry,
-                args: intent.args,
-            });
+    let application_runtime = value
+        .application_runtime
+        .map(|intent| {
+            let declaration: nrz_source_bundle::ApplicationRuntimeDeclaration =
+                serde_json::from_value(serde_json::to_value(intent)?)?;
+            declaration.validate().map_err(anyhow::Error::msg)?;
+            Ok::<_, anyhow::Error>(declaration)
+        })
+        .transpose()?;
     Ok(ProjectBuildSettings {
         node_version: Some(value.node_version.to_string()),
         application_runtime: Some(application_runtime),

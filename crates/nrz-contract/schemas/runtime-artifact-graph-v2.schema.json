@@ -228,7 +228,16 @@
                 "type": "object",
                 "properties": {
                   "profile": {
-                    "enum": ["BUN", "NODE_22", "NODE_24", "NODE_26", "CPYTHON_3_14", "EXECUTABLE"],
+                    "enum": [
+                      "BUN",
+                      "NODE_22",
+                      "NODE_24",
+                      "NODE_26",
+                      "CPYTHON_3_12",
+                      "CPYTHON_3_13",
+                      "CPYTHON_3_14",
+                      "EXECUTABLE"
+                    ],
                     "type": "string"
                   },
                   "args": {

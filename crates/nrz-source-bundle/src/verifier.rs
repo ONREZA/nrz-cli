@@ -220,6 +220,14 @@ fn prepare_verification(
             format!("Logical manifest runtime readiness is invalid: {message}"),
         )
     })?;
+    crate::source_application_runtime(&manifest).map_err(|message| {
+        failure(
+            "SOURCE_APPLICATION_RUNTIME_INVALID",
+            format!("Logical manifest application runtime is invalid: {message}"),
+        )
+    })?;
+    crate::validate_source_route_headers(&manifest)
+        .map_err(|message| failure("SOURCE_ROUTE_HEADERS_INVALID", message))?;
     let computed_source_artifact_id = compute_source_artifact_id(
         &input.owner_workspace_id,
         &input.logical_manifest_sha256,

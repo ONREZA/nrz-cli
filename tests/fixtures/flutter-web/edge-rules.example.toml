@@ -1,0 +1,14 @@
+schema = "EDGE_RULE_SET_V1"
+source = { origin = "build" }
+
+[[rule]]
+id = "flutter-revalidate-assets"
+when.path = { prefix = "/" }
+when.methods = ["GET", "HEAD"]
+action.set_headers = { headers = { "cache-control" = "no-cache" } }
+
+[[rule]]
+id = "flutter-path-routing"
+when.path = { prefix = "/" }
+when.methods = ["GET", "HEAD"]
+action.rewrite = { target = "/index.html", external = false, if_no_file = true }

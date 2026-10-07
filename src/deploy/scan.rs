@@ -30,15 +30,84 @@ pub(super) fn scan_runtime_artifact(
     scan: &RuntimeArtifactScan,
 ) -> anyhow::Result<Vec<FileEntry>> {
     match scan {
-        RuntimeArtifactScan::All
-        | RuntimeArtifactScan::NodeRuntimeRoot
-        | RuntimeArtifactScan::PythonRuntimeRoot => scan_dir(root_dir),
+        RuntimeArtifactScan::All | RuntimeArtifactScan::NodeRuntimeRoot => scan_dir(root_dir),
+        RuntimeArtifactScan::PythonRuntimeRoot(minor) => scan_python_root(root_dir, *minor),
         RuntimeArtifactScan::Relocated { base, .. } => scan_runtime_artifact(root_dir, base),
         RuntimeArtifactScan::Selected {
             roots,
             symlink_roots,
         } => scan_selected_runtime_roots(root_dir, roots, symlink_roots),
     }
+}
+
+fn scan_python_root(
+    root: &Path,
+    minor: nrz_source_bundle::PythonMinor,
+) -> anyhow::Result<Vec<FileEntry>> {
+    fn visit(
+        base: &Path,
+        current: &Path,
+        canonical: &Path,
+        files: &mut Vec<FileEntry>,
+        project_package: bool,
+        minor: nrz_source_bundle::PythonMinor,
+    ) -> anyhow::Result<()> {
+        for entry in std::fs::read_dir(current)? {
+            let entry = entry?;
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let ft = entry.file_type()?;
+            let relative = path.strip_prefix(base)?;
+            let staged_dependency = relative.starts_with(minor.site_packages_root());
+            // A previous build may leave another minor's incompatible wheel tree.
+            if relative.parent() == Some(Path::new(".onreza/python"))
+                && nrz_source_bundle::PythonMinor::from_version(&name)
+                    .is_some_and(|other| other != minor)
+            {
+                continue;
+            }
+            let backend_output = project_package
+                && (relative == Path::new("build/lib")
+                    || relative == Path::new("build/bdist")
+                    || relative.parent() == Some(Path::new("build")) && name.starts_with("bdist."));
+            if (!staged_dependency && name.ends_with(".egg-info"))
+                || backend_output
+                || matches!(
+                    name.as_ref(),
+                    ".venv"
+                        | "venv"
+                        | "__pycache__"
+                        | ".pytest_cache"
+                        | ".mypy_cache"
+                        | ".ruff_cache"
+                        | ".tox"
+                        | ".nox"
+                        | "node_modules"
+                )
+                || name == ".env"
+                || name.starts_with(".env.")
+                || (ft.is_dir() && path.join("pyvenv.cfg").is_file())
+                || is_vcs_internal_path(base, &path)
+            {
+                continue;
+            }
+            if ft.is_dir() {
+                visit(base, &path, canonical, files, project_package, minor)?;
+            } else {
+                scan_runtime_path_with_type(base, &path, ft, canonical, files, &mut Vec::new())?;
+            }
+        }
+        Ok(())
+    }
+    let canonical = std::fs::canonicalize(root)?;
+    let mut files = Vec::new();
+    let project_package =
+        crate::detect::python::dependency_plan(&crate::detect::fs::LocalFs::new(root))?
+            .is_some_and(|plan| plan.install_project);
+    visit(root, root, &canonical, &mut files, project_package, minor)?;
+    files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    Ok(files)
 }
 
 pub(super) fn scan_selected_runtime_roots(

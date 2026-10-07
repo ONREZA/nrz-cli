@@ -14,10 +14,14 @@ struct RuntimeProject {
 
 #[derive(Debug, Default, Deserialize)]
 struct RuntimeDeploy {
+    python_version: Option<nrz_source_bundle::PythonMinor>,
     runtime: Option<ApplicationRuntimeFamily>,
     #[serde(alias = "entrypoint")]
     entry: Option<String>,
     args: Option<Vec<String>>,
+    module: Option<String>,
+    application: Option<String>,
+    server: Option<String>,
 }
 
 #[allow(dead_code)] // Public library API; the CLI uses resolve_and_bind_detection.
@@ -26,13 +30,7 @@ pub fn resolve_application_runtime(
     framework: &str,
 ) -> anyhow::Result<Option<ApplicationRuntimeDeclaration>> {
     let config = read_runtime_config(fs)?;
-    resolve_application_runtime_with_config(
-        fs,
-        framework,
-        config.runtime,
-        config.entry,
-        config.args,
-    )
+    resolve_runtime(fs, framework, config)
 }
 
 fn read_runtime_config(fs: &dyn Fs) -> anyhow::Result<RuntimeDeploy> {
@@ -52,13 +50,7 @@ pub(crate) fn resolve_and_bind_detection(
 ) -> anyhow::Result<()> {
     let config = read_runtime_config(fs)?;
     let configured_entry = config.entry.clone();
-    let declaration = resolve_application_runtime_with_config(
-        fs,
-        &detection.framework,
-        config.runtime,
-        config.entry,
-        config.args,
-    )?;
+    let declaration = resolve_runtime(fs, &detection.framework, config)?;
     bind_application_runtime(detection, declaration, configured_entry.as_deref())
 }
 
@@ -73,6 +65,7 @@ pub(crate) fn bind_application_runtime(
         normalize_application_entry(entry)?;
     }
     if let Some(declaration) = &declaration {
+        declaration.validate().map_err(anyhow::Error::msg)?;
         validate_framework(&detection.framework, declaration.family)?;
     }
     // Generic static fallback must not erase a configured server launch.
@@ -82,10 +75,29 @@ pub(crate) fn bind_application_runtime(
     {
         detection.suggested_compute = super::types::ComputeType::Process;
     }
+    if let Some(declaration) = &declaration {
+        match declaration.family {
+            ApplicationRuntimeFamily::Python => {
+                detection.metadata.runtime.runtime_type = super::types::RuntimeType::Python;
+                detection.metadata.runtime.version = Some(
+                    declaration
+                        .python_version
+                        .unwrap_or_default()
+                        .version()
+                        .into(),
+                );
+            }
+            ApplicationRuntimeFamily::Executable => {
+                detection.suggested_compute = super::types::ComputeType::Process;
+            }
+            _ => {}
+        }
+    }
     detection.metadata.application_runtime = declaration;
     Ok(())
 }
 
+#[allow(dead_code)] // Retained public library API; the CLI uses the complete project declaration.
 pub fn resolve_application_runtime_with_config(
     fs: &dyn Fs,
     framework: &str,
@@ -93,12 +105,112 @@ pub fn resolve_application_runtime_with_config(
     entry: Option<String>,
     args: Option<Vec<String>>,
 ) -> anyhow::Result<Option<ApplicationRuntimeDeclaration>> {
+    resolve_runtime(
+        fs,
+        framework,
+        RuntimeDeploy {
+            runtime,
+            entry,
+            args,
+            ..Default::default()
+        },
+    )
+}
+
+pub fn resolve_application_runtime_with_project(
+    fs: &dyn Fs,
+    framework: &str,
+    deploy: &crate::config::DeploySection,
+) -> anyhow::Result<Option<ApplicationRuntimeDeclaration>> {
+    resolve_runtime(
+        fs,
+        framework,
+        RuntimeDeploy {
+            runtime: deploy.runtime,
+            python_version: deploy.python_version,
+            entry: deploy.entry.clone(),
+            args: deploy.args.clone(),
+            module: deploy.module.clone(),
+            application: deploy.application.clone(),
+            server: deploy.server.clone(),
+        },
+    )
+}
+
+fn resolve_runtime(
+    fs: &dyn Fs,
+    framework: &str,
+    mut config: RuntimeDeploy,
+) -> anyhow::Result<Option<ApplicationRuntimeDeclaration>> {
+    if let Some(entry) = &config.entry {
+        config.entry = Some(normalize_application_entry(entry)?);
+    }
+    let python_fields = config.module.is_some()
+        || config.application.is_some()
+        || config.server.is_some()
+        || config.python_version.is_some();
+    if super::python::is_python_framework(framework)
+        || config.runtime == Some(ApplicationRuntimeFamily::Python)
+        || python_fields
+    {
+        if config
+            .runtime
+            .is_some_and(|family| family != ApplicationRuntimeFamily::Python)
+        {
+            bail!("Python launch conflicts with the declared application runtime");
+        }
+        let args = config.args.as_deref().unwrap_or_default();
+        let launch = super::python_launch::resolve_launch_for_framework(fs, super::python_launch::PythonLaunchRequest {
+            entry: config.entry.as_deref(), module: config.module.as_deref(), application: config.application.as_deref(),
+            server: config.server.as_deref(), args,
+        }, Some(framework))?.context("Python application entry is ambiguous or absent; declare deploy.entry, module or application")?;
+        let declaration = ApplicationRuntimeDeclaration {
+            family: ApplicationRuntimeFamily::Python,
+            python_version: Some(config.python_version.unwrap_or_default()),
+            entry: Some(launch.entry),
+            args: launch.args,
+        };
+        validate_framework(framework, declaration.family)?;
+        declaration.validate().map_err(anyhow::Error::msg)?;
+        return Ok(Some(declaration));
+    }
+    if matches!(
+        super::native::native_recipe(framework),
+        Some(super::native::NativeRecipe::DartServer | super::native::NativeRecipe::GoServer)
+    ) || config.runtime == Some(ApplicationRuntimeFamily::Executable)
+    {
+        if config
+            .runtime
+            .is_some_and(|family| family != ApplicationRuntimeFamily::Executable)
+        {
+            bail!("native application conflicts with the declared runtime");
+        }
+        let entry = config.entry.or_else(|| {
+            super::native::detect_configured_native(fs, framework).and_then(|detection| {
+                detection
+                    .metadata
+                    .build_info
+                    .and_then(|build| build.entry_point)
+            })
+        });
+        let declaration = ApplicationRuntimeDeclaration {
+            family: ApplicationRuntimeFamily::Executable,
+            python_version: None,
+            entry,
+            args: config.args.unwrap_or_default(),
+        };
+        validate_framework(framework, declaration.family)?;
+        declaration.validate().map_err(anyhow::Error::msg)?;
+        return Ok(Some(declaration));
+    }
     let config = RuntimeDeploy {
-        runtime,
-        entry: entry
+        runtime: config.runtime,
+        entry: config
+            .entry
             .map(|entry| normalize_application_entry(&entry))
             .transpose()?,
-        args,
+        args: config.args,
+        ..Default::default()
     };
     let package = fs
         .read_file("package.json")
@@ -151,13 +263,11 @@ pub fn resolve_application_runtime_with_config(
         .unwrap_or_else(|| start.map_or_else(Vec::new, |start| start.args));
     let declaration = ApplicationRuntimeDeclaration {
         family,
+        python_version: None,
         entry,
         args,
     };
-    declaration
-        .intent()
-        .validate()
-        .map_err(anyhow::Error::msg)?;
+    declaration.validate().map_err(anyhow::Error::msg)?;
     Ok(Some(declaration))
 }
 
@@ -165,7 +275,16 @@ pub(crate) fn validate_framework(
     framework: &str,
     family: ApplicationRuntimeFamily,
 ) -> anyhow::Result<()> {
-    if framework == "python" || (framework == "elysia" && family != ApplicationRuntimeFamily::Bun) {
+    let python = super::python::is_python_framework(framework);
+    let native = matches!(
+        super::native::native_recipe(framework),
+        Some(super::native::NativeRecipe::DartServer | super::native::NativeRecipe::GoServer)
+    );
+    if (python && family != ApplicationRuntimeFamily::Python)
+        || (native && family != ApplicationRuntimeFamily::Executable)
+        || (framework == "elysia" && family != ApplicationRuntimeFamily::Bun)
+        || (matches!(framework, "flutter" | "hugo"))
+    {
         bail!("application runtime conflicts with framework {framework}");
     }
     Ok(())
@@ -248,6 +367,7 @@ fn direct_start(script: &str) -> anyhow::Result<Option<ApplicationRuntimeDeclara
     }
     Ok(Some(ApplicationRuntimeDeclaration {
         family,
+        python_version: None,
         entry: Some(normalize_application_entry(entry)?),
         args: words.map(str::to_string).collect(),
     }))

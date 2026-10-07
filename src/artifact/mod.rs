@@ -46,8 +46,6 @@ pub(crate) struct RuntimeArtifact {
     pub(crate) scan: RuntimeArtifactScan,
 }
 
-pub(crate) use crate::detect::python::PYTHON_SITE_PACKAGES_ROOT;
-
 pub(crate) const NODE_RUNTIME_METADATA_FILES: &[&str] = &[
     "package.json",
     "package-lock.json",
@@ -62,7 +60,7 @@ pub(crate) const NODE_RUNTIME_METADATA_FILES: &[&str] = &[
 pub(crate) enum RuntimeArtifactScan {
     All,
     NodeRuntimeRoot,
-    PythonRuntimeRoot,
+    PythonRuntimeRoot(nrz_source_bundle::PythonMinor),
     Relocated {
         base: Box<RuntimeArtifactScan>,
         ownership: RuntimeArtifactSourceOwnership,
@@ -126,7 +124,7 @@ impl RuntimeArtifactFileBreakdown {
 impl RuntimeArtifactScan {
     pub(crate) fn explain(&self) -> serde_json::Value {
         match self {
-            Self::All | Self::NodeRuntimeRoot | Self::PythonRuntimeRoot => {
+            Self::All | Self::NodeRuntimeRoot | Self::PythonRuntimeRoot(_) => {
                 serde_json::json!({ "mode": "all" })
             }
             Self::Relocated { base, ownership } => {
@@ -205,7 +203,7 @@ impl RuntimeArtifactScan {
 
     pub(crate) fn is_python_runtime_root(&self) -> bool {
         match self {
-            Self::PythonRuntimeRoot => true,
+            Self::PythonRuntimeRoot(_) => true,
             Self::Relocated { base, .. } => base.is_python_runtime_root(),
             _ => false,
         }
@@ -215,7 +213,7 @@ impl RuntimeArtifactScan {
         let (roots, symlink_roots) = match self {
             Self::All => return RuntimeArtifactFileCategory::BuildOutput,
             Self::NodeRuntimeRoot => return node_runtime_root_file_category(path),
-            Self::PythonRuntimeRoot => return python_runtime_root_file_category(path),
+            Self::PythonRuntimeRoot(_) => return python_runtime_root_file_category(path),
             Self::Relocated { base, .. } => return base.file_category(path),
             Self::Selected {
                 roots,
@@ -283,7 +281,7 @@ fn node_runtime_root_file_category(path: &str) -> RuntimeArtifactFileCategory {
 }
 
 fn python_runtime_root_file_category(path: &str) -> RuntimeArtifactFileCategory {
-    if runtime_path_is_covered(path, PYTHON_SITE_PACKAGES_ROOT) {
+    if nrz_source_bundle::PythonMinor::for_dependency_path(path).is_some() {
         RuntimeArtifactFileCategory::PythonSitePackages
     } else {
         RuntimeArtifactFileCategory::BuildOutput
@@ -667,7 +665,8 @@ fn is_platform_build_only_path(
     path: &str,
 ) -> bool {
     if detection.metadata.runtime.runtime_type == crate::detect::types::RuntimeType::Python
-        && runtime_path_is_covered(path, PYTHON_SITE_PACKAGES_ROOT)
+        && (nrz_source_bundle::PythonMinor::for_dependency_path(path).is_some()
+            || path == crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY)
     {
         return false;
     }

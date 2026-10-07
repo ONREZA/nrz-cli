@@ -11,6 +11,8 @@ pub enum RuntimeType {
     Bun,
     Deno,
     Python,
+    Dart,
+    Go,
     Static,
 }
 
@@ -35,6 +37,10 @@ pub enum PackageManagerType {
     Pnpm,
     Bun,
     Pip,
+    Uv,
+    Poetry,
+    Pub,
+    Go,
 }
 
 impl PackageManagerType {
@@ -45,6 +51,10 @@ impl PackageManagerType {
             Self::Pnpm => "pnpm",
             Self::Bun => "bun",
             Self::Pip => "pip",
+            Self::Uv => "uv",
+            Self::Poetry => "poetry",
+            Self::Pub => "pub",
+            Self::Go => "go",
         }
     }
 }

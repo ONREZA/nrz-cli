@@ -16,6 +16,42 @@ const FIXTURE_SOURCE_ARTIFACT_ID_FOR_A_SOURCE_SHA: &str =
 const MANY_TINY_FILES_COUNT: usize = 66_000;
 
 #[tokio::test]
+async fn rejects_unsafe_or_unbounded_route_response_headers() {
+    let oversized = "x".repeat(8193);
+    let long_name = "x".repeat(257);
+    let many = Value::Object(
+        (0..129)
+            .map(|i| (format!("x-fixture-{i}"), json!("value")))
+            .collect(),
+    );
+    for headers in [
+        json!({"bad name":"value"}),
+        json!({"x-fixture":"value\r\nx-injected: yes"}),
+        json!({"x-fixture":oversized}),
+        json!({long_name:"value"}),
+        many,
+    ] {
+        let mut manifest = fixture_manifest();
+        manifest["routes"][0]["headers"] = headers;
+        let compressed = bundle(
+            &manifest,
+            &[
+                ("dist/index.html", b"<h1>ONREZA</h1>\n".as_slice()),
+                ("server/index.js", b"export default fetch;\n".as_slice()),
+            ],
+        );
+        let input = input_for(manifest, &compressed);
+        assert_eq!(
+            verify_source_bundle_bytes(input, compressed)
+                .await
+                .unwrap_err()
+                .error_code,
+            "SOURCE_ROUTE_HEADERS_INVALID"
+        );
+    }
+}
+
+#[tokio::test]
 async fn accepts_deterministic_tar_zst_bundle() {
     let manifest = fixture_manifest();
     let compressed = bundle(
@@ -32,6 +68,29 @@ async fn accepts_deterministic_tar_zst_bundle() {
     assert_eq!(result.summary.file_count, 2);
     assert_eq!(result.summary.logical_static_bytes, 16);
     assert_eq!(result.summary.artifact_size_bytes, 22);
+}
+
+#[tokio::test]
+async fn source_verification_rejects_conflicting_runtime_declarations() {
+    for config in [
+        json!({"applicationRuntime":{"family":"PYTHON","args":[]},"runtimeFamily":"JAVASCRIPT"}),
+        json!({"applicationRuntime":{"family":"EXECUTABLE","args":[]},"isBinaryEntry":false}),
+        json!({"applicationRuntime":{"family":"NODE","args":[]},"runtimeFamily":"PYTHON"}),
+    ] {
+        let mut manifest = fixture_manifest();
+        manifest["layers"][1]["runtimeConfig"] = config;
+        let bytes = bundle(
+            &manifest,
+            &[
+                ("dist/index.html", b"<h1>ONREZA</h1>\n".as_slice()),
+                ("server/index.js", b"export default fetch;\n".as_slice()),
+            ],
+        );
+        let error = verify_source_bundle_bytes(input_for(manifest, &bytes), bytes)
+            .await
+            .unwrap_err();
+        assert_eq!(error.error_code, "SOURCE_APPLICATION_RUNTIME_INVALID");
+    }
 }
 
 #[tokio::test]

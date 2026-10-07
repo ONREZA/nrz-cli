@@ -1,0 +1,3 @@
+baseURL = 'https://example.org/'
+title = 'ONREZA Hugo fixture'
+disableKinds = ['taxonomy', 'term']

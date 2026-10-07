@@ -85,6 +85,33 @@ pub struct SourceLogicalManifestRoute {
     pub methods: Option<Vec<String>>,
     #[serde(default)]
     pub fallthrough_when: Option<Vec<RouteFallthroughCondition>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<std::collections::BTreeMap<String, String>>,
+}
+
+pub fn validate_source_route_headers(manifest: &SourceLogicalManifest) -> Result<(), String> {
+    for headers in manifest
+        .routes
+        .iter()
+        .filter_map(|route| route.headers.as_ref())
+    {
+        if headers.len() > 128 {
+            return Err("source route response headers exceed the supported count".into());
+        }
+        for (name, value) in headers {
+            if name.is_empty()
+                || name.len() > 256
+                || value.len() > 8192
+                || http::HeaderName::from_bytes(name.as_bytes()).is_err()
+                || http::HeaderValue::from_str(value).is_err()
+            {
+                return Err(
+                    "source route response header is invalid or exceeds its supported size".into(),
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

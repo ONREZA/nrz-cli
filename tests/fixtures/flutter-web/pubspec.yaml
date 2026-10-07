@@ -1,0 +1,6 @@
+name: onreza_flutter_fixture
+environment:
+  sdk: '>=3.13.5 <3.14.0'
+dependencies:
+  flutter:
+    sdk: flutter

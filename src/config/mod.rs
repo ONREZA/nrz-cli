@@ -118,11 +118,19 @@ pub struct BuildSection {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DeploySection {
+    /// Selected supported CPython minor; absent selects the platform default.
+    pub python_version: Option<nrz_source_bundle::PythonMinor>,
     /// Application launcher, independent of install/build commands.
     #[serde(serialize_with = "serialize_runtime_family")]
     pub runtime: Option<nrz_source_bundle::ApplicationRuntimeFamily>,
     /// Arguments after the application entry (not interpreter flags).
     pub args: Option<Vec<String>>,
+    /// Python module run through an immutable deployment bootstrap.
+    pub module: Option<String>,
+    /// Python import string (module:callable) for the selected server.
+    pub application: Option<String>,
+    /// Production Python server profile: asgi/uvicorn or wsgi/gunicorn.
+    pub server: Option<String>,
     /// Compute type override: "static", "process".
     pub compute: Option<String>,
     /// Explicit entry point for PROCESS deployments (e.g. "server.ts").
@@ -144,6 +152,8 @@ fn serialize_runtime_family<S: serde::Serializer>(
         .map(|family| match family {
             ApplicationRuntimeFamily::Bun => "bun",
             ApplicationRuntimeFamily::Node => "node",
+            ApplicationRuntimeFamily::Python => "python",
+            ApplicationRuntimeFamily::Executable => "executable",
         })
         .serialize(serializer)
 }
@@ -273,6 +283,10 @@ pub struct EnvSection {
 impl ProjectConfig {
     pub fn merge_child(&self, child: ProjectConfig) -> ProjectConfig {
         let parent = self.clone();
+        let inherit_python_fields = !child
+            .deploy
+            .runtime
+            .is_some_and(|family| family != nrz_source_bundle::ApplicationRuntimeFamily::Python);
 
         let mut aliases = parent.dev.aliases;
         aliases.extend(child.dev.aliases);
@@ -304,8 +318,28 @@ impl ProjectConfig {
                     .or(parent.build.output_directory),
             },
             deploy: DeploySection {
+                python_version: if inherit_python_fields {
+                    child.deploy.python_version.or(parent.deploy.python_version)
+                } else {
+                    child.deploy.python_version
+                },
                 runtime: child.deploy.runtime.or(parent.deploy.runtime),
                 args: child.deploy.args.or(parent.deploy.args),
+                module: if inherit_python_fields {
+                    child.deploy.module.or(parent.deploy.module)
+                } else {
+                    child.deploy.module
+                },
+                application: if inherit_python_fields {
+                    child.deploy.application.or(parent.deploy.application)
+                } else {
+                    child.deploy.application
+                },
+                server: if inherit_python_fields {
+                    child.deploy.server.or(parent.deploy.server)
+                } else {
+                    child.deploy.server
+                },
                 compute: child.deploy.compute.or(parent.deploy.compute),
                 entry: child.deploy.entry.or(parent.deploy.entry),
                 health_check_path: child
@@ -623,6 +657,7 @@ pub struct EffectiveConfigExplanation {
     pub output_dirs: EffectiveConfigList,
     pub deploy_compute: EffectiveConfigValue,
     pub deploy_entry: EffectiveConfigValue,
+    pub deploy_python_version: EffectiveConfigValue,
     pub deploy_app: EffectiveConfigValue,
 }
 
@@ -874,6 +909,14 @@ impl EffectiveProjectConfig {
             },
             deploy_compute: explain_config_option(self.deploy_compute(), "onreza.toml", "auto"),
             deploy_entry: explain_config_option(self.deploy_entry(), "onreza.toml", "absent"),
+            deploy_python_version: explain_config_option(
+                self.config
+                    .deploy
+                    .python_version
+                    .map(nrz_source_bundle::PythonMinor::version),
+                "onreza.toml",
+                "default",
+            ),
             deploy_app: explain_origin_value(self.deploy_app(), self.deploy_app_source, "absent"),
         }
     }

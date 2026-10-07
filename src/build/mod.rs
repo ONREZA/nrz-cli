@@ -157,12 +157,10 @@ pub(crate) async fn run_with_effective_config(
     });
     let application_runtime = match pre_resolved_runtime {
         Some(runtime) => runtime,
-        None => crate::detect::application_runtime::resolve_application_runtime_with_config(
+        None => crate::detect::application_runtime::resolve_application_runtime_with_project(
             &crate::detect::fs::LocalFs::new(project_dir),
             &detection.framework,
-            effective.config().deploy.runtime,
-            effective.config().deploy.entry.clone(),
-            effective.config().deploy.args.clone(),
+            &effective.config().deploy,
         )
         .map_err(|error| {
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))

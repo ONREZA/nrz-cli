@@ -109,14 +109,17 @@ fn prepare_deploy_files_keeps_python_dependencies_and_prunes_platform_metadata()
 
     let detection = crate::detect::detect_with_framework_override(dir.path(), None);
     let manifest = build_manifest::generate_compute_manifest("main.py");
-    let scanned =
-        scan_runtime_artifact(dir.path(), &RuntimeArtifactScan::PythonRuntimeRoot).unwrap();
+    let scanned = scan_runtime_artifact(
+        dir.path(),
+        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
+    )
+    .unwrap();
     let collection = prepare_artifact_files(
         &manifest,
         scanned,
         &detection,
         crate::artifact::ArtifactRootScope::ProjectRoot,
-        &RuntimeArtifactScan::PythonRuntimeRoot,
+        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
         true,
     );
     let deployable = collection.deployable_entries();
@@ -136,7 +139,7 @@ fn prepare_deploy_files_keeps_python_dependencies_and_prunes_platform_metadata()
         dir.path(),
         &manifest,
         &deployable,
-        &RuntimeArtifactScan::PythonRuntimeRoot,
+        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
         crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
         Some(crate::artifact::source_bundle_v1::RuntimeReadinessContract::Http("/healthz")),
     )
@@ -148,6 +151,102 @@ fn prepare_deploy_files_keeps_python_dependencies_and_prunes_platform_metadata()
             "runtimeFamily": "PYTHON"
         }))
     );
+}
+
+#[test]
+fn python_scan_excludes_local_environments_and_keeps_the_frozen_bootstrap() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".venv/bin")).unwrap();
+    fs::create_dir_all(dir.path().join("src/__pycache__")).unwrap();
+    fs::create_dir_all(dir.path().join("assets")).unwrap();
+    fs::create_dir_all(dir.path().join("build/lib/demo")).unwrap();
+    fs::create_dir_all(dir.path().join("build/assets")).unwrap();
+    fs::create_dir_all(dir.path().join("src/demo.egg-info")).unwrap();
+    fs::create_dir_all(dir.path().join(".onreza/python/3.14/site-packages/demo")).unwrap();
+    fs::create_dir_all(
+        dir.path()
+            .join(".onreza/python/3.14/site-packages/demo.egg-info"),
+    )
+    .unwrap();
+    for (name, content) in [
+        (".env", "SECRET=local"),
+        (".env.production", "SECRET=local"),
+        (".venv/bin/python", "local interpreter"),
+        ("src/__pycache__/demo.pyc", "cache"),
+        ("src/main.py", "print('ready')"),
+        ("assets/data.json", "{}"),
+        ("build/lib/demo/__init__.py", "backend duplicate"),
+        ("build/assets/logo.svg", "<svg/>"),
+        ("src/demo.egg-info/PKG-INFO", "backend metadata"),
+        (
+            "pyproject.toml",
+            "[build-system]\nrequires = ['setuptools']\nbuild-backend = 'setuptools.build_meta'\n[project]\nname = 'demo'\nversion = '1.0'\n",
+        ),
+        (".onreza/python/launch.py", "print('launch')"),
+        (".onreza/python/3.14/site-packages/demo/__init__.py", ""),
+        (
+            ".onreza/python/3.14/site-packages/demo.egg-info/PKG-INFO",
+            "installed metadata",
+        ),
+    ] {
+        fs::write(dir.path().join(name), content).unwrap();
+    }
+    #[cfg(unix)]
+    {
+        fs::remove_file(dir.path().join(".venv/bin/python")).unwrap();
+        std::os::unix::fs::symlink("/usr/bin/python3", dir.path().join(".venv/bin/python"))
+            .unwrap();
+    }
+    let scanned = scan_runtime_artifact(
+        dir.path(),
+        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
+    )
+    .unwrap();
+    let paths = scanned
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        paths,
+        [
+            ".onreza/python/3.14/site-packages/demo.egg-info/PKG-INFO",
+            ".onreza/python/3.14/site-packages/demo/__init__.py",
+            ".onreza/python/launch.py",
+            "assets/data.json",
+            "build/assets/logo.svg",
+            "pyproject.toml",
+            "src/main.py"
+        ]
+    );
+    let mut detection = crate::detect::detect_with_framework_override(dir.path(), None);
+    detection.metadata.runtime.runtime_type = RuntimeType::Python;
+    let manifest = build_manifest::generate_compute_manifest(".onreza/python/launch.py");
+    let deployable = prepare_artifact_files(
+        &manifest,
+        scanned,
+        &detection,
+        crate::artifact::ArtifactRootScope::ProjectRoot,
+        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
+        true,
+    )
+    .deployable_entries();
+    assert_eq!(deployable.len(), 7);
+    assert!(
+        deployable
+            .iter()
+            .any(|file| file.path == ".onreza/python/launch.py")
+    );
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("/etc/passwd", dir.path().join("assets/escape")).unwrap();
+        assert!(
+            scan_runtime_artifact(
+                dir.path(),
+                &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default())
+            )
+            .is_err()
+        );
+    }
 }
 
 #[test]
@@ -363,6 +462,8 @@ fn relocated_python_runtime_preserves_compute_file_ownership() {
     let mut detection =
         crate::detect::detect_with_framework_override(project.path(), Some("other"));
     detection.metadata.runtime.runtime_type = RuntimeType::Python;
+    detection.metadata.runtime.version =
+        Some(nrz_source_bundle::PythonMinor::default().version().into());
     let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
         "version": 1,
         "layers": [
@@ -429,11 +530,13 @@ fn relocated_python_runtime_preserves_compute_file_ownership() {
     );
     let wire =
         serde_json::from_value(serde_json::to_value(&plan.logical_manifest).unwrap()).unwrap();
-    let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph(
+    let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph_for_target(
         &plan.logical_manifest_sha256,
         &plan.source_sha256,
         plan.source_size_bytes,
         &wire,
+        &[],
+        Some(nrz_source_bundle::PythonMinor::default().target()),
     )
     .unwrap();
     assert_eq!(
@@ -792,4 +895,30 @@ async fn runtime_artifact_scan_preserves_invalid_output_error_code() {
             .contains("failed to scan runtime artifact"),
         "{error:#}"
     );
+}
+
+#[test]
+fn python_runtime_scan_excludes_a_previous_build_for_another_minor() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
+    for minor in nrz_source_bundle::PythonMinor::ALL {
+        fs::create_dir_all(dir.path().join(minor.site_packages_root())).unwrap();
+        fs::write(
+            dir.path().join(minor.site_packages_root()).join("demo.py"),
+            "VALUE=1",
+        )
+        .unwrap();
+    }
+    for minor in nrz_source_bundle::PythonMinor::ALL {
+        let scanned =
+            scan_runtime_artifact(dir.path(), &RuntimeArtifactScan::PythonRuntimeRoot(minor))
+                .unwrap();
+        let paths = scanned
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+        assert!(paths.contains(&"main.py"));
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains(&format!("{}/demo.py", minor.site_packages_root()).as_str()));
+    }
 }

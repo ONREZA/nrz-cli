@@ -7,13 +7,17 @@ use thiserror::Error;
 
 mod execution_compatibility;
 mod launch;
+mod native_executable;
+pub use native_executable::{
+    NATIVE_EXECUTION_TARGET, NativeExecutableRequirements, verify_native_executable,
+};
 mod source_graph;
 pub use execution_compatibility::{
     ExecutionRuntimeFamily, ExecutionRuntimeTarget, verify_execution_runtime_compatibility,
 };
 pub use launch::{
-    source_layer_launch, source_layer_launch_for_target, source_layer_runtime_config,
-    verify_runtime_launch,
+    python_minor_for_profile, source_layer_launch, source_layer_launch_for_target,
+    source_layer_runtime_config, verify_runtime_launch,
 };
 pub use nrz_contract::{
     RuntimeLaunchWire, RuntimeLayerWire, RuntimeProfile, RuntimeReadinessProtocol,
@@ -311,7 +315,12 @@ pub fn verify_runtime_artifact_graph(
                         | RuntimeProfile::Node24
                         | RuntimeProfile::Node26
                 ) && family != "JAVASCRIPT")
-                    || (launch.profile == RuntimeProfile::Cpython314 && family != "PYTHON")
+                    || (matches!(
+                        launch.profile,
+                        RuntimeProfile::Cpython312
+                            | RuntimeProfile::Cpython313
+                            | RuntimeProfile::Cpython314
+                    ) && family != "PYTHON")
                 {
                     return invariant("runtime profile conflicts with runtimeFamily");
                 }
@@ -364,6 +373,15 @@ pub fn verify_runtime_artifact_graph(
                     .iter()
                     .find(|value| value.materialization_id.as_str() == materialization_id)
                     .expect("known dependency");
+                if let Some(minor) = python_minor_for_profile(launch.profile)
+                    && (dependency.compatibility.runtime_family.as_str() != "python"
+                        || dependency.compatibility.runtime_version.as_str() != minor.target()
+                        || dependency.kind.to_string() != "PYTHON_SITE_PACKAGES")
+                {
+                    return invariant(
+                        "Python launch profile conflicts with dependency build minor",
+                    );
+                }
                 if expected.is_some_and(|version| {
                     dependency.compatibility.runtime_family.as_str() != "javascript"
                         || dependency.compatibility.runtime_version.as_str() != version

@@ -201,19 +201,55 @@ fn explicit_bindings_enforce_layer_ownership_and_every_application_mount() {
 }
 
 #[test]
-fn node_launch_profiles_require_matching_dependency_targets() {
-    for major in [22, 24, 26] {
+fn managed_launch_profiles_require_matching_dependency_build_targets() {
+    for (profile, target, family, kind) in [
+        (
+            "NODE_22",
+            "node-22",
+            "javascript",
+            "JAVASCRIPT_NODE_MODULES",
+        ),
+        (
+            "NODE_24",
+            "node-24",
+            "javascript",
+            "JAVASCRIPT_NODE_MODULES",
+        ),
+        (
+            "NODE_26",
+            "node-26",
+            "javascript",
+            "JAVASCRIPT_NODE_MODULES",
+        ),
+        (
+            "CPYTHON_3_12",
+            "python-3.12",
+            "python",
+            "PYTHON_SITE_PACKAGES",
+        ),
+        (
+            "CPYTHON_3_13",
+            "python-3.13",
+            "python",
+            "PYTHON_SITE_PACKAGES",
+        ),
+        (
+            "CPYTHON_3_14",
+            "python-3.14",
+            "python",
+            "PYTHON_SITE_PACKAGES",
+        ),
+    ] {
         let mut value = graph();
-        value["runtimeLayers"][0]["launch"] =
-            json!({"profile": format!("NODE_{major}"), "args": [], "cwd": "."});
-        value["dependencies"][0]["compatibility"]["runtimeVersion"] =
-            json!(format!("node-{major}"));
-        value["dependencies"][0]["compatibility"]["runtimeFamily"] = json!("javascript");
+        value["runtimeLayers"][0]["launch"] = json!({"profile": profile, "args": [], "cwd": "."});
+        value["dependencies"][0]["compatibility"]["runtimeVersion"] = json!(target);
+        value["dependencies"][0]["compatibility"]["runtimeFamily"] = json!(family);
+        value["dependencies"][0]["kind"] = json!(kind);
         assert!(finalize_runtime_artifact_graph(value.clone(), &[]).is_ok());
         for (field, invalid) in [
             ("runtimeVersion", "node-25"),
             ("runtimeFamily", "bun"),
-            ("runtimeFamily", "python"),
+            ("runtimeFamily", "native"),
         ] {
             let mut mismatch = value.clone();
             mismatch["dependencies"][0]["compatibility"][field] = json!(invalid);
@@ -221,7 +257,7 @@ fn node_launch_profiles_require_matching_dependency_targets() {
                 finalize_runtime_artifact_graph(mismatch, &[])
                     .unwrap_err()
                     .to_string()
-                    .contains("conflicts with dependency runtime target")
+                    .contains("conflicts with dependency")
             );
         }
         value["dependencies"] = json!([]);

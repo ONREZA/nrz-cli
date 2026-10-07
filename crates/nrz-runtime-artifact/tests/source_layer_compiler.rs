@@ -21,8 +21,28 @@ fn manifest(config: Value) -> SourceLogicalManifest {
 fn producer_and_consumer_share_complete_layer_semantics() {
     for (config, target) in [
         (json!({}), None),
-        (json!({"runtimeFamily":"PYTHON"}), None),
+        (json!({"runtimeFamily":"PYTHON"}), Some("python-3.14")),
         (json!({"isBinaryEntry":true}), None),
+        (
+            json!({"applicationRuntime":{"family":"PYTHON","args":["MODULE","demo","two words"]},
+                "buildRuntimeVersion":"python-3.12"}),
+            Some("python-3.12"),
+        ),
+        (
+            json!({"applicationRuntime":{"family":"PYTHON","args":["MODULE","demo","two words"]},
+                "buildRuntimeVersion":"python-3.13"}),
+            Some("python-3.13"),
+        ),
+        (
+            json!({"applicationRuntime":{"family":"PYTHON","args":["MODULE","demo","two words"]},
+                "buildRuntimeVersion":"python-3.14"}),
+            Some("python-3.14"),
+        ),
+        (
+            json!({"applicationRuntime":{"family":"EXECUTABLE","args":["$(id)","two words"]},
+                "buildRuntimeVersion":"native-linux-x86_64-glibc"}),
+            Some("native-linux-x86_64-glibc"),
+        ),
         (
             json!({"applicationRuntime":{"family":"BUN","args":["--fixture","two words"]},
             "buildRuntimeVersion":"bun-1.4.2"}),
@@ -135,30 +155,16 @@ fn existing_python_and_bun_layers_need_independent_frozen_build_facts() {
     file.layer_name = Some("python".into());
     source.layers.push(python);
     source.files.push(file);
-    let graph = finalize_source_bundle_runtime_graph_for_target(
-        &"1".repeat(64),
-        &"2".repeat(64),
-        2,
-        &source,
-        &[],
-        Some("bun-1.4.2"),
-    )
-    .unwrap();
-    assert_eq!(
-        graph.wire().runtime_layers[0]
-            .launch
-            .as_ref()
-            .unwrap()
-            .profile,
-        nrz_runtime_artifact::RuntimeProfile::Bun
-    );
-    assert_eq!(
-        graph.wire().runtime_layers[1]
-            .launch
-            .as_ref()
-            .unwrap()
-            .profile,
-        nrz_runtime_artifact::RuntimeProfile::Cpython314
+    assert!(
+        finalize_source_bundle_runtime_graph_for_target(
+            &"1".repeat(64),
+            &"2".repeat(64),
+            2,
+            &source,
+            &[],
+            Some("bun-1.4.2"),
+        )
+        .is_err()
     );
     source.layers[1].runtime_config.as_mut().unwrap()["buildRuntimeVersion"] = json!("python-3.14");
     assert!(
@@ -222,6 +228,78 @@ fn existing_python_and_bun_layers_need_independent_frozen_build_facts() {
             &source,
             &[],
             &extra
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn typed_mixed_layers_keep_independent_frozen_targets_and_literal_arguments() {
+    use nrz_runtime_artifact::{
+        RuntimeProfile, finalize_source_bundle_runtime_graph_for_layer_targets,
+    };
+    use std::collections::HashMap;
+    let mut source = manifest(
+        json!({"applicationRuntime":{"family":"BUN","args":[]}, "buildRuntimeVersion":"bun-1.4.2"}),
+    );
+    let mut targets = HashMap::from([("server".into(), "bun-1.4.2".into())]);
+    for (name, family, target) in [
+        ("python", "PYTHON", "python-3.14"),
+        ("native", "EXECUTABLE", "native-linux-x86_64-glibc"),
+    ] {
+        let mut layer = source.layers[0].clone();
+        layer.name = name.into();
+        layer.root_path = Some(name.into());
+        layer.entrypoint = Some(format!("{name}/entry"));
+        layer.runtime_config = Some(
+            json!({"applicationRuntime":{"family":family,"args":["$(id)","two words"]}, "buildRuntimeVersion":target}),
+        );
+        let mut file = source.files[0].clone();
+        file.path = format!("{name}/entry");
+        file.layer_name = Some(name.into());
+        source.layers.push(layer);
+        source.files.push(file);
+        targets.insert(name.into(), target.into());
+    }
+    let graph = finalize_source_bundle_runtime_graph_for_layer_targets(
+        &"1".repeat(64),
+        &"2".repeat(64),
+        3,
+        &source,
+        &[],
+        &targets,
+    )
+    .unwrap();
+    for (index, profile) in [
+        RuntimeProfile::Bun,
+        RuntimeProfile::Cpython314,
+        RuntimeProfile::Executable,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let launch = graph.wire().runtime_layers[index].launch.as_ref().unwrap();
+        assert_eq!(launch.profile, profile);
+        if index > 0 {
+            assert_eq!(
+                launch
+                    .args
+                    .iter()
+                    .map(|arg| arg.as_str())
+                    .collect::<Vec<_>>(),
+                ["$(id)", "two words"]
+            );
+        }
+    }
+    targets.insert("native".into(), "python-3.14".into());
+    assert!(
+        finalize_source_bundle_runtime_graph_for_layer_targets(
+            &"1".repeat(64),
+            &"2".repeat(64),
+            3,
+            &source,
+            &[],
+            &targets
         )
         .is_err()
     );

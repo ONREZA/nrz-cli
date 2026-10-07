@@ -17,7 +17,20 @@ pub(super) fn resolve_runtime_artifact(
     if detection.metadata.runtime.runtime_type == RuntimeType::Python
         && manifest_has_compute_layer(&manifest)
     {
-        return resolve_python_runtime_artifact(project_dir, build_output_dir, manifest, json);
+        let minor = detection
+            .metadata
+            .runtime
+            .version
+            .as_deref()
+            .and_then(nrz_source_bundle::PythonMinor::from_version)
+            .context("unsupported selected Python minor")?;
+        return resolve_python_runtime_artifact(
+            project_dir,
+            build_output_dir,
+            manifest,
+            json,
+            minor,
+        );
     }
     let Some(plan) = plan_node_project_runtime_artifact(
         workspace_root_dir,
@@ -89,6 +102,7 @@ fn resolve_python_runtime_artifact(
     build_output_dir: PathBuf,
     manifest: build_manifest::Manifest,
     json: bool,
+    minor: nrz_source_bundle::PythonMinor,
 ) -> anyhow::Result<RuntimeArtifact> {
     let build_output_prefix = relative_runtime_artifact_path(project_dir, &build_output_dir)
         .map_err(|_| {
@@ -107,7 +121,7 @@ fn resolve_python_runtime_artifact(
     } else {
         rewrite_manifest_for_node_project_runtime(manifest, &build_output_prefix)?
     };
-    let dependency_root = project_dir.join(crate::artifact::PYTHON_SITE_PACKAGES_ROOT);
+    let dependency_root = project_dir.join(minor.site_packages_root());
     if crate::detect::python::dependency_manifest(&crate::detect::fs::LocalFs::new(project_dir))
         .is_some()
         && !dependency_root.is_dir()
@@ -120,7 +134,7 @@ fn resolve_python_runtime_artifact(
     output::status(
         json,
         "~",
-        "Runtime artifact: CPython 3.14 project root",
+        format!("Runtime artifact: CPython {} project root", minor.version()),
         output::Phase::Deploy,
     );
     Ok(RuntimeArtifact {
@@ -128,10 +142,10 @@ fn resolve_python_runtime_artifact(
         manifest,
         scan: match ownership {
             Some(ownership) => RuntimeArtifactScan::Relocated {
-                base: Box::new(RuntimeArtifactScan::PythonRuntimeRoot),
+                base: Box::new(RuntimeArtifactScan::PythonRuntimeRoot(minor)),
                 ownership,
             },
-            None => RuntimeArtifactScan::PythonRuntimeRoot,
+            None => RuntimeArtifactScan::PythonRuntimeRoot(minor),
         },
     })
 }

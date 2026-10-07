@@ -13,7 +13,7 @@ use crate::{
 };
 
 const DEPENDENCY_FILE_ROLE: &str = "dependency";
-pub const PYTHON_314_SITE_PACKAGES_ROOT: &str = ".onreza/python/3.14/site-packages";
+pub const PYTHON_314_SITE_PACKAGES_ROOT: &str = crate::PythonMinor::Python314.site_packages_root();
 #[cfg(unix)]
 const FILE_MODE: u32 = 0o644;
 #[cfg(unix)]
@@ -270,11 +270,8 @@ fn expected_dependency_file<'a>(
 }
 
 fn dependency_source_root(path: &str) -> Option<String> {
-    if path
-        .strip_prefix(PYTHON_314_SITE_PACKAGES_ROOT)
-        .is_some_and(|suffix| suffix.starts_with('/'))
-    {
-        return Some(PYTHON_314_SITE_PACKAGES_ROOT.to_string());
+    if let Some(minor) = crate::PythonMinor::for_dependency_path(path) {
+        return Some(minor.site_packages_root().to_string());
     }
     let mut parts = Vec::new();
     for segment in path.split('/') {

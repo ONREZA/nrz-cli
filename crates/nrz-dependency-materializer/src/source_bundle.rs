@@ -9,8 +9,7 @@ use nrz_runtime_artifact::{
     finalize_source_bundle_runtime_graph_for_layer_targets,
 };
 use nrz_source_bundle::{
-    DependencySourceTreeError, PYTHON_314_SITE_PACKAGES_ROOT, SourceLogicalManifest,
-    extract_dependency_source_trees,
+    DependencySourceTreeError, PythonMinor, SourceLogicalManifest, extract_dependency_source_trees,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -21,7 +20,8 @@ use crate::{
 };
 
 pub struct SourceBundleMaterializationPolicy {
-    pub kind: DependencyMaterializationKind,
+    /// None explicitly permits only artifacts without dependency trees.
+    pub kind: Option<DependencyMaterializationKind>,
     pub compatibility: Value,
     pub tree_limits: DependencyTreeLimits,
     pub max_total_files: u64,
@@ -74,6 +74,17 @@ pub fn materialize_source_bundle_runtime(
     };
     nrz_source_bundle::source_application_runtime(request.manifest)
         .map_err(RuntimeArtifactError::Invariant)?;
+    if request.policy.kind.is_none()
+        && let Some(file) = request
+            .manifest
+            .files
+            .iter()
+            .find(|file| file.role == "dependency")
+    {
+        return Err(SourceBundleMaterializationError::UnexpectedDependencies {
+            source_root: file.path.clone(),
+        });
+    }
     let targets = freeze_layer_targets(request.manifest, request.policy.kind, &version)?;
     for layer in request
         .manifest
@@ -87,6 +98,45 @@ pub fn materialize_source_bundle_runtime(
             &[],
             targets.get(&layer.name).map(String::as_str),
         )?;
+    }
+    // A single dependency policy cannot attest a second interpreter's tree.
+    // Code-only siblings retain their independent frozen launch target.
+    if request.policy.kind.is_some()
+        && request.manifest.files.iter().any(|file| {
+            file.role == "dependency"
+                && file
+                    .layer_name
+                    .as_ref()
+                    .and_then(|name| targets.get(name))
+                    .is_some_and(|target| {
+                        target != &version
+                            && match request.policy.kind {
+                                Some(DependencyMaterializationKind::JavaScriptNodeModules) => {
+                                    target.starts_with("bun-") || target.starts_with("node-")
+                                }
+                                Some(DependencyMaterializationKind::PythonSitePackages) => {
+                                    target.starts_with("python-")
+                                }
+                                None => false,
+                            }
+                    })
+        })
+    {
+        return Err(RuntimeArtifactError::Invariant(
+            "sibling dependencies require their own frozen build policy".into(),
+        )
+        .into());
+    }
+    if let Some(minor) = PythonMinor::from_target(&version)
+        && request.policy.kind == Some(DependencyMaterializationKind::PythonSitePackages)
+        && request.manifest.files.iter().any(|file| {
+            file.role == "dependency" && PythonMinor::for_dependency_path(&file.path) != Some(minor)
+        })
+    {
+        return Err(RuntimeArtifactError::Invariant(
+            "Python dependency root differs from frozen build minor".into(),
+        )
+        .into());
     }
     fs::create_dir(request.output_root).map_err(|source| SourceBundleMaterializationError::Io {
         operation: "create runtime materialization root",
@@ -123,10 +173,15 @@ pub fn materialize_source_bundle_runtime(
     let mut total_bytes = 0_u64;
     let mut dependencies = Vec::with_capacity(trees.len());
     for (index, tree) in trees.into_iter().enumerate() {
-        if !dependency_root_matches_kind(&tree.source_root, request.policy.kind) {
+        let kind = request.policy.kind.ok_or_else(|| {
+            SourceBundleMaterializationError::UnexpectedDependencies {
+                source_root: tree.source_root.clone(),
+            }
+        })?;
+        if !dependency_root_matches_kind(&tree.source_root, kind) {
             return Err(SourceBundleMaterializationError::DependencyKindMismatch {
                 source_root: tree.source_root,
-                kind: request.policy.kind,
+                kind,
             });
         }
         let allowed_mount_points = allowed_mount_points_by_layer
@@ -136,7 +191,7 @@ pub fn materialize_source_bundle_runtime(
         let output = toolchain.materialize(DependencyMaterializationRequest {
             source_tree: &tree.path,
             output_image: &image_path,
-            kind: request.policy.kind,
+            kind,
             compatibility: request.policy.compatibility.clone(),
             limits: request.policy.tree_limits,
             symlink_scope: DependencySymlinkScope::RuntimeMounts {
@@ -192,18 +247,21 @@ fn dependency_root_matches_kind(root: &str, kind: DependencyMaterializationKind)
             .split('/')
             .next_back()
             .is_some_and(|component| component == "node_modules"),
-        DependencyMaterializationKind::PythonSitePackages => root == PYTHON_314_SITE_PACKAGES_ROOT,
+        DependencyMaterializationKind::PythonSitePackages => PythonMinor::ALL
+            .into_iter()
+            .any(|minor| root == minor.site_packages_root()),
     }
 }
 
 fn freeze_layer_targets(
     manifest: &SourceLogicalManifest,
-    kind: DependencyMaterializationKind,
+    kind: Option<DependencyMaterializationKind>,
     primary_target: &str,
 ) -> Result<HashMap<String, String>, SourceBundleMaterializationError> {
     let expected = match kind {
-        DependencyMaterializationKind::JavaScriptNodeModules => "JAVASCRIPT",
-        DependencyMaterializationKind::PythonSitePackages => "PYTHON",
+        Some(DependencyMaterializationKind::JavaScriptNodeModules) => "JAVASCRIPT",
+        Some(DependencyMaterializationKind::PythonSitePackages) => "PYTHON",
+        None => "NATIVE",
     };
     let mut targets = HashMap::new();
     let mut siblings = Vec::new();
@@ -212,13 +270,44 @@ fn freeze_layer_targets(
         .iter()
         .filter(|layer| layer.target == "COMPUTE")
     {
-        if layer
+        let intent = nrz_source_bundle::layer_application_runtime(layer.runtime_config.as_ref())
+            .map_err(RuntimeArtifactError::Invariant)?;
+        if intent.as_ref().is_some_and(|intent| {
+            intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Executable
+        }) || layer
             .runtime_config
             .as_ref()
             .and_then(|c| c.get("isBinaryEntry"))
             .and_then(Value::as_bool)
             == Some(true)
         {
+            if kind.is_none() {
+                if primary_target != nrz_runtime_artifact::NATIVE_EXECUTION_TARGET {
+                    return Err(RuntimeArtifactError::Invariant(
+                        "native layer requires the qualified build target".into(),
+                    )
+                    .into());
+                }
+                targets.insert(layer.name.clone(), primary_target.to_owned());
+            } else if intent.is_some() {
+                let target = layer
+                    .runtime_config
+                    .as_ref()
+                    .and_then(|config| config.get("buildRuntimeVersion"))
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        RuntimeArtifactError::Invariant(
+                            "native sibling requires a frozen build target".into(),
+                        )
+                    })?;
+                if target != nrz_runtime_artifact::NATIVE_EXECUTION_TARGET {
+                    return Err(RuntimeArtifactError::Invariant(
+                        "native sibling requires the qualified build target".into(),
+                    )
+                    .into());
+                }
+                targets.insert(layer.name.clone(), target.to_owned());
+            }
             continue;
         }
         let runtime_family = layer
@@ -227,11 +316,35 @@ fn freeze_layer_targets(
             .and_then(Value::as_object)
             .and_then(|config| config.get("runtimeFamily"));
         let actual = match runtime_family {
-            None => "JAVASCRIPT".to_string(),
+            None => if intent.as_ref().is_some_and(|intent| {
+                intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+            }) {
+                "PYTHON"
+            } else {
+                "JAVASCRIPT"
+            }
+            .to_string(),
             Some(Value::String(value)) => value.clone(),
             Some(value) => value.to_string(),
         };
-        if actual == expected {
+        let foreign_javascript_interpreter =
+            intent.as_ref().is_some_and(|intent| match intent.family {
+                nrz_source_bundle::ApplicationRuntimeFamily::Bun => {
+                    primary_target.starts_with("node-")
+                }
+                nrz_source_bundle::ApplicationRuntimeFamily::Node => {
+                    primary_target.starts_with("bun-")
+                }
+                _ => false,
+            });
+        let foreign_python_minor = actual == "PYTHON"
+            && layer
+                .runtime_config
+                .as_ref()
+                .and_then(|config| config.get("buildRuntimeVersion"))
+                .and_then(Value::as_str)
+                .is_some_and(|target| target != primary_target);
+        if actual == expected && !foreign_javascript_interpreter && !foreign_python_minor {
             targets.insert(layer.name.clone(), primary_target.to_owned());
         } else if matches!(actual.as_str(), "JAVASCRIPT" | "PYTHON") {
             siblings.push((layer, actual));
@@ -246,6 +359,12 @@ fn freeze_layer_targets(
     if targets.is_empty()
         && let Some((layer, actual)) = siblings.first()
     {
+        if actual == expected {
+            return Err(RuntimeArtifactError::Invariant(
+                "application runtime conflicts with the admitted primary build target".into(),
+            )
+            .into());
+        }
         return Err(SourceBundleMaterializationError::RuntimeFamilyMismatch {
             layer_name: layer.name.clone(),
             expected,
@@ -273,6 +392,8 @@ fn freeze_layer_targets(
 
 #[derive(Debug, Error)]
 pub enum SourceBundleMaterializationError {
+    #[error("dependency root {source_root} is forbidden by the no-dependency build policy")]
+    UnexpectedDependencies { source_root: String },
     #[error("verified dependency trees exceed the materialization policy limits")]
     LimitExceeded,
     #[error("dependency root {source_root} is incompatible with materialization kind {kind:?}")]

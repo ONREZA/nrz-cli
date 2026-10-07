@@ -166,6 +166,9 @@ fn print_human_explanation(output: &ConfigExplainOutput) {
     );
     print_value("Deploy compute", &output.effective.deploy_compute);
     print_value("Deploy entry", &output.effective.deploy_entry);
+    if output.effective.deploy_python_version.value.is_some() {
+        print_value("Python version", &output.effective.deploy_python_version);
+    }
     print_value("Deploy app", &output.effective.deploy_app);
 }
 

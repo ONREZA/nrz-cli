@@ -607,3 +607,69 @@ async fn python_install_step_ignores_retained_shell_command_without_manifest() {
             .exists()
     );
 }
+
+#[tokio::test]
+async fn python_install_step_preserves_authored_command_and_dependencies() {
+    for platform_runner in [false, true] {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
+        let stale = dir
+            .path()
+            .join(nrz_source_bundle::PythonMinor::default().site_packages_root())
+            .join("prepared.py");
+        fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        fs::write(&stale, "prepared = True").unwrap();
+        let settings = server_install_settings(
+            Some("echo authored > installed.txt"),
+            Some(nrz::config::BuildSettingSource::User),
+        );
+        let mut effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
+        if platform_runner {
+            effective.apply_platform_runner_settings(&settings);
+        } else {
+            effective.apply_server_settings(Some(&settings));
+        }
+        run_install_step(dir.path(), true, &effective, &[], None, platform_runner)
+            .await
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path().join("installed.txt"))
+                .unwrap()
+                .trim(),
+            "authored"
+        );
+        assert!(
+            stale.exists(),
+            "authored install owns its prepared dependency tree"
+        );
+    }
+}
+
+#[tokio::test]
+async fn python_install_step_user_absence_preserves_prepared_dependencies() {
+    for platform_runner in [false, true] {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
+        let prepared = dir
+            .path()
+            .join(nrz_source_bundle::PythonMinor::default().site_packages_root())
+            .join("prepared.py");
+        fs::create_dir_all(prepared.parent().unwrap()).unwrap();
+        fs::write(&prepared, "prepared = True").unwrap();
+        let settings = server_install_settings(None, Some(nrz::config::BuildSettingSource::User));
+        let mut effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
+        if platform_runner {
+            effective.apply_platform_runner_settings(&settings);
+        } else {
+            effective.apply_server_settings(Some(&settings));
+        }
+        run_install_step(dir.path(), true, &effective, &[], None, platform_runner)
+            .await
+            .unwrap();
+        assert!(
+            prepared.exists(),
+            "explicit install absence must not clean prepared dependencies"
+        );
+        assert!(resolve_install_command(dir.path(), &effective).is_none());
+    }
+}

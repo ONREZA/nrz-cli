@@ -42,6 +42,19 @@ pub(crate) fn canonical_build_runtime_target(
     declaration: Option<&ApplicationRuntimeDeclaration>,
     admitted_node_version: Option<&str>,
 ) -> anyhow::Result<Option<String>> {
+    if declaration
+        .is_some_and(|declaration| declaration.family == ApplicationRuntimeFamily::Executable)
+        || matches!(runtime.runtime_type, RuntimeType::Dart | RuntimeType::Go)
+    {
+        let target = nrz_runtime_artifact::NATIVE_EXECUTION_TARGET;
+        if platform_runner && selected_platform_target()? != target {
+            return Err(output::coded_error(
+                "APPLICATION_RUNTIME_INVALID",
+                "native source conflicts with the frozen Builder target",
+            ));
+        }
+        return Ok(Some(target.into()));
+    }
     let authored_node = declaration
         .is_some_and(|declaration| declaration.family == ApplicationRuntimeFamily::Node)
         || manifest.is_some_and(|manifest| {
@@ -61,7 +74,12 @@ pub(crate) fn canonical_build_runtime_target(
     }
     match runtime.runtime_type {
         RuntimeType::Python => {
-            let version = crate::detect::python::PYTHON_RUNTIME_VERSION;
+            let minor = runtime
+                .version
+                .as_deref()
+                .and_then(nrz_source_bundle::PythonMinor::from_version)
+                .context("unsupported selected Python minor")?;
+            let version = minor.version();
             if runtime.version.as_deref() != Some(version) {
                 return Err(output::coded_error(
                     "APPLICATION_RUNTIME_INVALID",
@@ -133,6 +151,23 @@ pub(crate) async fn validate_application_runtime_before_build(
         }
         return Ok(None);
     };
+    if matches!(
+        declaration.family,
+        ApplicationRuntimeFamily::Python | ApplicationRuntimeFamily::Executable
+    ) {
+        let target = canonical_build_runtime_target(
+            runtime,
+            platform_runner,
+            None,
+            Some(declaration),
+            effective.node_version(),
+        )?
+        .context("application requires an admitted build target")?;
+        declaration
+            .validate_target(Some(&target))
+            .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", error))?;
+        return Ok(Some(target));
+    }
     let target = if platform_runner {
         selected_platform_target()?
     } else {
@@ -141,15 +176,18 @@ pub(crate) async fn validate_application_runtime_before_build(
                 output::coded_error("APPLICATION_RUNTIME_INVALID", "explicit Node runtime requires the project's selected Node version before building")
             })?)?,
             ApplicationRuntimeFamily::Bun => pinned_bun_build_target()?,
+            ApplicationRuntimeFamily::Python | ApplicationRuntimeFamily::Executable => unreachable!("non-JavaScript target resolved above"),
         }
     };
     declaration
-        .intent()
         .validate_target(Some(&target))
         .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", error))?;
     let binary = match declaration.family {
         ApplicationRuntimeFamily::Node => "node",
         ApplicationRuntimeFamily::Bun => "bun",
+        ApplicationRuntimeFamily::Python | ApplicationRuntimeFamily::Executable => {
+            unreachable!("non-JavaScript target resolved above")
+        }
     };
     let mut command = tokio::process::Command::new(binary);
     command
@@ -180,6 +218,7 @@ pub(crate) async fn validate_application_runtime_before_build(
                     == target.strip_prefix("node-")
             }
             ApplicationRuntimeFamily::Bun => Some(actual) == target.strip_prefix("bun-"),
+            ApplicationRuntimeFamily::Python | ApplicationRuntimeFamily::Executable => false,
         };
     if !matches {
         return Err(output::coded_error(
