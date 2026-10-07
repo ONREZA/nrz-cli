@@ -1009,3 +1009,139 @@ fn interpreter_sibling_dependencies_require_their_own_build_policy() {
         );
     }
 }
+
+// A prebuilt or authored Python tree can bypass installer target-wheel checks.
+// The trusted image producer must reject the actual foreign bytes before mkfs.
+#[test]
+fn python_native_platform_conflicts_fail_before_image_generation() {
+    let mut arm_elf = vec![0_u8; 64];
+    arm_elf[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+    arm_elf[16..18].copy_from_slice(&3_u16.to_le_bytes());
+    arm_elf[18..20].copy_from_slice(&183_u16.to_le_bytes());
+    for body in [
+        arm_elf,
+        {
+            let mut pe = vec![0_u8; 132];
+            pe[..2].copy_from_slice(b"MZ");
+            pe[60..64].copy_from_slice(&128_u32.to_le_bytes());
+            pe[128..].copy_from_slice(b"PE\0\0");
+            pe
+        },
+        b"\xcf\xfa\xed\xfe Mach-O".to_vec(),
+    ] {
+        check_native_materialization(
+            &body,
+            DependencyMaterializationKind::PythonSitePackages,
+            false,
+        );
+        check_native_materialization(
+            &body,
+            DependencyMaterializationKind::JavaScriptNodeModules,
+            true,
+        );
+    }
+}
+
+#[test]
+fn python_native_platform_accepts_relocatable_objects_and_opaque_assets() {
+    let mut object = vec![0_u8; 64];
+    object[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+    object[16..18].copy_from_slice(&1_u16.to_le_bytes());
+    object[18..20].copy_from_slice(&62_u16.to_le_bytes());
+    for body in [object, b"!<arch>\n".to_vec(), b"plain resource".to_vec()] {
+        check_native_materialization(
+            &body,
+            DependencyMaterializationKind::PythonSitePackages,
+            true,
+        );
+    }
+}
+
+fn check_native_materialization(body: &[u8], kind: DependencyMaterializationKind, accepted: bool) {
+    let temp = TempDir::new().unwrap();
+    let source_tree = temp.path().join("site-packages");
+    fs::create_dir(&source_tree).unwrap();
+    fs::write(source_tree.join("payload"), body).unwrap();
+    let output_image = temp.path().join("dependency.erofs");
+    let mut policy = compatibility();
+    if kind == DependencyMaterializationKind::PythonSitePackages {
+        policy["runtimeFamily"] = json!("python");
+        policy["runtimeVersion"] = json!("python-3.14");
+    }
+    let before = nrz_dependency_materializer::inspect_dependency_tree(
+        &source_tree,
+        DependencyTreeLimits {
+            max_expanded_bytes: 1024 * 1024,
+            ..tree_limits()
+        },
+    )
+    .unwrap();
+    let toolchain = fake_erofs_toolchain(temp.path());
+    // Observe actual process invocation without changing the shared test tool.
+    let mkfs = temp.path().join("mkfs.erofs");
+    let script = fs::read_to_string(&mkfs).unwrap();
+    fs::write(
+        &mkfs,
+        script.replacen(
+            "set -eu\n",
+            "set -eu\nprintf invoked > \"${0}.called\"\n",
+            1,
+        ),
+    )
+    .unwrap();
+    let invoked = temp.path().join("mkfs.erofs.called");
+    let result = toolchain.materialize(
+        nrz_dependency_materializer::DependencyMaterializationRequest {
+            source_tree: &source_tree,
+            output_image: &output_image,
+            kind,
+            compatibility: policy,
+            limits: DependencyTreeLimits {
+                max_expanded_bytes: 1024 * 1024,
+                ..tree_limits()
+            },
+            symlink_scope: nrz_dependency_materializer::DependencySymlinkScope::ClosedTree,
+        },
+    );
+    if accepted {
+        let output = result.unwrap();
+        assert_eq!(output.tree, before);
+        assert!(output_image.exists());
+        assert!(invoked.exists());
+    } else {
+        let error =
+            result.expect_err("foreign Python native payload must fail before image generation");
+        assert!(error.to_string().contains("native platform"), "{error}");
+        assert!(!output_image.exists());
+        assert!(!invoked.exists());
+    }
+}
+
+// Real compiled native fixtures are reused from the CLI qualification (CC +
+// clang/lld cross targets), so this test needs no SDK/compiler on the consumer.
+#[test]
+#[ignore = "requires NRZ_PYTHON_NATIVE_FIXTURE_ROOT with compiled platform fixtures"]
+fn real_python_native_platform_materialization() {
+    let root = std::path::PathBuf::from(
+        std::env::var_os("NRZ_PYTHON_NATIVE_FIXTURE_ROOT").expect("fixture root"),
+    );
+    for (name, accepted) in [
+        ("linux_x64.so", true),
+        ("linux_arm64.so", false),
+        ("macos_x64.so", false),
+        ("windows_x64.pyd", false),
+        ("fixture.o", true),
+        ("libfixture.a", true),
+        ("NativeResource.class", true),
+        ("pure_mz.py", true),
+        ("macos_fat.so", false),
+        ("windows_long_stub.pyd", false),
+    ] {
+        let bytes = fs::read(root.join(name)).unwrap();
+        check_native_materialization(
+            &bytes,
+            DependencyMaterializationKind::PythonSitePackages,
+            accepted,
+        );
+    }
+}

@@ -5,11 +5,21 @@ use clap::Parser as _;
 #[cfg(unix)]
 #[tokio::test]
 async fn authored_python_install_cannot_publish_unqualified_native_dependencies() {
+    let mut pe = [0; 128];
+    pe[..2].copy_from_slice(b"MZ");
+    pe[60..64].copy_from_slice(&64_u32.to_le_bytes());
+    pe[64..68].copy_from_slice(b"PE\0\0");
+    let mut elf = [0; 64];
+    elf[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+    elf[16..18].copy_from_slice(&3_u16.to_le_bytes());
+    elf[18..20].copy_from_slice(&62_u16.to_le_bytes());
+    elf[20..24].copy_from_slice(&1_u32.to_le_bytes());
+    elf[52..54].copy_from_slice(&64_u16.to_le_bytes());
     for minor in PythonMinor::ALL {
         for bytes in [
             b"\xcf\xfa\xed\xfeHOST_MACH_O".as_slice(),
-            b"MZHOST_PE",
-            b"\x7fELFUNQUALIFIED_NATIVE",
+            pe.as_slice(),
+            elf.as_slice(),
         ] {
             let project = tempfile::tempdir().unwrap();
             std::fs::write(project.path().join("main.py"), "print('APP')\n").unwrap();
@@ -81,10 +91,20 @@ async fn authored_python_install_preserves_pure_prebuilt_and_static_stage_bounda
         for mode in ["pure", "skip-install", "skip-build", "empty", "static"] {
             let project = tempfile::tempdir().unwrap();
             std::fs::write(project.path().join("main.py"), "print('APP')\n").unwrap();
+            // Target-platform header admission is deliberately separate from
+            // runtime loading, qualified by the actual ELF fixture CLI checks.
+            let mut target_elf = [0u8; 64];
+            target_elf[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+            target_elf[16..18].copy_from_slice(&3u16.to_le_bytes()); // ET_DYN, entry0
+            target_elf[18..20].copy_from_slice(&62u16.to_le_bytes()); // EM_X86_64
+            target_elf[20..24].copy_from_slice(&1u32.to_le_bytes());
+            target_elf[52..54].copy_from_slice(&64u16.to_le_bytes());
             let bytes = if mode == "pure" {
                 b"VALUE='PURE'\n".as_slice()
+            } else if mode == "static" {
+                b"\xcf\xfa\xed\xfeSTATIC_DOWNLOAD".as_slice()
             } else {
-                b"\xcf\xfa\xed\xfePREBUILT_NATIVE".as_slice()
+                &target_elf
             };
             std::fs::write(project.path().join("host.bin"), bytes).unwrap();
             let relative = format!("{}/demo/native.data", minor.site_packages_root());
@@ -310,6 +330,7 @@ fn authored_python_dependency_guard_preserves_frozen_owners_and_builder_mode() {
             ArtifactRootScope::ProjectRoot,
             &artifact.scan,
         );
+        assert!(validate_retained_python_native_platform(&artifact, &files).is_err());
         assert!(
             validate_authored_python_dependency_output(
                 &artifact,
@@ -326,5 +347,79 @@ fn authored_python_dependency_guard_preserves_frozen_owners_and_builder_mode() {
             )
             .is_ok()
         );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn retained_python_native_platform_is_checked_without_install_or_build() {
+    for minor in PythonMinor::ALL {
+        for placement in ["dependency", "application"] {
+            for invocation in ["skip-install", "skip-build", "empty-install"] {
+                let project = tempfile::tempdir().unwrap();
+                std::fs::write(project.path().join("main.py"), "print('APP')\n").unwrap();
+                let relative = if placement == "dependency" {
+                    format!("{}/demo/native.data", minor.site_packages_root())
+                } else {
+                    "native.data".to_string()
+                };
+                std::fs::create_dir_all(project.path().join(&relative).parent().unwrap()).unwrap();
+                std::fs::write(
+                    project.path().join(&relative),
+                    b"\xcf\xfa\xed\xfeFOREIGN_MACH_O",
+                )
+                .unwrap();
+                let requirements = if placement == "dependency" && invocation == "skip-install" {
+                    "colorama; sys_platform == 'win32'\n"
+                } else if placement == "dependency" && invocation == "empty-install" {
+                    "demo==1.0\n"
+                } else {
+                    ""
+                };
+                std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
+                let mut config = nrz::config::ProjectConfig::default();
+                config.build.output_directory = Some(".".into());
+                config.build.python_version = Some(minor);
+                config.build.install_command = Some(if invocation == "empty-install" {
+                    String::new()
+                } else {
+                    "printf UNEXPECTED_INSTALL > installer-marker".into()
+                });
+                config.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Python);
+                config.deploy.python_version = Some(minor);
+                config.deploy.entry = Some("main.py".into());
+                std::fs::write(
+                    project.path().join("onreza.toml"),
+                    toml::to_string(&config).unwrap(),
+                )
+                .unwrap();
+                let command = crate::context::CommandContext::resolve_platform_root(
+                    project.path(),
+                    &config,
+                    true,
+                )
+                .unwrap();
+                let mut args = crate::cli::DeployArgs::try_parse_from([
+                    "deploy",
+                    project.path().to_str().unwrap(),
+                    "--dry",
+                ])
+                .unwrap();
+                args.skip_install = invocation == "skip-install";
+                args.skip_build = invocation == "skip-build";
+                let error = super::super::plan::build(super::super::plan::DeployPlanRequest {
+                    args: &args, command: &command, explicit_compute: None, build_logs: None,
+                    execution_env: &[], target_production: None, platform_runner: false,
+                }).await.err().unwrap_or_else(|| panic!("{minor:?}/{placement}/{invocation}: foreign native payload published without any installer/build execution"));
+                assert!(!project.path().join("installer-marker").exists());
+                assert!(
+                    error
+                        .chain()
+                        .filter_map(|cause| cause.downcast_ref::<crate::output::CodedError>())
+                        .any(|coded| coded.code == "PYTHON_PLATFORM_UNSUPPORTED"),
+                    "{minor:?}/{placement}/{invocation}: {error:#}"
+                );
+            }
+        }
     }
 }

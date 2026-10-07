@@ -826,6 +826,10 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         &artifact_files,
         &build_artifact.detection,
     )?;
+    super::python_toolchain::validate_retained_python_native_platform(
+        &runtime_artifact,
+        &artifact_files,
+    )?;
     let files = artifact_files.deployable_entries();
     if authored_install_executed {
         super::python_toolchain::validate_authored_python_dependency_output(

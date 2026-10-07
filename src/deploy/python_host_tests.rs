@@ -1,5 +1,31 @@
 use super::*;
 
+fn linux_elf_header() -> [u8; 64] {
+    let mut header = [0; 64];
+    header[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+    header[16..18].copy_from_slice(&3_u16.to_le_bytes());
+    header[18..20].copy_from_slice(&62_u16.to_le_bytes());
+    header[20..24].copy_from_slice(&1_u32.to_le_bytes());
+    header[52..54].copy_from_slice(&64_u16.to_le_bytes());
+    header
+}
+
+fn pe_header() -> [u8; 128] {
+    let mut header = [0; 128];
+    header[..2].copy_from_slice(b"MZ");
+    header[60..64].copy_from_slice(&64_u32.to_le_bytes());
+    header[64..68].copy_from_slice(b"PE\0\0");
+    header
+}
+
+fn fat_header() -> [u8; 64] {
+    let mut header = [0; 64];
+    header[..4].copy_from_slice(b"\xca\xfe\xba\xbf");
+    header[4..8].copy_from_slice(&1_u32.to_be_bytes());
+    header[8..12].copy_from_slice(&0x01000007_u32.to_be_bytes());
+    header
+}
+
 #[tokio::test]
 async fn incompatible_host_build_refuses_native_target_tree_before_compiler_selection() {
     for (os, arch) in [
@@ -9,10 +35,10 @@ async fn incompatible_host_build_refuses_native_target_tree_before_compiler_sele
         ("linux", "aarch64"),
     ] {
         for (name, bytes) in [
-            ("native.bin", b"\x7fELFfake-linux-payload".as_slice()),
+            ("native.bin", linux_elf_header().as_slice()),
             ("native.data", b"\xfe\xed\xfa\xcfMach-O".as_slice()),
-            ("fat.data", b"\xca\xfe\xba\xbffat-Mach-O".as_slice()),
-            ("windows.data", b"MZportable-executable".as_slice()),
+            ("fat.data", fat_header().as_slice()),
+            ("windows.data", pe_header().as_slice()),
             ("archive.data", b"!<arch>\nstatic-library".as_slice()),
             ("extension.SO", b"".as_slice()),
             ("extension.pyd", b"".as_slice()),
@@ -84,7 +110,7 @@ fn portable_or_absent_target_dependencies_preserve_local_build_support() {
         )
         .unwrap();
     }
-    std::fs::write(stage.join("demo/native.so"), b"\x7fELF").unwrap();
+    std::fs::write(stage.join("demo/native.so"), linux_elf_header()).unwrap();
     validate_local_build_dependency_host_with_glibc(
         project.path(),
         PythonInstallMode::ManagedLocal,
@@ -104,15 +130,16 @@ fn portable_or_absent_target_dependencies_preserve_local_build_support() {
 
 #[test]
 fn portable_wheel_recipe_rejects_native_payload_with_shared_host_evidence() {
+    use std::io::Write as _;
     for (name, contents, accepted) in [
-        ("demo/__init__.py", "VALUE=42\n".as_bytes(), true),
-        ("demo/data/native.bin", b"\x7fELFpayload".as_slice(), false),
+        ("demo/__init__.py", b"VALUE=42\n".as_slice(), true),
+        ("demo/data/native.bin", linux_elf_header().as_slice(), false),
         (
             "demo/data/native.bin",
             b"\xfe\xed\xfa\xcfpayload".as_slice(),
             false,
         ),
-        ("demo/data/native.bin", b"MZpayload".as_slice(), false),
+        ("demo/data/native.bin", pe_header().as_slice(), false),
         ("demo/native.so", b"".as_slice(), false),
     ] {
         let project = tempfile::tempdir().unwrap();
@@ -127,43 +154,22 @@ fn portable_wheel_recipe_rejects_native_payload_with_shared_host_evidence() {
         .unwrap();
         let qualification = commands
             .iter()
-            .find(|command| {
-                command
-                    .display
-                    .contains("qualify portable application wheel")
-            })
+            .find_map(|command| command.portable_wheel_directory.as_ref())
             .unwrap();
-        let script_index = qualification
-            .arguments
-            .iter()
-            .position(|argument| argument == "-c")
-            .unwrap()
-            + 1;
-        let wheel = project
-            .path()
-            .join(PROJECT_WHEELS)
-            .join("demo-1.0-py3-none-any.whl");
-        std::fs::create_dir_all(wheel.parent().unwrap()).unwrap();
-        let payload = contents
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        let output=std::process::Command::new("python3").args(["-I","-c","import zipfile,sys; archive=zipfile.ZipFile(sys.argv[1], 'w'); archive.writestr(sys.argv[2], bytes.fromhex(sys.argv[3])); archive.close()"]).arg(&wheel).args([name,&payload]).output().unwrap();
-        assert!(output.status.success());
-        let output = std::process::Command::new("python3")
-            .args(["-I", "-c"])
-            .args(&qualification.arguments[script_index..])
-            .current_dir(project.path())
-            .output()
-            .unwrap();
-        assert_eq!(
-            output.status.success(),
-            accepted,
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
+        let directory = project.path().join(qualification);
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut wheel = zip::ZipWriter::new(
+            std::fs::File::create(directory.join("demo-1.0-py3-none-any.whl")).unwrap(),
         );
+        wheel
+            .start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        wheel.write_all(contents).unwrap();
+        wheel.finish().unwrap();
+        let result = qualify_portable_application_wheels(project.path(), qualification);
+        assert_eq!(result.is_ok(), accepted, "{name}: {result:?}");
         if !accepted {
-            assert!(String::from_utf8_lossy(&output.stderr).contains("native payload"));
+            assert!(result.unwrap_err().to_string().contains("native payload"));
         }
     }
 }
@@ -186,7 +192,7 @@ fn native_stage_inspection_handles_relative_symlinks_and_directory_cycles() {
     .unwrap();
     let external = project.path().join("host-native");
     std::fs::create_dir(&external).unwrap();
-    std::fs::write(external.join("payload.bin"), b"\x7fELFnative").unwrap();
+    std::fs::write(external.join("payload.bin"), linux_elf_header()).unwrap();
     std::os::unix::fs::symlink(
         "../../../../../../host-native/payload.bin",
         stage.join("demo/data/alias.py"),
@@ -232,7 +238,7 @@ async fn assert_linux_libc_refuses_native_stage(glibc_version: Option<(u32, u32)
     let minor = PythonMinor::default();
     let stage = project.path().join(minor.site_packages_root());
     std::fs::create_dir_all(&stage).unwrap();
-    std::fs::write(stage.join("native.bin"), b"\x7fELFsynthetic-native").unwrap();
+    std::fs::write(stage.join("native.bin"), linux_elf_header()).unwrap();
     let result = build_environment_for_host(
         project.path(),
         PythonInstallMode::ManagedLocal,
@@ -294,7 +300,7 @@ fn linux_glibc_floor_keeps_portable_stage_and_qualified_native_builds() {
         )
         .unwrap();
     }
-    std::fs::write(stage.join("native.bin"), b"\x7fELFsynthetic-native").unwrap();
+    std::fs::write(stage.join("native.bin"), linux_elf_header()).unwrap();
     for glibc_version in [
         Some(python_target_glibc_floor()),
         Some((2, 44)),
@@ -343,7 +349,7 @@ fn actual_linux_host_libc_probe_qualifies_native_stage() {
     let minor = PythonMinor::default();
     let stage = project.path().join(minor.site_packages_root());
     std::fs::create_dir_all(&stage).unwrap();
-    std::fs::write(stage.join("native.bin"), b"\x7fELFsynthetic-native").unwrap();
+    std::fs::write(stage.join("native.bin"), linux_elf_header()).unwrap();
     let observed = host_glibc_version();
     let result = validate_local_build_dependency_host(
         project.path(),

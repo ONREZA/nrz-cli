@@ -20,7 +20,7 @@ pub use tool_executor::{
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, Metadata, Permissions};
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
@@ -29,6 +29,7 @@ use std::sync::Arc;
 use nrz_runtime_artifact::{
     DEPENDENCY_EROFS_MEDIA_TYPE, DEPENDENCY_MATERIALIZATION_V1_SCHEMA_VERSION,
     VerifiedDependencyMaterializationManifest, verify_dependency_materialization_manifest,
+    verify_linux_x86_64_native_platform,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -228,6 +229,7 @@ impl ErofsToolchain {
             &source_tree,
             request.limits,
             request.symlink_scope,
+            request.kind == DependencyMaterializationKind::PythonSitePackages,
         )?;
         let tree = inspection.summary;
         let generator_digest = sha256_file(&self.mkfs_erofs)?;
@@ -295,6 +297,7 @@ impl ErofsToolchain {
             &source_tree,
             request.limits,
             request.symlink_scope,
+            request.kind == DependencyMaterializationKind::PythonSitePackages,
         )?;
         if inspection_after_generation.summary != tree
             || inspection_after_generation.uses_runtime_mount_symlink
@@ -423,7 +426,7 @@ pub fn inspect_dependency_tree(
     root: &Path,
     limits: DependencyTreeLimits,
 ) -> Result<DependencyTreeSummary, DependencyMaterializerError> {
-    inspect_dependency_tree_with_scope(root, limits, DependencySymlinkScope::ClosedTree)
+    inspect_dependency_tree_with_scope(root, limits, DependencySymlinkScope::ClosedTree, false)
         .map(|inspection| inspection.summary)
 }
 
@@ -437,6 +440,7 @@ fn inspect_dependency_tree_with_scope(
     root: &Path,
     limits: DependencyTreeLimits,
     symlink_scope: DependencySymlinkScope<'_>,
+    verify_python_native_platform: bool,
 ) -> Result<DependencyTreeInspection, DependencyMaterializerError> {
     limits.validate()?;
     let root = canonical_source_tree(root)?;
@@ -485,7 +489,8 @@ fn inspect_dependency_tree_with_scope(
                     limits.max_expanded_bytes,
                 )?;
 
-                let (file_digest, native_object) = hash_regular_file(&entry.path)?;
+                let (file_digest, native_object) =
+                    hash_regular_file(&entry.path, verify_python_native_platform)?;
                 hasher.update(file_digest);
                 if native_object {
                     summary.native_object_count = summary.native_object_count.saturating_add(1);
@@ -721,12 +726,26 @@ fn canonical_absolute_path(path: &str) -> Option<PathBuf> {
     Some(normalized)
 }
 
-fn hash_regular_file(path: &Path) -> Result<([u8; 32], bool), DependencyMaterializerError> {
+fn hash_regular_file(
+    path: &Path,
+    verify_python_native_platform: bool,
+) -> Result<([u8; 32], bool), DependencyMaterializerError> {
     let mut file = File::open(path).map_err(|source| DependencyMaterializerError::Io {
         operation: "open dependency file",
         path: path.to_path_buf(),
         source,
     })?;
+    if verify_python_native_platform {
+        verify_linux_x86_64_native_platform(&mut file).map_err(|error| {
+            DependencyMaterializerError::Contract(format!("{}: {error}", path.display()))
+        })?;
+        file.seek(SeekFrom::Start(0))
+            .map_err(|source| DependencyMaterializerError::Io {
+                operation: "rewind dependency file",
+                path: path.to_path_buf(),
+                source,
+            })?;
+    }
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; IO_BUFFER_BYTES];
     let mut prefix = [0u8; 4];
@@ -1009,6 +1028,7 @@ mod tests {
                 mount_point: "/output/.next/node_modules",
                 allowed_mount_points: &allowed_mount_points,
             },
+            false,
         )
         .unwrap();
 

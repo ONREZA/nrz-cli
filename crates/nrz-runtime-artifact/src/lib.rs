@@ -8,6 +8,8 @@ use thiserror::Error;
 mod execution_compatibility;
 mod launch;
 mod native_executable;
+mod native_platform;
+pub use native_platform::{has_native_payload_header, verify_linux_x86_64_native_platform};
 mod python_startup;
 pub use native_executable::{
     NATIVE_EXECUTION_TARGET, NativeExecutableRequirements, verify_native_executable,

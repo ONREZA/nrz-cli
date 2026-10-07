@@ -222,7 +222,7 @@ fn uv_locked_plan_excludes_dev_and_installs_the_project_separately() {
         nrz_source_bundle::PythonMinor::default(),
     )
     .unwrap();
-    assert_eq!(commands.len(), 6);
+    assert_eq!(commands.len(), 5);
     let export = &commands[1].arguments;
     for flag in [
         "--locked",
@@ -236,7 +236,82 @@ fn uv_locked_plan_excludes_dev_and_installs_the_project_separately() {
     assert!(!export.contains(&OsString::from("--frozen")));
     assert!(commands[2].arguments.contains(&OsString::from("--no-deps")));
     assert!(commands[3].arguments.contains(&OsString::from("build")));
-    assert!(commands[5].arguments.contains(&OsString::from("demo")));
+    assert!(commands[4].arguments.contains(&OsString::from("demo")));
+    assert_eq!(
+        commands[4].portable_wheel_directory.as_deref(),
+        Some(std::path::Path::new(".onreza/python/build/wheels"))
+    );
+    assert!(
+        commands[..4]
+            .iter()
+            .all(|command| command.portable_wheel_directory.is_none())
+    );
+}
+
+#[test]
+fn portable_application_wheel_checks_members_without_rejecting_python_or_java_resources() {
+    use super::python_toolchain::qualify_portable_application_wheels;
+    use std::io::Write as _;
+    let project = tempfile::tempdir().unwrap();
+    let directory = std::path::Path::new(".onreza/python/build/wheels");
+    std::fs::create_dir_all(project.path().join(directory)).unwrap();
+    let mut java = b"\xca\xfe\xba\xbe\0\0\0\x3d\0\x1b\x0a\0\x02\0\x03\x07".to_vec();
+    java.resize(96, 0);
+    let mut pe = vec![0; 8196];
+    pe[..2].copy_from_slice(b"MZ");
+    pe[60..64].copy_from_slice(&8192_u32.to_le_bytes());
+    pe[8192..].copy_from_slice(b"PE\0\0");
+    let cases: &[(&str, &[u8], bool)] = &[
+        ("demo/pure.py", b"MZ = 42\nprint(MZ)\n", false),
+        ("demo/NativeResource.class", &java, false),
+        ("demo/native.so", b"native extension filename", true),
+        ("demo/native.data", b"\xcf\xfa\xed\xfeMACH_O", true),
+        ("demo/long-stub.data", &pe, true),
+    ];
+    for (name, payload, native) in cases {
+        let wheel = project
+            .path()
+            .join(directory)
+            .join("demo-1.0-py3-none-any.whl");
+        let mut archive = zip::ZipWriter::new(std::fs::File::create(&wheel).unwrap());
+        archive
+            .start_file(*name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        archive.write_all(payload).unwrap();
+        archive.finish().unwrap();
+        let result = qualify_portable_application_wheels(project.path(), directory);
+        assert_eq!(result.is_err(), *native, "{name}: {result:?}");
+        if *native {
+            let error = result.unwrap_err().to_string();
+            assert!(
+                error.contains(name) && error.contains("Cloud Builder"),
+                "{error}"
+            );
+        }
+        std::fs::remove_file(wheel).unwrap();
+    }
+    assert!(
+        qualify_portable_application_wheels(project.path(), directory)
+            .unwrap_err()
+            .to_string()
+            .contains("produced no wheel")
+    );
+    #[cfg(unix)]
+    {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("foreign.whl"), b"outside").unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("foreign.whl"),
+            project.path().join(directory).join("linked.whl"),
+        )
+        .unwrap();
+        assert!(
+            qualify_portable_application_wheels(project.path(), directory)
+                .unwrap_err()
+                .to_string()
+                .contains("escapes the project root")
+        );
+    }
 }
 
 #[test]
@@ -253,6 +328,11 @@ fn poetry_platform_plan_uses_frozen_tools_and_validates_both_python_constraints(
     )
     .unwrap();
     assert_eq!(commands.len(), 6);
+    assert!(
+        commands
+            .iter()
+            .all(|command| command.portable_wheel_directory.is_none())
+    );
     let commands = &commands[1..];
     for command in &commands[..2] {
         assert_eq!(
@@ -612,6 +692,15 @@ async fn python_local_rejects_native_payload_in_mislabeled_none_any_wheel() {
     )
     .unwrap()
     {
+        if let Some(directory) = &command.portable_wheel_directory
+            && let Err(error) = super::python_toolchain::qualify_portable_application_wheels(
+                project.path(),
+                directory,
+            )
+        {
+            rejection = Some(error.to_string());
+            break;
+        }
         let result = command
             .process(&uv, &[])
             .current_dir(project.path())
@@ -652,6 +741,10 @@ fn run_plan_with_environment(
     for command in
         install_commands(project, qualification_mode(), "linux", "x86_64", minor).unwrap()
     {
+        if let Some(directory) = &command.portable_wheel_directory {
+            super::python_toolchain::qualify_portable_application_wheels(project, directory)
+                .unwrap();
+        }
         let result = command
             .process(uv, environment)
             .current_dir(project)

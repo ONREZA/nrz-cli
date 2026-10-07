@@ -20,19 +20,6 @@ const MAX_UV_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_UV_BINARY_BYTES: u64 = 96 * 1024 * 1024;
 const PLATFORM_PYTHON_TARGET: &str = "x86_64-manylinux_2_39";
 const NATIVE_PAYLOAD_EXTENSIONS: &[&str] = &[".so", ".pyd", ".dll", ".dylib", ".a", ".o"];
-const NATIVE_PAYLOAD_MAGICS: &[&[u8]] = &[
-    b"\x7fELF",
-    b"\xfe\xed\xfa\xce",
-    b"\xce\xfa\xed\xfe",
-    b"\xfe\xed\xfa\xcf",
-    b"\xcf\xfa\xed\xfe",
-    b"\xca\xfe\xba\xbe",
-    b"\xbe\xba\xfe\xca",
-    b"\xca\xfe\xba\xbf",
-    b"\xbf\xba\xfe\xca",
-    b"MZ",
-    b"!<arch>\n",
-];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum PythonInstallMode {
@@ -45,6 +32,7 @@ pub(super) struct PythonInstallCommand {
     pub(super) program: PathBuf,
     pub(super) arguments: Vec<OsString>,
     pub(super) display: String,
+    pub(super) portable_wheel_directory: Option<PathBuf>,
 }
 
 impl PythonInstallCommand {
@@ -193,6 +181,7 @@ async fn build_environment_for_host(
                     program: uv.clone(),
                     arguments: arguments.into_iter().map(OsString::from).collect(),
                     display: "select managed Python build compiler".into(),
+                    portable_wheel_directory: None,
                 };
                 let mut process: tokio::process::Command = command.process(&uv, environment).into();
                 let output = process
@@ -354,25 +343,47 @@ fn find_native_python_payload(root: &Path) -> anyhow::Result<Option<PathBuf>> {
     }
 }
 
-fn is_native_python_payload_file(path: &Path) -> anyhow::Result<bool> {
-    let name = path
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_ascii_lowercase();
-    if NATIVE_PAYLOAD_EXTENSIONS
+fn has_native_python_extension(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    NATIVE_PAYLOAD_EXTENSIONS
         .iter()
         .any(|extension| name.ends_with(extension))
-    {
+}
+
+fn is_native_python_payload_file(path: &Path) -> anyhow::Result<bool> {
+    if has_native_python_extension(&path.to_string_lossy()) {
         return Ok(true);
     }
-    let mut header = Vec::with_capacity(8);
-    std::fs::File::open(path)?
-        .take(8)
-        .read_to_end(&mut header)?;
-    Ok(NATIVE_PAYLOAD_MAGICS
-        .iter()
-        .any(|magic| header.starts_with(magic)))
+    let mut file = std::fs::File::open(path)?;
+    Ok(nrz_runtime_artifact::has_native_payload_header(&mut file)?)
+}
+
+/// Validate target platform facts for every retained Python serving file,
+/// independently of installer/build execution and declared dependency evidence.
+pub(super) fn validate_retained_python_native_platform(
+    artifact: &crate::artifact::RuntimeArtifact,
+    files: &crate::artifact::ArtifactFileCollection,
+) -> anyhow::Result<()> {
+    for file in &files.files {
+        if !is_python_compute_file(artifact, file) {
+            continue;
+        }
+        let path = artifact.root_dir.join(&file.path);
+        if !std::fs::metadata(&path)?.is_file() {
+            continue;
+        }
+        let mut payload = std::fs::File::open(&path)?;
+        nrz_runtime_artifact::verify_linux_x86_64_native_platform(&mut payload).map_err(|error| {
+            crate::output::coded_error(
+                "PYTHON_PLATFORM_UNSUPPORTED",
+                format!(
+                    "Retained Python native payload '{}' is incompatible with the managed Linux x86_64 runtime: {error}. Provide target-compatible prebuilt files or use ONREZA Cloud Builder for qualified Linux builds.",
+                    file.path,
+                ),
+            )
+        })?;
+    }
+    Ok(())
 }
 
 /// The scan and classification already own custody, pruning and symlink bounds.
@@ -538,27 +549,49 @@ if _spec is not None and _spec.loader is not None:
 
 const GENERATED_REQUIREMENTS: &str = ".onreza/python/build/requirements.txt";
 const PROJECT_WHEELS: &str = ".onreza/python/build/wheels";
-const PORTABLE_WHEEL_CHECK: &str = r#"from pathlib import Path
-import sys
-import zipfile
-import json
-
-wheels = list(Path(sys.argv[1]).glob('*.whl'))
-if not wheels:
-    sys.exit('Python application build produced no wheel')
-native_extensions = tuple(json.loads(sys.argv[2]))
-native_magic = tuple(bytes(values) for values in json.loads(sys.argv[3]))
-for wheel in wheels:
-    with zipfile.ZipFile(wheel) as archive:
-        for entry in archive.infolist():
-            if entry.is_dir():
-                continue
-            with archive.open(entry) as stream:
-                header = stream.read(8)
-            if (entry.filename.lower().endswith(native_extensions)
-                    or any(header.startswith(magic) for magic in native_magic)):
-                sys.exit('local Python application wheel contains native payload ' + entry.filename + '; use ONREZA Cloud Builder for qualified Linux builds or an explicitly qualified custom artifact')
-"#;
+/// Inspect actual wheel members before local project installation. Wheel tags
+/// alone cannot qualify native package data for the managed Linux target.
+pub(super) fn qualify_portable_application_wheels(
+    project_dir: &Path,
+    wheel_directory: &Path,
+) -> anyhow::Result<()> {
+    let directory = project_dir.join(wheel_directory);
+    ensure_python_output_path(project_dir, &directory)?;
+    let entries = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            bail!("Python application build produced no wheel")
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let mut wheels = entries
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    wheels.retain(|path| path.extension().is_some_and(|extension| extension == "whl"));
+    wheels.sort();
+    if wheels.is_empty() {
+        bail!("Python application build produced no wheel");
+    }
+    for wheel in wheels {
+        ensure_python_output_path(project_dir, &wheel)?;
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&wheel)?)?;
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index)?;
+            if entry.is_dir() {
+                continue;
+            }
+            let name = entry.name().to_owned();
+            if has_native_python_extension(&name)
+                || nrz_runtime_artifact::has_native_payload_header(&mut entry)?
+            {
+                bail!(
+                    "local Python application wheel contains native payload {name}; use ONREZA Cloud Builder for qualified Linux builds or an explicitly qualified custom artifact"
+                );
+            }
+        }
+    }
+    Ok(())
+}
 
 /// Both paths use the pinned installer; Builder selects its frozen interpreter.
 pub(super) fn install_command(
@@ -615,6 +648,7 @@ pub(super) fn install_commands(
             program: PathBuf::from(minor.platform_interpreter()),
             arguments: ["-I", "-c", "import sys; expected = sys.argv[1]; actual = '.'.join(map(str, sys.version_info[:3])); sys.exit(0 if actual == expected and sys.implementation.name == 'cpython' else 'frozen CPython differs from selected exact patch: ' + actual)", exact_version].map(OsString::from).to_vec(),
             display: format!("verify frozen CPython {exact_version}"),
+            portable_wheel_directory: None,
         });
     }
     for (constraint, poetry_syntax) in [
@@ -758,21 +792,6 @@ pub(super) fn install_commands(
             build,
             "build Python application wheel".into(),
         ));
-        if mode == PythonInstallMode::ManagedLocal {
-            let mut qualification = python_tool_command(
-                mode,
-                minor,
-                &format!("packaging=={}", python_toolchain_versions().packaging),
-                PORTABLE_WHEEL_CHECK,
-                PROJECT_WHEELS,
-                "qualify portable application wheel",
-            );
-            qualification.arguments.extend([
-                OsString::from(serde_json::to_string(NATIVE_PAYLOAD_EXTENSIONS)?),
-                OsString::from(serde_json::to_string(NATIVE_PAYLOAD_MAGICS)?),
-            ]);
-            commands.push(qualification);
-        }
         let mut install = pip_arguments(mode, minor);
         install.extend(
             [
@@ -784,11 +803,11 @@ pub(super) fn install_commands(
             ]
             .map(OsString::from),
         );
-        commands.push(uv_command(
-            minor,
-            install,
-            "install Python application wheel".into(),
-        ));
+        let mut install = uv_command(minor, install, "install Python application wheel".into());
+        if mode == PythonInstallMode::ManagedLocal {
+            install.portable_wheel_directory = Some(PathBuf::from(PROJECT_WHEELS));
+        }
+        commands.push(install);
     }
     Ok(commands)
 }
@@ -878,6 +897,7 @@ fn python_tool_command(
             program: PathBuf::from("/opt/onreza/poetry/bin/python"),
             arguments: ["-I", "-c", script, argument].map(OsString::from).to_vec(),
             display: format!("frozen Python validator: {operation}"),
+            portable_wheel_directory: None,
         }
     } else {
         let mut arguments = tool_arguments(mode, minor, package, package.starts_with("poetry=="));
@@ -896,6 +916,7 @@ fn poetry_command(
         PythonInstallCommand {
             program: PathBuf::from("/opt/onreza/poetry/bin/poetry"),
             arguments: arguments.iter().map(OsString::from).collect(),
+            portable_wheel_directory: None,
             display: format!(
                 "frozen Poetry {} / export {}: {operation}",
                 python_toolchain_versions().poetry,
@@ -952,6 +973,7 @@ fn uv_command(
     PythonInstallCommand {
         program: PathBuf::new(),
         arguments,
+        portable_wheel_directory: None,
         display: format!(
             "pinned uv {} / CPython {}: {operation}",
             python_toolchain_versions().uv,

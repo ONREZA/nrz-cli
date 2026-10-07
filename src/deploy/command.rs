@@ -523,6 +523,18 @@ pub(super) async fn run_install_step(
                 )
             })?;
         for install in installs {
+            if let Some(directory) = &install.portable_wheel_directory {
+                super::python_toolchain::qualify_portable_application_wheels(
+                    project_dir,
+                    directory,
+                )
+                .map_err(|error| {
+                    output::coded_error(
+                        "PYTHON_PLATFORM_UNSUPPORTED",
+                        format!("cannot qualify Python application wheel: {error:#}"),
+                    )
+                })?;
+            }
             let display = &install.display;
             output::status(
                 json,

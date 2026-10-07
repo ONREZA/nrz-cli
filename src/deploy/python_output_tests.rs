@@ -117,6 +117,12 @@ fn python_output_guard_uses_retained_layer_and_dependency_custody() {
             true,
         ),
         ("pure.py", b"print('PURE_OUTPUT')".as_slice(), false),
+        ("pure_mz.py", b"MZ = 42\nprint(MZ)\n".as_slice(), false),
+        (
+            "Java.class",
+            b"\xca\xfe\xba\xbe\0\0\0\x3d\0\x1b\x0a\0\x02\0\x03\x07".as_slice(),
+            false,
+        ),
         (
             "static/native-host.so",
             b"STATIC_DOWNLOAD".as_slice(),
@@ -167,5 +173,34 @@ fn python_output_guard_uses_retained_layer_and_dependency_custody() {
             rejected,
             "{path}"
         );
+        assert_eq!(
+            validate_retained_python_native_platform(&artifact, &files).is_err(),
+            matches!(
+                path,
+                "native-opaque.data" | ".onreza/python/3.14/site-packages/dependency/native.so"
+            ),
+            "platform content custody: {path}"
+        );
+    }
+}
+
+#[test]
+fn pure_python_and_java_stage_resources_remain_portable_on_non_linux_hosts() {
+    let project = tempfile::tempdir().unwrap();
+    let minor = PythonMinor::default();
+    let directory = project.path().join(minor.site_packages_root()).join("demo");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("pure_mz.py"), "MZ = 42\nprint(MZ)\n").unwrap();
+    let mut java = b"\xca\xfe\xba\xbe\0\0\0\x3d\0\x1b\x0a\0\x02\0\x03\x07".to_vec();
+    java.resize(96, 0);
+    std::fs::write(directory.join("Java.class"), java).unwrap();
+    for host in [("macos", "aarch64"), ("windows", "x86_64")] {
+        validate_local_build_dependency_host(
+            project.path(),
+            PythonInstallMode::ManagedLocal,
+            minor,
+            host,
+        )
+        .unwrap();
     }
 }
