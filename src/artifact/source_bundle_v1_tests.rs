@@ -656,10 +656,6 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
                 directory.path(),
             )
             .await;
-            if admitted && witness == Some("node-22") {
-                assert!(result.is_err());
-                continue;
-            }
             let built = result.unwrap().manifest.unwrap();
             let plan = build_source_bundle_plan_with_scan(
                 directory.path(),
@@ -675,7 +671,7 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
                 .as_ref()
                 .unwrap();
             assert_eq!(config["applicationRuntime"]["family"], "NODE");
-            if admitted {
+            if admitted && witness.is_none() {
                 assert_eq!(config["buildRuntimeVersion"], "node-24");
             } else {
                 assert_eq!(

@@ -75,6 +75,7 @@ pub(crate) enum RuntimeArtifactScan {
 pub(crate) struct RuntimeArtifactSourceOwnership {
     pub(crate) build_output_prefix: String,
     pub(crate) layers: Vec<crate::build::manifest::Layer>,
+    pub(crate) javascript_dependency_owner: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,9 +177,6 @@ impl RuntimeArtifactScan {
         manifest: &'a Manifest,
         path: &str,
     ) -> Option<&'a crate::build::manifest::Layer> {
-        if self.owns_as_dependency(path) {
-            return best_layer_match(&manifest.layers, path);
-        }
         if let Self::Relocated { ownership, .. } = self {
             let source_path = if ownership.build_output_prefix == "." {
                 Some(path)
@@ -187,10 +185,34 @@ impl RuntimeArtifactScan {
                     .and_then(|path| path.strip_prefix('/'))
             };
             if let Some(source_path) = source_path {
-                return best_layer_match(&ownership.layers, source_path);
+                let owner = best_layer_match(&ownership.layers, source_path);
+                if owner.is_some() || !self.owns_as_dependency(path) {
+                    return owner;
+                }
+            }
+            if matches!(
+                self.file_category(path),
+                RuntimeArtifactFileCategory::NodeModules
+                    | RuntimeArtifactFileCategory::WorkspacePackage
+            ) && ownership.layers.iter().any(is_javascript_compute_layer)
+            {
+                return ownership
+                    .javascript_dependency_owner
+                    .as_deref()
+                    .and_then(|name| ownership.layers.iter().find(|layer| layer.name == name));
             }
         }
-        best_layer_match(&manifest.layers, path)
+        best_layer_match(&manifest.layers, path).or_else(|| {
+            if self.file_category(path) != RuntimeArtifactFileCategory::NodeModules {
+                return None;
+            }
+            let mut candidates = manifest
+                .layers
+                .iter()
+                .filter(|layer| is_javascript_compute_layer(layer));
+            let owner = candidates.next()?;
+            candidates.next().is_none().then_some(owner)
+        })
     }
 
     pub(crate) fn symlink_roots(&self) -> Option<&[String]> {
@@ -245,6 +267,21 @@ impl RuntimeArtifactScan {
             RuntimeArtifactFileCategory::Other
         }
     }
+}
+
+pub(crate) fn is_javascript_compute_layer(layer: &crate::build::manifest::Layer) -> bool {
+    layer.target == LayerTarget::Compute
+        && layer
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.application_runtime.as_ref())
+            .is_some_and(|runtime| {
+                matches!(
+                    runtime.family,
+                    nrz_source_bundle::ApplicationRuntimeFamily::Node
+                        | nrz_source_bundle::ApplicationRuntimeFamily::Bun
+                )
+            })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -554,11 +554,32 @@ pub(crate) fn apply_application_runtime_manifest(
     build_runtime_version: Option<&str>,
     framework: &str,
 ) -> anyhow::Result<()> {
-    let sole_primary = manifest.layers.len() == 1;
+    let sole_compute = compute_layer_count(manifest) == 1;
     for layer in &mut manifest.layers {
         if layer.target != crate::build::manifest::LayerTarget::Compute {
             continue;
         }
+        // A typed frozen owner remains independent when no primary serving
+        // target was selected, regardless of physical STATIC output membership.
+        let sole_primary = sole_compute
+            && (build_runtime_version.is_some()
+                || layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.build_runtime_version.as_ref())
+                    .is_none());
+        let identified_primary = if let (Some(declared_entry), Some(layer_entry)) = (
+            declaration.and_then(|declaration| declaration.entry.as_deref()),
+            layer.entry.as_deref(),
+        ) {
+            join_runtime_artifact_paths(&layer.directory, layer_entry)
+                .map_err(|error| output::with_default_code(error, "APPLICATION_RUNTIME_INVALID"))?
+                == normalize_runtime_artifact_path(declared_entry).map_err(|error| {
+                    output::with_default_code(error, "APPLICATION_RUNTIME_INVALID")
+                })?
+        } else {
+            false
+        };
         if let Some(intent) = layer
             .runtime
             .as_ref()
@@ -587,16 +608,16 @@ pub(crate) fn apply_application_runtime_manifest(
             }
             if declaration.is_none() && (!sole_primary || build_runtime_version.is_none())
                 || declaration.is_some_and(|declaration| {
-                    (declaration.family != intent.family
-                        || layer
-                            .runtime
-                            .as_ref()
-                            .and_then(|runtime| runtime.build_runtime_version.as_deref())
-                            .zip(build_runtime_version)
-                            .is_some_and(|(sibling, primary)| sibling != primary))
-                        && !(layer.directory == "."
-                            && declaration.entry.is_some()
-                            && declaration.entry.as_deref() == layer.entry.as_deref())
+                    !identified_primary
+                        && (declaration.entry.is_some()
+                            || !sole_compute
+                            || declaration.intent() != *intent
+                            || layer
+                                .runtime
+                                .as_ref()
+                                .and_then(|runtime| runtime.build_runtime_version.as_deref())
+                                .zip(build_runtime_version)
+                                .is_some_and(|(sibling, primary)| sibling != primary))
                 })
             {
                 let target = layer
@@ -1031,3 +1052,7 @@ pub(super) fn should_skip_misplaced_entrypoint_dir(path: &Path) -> bool {
         Some("node_modules" | ".git" | ".cache" | ".next" | "target")
     )
 }
+
+#[cfg(test)]
+#[path = "runtime_artifact_tests.rs"]
+mod tests;

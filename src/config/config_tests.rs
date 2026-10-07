@@ -1354,3 +1354,112 @@ fn runtime_selection_distinguishes_implicit_python_from_an_unknown_parent_launch
         assert_eq!(inherited.deploy.args, parent.deploy.args);
     }
 }
+
+#[test]
+fn implicit_child_python_selectors_replace_foreign_parent_launches() {
+    use nrz_source_bundle::ApplicationRuntimeFamily as Family;
+    let input =
+        crate::detect::fs::VirtualFs::from_json(r#"{"tree":["main.py"],"files":{}}"#).unwrap();
+    for parent_family in [
+        Family::Node,
+        Family::Bun,
+        Family::Executable,
+        Family::Python,
+    ] {
+        let mut parent = ProjectConfig::default();
+        parent.deploy.runtime = Some(parent_family);
+        parent.deploy.entry = Some("parent-entry".into());
+        parent.deploy.args = Some(vec!["parent argument".into()]);
+        for selector in [
+            "module='child_module'",
+            "application='child:app'",
+            "server='wsgi'",
+            "python_version='3.12'",
+        ] {
+            let child: ProjectConfig = toml::from_str(&format!("[deploy]\n{selector}")).unwrap();
+            let merged = parent.merge_child(child.clone());
+            let declaration =
+                crate::detect::application_runtime::resolve_application_runtime_with_project(
+                    &input,
+                    "other",
+                    &merged.deploy,
+                    None,
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(declaration.family, Family::Python);
+            if parent_family != Family::Python {
+                assert_ne!(declaration.entry.as_deref(), Some("parent-entry"));
+                assert!(!declaration.args.iter().any(|arg| arg == "parent argument"));
+            } else {
+                assert!(declaration.args.iter().any(|arg| arg == "parent argument"));
+            }
+            let mut invalid = child;
+            invalid.deploy.runtime = Some(Family::Node);
+            let conflicting = parent.merge_child(invalid);
+            assert!(
+                crate::detect::application_runtime::resolve_application_runtime_with_project(
+                    &input,
+                    "other",
+                    &conflicting.deploy,
+                    None
+                )
+                .is_err()
+            );
+        }
+        for field in ["module", "application", "server"] {
+            let invalid: ProjectConfig = toml::from_str(&format!("[deploy]\n{field}=''")).unwrap();
+            let merged = parent.merge_child(invalid);
+            assert!(
+                crate::detect::application_runtime::resolve_application_runtime_with_project(
+                    &input,
+                    "other",
+                    &merged.deploy,
+                    None
+                )
+                .is_err()
+            );
+        }
+    }
+}
+
+#[test]
+fn explained_python_toolchain_matches_the_shared_build_selection() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = crate::detect::fs::VirtualFs::from_json(r#"{"tree":[],"files":{}}"#).unwrap();
+    let detection = crate::detect::detect_with_fs(&input);
+    for minor in nrz_source_bundle::PythonMinor::ALL {
+        for explicit in [false, true] {
+            let mut config = ProjectConfig::default();
+            config.build.python_version = Some(minor);
+            config.build.toolchain =
+                explicit.then_some(nrz_source_bundle::BuildToolchainFamily::Python);
+            let selected =
+                crate::detect::application_runtime::resolve_build_toolchain(&detection, &config)
+                    .unwrap();
+            let effective =
+                EffectiveProjectConfig::from_project_config(dir.path().to_owned(), config);
+            let explained = effective.explain();
+            assert_eq!(explained.build_toolchain.value.as_deref(), Some("python"));
+            assert_eq!(explained.build_toolchain.source, "onreza.toml");
+            assert_eq!(
+                explained.build_python_version.value.as_deref(),
+                Some(minor.version())
+            );
+            assert_eq!(explained.build_python_version.source, "onreza.toml");
+            assert_eq!(
+                selected.family,
+                nrz_source_bundle::BuildToolchainFamily::Python
+            );
+            assert_eq!(selected.resolved_python_minor(), Some(minor));
+            assert_eq!(effective.config().build.toolchain.is_some(), explicit);
+        }
+    }
+    let empty = EffectiveProjectConfig::from_project_config(
+        dir.path().to_owned(),
+        ProjectConfig::default(),
+    )
+    .explain();
+    assert_eq!(empty.build_toolchain.value, None);
+    assert_eq!(empty.build_toolchain.source, "auto");
+}

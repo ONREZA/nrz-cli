@@ -490,26 +490,18 @@ pub fn resolve_build_toolchain(
     detection: &super::types::DetectionResult,
     config: &crate::config::ProjectConfig,
 ) -> anyhow::Result<BuildToolchainDeclaration> {
-    let implied_serving = config.deploy.runtime.or_else(|| {
-        (config.deploy.module.is_some()
-            || config.deploy.application.is_some()
-            || config.deploy.server.is_some()
-            || config.deploy.python_version.is_some())
-        .then_some(ApplicationRuntimeFamily::Python)
-    });
-    let serving = implied_serving.map(|family| ApplicationRuntimeDeclaration {
-        family,
-        python_version: config.deploy.python_version,
-        entry: None,
-        args: vec![],
-    });
-    let mut build = default_build_toolchain(detection, serving.as_ref());
-    if let Some(family) = config.build.toolchain.or_else(|| {
+    let serving =
         config
-            .build
-            .python_version
-            .map(|_| BuildToolchainFamily::Python)
-    }) {
+            .deploy
+            .selected_runtime_family()
+            .map(|family| ApplicationRuntimeDeclaration {
+                family,
+                python_version: config.deploy.python_version,
+                entry: None,
+                args: vec![],
+            });
+    let mut build = default_build_toolchain(detection, serving.as_ref());
+    if let Some(family) = config.build.selected_toolchain_family() {
         build.family = family;
         build.python_version = (family == BuildToolchainFamily::Python).then(|| {
             config
@@ -576,12 +568,9 @@ pub(crate) fn resolve_and_bind_source_build_context(
     } else {
         let mut deploy = config.deploy.clone();
         if deploy.python_version.is_none()
-            && (deploy.runtime == Some(ApplicationRuntimeFamily::Python)
-                || deploy.runtime.is_none()
-                    && (super::python::is_python_framework(&detection.framework)
-                        || deploy.module.is_some()
-                        || deploy.application.is_some()
-                        || deploy.server.is_some()))
+            && (deploy.selected_runtime_family() == Some(ApplicationRuntimeFamily::Python)
+                || deploy.selected_runtime_family().is_none()
+                    && super::python::is_python_framework(&detection.framework))
         {
             deploy.python_version = build_toolchain.resolved_python_minor();
         }
@@ -628,7 +617,7 @@ pub(crate) fn bind_source_build_context(
         config.deploy.entry.as_deref(),
         framework_override,
     )?;
-    if config.build.toolchain.is_some() || config.build.python_version.is_some() {
+    if config.build.selected_toolchain_family().is_some() {
         detection.framework = build_framework;
     }
     if explicit_compute == Some(super::types::ComputeType::Static)
@@ -669,12 +658,13 @@ pub(crate) fn serving_framework<'a>(
     config: &crate::config::ProjectConfig,
     detected: &'a str,
 ) -> &'a str {
+    let selected_runtime = config.deploy.selected_runtime_family();
     let converter = config
         .build
         .command
         .as_ref()
         .is_some_and(|command| !command.trim().is_empty())
-        && config.deploy.runtime.is_some();
+        && selected_runtime.is_some();
     let detected_serving_family = match detected {
         "python" => Some(ApplicationRuntimeFamily::Python),
         "go" | "dart" => Some(ApplicationRuntimeFamily::Executable),
@@ -682,19 +672,14 @@ pub(crate) fn serving_framework<'a>(
     };
     // Confirming the inferred launch family keeps its entry and build recipe,
     // even when the compiler is selected independently.
-    if !converter
-        && config.deploy.runtime.is_some()
-        && config.deploy.runtime == detected_serving_family
-    {
+    if !converter && selected_runtime.is_some() && selected_runtime == detected_serving_family {
         return detected;
     }
-    let generic_declaration = config.deploy.runtime.is_some()
+    let generic_declaration = selected_runtime.is_some()
         && detected_serving_family.is_some()
-        && config.deploy.runtime != detected_serving_family;
-    let independent = config.build.toolchain.is_some()
-        || config.build.python_version.is_some()
-        || converter
-        || generic_declaration;
+        && selected_runtime != detected_serving_family;
+    let independent =
+        config.build.selected_toolchain_family().is_some() || converter || generic_declaration;
     if independent
         && config.project.framework.is_none()
         && (matches!(detected, "python" | "go" | "dart") || converter)

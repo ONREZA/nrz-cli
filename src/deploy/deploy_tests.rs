@@ -77,6 +77,7 @@ mod health_output_tests;
 mod process_entry_tests;
 mod process_output_tests;
 mod publication_tests;
+mod runtime_dependency_tests;
 mod runtime_files_tests;
 mod scan_tests;
 mod workspace_artifact_tests;

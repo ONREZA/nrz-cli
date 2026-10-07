@@ -66,17 +66,27 @@ pub(crate) fn canonical_build_runtime_target(
             .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", error))?;
         return Ok(Some(target));
     }
-    // A sole legacy JavaScript layer is the primary authored serving owner.
+    // A sole legacy JavaScript COMPUTE owner can select its serving target.
+    // Typed frozen owners retain their own targets: compiler metadata and
+    // admitted Node versions do not declare a primary serving runtime.
     // Standalone Node builds remain unresolved until independent admission.
     if legacy_manifest_selection
         && let Some(manifest) = manifest
-        && manifest.layers.len() == 1
-        && manifest.layers[0].target == crate::build::manifest::LayerTarget::Compute
+        && super::compute_layer_count(manifest) == 1
+        && let Some(layer) = manifest
+            .layers
+            .iter()
+            .find(|layer| layer.target == crate::build::manifest::LayerTarget::Compute)
+        && layer
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.build_runtime_version.as_ref())
+            .is_none()
         && matches!(
             runtime.runtime_type,
             RuntimeType::Node | RuntimeType::Bun | RuntimeType::Static
         )
-        && let Some(intent) = manifest.layers[0]
+        && let Some(intent) = layer
             .runtime
             .as_ref()
             .and_then(|runtime| runtime.application_runtime.as_ref())

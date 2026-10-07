@@ -662,3 +662,76 @@ fn source_build_context_defaults_follow_compiler_manager_and_python_minors() {
         );
     }
 }
+
+#[test]
+fn implicit_python_selectors_bind_native_evidence_like_explicit_python() {
+    for (framework, native_files) in [
+        (
+            "go",
+            vec![
+                ("go.mod", "module example.org/server"),
+                ("main.go", "package main\nfunc main() {}"),
+            ],
+        ),
+        (
+            "dart",
+            vec![
+                ("pubspec.yaml", "name: server"),
+                ("bin/server.dart", "void main() {}"),
+            ],
+        ),
+    ] {
+        let mut files = native_files
+            .into_iter()
+            .collect::<std::collections::HashMap<_, _>>();
+        files.insert("main.py", "print(42)");
+        let fs = super::fs::VirtualFs::from_json(&serde_json::json!({"files":files}).to_string())
+            .unwrap();
+        for selector in [
+            "module='main'",
+            "application='main:app'",
+            "server='wsgi'",
+            "python_version='3.12'",
+        ] {
+            for converter in [false, true] {
+                let mut implicit: crate::config::ProjectConfig =
+                    toml::from_str(&format!("[deploy]\n{selector}")).unwrap();
+                implicit.build.command = converter.then(|| "emit-converted-output".into());
+                let mut detected = super::detect_with_fs(&fs);
+                assert_eq!(detected.framework, framework);
+                let implied = super::application_runtime::resolve_and_bind_source_build_context(
+                    &fs,
+                    &mut detected,
+                    &implicit,
+                    None,
+                    None,
+                )
+                .unwrap();
+                let mut explicit = implicit.clone();
+                explicit.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Python);
+                let mut detected = super::detect_with_fs(&fs);
+                let declared = super::application_runtime::resolve_and_bind_source_build_context(
+                    &fs,
+                    &mut detected,
+                    &explicit,
+                    None,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(implied, declared);
+                implicit.project.framework = Some(framework.into());
+                let mut detected = super::detect_with_fs(&fs);
+                assert!(
+                    super::application_runtime::resolve_and_bind_source_build_context(
+                        &fs,
+                        &mut detected,
+                        &implicit,
+                        Some(framework),
+                        None
+                    )
+                    .is_err()
+                );
+            }
+        }
+    }
+}

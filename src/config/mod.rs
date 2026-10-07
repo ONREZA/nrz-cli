@@ -149,6 +149,30 @@ pub struct DeploySection {
     pub app: Option<String>,
 }
 
+impl BuildSection {
+    /// Resolve authored compiler selectors without framework detection.
+    pub fn selected_toolchain_family(&self) -> Option<nrz_source_bundle::BuildToolchainFamily> {
+        self.toolchain.or_else(|| {
+            self.python_version
+                .map(|_| nrz_source_bundle::BuildToolchainFamily::Python)
+        })
+    }
+}
+
+impl DeploySection {
+    /// Explicit runtime wins; Python launch fields imply Python when absent.
+    /// Validation still rejects fields incompatible with that explicit runtime.
+    pub fn selected_runtime_family(&self) -> Option<nrz_source_bundle::ApplicationRuntimeFamily> {
+        self.runtime.or_else(|| {
+            (self.python_version.is_some()
+                || self.module.is_some()
+                || self.application.is_some()
+                || self.server.is_some())
+            .then_some(nrz_source_bundle::ApplicationRuntimeFamily::Python)
+        })
+    }
+}
+
 fn deserialize_build_toolchain<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<nrz_source_bundle::BuildToolchainFamily>, D::Error> {
@@ -316,16 +340,12 @@ pub struct EnvSection {
 impl ProjectConfig {
     pub fn merge_child(&self, child: ProjectConfig) -> ProjectConfig {
         let mut parent = self.clone();
-        let parent_runtime = parent.deploy.runtime.or_else(|| {
-            (parent.deploy.python_version.is_some()
-                || parent.deploy.module.is_some()
-                || parent.deploy.application.is_some()
-                || parent.deploy.server.is_some())
-            .then_some(nrz_source_bundle::ApplicationRuntimeFamily::Python)
-        });
-        if child.deploy.runtime.is_some() && child.deploy.runtime != parent_runtime {
+        let parent_runtime = parent.deploy.selected_runtime_family();
+        let child_runtime = child.deploy.selected_runtime_family();
+        if child_runtime.is_some() && child_runtime != parent_runtime {
             // A new runtime family owns a fresh launch namespace. Preserve child
             // declarations so incompatible authored fields still fail validation.
+            parent.deploy.runtime = None;
             parent.deploy.entry = None;
             parent.deploy.args = None;
             parent.deploy.python_version = None;
@@ -333,9 +353,7 @@ impl ProjectConfig {
             parent.deploy.application = None;
             parent.deploy.server = None;
         }
-        if child
-            .deploy
-            .runtime
+        if child_runtime
             .is_none_or(|family| family == nrz_source_bundle::ApplicationRuntimeFamily::Python)
         {
             // An explicit child launch mode replaces competing parent defaults.
@@ -381,13 +399,7 @@ impl ProjectConfig {
             build: BuildSection {
                 toolchain: child
                     .build
-                    .toolchain
-                    .or_else(|| {
-                        child
-                            .build
-                            .python_version
-                            .map(|_| nrz_source_bundle::BuildToolchainFamily::Python)
-                    })
+                    .selected_toolchain_family()
                     .or(parent.build.toolchain),
                 python_version: if child
                     .build
@@ -971,12 +983,15 @@ impl EffectiveProjectConfig {
                 },
             },
             build_toolchain: explain_config_option(
-                self.config.build.toolchain.map(|family| match family {
-                    nrz_source_bundle::BuildToolchainFamily::Node => "node",
-                    nrz_source_bundle::BuildToolchainFamily::Bun => "bun",
-                    nrz_source_bundle::BuildToolchainFamily::Python => "python",
-                    nrz_source_bundle::BuildToolchainFamily::Native => "native",
-                }),
+                self.config
+                    .build
+                    .selected_toolchain_family()
+                    .map(|family| match family {
+                        nrz_source_bundle::BuildToolchainFamily::Node => "node",
+                        nrz_source_bundle::BuildToolchainFamily::Bun => "bun",
+                        nrz_source_bundle::BuildToolchainFamily::Python => "python",
+                        nrz_source_bundle::BuildToolchainFamily::Native => "native",
+                    }),
                 "onreza.toml",
                 "auto",
             ),
