@@ -20,6 +20,61 @@ const SERVER_BODY: &[u8] = b"export default { fetch() {} };\n";
 const DEPENDENCY_BODY: &[u8] = b"export const dependency = true;\n";
 
 #[test]
+fn legacy_binary_without_dependencies_retains_its_targetless_executable_launch() {
+    let temp = TempDir::new().unwrap();
+    let mut manifest = source_manifest();
+    manifest.files.retain(|file| file.role != "dependency");
+    manifest.files[0].executable = true;
+    manifest.layers[0].runtime_config = Some(json!({"isBinaryEntry":true}));
+    let source_path = temp.path().join("source.tar.zst");
+    write_source_bundle(&source_path, &manifest);
+    let source_bytes = fs::read(&source_path).unwrap();
+    let mut compatibility = compatibility();
+    compatibility["runtimeFamily"] = json!("native");
+    compatibility["runtimeVersion"] = json!(nrz_runtime_artifact::NATIVE_EXECUTION_TARGET);
+
+    let result = materialize_source_bundle_runtime(
+        &fake_erofs_toolchain(temp.path()),
+        SourceBundleMaterializationRequest {
+            source_path: &source_path,
+            logical_manifest_sha256: &compute_logical_manifest_sha256(
+                &serde_json::to_value(&manifest).unwrap(),
+            ),
+            source_sha256: &sha256_hex(&source_bytes),
+            source_size_bytes: source_bytes.len() as u64,
+            manifest: &manifest,
+            output_root: &temp.path().join("runtime"),
+            policy: SourceBundleMaterializationPolicy {
+                kind: None,
+                compatibility,
+                tree_limits: tree_limits(),
+                max_total_files: 10,
+                max_total_bytes: 1024,
+            },
+        },
+    )
+    .unwrap();
+
+    assert!(result.dependencies.is_empty());
+    let layers = &result.graph.wire().runtime_layers;
+    assert_eq!(layers.len(), 1);
+    let launch = layers[0].launch.as_ref().unwrap();
+    assert_eq!(
+        launch.profile,
+        nrz_runtime_artifact::RuntimeProfile::Executable
+    );
+    assert!(launch.args.is_empty());
+    assert_eq!(layers[0].entrypoint.as_str(), "server.js");
+    assert!(
+        serde_json::to_value(&layers[0].runtime_config)
+            .unwrap()
+            .get("buildRuntimeVersion")
+            .is_none()
+    );
+    assert!(!temp.path().join("runtime/images").exists());
+}
+
+#[test]
 fn native_policy_has_no_dependency_images_and_rejects_foreign_dependency_inputs() {
     let temp = TempDir::new().unwrap();
     let toolchain = fake_erofs_toolchain(temp.path());

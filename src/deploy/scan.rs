@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "scan_python_tests.rs"]
+mod python_tests;
+
 // ── Output scan ──────────────────────────────────────────────
 
 /// Read buffer for streaming SHA-256. Sized to match a single page-cache
@@ -20,7 +24,14 @@ pub(crate) fn scan_dir(dir: &Path) -> anyhow::Result<Vec<FileEntry>> {
     let canonical_base = std::fs::canonicalize(dir)
         .with_context(|| format!("failed to canonicalize {}", dir.display()))?;
     let mut symlink_targets = Vec::new();
-    scan_dir_recursive(dir, dir, &canonical_base, &mut files, &mut symlink_targets)?;
+    scan_dir_recursive(
+        dir,
+        dir,
+        dir,
+        &canonical_base,
+        &mut files,
+        &mut symlink_targets,
+    )?;
     files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }
@@ -60,6 +71,9 @@ fn scan_python_root(
             let ft = entry.file_type()?;
             let relative = path.strip_prefix(base)?;
             let staged_dependency = relative.starts_with(minor.site_packages_root());
+            if is_python_installer_staging_path(base, &path) {
+                continue;
+            }
             // A previous build may leave another minor's incompatible wheel tree.
             if relative.parent() == Some(Path::new(".onreza/python"))
                 && nrz_source_bundle::PythonMinor::from_version(&name)
@@ -97,7 +111,15 @@ fn scan_python_root(
             if ft.is_dir() {
                 visit(base, &path, canonical, files, project_package, minor)?;
             } else {
-                scan_runtime_path_with_type(base, &path, ft, canonical, files, &mut Vec::new())?;
+                scan_runtime_path_with_type(
+                    base,
+                    base,
+                    &path,
+                    ft,
+                    canonical,
+                    files,
+                    &mut Vec::new(),
+                )?;
             }
         }
         Ok(())
@@ -136,9 +158,22 @@ pub(super) fn scan_selected_runtime_roots(
         if !path.exists() {
             continue;
         }
+        // Selected output can be project-relative beneath a workspace archive
+        // root. Installer state belongs to that output root, while file paths
+        // and symlink containment remain relative to the full archive root.
+        let installer_root = if roots.iter().any(|candidate| {
+            candidate.kind == crate::artifact::RuntimeArtifactScanRootKind::BuildOutput
+                && normalize_runtime_artifact_path(&candidate.path)
+                    .is_ok_and(|candidate| candidate == root)
+        }) {
+            path.as_path()
+        } else {
+            root_dir
+        };
         let mut symlink_targets = Vec::new();
         scan_runtime_path(
             root_dir,
+            installer_root,
             &path,
             &canonical_base,
             &mut files,
@@ -324,6 +359,7 @@ pub(super) fn warn_large_deploy_files(json: bool, files: &[FileEntry]) {
 
 pub(super) fn scan_dir_recursive(
     base: &Path,
+    installer_root: &Path,
     current: &Path,
     canonical_base: &Path,
     files: &mut Vec<FileEntry>,
@@ -340,7 +376,15 @@ pub(super) fn scan_dir_recursive(
             .file_type()
             .with_context(|| format!("failed to stat {}", path.display()))?;
 
-        scan_runtime_path_with_type(base, &path, ft, canonical_base, files, symlink_targets)?;
+        scan_runtime_path_with_type(
+            base,
+            installer_root,
+            &path,
+            ft,
+            canonical_base,
+            files,
+            symlink_targets,
+        )?;
     }
 
     Ok(())
@@ -348,6 +392,7 @@ pub(super) fn scan_dir_recursive(
 
 pub(super) fn scan_runtime_path(
     base: &Path,
+    installer_root: &Path,
     path: &Path,
     canonical_base: &Path,
     files: &mut Vec<FileEntry>,
@@ -356,18 +401,27 @@ pub(super) fn scan_runtime_path(
     let ft = std::fs::symlink_metadata(path)
         .with_context(|| format!("failed to stat {}", path.display()))?
         .file_type();
-    scan_runtime_path_with_type(base, path, ft, canonical_base, files, symlink_targets)
+    scan_runtime_path_with_type(
+        base,
+        installer_root,
+        path,
+        ft,
+        canonical_base,
+        files,
+        symlink_targets,
+    )
 }
 
 pub(super) fn scan_runtime_path_with_type(
     base: &Path,
+    installer_root: &Path,
     path: &Path,
     ft: std::fs::FileType,
     canonical_base: &Path,
     files: &mut Vec<FileEntry>,
     symlink_targets: &mut Vec<String>,
 ) -> anyhow::Result<()> {
-    if is_vcs_internal_path(base, path) {
+    if is_vcs_internal_path(base, path) || is_python_installer_staging_path(installer_root, path) {
         return Ok(());
     }
 
@@ -390,7 +444,14 @@ pub(super) fn scan_runtime_path_with_type(
     }
 
     if ft.is_dir() {
-        scan_dir_recursive(base, path, canonical_base, files, symlink_targets)?;
+        scan_dir_recursive(
+            base,
+            installer_root,
+            path,
+            canonical_base,
+            files,
+            symlink_targets,
+        )?;
     } else if ft.is_file() {
         let rel = path
             .strip_prefix(base)
@@ -408,6 +469,11 @@ pub(super) fn scan_runtime_path_with_type(
     }
 
     Ok(())
+}
+
+fn is_python_installer_staging_path(base: &Path, path: &Path) -> bool {
+    path.strip_prefix(base)
+        .is_ok_and(|relative| relative.starts_with(".onreza/python/build"))
 }
 
 pub(super) fn is_vcs_internal_path(base: &Path, path: &Path) -> bool {

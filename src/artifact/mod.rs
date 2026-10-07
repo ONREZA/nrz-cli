@@ -76,6 +76,8 @@ pub(crate) struct RuntimeArtifactSourceOwnership {
     pub(crate) build_output_prefix: String,
     pub(crate) layers: Vec<crate::build::manifest::Layer>,
     pub(crate) javascript_dependency_owner: Option<String>,
+    pub(crate) python_dependency_owner: Option<String>,
+    pub(crate) python_primary_declared: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,6 +180,16 @@ impl RuntimeArtifactScan {
         path: &str,
     ) -> Option<&'a crate::build::manifest::Layer> {
         if let Self::Relocated { ownership, .. } = self {
+            // The reserved installer tree belongs to the frozen primary, even
+            // when an authored sibling's broad root also covers that directory.
+            if self.file_category(path) == RuntimeArtifactFileCategory::PythonSitePackages
+                && ownership.python_primary_declared
+            {
+                return ownership
+                    .python_dependency_owner
+                    .as_deref()
+                    .and_then(|name| ownership.layers.iter().find(|layer| layer.name == name));
+            }
             let source_path = if ownership.build_output_prefix == "." {
                 Some(path)
             } else {
@@ -186,9 +198,32 @@ impl RuntimeArtifactScan {
             };
             if let Some(source_path) = source_path {
                 let owner = best_layer_match(&ownership.layers, source_path);
-                if owner.is_some() || !self.owns_as_dependency(path) {
+                if self.file_category(path) == RuntimeArtifactFileCategory::PythonSitePackages {
+                    if let Some(owner) = owner {
+                        let root = normalize_layer_root(&owner.directory);
+                        let ambiguous = ownership
+                            .layers
+                            .iter()
+                            .filter(|layer| {
+                                let candidate_root = normalize_layer_root(&layer.directory);
+                                candidate_root.len() == root.len()
+                                    && path_in_root(source_path, &candidate_root)
+                            })
+                            .count()
+                            > 1;
+                        if !ambiguous {
+                            return Some(owner);
+                        }
+                    }
+                } else if owner.is_some() || !self.owns_as_dependency(path) {
                     return owner;
                 }
+            }
+            if self.file_category(path) == RuntimeArtifactFileCategory::PythonSitePackages {
+                return ownership
+                    .python_dependency_owner
+                    .as_deref()
+                    .and_then(|name| ownership.layers.iter().find(|layer| layer.name == name));
             }
             if matches!(
                 self.file_category(path),

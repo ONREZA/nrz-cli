@@ -85,7 +85,7 @@ pub(super) fn resolve_runtime_artifact_with_manifest_source(
                             && runtime.entry.as_deref()
                                 == Some(crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY)
                     }),
-            javascript_dependency_owner.clone(),
+            detection,
         )?;
         if validate_python_layer_dependencies(
             workspace_root_dir,
@@ -171,6 +171,8 @@ pub(super) fn resolve_runtime_artifact_with_manifest_source(
         build_output_prefix: plan.build_output_prefix.clone(),
         layers: manifest.layers.clone(),
         javascript_dependency_owner,
+        python_dependency_owner: None,
+        python_primary_declared: false,
     };
     let manifest =
         rewrite_manifest_for_project_runtime(manifest, &plan.build_output_prefix, false)?;
@@ -287,34 +289,46 @@ fn validate_python_layer_dependencies(
         && crate::detect::python::requires_dependency_stage(&crate::detect::fs::LocalFs::new(
             project_dir,
         ))?;
-    let staged_minors = PythonMinor::ALL
-        .into_iter()
-        .filter(|minor| {
-            project_dir
-                .join(minor.site_packages_root())
-                .read_dir()
-                .is_ok_and(|mut entries| entries.next().is_some())
-        })
-        .collect::<Vec<_>>();
+    let staged = project_dir
+        .join(minor.site_packages_root())
+        .read_dir()
+        .is_ok_and(|mut entries| entries.next().is_some());
     let scan = &artifact.scan;
-    // A stale unselected tree stays excluded. A layer explicitly claiming that
-    // tree's minor would turn it into runtime input, so it cannot replace the installer.
-    for staged in &staged_minors {
-        if *staged != minor
-            && scan
-                .source_layer_match(manifest, staged.site_packages_root())
-                .and_then(|layer| layer.runtime.as_ref())
-                .and_then(|runtime| runtime.build_runtime_version.as_deref())
-                == Some(staged.target())
+    // Without a primary, an unambiguous typed owner can explicitly claim a
+    // retained serving tree. A primary's code-only siblings do not claim stale trees.
+    if primary.is_none() {
+        for other_minor in PythonMinor::ALL
+            .into_iter()
+            .filter(|candidate| *candidate != minor)
         {
-            return Err(output::coded_error(
-                "APPLICATION_RUNTIME_INVALID",
-                "Python runtime dependencies require matching build and serving Python minors; independent toolchains are supported for code-only output",
-            ));
+            let claimed = scan
+                .source_layer_match(manifest, other_minor.site_packages_root())
+                .is_some_and(|layer| {
+                    layer.target == build_manifest::LayerTarget::Compute
+                        && layer.runtime.as_ref().is_some_and(|runtime| {
+                            runtime
+                                .application_runtime
+                                .as_ref()
+                                .is_some_and(|intent| intent.family == Family::Python)
+                                && runtime.build_runtime_version.as_deref()
+                                    == Some(other_minor.target())
+                        })
+                });
+            if claimed
+                && project_dir
+                    .join(other_minor.site_packages_root())
+                    .read_dir()
+                    .is_ok_and(|mut entries| entries.next().is_some())
+            {
+                return Err(output::coded_error(
+                    "APPLICATION_RUNTIME_INVALID",
+                    "Python runtime dependencies require matching build and serving Python minors; independent toolchains are supported for code-only output",
+                ));
+            }
         }
     }
     let staged_owner = scan.source_layer_match(manifest, minor.site_packages_root());
-    let staged_runtime_dependencies = staged_minors.contains(&minor)
+    let staged_runtime_dependencies = staged
         && (python_materialization
             || staged_owner
                 .and_then(|layer| layer.runtime.as_ref())
@@ -452,18 +466,74 @@ fn declared_javascript_dependency_owner(
     if candidates.len() == 1 {
         return Some(candidates[0].name.clone());
     }
-    let primary = detection.metadata.application_runtime()?;
-    let entry = crate::detect::resolve_application_entry(
-        primary.entry.as_deref()?,
-        manifest_root,
+    declared_primary_dependency_owner(project_dir, manifest_root, candidates, detection, false)
+}
+
+fn declared_python_dependency_owner(
+    project_dir: &Path,
+    manifest_root: &Path,
+    manifest: &build_manifest::Manifest,
+    detection: &crate::detect::types::DetectionResult,
+    project_owned_entry: bool,
+) -> Option<String> {
+    use nrz_source_bundle::ApplicationRuntimeFamily;
+    let primary = detection.metadata.application_runtime();
+    if primary.is_some_and(|runtime| runtime.family != ApplicationRuntimeFamily::Python) {
+        // Python packages used only by a build tool do not become serving dependencies.
+        return None;
+    }
+    let candidates = manifest
+        .layers
+        .iter()
+        .filter(|layer| {
+            layer.target == build_manifest::LayerTarget::Compute
+                && layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.application_runtime.as_ref())
+                    .map(|intent| intent.family)
+                    .or_else(|| primary.map(|runtime| runtime.family))
+                    == Some(ApplicationRuntimeFamily::Python)
+        })
+        .collect::<Vec<_>>();
+    if primary.is_none() && candidates.len() == 1 {
+        return Some(candidates[0].name.clone());
+    }
+    declared_primary_dependency_owner(
         project_dir,
-    )?;
+        manifest_root,
+        candidates,
+        detection,
+        project_owned_entry,
+    )
+}
+
+fn declared_primary_dependency_owner(
+    project_dir: &Path,
+    manifest_root: &Path,
+    candidates: Vec<&build_manifest::Layer>,
+    detection: &crate::detect::types::DetectionResult,
+    project_owned_entry: bool,
+) -> Option<String> {
+    let primary = detection.metadata.application_runtime()?;
+    let entry = if project_owned_entry {
+        // Generated bootstrap provenance explicitly anchors this entry at the project.
+        primary.entry.clone()?
+    } else {
+        crate::detect::resolve_application_entry(
+            primary.entry.as_deref()?,
+            manifest_root,
+            project_dir,
+        )?
+    };
     let mut matching = candidates.into_iter().filter(|layer| {
         layer
             .runtime
             .as_ref()
             .and_then(|runtime| runtime.application_runtime.as_ref())
-            .is_some_and(|intent| intent.family == primary.family)
+            .map(|intent| intent.family)
+            .unwrap_or(primary.family)
+            == primary.family
             && layer
                 .entry
                 .as_deref()
@@ -532,7 +602,7 @@ fn resolve_python_runtime_artifact(
     json: bool,
     minor: nrz_source_bundle::PythonMinor,
     project_owned_bootstrap: bool,
-    javascript_dependency_owner: Option<String>,
+    detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<RuntimeArtifact> {
     let build_output_prefix = relative_runtime_artifact_path(project_dir, &build_output_dir)
         .map_err(|_| {
@@ -542,11 +612,26 @@ fn resolve_python_runtime_artifact(
             )
         })?;
     let ownership =
-        (build_output_prefix != ".").then(|| crate::artifact::RuntimeArtifactSourceOwnership {
+        crate::artifact::RuntimeArtifactSourceOwnership {
             build_output_prefix: build_output_prefix.clone(),
             layers: manifest.layers.clone(),
-            javascript_dependency_owner,
-        });
+            javascript_dependency_owner: declared_javascript_dependency_owner(
+                project_dir,
+                &build_output_dir,
+                &manifest,
+                detection,
+            ),
+            python_dependency_owner: declared_python_dependency_owner(
+                project_dir,
+                &build_output_dir,
+                &manifest,
+                detection,
+                project_owned_bootstrap,
+            ),
+            python_primary_declared: detection.metadata.application_runtime().is_some_and(
+                |runtime| runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python,
+            ),
+        };
     let manifest = if build_output_prefix == "." {
         manifest
     } else {
@@ -565,12 +650,9 @@ fn resolve_python_runtime_artifact(
     Ok(RuntimeArtifact {
         root_dir: project_dir.to_path_buf(),
         manifest,
-        scan: match ownership {
-            Some(ownership) => RuntimeArtifactScan::Relocated {
-                base: Box::new(RuntimeArtifactScan::PythonRuntimeRoot(minor)),
-                ownership,
-            },
-            None => RuntimeArtifactScan::PythonRuntimeRoot(minor),
+        scan: RuntimeArtifactScan::Relocated {
+            base: Box::new(RuntimeArtifactScan::PythonRuntimeRoot(minor)),
+            ownership,
         },
     })
 }

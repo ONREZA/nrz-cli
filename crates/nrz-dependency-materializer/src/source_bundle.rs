@@ -285,7 +285,11 @@ fn freeze_layer_targets(
                     )
                     .into());
                 }
-                targets.insert(layer.name.clone(), primary_target.to_owned());
+                // DEPRECATED: isBinaryEntry-only layers retain targetless
+                // executable launches and are excluded from the managed map.
+                if intent.is_some() {
+                    targets.insert(layer.name.clone(), primary_target.to_owned());
+                }
             } else if intent.is_some() {
                 let target = layer
                     .runtime_config

@@ -17,6 +17,10 @@ use crate::cli::{BuildArgs, DeployArgs};
 use crate::detect::types::{ComputeType, RuntimeType};
 use crate::output;
 
+#[cfg(test)]
+#[path = "plan_python_scan_tests.rs"]
+mod python_scan_tests;
+
 pub(super) struct DeployPlanRequest<'a> {
     pub(super) args: &'a DeployArgs,
     pub(super) command: &'a crate::context::CommandContext,
@@ -921,14 +925,12 @@ fn validate_python_dependency_context(
     let fs = crate::detect::fs::LocalFs::new(project_dir);
     let authored_dependencies = crate::detect::python::requires_dependency_stage(&fs)?;
     let staged_dependencies = staged
-        && nrz_source_bundle::PythonMinor::ALL
-            .into_iter()
-            .any(|minor| {
-                project_dir
-                    .join(minor.site_packages_root())
-                    .read_dir()
-                    .is_ok_and(|mut entries| entries.next().is_some())
-            });
+        && serving.python_version.is_some_and(|minor| {
+            project_dir
+                .join(minor.site_packages_root())
+                .read_dir()
+                .is_ok_and(|mut entries| entries.next().is_some())
+        });
     if authored_dependencies || staged_dependencies {
         return Err(output::coded_error(
             "APPLICATION_RUNTIME_INVALID",

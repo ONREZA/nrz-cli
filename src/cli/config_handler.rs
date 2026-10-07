@@ -157,6 +157,11 @@ fn print_human_explanation(output: &ConfigExplainOutput) {
     print_value("Project ID", &output.effective.project_id);
     print_value("Framework", &output.effective.framework);
     print_value("Install command", &output.effective.install_command);
+    print_value("Build toolchain", &output.effective.build_toolchain);
+    print_value(
+        "Build Python version",
+        &output.effective.build_python_version,
+    );
     print_value("Build command", &output.effective.build_command);
     print_value("Output directory", &output.effective.output_directory);
     eprintln!(

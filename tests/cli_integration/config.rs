@@ -3,6 +3,26 @@ use super::*;
 use axum::http::StatusCode;
 
 #[test]
+fn config_explain_human_shows_separate_build_and_serving_python_selection() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("onreza.toml"),
+        "[build]\npython_version = \"3.12\"\n\n[deploy]\nruntime = \"python\"\npython_version = \"3.14\"\n",
+    )
+    .unwrap();
+
+    nrz()
+        .current_dir(&temp)
+        .args(["--human", "config", "explain", "--local"])
+        .assert()
+        .success()
+        .stdout("")
+        .stderr(contains("Build toolchain: python (onreza.toml)"))
+        .stderr(contains("Build Python version: 3.12 (onreza.toml)"))
+        .stderr(contains("Python version: 3.14 (onreza.toml)"));
+}
+
+#[test]
 fn config_explain_app_merges_root_identity_with_app_config() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(
