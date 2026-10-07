@@ -240,6 +240,7 @@ jobs:
           dagger call package-release-artifacts \
             --binaries=./dist/raw \
             --notices=./THIRD_PARTY_NOTICES \
+            --license=./LICENSE \
             export --path ./dist/release --wipe=true
           cp ./dist/raw/nrz-release-provenance/metadata.json ./dist/release/release-metadata.json
 

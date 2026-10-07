@@ -208,16 +208,11 @@ fn resolve_runtime(
         || config.application.is_some()
         || config.server.is_some()
         || config.python_version.is_some();
-    if super::python::is_python_framework(framework)
+    let python_selected = super::python::is_python_framework(framework)
         || config.runtime == Some(ApplicationRuntimeFamily::Python)
-        || python_fields
-    {
-        if config
-            .runtime
-            .is_some_and(|family| family != ApplicationRuntimeFamily::Python)
-        {
-            bail!("Python launch conflicts with the declared application runtime");
-        }
+        || python_fields;
+    validate_python_runtime_family(config.runtime, python_selected)?;
+    if python_selected {
         let args = config.args.as_deref().unwrap_or_default();
         let launch = super::python_launch::resolve_launch_for_framework(fs, super::python_launch::PythonLaunchRequest {
             entry: config.entry.as_deref(), module: config.module.as_deref(), application: config.application.as_deref(),
@@ -328,6 +323,16 @@ fn resolve_runtime(
     };
     declaration.validate().map_err(anyhow::Error::msg)?;
     Ok(Some(declaration))
+}
+
+fn validate_python_runtime_family(
+    runtime: Option<ApplicationRuntimeFamily>,
+    python_selected: bool,
+) -> anyhow::Result<()> {
+    if python_selected && runtime.is_some_and(|family| family != ApplicationRuntimeFamily::Python) {
+        bail!("Python launch conflicts with the declared application runtime");
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_framework(
@@ -543,10 +548,16 @@ fn resolve_static_serving(
         || config.deploy.server.is_some()
         || config.deploy.python_version.is_some();
     let selected_compute = explicit_compute.or(configured_compute);
-    Ok(selected_compute == Some(super::types::ComputeType::Static)
+    let static_serving = selected_compute == Some(super::types::ComputeType::Static)
         || selected_compute.is_none()
             && !process_fields
-            && detection.suggested_compute == super::types::ComputeType::Static)
+            && detection.suggested_compute == super::types::ComputeType::Static;
+    if static_serving && process_fields {
+        bail!(
+            "STATIC serving conflicts with explicit PROCESS launch fields; use build.toolchain and build.python_version for build-only selectors"
+        );
+    }
+    Ok(static_serving)
 }
 
 pub(crate) fn resolve_serving_python_minor(
@@ -558,6 +569,13 @@ pub(crate) fn resolve_serving_python_minor(
     if resolve_static_serving(detection, config, explicit_compute)? {
         return Ok(None);
     }
+    validate_python_runtime_family(
+        config.deploy.runtime,
+        config.deploy.module.is_some()
+            || config.deploy.application.is_some()
+            || config.deploy.server.is_some()
+            || config.deploy.python_version.is_some(),
+    )?;
     let family = config.deploy.selected_runtime_family();
     let inherited_minor = if family == Some(ApplicationRuntimeFamily::Python)
         || family.is_none() && super::python::is_python_framework(&detection.framework)
@@ -596,18 +614,6 @@ pub(crate) fn resolve_and_bind_source_build_context(
     let static_serving = resolve_static_serving(detection, config, explicit_compute)?;
     let serving_framework = serving_framework(config, &detection.framework).to_string();
     let application_runtime = if static_serving {
-        if config.deploy.runtime.is_some()
-            || config.deploy.entry.is_some()
-            || config.deploy.args.is_some()
-            || config.deploy.module.is_some()
-            || config.deploy.application.is_some()
-            || config.deploy.server.is_some()
-            || config.deploy.python_version.is_some()
-        {
-            bail!(
-                "STATIC serving conflicts with explicit PROCESS launch fields; use build.toolchain and build.python_version for build-only selectors"
-            );
-        }
         None
     } else {
         let mut deploy = config.deploy.clone();

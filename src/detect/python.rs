@@ -5,6 +5,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 use anyhow::{Context, bail};
+use pep508_rs::pep440_rs::{Operator, VersionSpecifiers};
 use pep508_rs::{
     MarkerEnvironment, MarkerEnvironmentBuilder, MarkerTree, MarkerTreeKind, MarkerValueString,
     Requirement,
@@ -241,15 +242,7 @@ fn requires_dependency_stage_with_environment(
             {
                 return Ok(dependencies.iter().any(|(name, requirement)| {
                     name != "python"
-                        && requirement.get("optional").and_then(toml::Value::as_bool) != Some(true)
-                        && requirement
-                            .get("markers")
-                            .and_then(toml::Value::as_str)
-                            .is_none_or(|marker| {
-                                MarkerTree::parse_str::<url::Url>(marker).map_or(true, |marker| {
-                                    marker_applies_to_target(&marker, environment)
-                                })
-                            })
+                        && poetry_requirement_applies_to_target(requirement, environment)
                 }));
             }
         }
@@ -271,6 +264,94 @@ fn requires_dependency_stage_with_environment(
         && !framework_evidence_complete(fs)?)
 }
 
+fn poetry_requirement_applies_to_target(
+    requirement: &toml::Value,
+    environment: &MarkerEnvironment,
+) -> bool {
+    if let Some(alternatives) = requirement.as_array() {
+        return alternatives.is_empty()
+            || alternatives
+                .iter()
+                .any(|requirement| poetry_requirement_applies_to_target(requirement, environment));
+    }
+    if requirement.get("optional").and_then(toml::Value::as_bool) == Some(true) {
+        return false;
+    }
+    let mut applies = true;
+    if let Some(platform) = requirement.get("platform") {
+        let Some(platform) = platform.as_str().filter(|platform| {
+            !platform.is_empty()
+                && platform
+                    .bytes()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, b'_' | b'-'))
+        }) else {
+            return true;
+        };
+        let marker = format!("sys_platform == '{platform}'");
+        let Some(result) = MarkerTree::parse_str::<url::Url>(&marker)
+            .ok()
+            .and_then(|marker| marker_matches_known_target(&marker, environment))
+        else {
+            return true;
+        };
+        applies &= result;
+    }
+    if let Some(python) = requirement.get("python") {
+        let Some(specifiers) = python
+            .as_str()
+            .and_then(|python| VersionSpecifiers::from_str(python).ok())
+        else {
+            return true;
+        };
+        for specifier in specifiers.iter() {
+            let version = specifier.version();
+            if version.epoch() != 0
+                || version.is_pre()
+                || version.is_post()
+                || version.is_dev()
+                || version.is_local()
+            {
+                return true;
+            }
+            // Poetry preserves minor equality, but uses the full version for
+            // strict lower and inclusive upper bounds and exact exclusions.
+            // Unqualified operators remain opaque rather than inventing ranges.
+            let key = match specifier.operator() {
+                Operator::Equal | Operator::LessThan | Operator::GreaterThanEqual => {
+                    if version.release().len() <= 2 {
+                        "python_version"
+                    } else {
+                        "python_full_version"
+                    }
+                }
+                Operator::NotEqual | Operator::LessThanEqual | Operator::GreaterThan => {
+                    "python_full_version"
+                }
+                _ => return true,
+            };
+            let marker = format!("{key} {} '{version}'", specifier.operator());
+            let Some(result) = MarkerTree::parse_str::<url::Url>(&marker)
+                .ok()
+                .and_then(|marker| marker_matches_known_target(&marker, environment))
+            else {
+                return true;
+            };
+            applies &= result;
+        }
+    }
+    if let Some(marker) = requirement.get("markers") {
+        let Some(result) = marker
+            .as_str()
+            .and_then(|marker| MarkerTree::parse_str::<url::Url>(marker).ok())
+            .and_then(|marker| marker_matches_known_target(&marker, environment))
+        else {
+            return true;
+        };
+        applies &= result;
+    }
+    applies
+}
+
 fn requirement_applies_to_target(requirement: &str, environment: &MarkerEnvironment) -> bool {
     if requirement.trim().is_empty() {
         return false;
@@ -281,6 +362,13 @@ fn requirement_applies_to_target(requirement: &str, environment: &MarkerEnvironm
 }
 
 fn marker_applies_to_target(marker: &MarkerTree, environment: &MarkerEnvironment) -> bool {
+    marker_matches_known_target(marker, environment).unwrap_or(true)
+}
+
+fn marker_matches_known_target(
+    marker: &MarkerTree,
+    environment: &MarkerEnvironment,
+) -> Option<bool> {
     let unknown_key = |key: &MarkerValueString| {
         matches!(
             key,
@@ -300,26 +388,26 @@ fn marker_applies_to_target(marker: &MarkerTree, environment: &MarkerEnvironment
             MarkerTreeKind::Version(node) => pending.extend(node.edges().map(|(_, child)| child)),
             MarkerTreeKind::String(node) => {
                 if unknown_key(node.key()) {
-                    return true;
+                    return None;
                 }
                 pending.extend(node.children().map(|(_, child)| child));
             }
             MarkerTreeKind::In(node) => {
                 if unknown_key(node.key()) {
-                    return true;
+                    return None;
                 }
                 pending.extend(node.children().map(|(_, child)| child));
             }
             MarkerTreeKind::Contains(node) => {
                 if unknown_key(node.key()) {
-                    return true;
+                    return None;
                 }
                 pending.extend(node.children().map(|(_, child)| child));
             }
-            MarkerTreeKind::Extra(_) => return true,
+            MarkerTreeKind::Extra(_) => return None,
         }
     }
-    marker.evaluate(environment, &[])
+    Some(marker.evaluate(environment, &[]))
 }
 
 pub fn dependency_names(fs: &dyn Fs) -> anyhow::Result<BTreeSet<String>> {

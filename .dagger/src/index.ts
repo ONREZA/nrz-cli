@@ -258,7 +258,7 @@ export class NrzCli {
    * Package a native nrz binary into the release archive contract.
    */
   @func()
-  packagePlatform(binary: File, platform: string, notices: File): File {
+  packagePlatform(binary: File, platform: string, notices: File, license: File): File {
     requirePlatform(platform);
     const executable = binName(platform);
     const mode = platform === "win32-x64" ? "0644" : "0755";
@@ -267,6 +267,7 @@ export class NrzCli {
       .from(ALPINE_IMAGE)
       .withMountedFile(`/input/${executable}`, binary)
       .withMountedFile("/input/THIRD_PARTY_NOTICES", notices)
+      .withMountedFile("/input/LICENSE", license)
       .withExec([
         "sh",
         "-ceu",
@@ -277,6 +278,8 @@ export class NrzCli {
           `chmod ${mode} /out/archive/${platform}/${executable}`,
           `cp /input/THIRD_PARTY_NOTICES /out/archive/${platform}/THIRD_PARTY_NOTICES`,
           `chmod 0644 /out/archive/${platform}/THIRD_PARTY_NOTICES`,
+          `cp /input/LICENSE /out/archive/${platform}/LICENSE`,
+          `chmod 0644 /out/archive/${platform}/LICENSE`,
           `find /out/archive/${platform} -exec touch -h -d @0 {} +`,
           `tar --numeric-owner -cf - -C /out/archive ${platform} | gzip -c > /out/${releaseAssetName(platform)}`,
         ].join("\n"),
@@ -288,12 +291,13 @@ export class NrzCli {
    * Package all native build artifacts downloaded from GitHub Actions.
    */
   @func()
-  packageReleaseArtifacts(binaries: Directory, notices: File): Directory {
+  packageReleaseArtifacts(binaries: Directory, notices: File, license: File): Directory {
     return dag
       .container()
       .from(ALPINE_IMAGE)
       .withDirectory("/input", binaries)
       .withMountedFile("/input/THIRD_PARTY_NOTICES", notices)
+      .withMountedFile("/input/LICENSE", license)
       .withExec([
         "sh",
         "-ceu",
@@ -310,6 +314,8 @@ export class NrzCli {
           "  chmod \"$mode\" \"/out/archive/$platform/$binary\"",
           '  cp /input/THIRD_PARTY_NOTICES "/out/archive/$platform/THIRD_PARTY_NOTICES"',
           '  chmod 0644 "/out/archive/$platform/THIRD_PARTY_NOTICES"',
+          '  cp /input/LICENSE "/out/archive/$platform/LICENSE"',
+          '  chmod 0644 "/out/archive/$platform/LICENSE"',
           "  find \"/out/archive/$platform\" -exec touch -h -d @0 {} +",
           "  tar --numeric-owner -cf - -C /out/archive \"$platform\" | gzip -c > \"/out/nrz-$platform.tar.gz\"",
           "done",

@@ -200,71 +200,83 @@ fn staged_requirement_project(
 async fn target_excluded_python_requirements_publish_without_a_dependency_stage() {
     for minor in PythonMinor::ALL {
         for output in [".", "dist"] {
-            let (project, command, args) = staged_requirement_project(minor, output);
-            std::fs::write(
-                project.path().join("requirements.txt"),
-                "colorama; sys_platform == 'win32'\n",
-            )
-            .unwrap();
-            std::fs::write(
-                project.path().join(output).join("main.py"),
-                "print('TARGET_DEPENDENCY_FREE')\n",
-            )
-            .unwrap();
-            let plan = super::super::plan::build(super::super::plan::DeployPlanRequest {
-                args: &args,
-                command: &command,
-                explicit_compute: None,
-                build_logs: None,
-                execution_env: &[],
-                target_production: None,
-                platform_runner: false,
-            })
-            .await
-            .unwrap();
-            let source = plan
-                .materialize_source_bundle(
-                    true,
-                    crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::Embedded,
+            for selectors in [
+                None,
+                Some("platform='win32'"),
+                Some("platform='freebsd'"),
+                Some("python='<3.12'"),
+            ] {
+                let (project, command, args) = staged_requirement_project(minor, output);
+                std::fs::write(
+                    project.path().join("requirements.txt"),
+                    "colorama; sys_platform == 'win32'\n",
                 )
                 .unwrap();
-            assert!(
-                source
-                    .logical_manifest
-                    .files
-                    .iter()
-                    .all(|file| !file.path.contains("site-packages/"))
-            );
-            let unpacked = tempfile::tempdir().unwrap();
-            let decoder = zstd::stream::read::Decoder::new(
-                std::fs::File::open(source.source_path()).unwrap(),
-            )
-            .unwrap();
-            tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
-            let entry = &source.logical_manifest.entrypoints[0];
-            assert_eq!(
-                std::fs::read_to_string(unpacked.path().join(entry)).unwrap(),
-                "print('TARGET_DEPENDENCY_FREE')\n"
-            );
-            let launch = nrz_runtime_artifact::python_script_launch_arguments(
-                entry,
-                minor.site_packages_root(),
-                ".",
-            );
-            let execution = std::process::Command::new("python3")
-                .args(launch)
-                .current_dir(unpacked.path())
-                .output()
+                if let Some(selectors) = selectors {
+                    std::fs::remove_file(project.path().join("requirements.txt")).unwrap();
+                    std::fs::write(project.path().join("pyproject.toml"), format!("[tool.poetry]\nname='app'\npackage-mode=false\n[tool.poetry.dependencies]\npython='*'\ncolorama={{version='*', {selectors}}}\n")).unwrap();
+                    std::fs::write(project.path().join("poetry.lock"), "").unwrap();
+                }
+                std::fs::write(
+                    project.path().join(output).join("main.py"),
+                    "print('TARGET_DEPENDENCY_FREE')\n",
+                )
                 .unwrap();
-            assert!(
-                execution.status.success(),
-                "{}",
-                String::from_utf8_lossy(&execution.stderr)
-            );
-            assert_eq!(
-                String::from_utf8_lossy(&execution.stdout),
-                "TARGET_DEPENDENCY_FREE\n"
-            );
+                let plan = super::super::plan::build(super::super::plan::DeployPlanRequest {
+                    args: &args,
+                    command: &command,
+                    explicit_compute: None,
+                    build_logs: None,
+                    execution_env: &[],
+                    target_production: None,
+                    platform_runner: false,
+                })
+                .await
+                .unwrap();
+                let source = plan
+                    .materialize_source_bundle(
+                        true,
+                        crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::Embedded,
+                    )
+                    .unwrap();
+                assert!(
+                    source
+                        .logical_manifest
+                        .files
+                        .iter()
+                        .all(|file| !file.path.contains("site-packages/"))
+                );
+                let unpacked = tempfile::tempdir().unwrap();
+                let decoder = zstd::stream::read::Decoder::new(
+                    std::fs::File::open(source.source_path()).unwrap(),
+                )
+                .unwrap();
+                tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+                let entry = &source.logical_manifest.entrypoints[0];
+                assert_eq!(
+                    std::fs::read_to_string(unpacked.path().join(entry)).unwrap(),
+                    "print('TARGET_DEPENDENCY_FREE')\n"
+                );
+                let launch = nrz_runtime_artifact::python_script_launch_arguments(
+                    entry,
+                    minor.site_packages_root(),
+                    ".",
+                );
+                let execution = std::process::Command::new("python3")
+                    .args(launch)
+                    .current_dir(unpacked.path())
+                    .output()
+                    .unwrap();
+                assert!(
+                    execution.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&execution.stderr)
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(&execution.stdout),
+                    "TARGET_DEPENDENCY_FREE\n"
+                );
+            }
         }
     }
 }

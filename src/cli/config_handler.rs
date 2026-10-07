@@ -72,7 +72,7 @@ async fn explain(
     }
     let server_settings =
         apply_server_settings_if_needed(&mut effective, args.local, token, workspace).await?;
-    let explanation = effective.explain();
+    let explanation = effective.explain()?;
     let output = ConfigExplainOutput {
         root_dir: context.root_dir.display().to_string(),
         project_dir: context.project_dir.display().to_string(),

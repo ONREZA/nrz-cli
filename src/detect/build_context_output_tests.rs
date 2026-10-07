@@ -55,3 +55,104 @@ fn independent_compilers_preserve_fresh_framework_build_hints() {
         }
     }
 }
+
+#[test]
+fn shallow_selection_rejects_the_same_authored_namespace_conflicts_as_full_context() {
+    use super::application_runtime::{resolve_build_toolchain, resolve_serving_python_minor};
+    use super::types::ComputeType;
+    let fs = VirtualFs::from_json(r#"{"tree":[],"files":{}}"#).unwrap();
+    let mut cases = Vec::new();
+    for field in [
+        "runtime='python'",
+        "entry='server.py'",
+        "args=[]",
+        "module='company.worker'",
+        "application='company.web:app'",
+        "server='asgi'",
+        "python_version='3.12'",
+    ] {
+        for explicit in [None, Some(ComputeType::Static)] {
+            let compute = if explicit.is_some() {
+                "process"
+            } else {
+                "static"
+            };
+            cases.push((format!("[deploy]\ncompute='{compute}'\n{field}\n"), explicit,
+                "STATIC serving conflicts with explicit PROCESS launch fields; use build.toolchain and build.python_version for build-only selectors"));
+        }
+    }
+    for family in ["node", "bun", "executable"] {
+        for field in [
+            "module='company.worker'",
+            "application='company.web:app'",
+            "server='asgi'",
+            "python_version='3.12'",
+        ] {
+            cases.push((
+                format!("[deploy]\nruntime='{family}'\n{field}\n"),
+                None,
+                "Python launch conflicts with the declared application runtime",
+            ));
+        }
+    }
+    for (text, explicit_compute, expected) in cases {
+        let config = toml::from_str(&text).unwrap();
+        let mut detection = super::detect_with_fs(&fs);
+        let before = detection.metadata.source_build_context.clone();
+        let build = resolve_build_toolchain(&detection, &config).unwrap();
+        let full = resolve_and_bind_source_build_context(
+            &fs,
+            &mut detection,
+            &config,
+            None,
+            explicit_compute,
+        )
+        .unwrap_err();
+        assert_eq!(full.to_string(), expected, "{text}");
+        assert_eq!(detection.metadata.source_build_context, before, "{text}");
+        let shallow = resolve_serving_python_minor(&detection, &config, &build, explicit_compute)
+            .unwrap_err();
+        assert_eq!(shallow.to_string(), expected, "{text}");
+    }
+}
+
+#[test]
+fn shallow_selection_preserves_independent_compilers_and_incomplete_launches() {
+    use super::application_runtime::{resolve_build_toolchain, resolve_serving_python_minor};
+    use nrz_source_bundle::{ApplicationRuntimeFamily, PythonMinor};
+    let fs = VirtualFs::from_json(r#"{"tree":["main.py","pyproject.toml"],"files":{"main.py":"print('ready')\n","pyproject.toml":"[tool.poetry]\npackage-mode=false\n"}}"#).unwrap();
+    for minor in PythonMinor::ALL {
+        let mut detection = super::detect_with_fs(&fs);
+        let config = toml::from_str(&format!("[build]\ntoolchain='python'\npython_version='{}'\n[deploy]\nruntime='node'\nentry='server.js'\n", minor.version())).unwrap();
+        let build = resolve_build_toolchain(&detection, &config).unwrap();
+        assert_eq!(build.resolved_python_minor(), Some(minor));
+        assert_eq!(
+            resolve_serving_python_minor(&detection, &config, &build, None).unwrap(),
+            None
+        );
+        let context =
+            resolve_and_bind_source_build_context(&fs, &mut detection, &config, None, None)
+                .unwrap();
+        assert_eq!(
+            context.application_runtime.unwrap().family,
+            ApplicationRuntimeFamily::Node
+        );
+        let config = toml::from_str(&format!(
+            "[build]\npython_version='{}'\n[deploy]\nruntime='python'\n",
+            minor.version()
+        ))
+        .unwrap();
+        let build = resolve_build_toolchain(&detection, &config).unwrap();
+        assert_eq!(
+            resolve_serving_python_minor(&detection, &config, &build, None).unwrap(),
+            Some(minor)
+        );
+        let missing = VirtualFs::from_json(r#"{"tree":["pyproject.toml"],"files":{"pyproject.toml":"[tool.poetry]\npackage-mode=false\n"}}"#).unwrap();
+        let detection = super::detect_with_fs(&missing);
+        let build = resolve_build_toolchain(&detection, &config).unwrap();
+        assert_eq!(
+            resolve_serving_python_minor(&detection, &config, &build, None).unwrap(),
+            Some(minor)
+        );
+    }
+}

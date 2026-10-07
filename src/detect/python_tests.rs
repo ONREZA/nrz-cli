@@ -414,6 +414,79 @@ fn python_stage_markers_use_the_frozen_target_and_keep_unknown_inputs_conservati
     for minor in PythonMinor::ALL {
         assert!(!requires_dependency_stage_for_target(&fs, minor).unwrap());
     }
+    for minor in PythonMinor::ALL {
+        for (selectors, required) in [
+            ("platform='win32'".to_string(), false),
+            ("platform='linux'".to_string(), true),
+            ("platform='freebsd'".to_string(), false),
+            ("platform='aix'".to_string(), false),
+            ("platform='custom_OS-123'".to_string(), false),
+            ("platform='Linux'".to_string(), false),
+            ("platform=''".to_string(), true),
+            ("platform=' linux '".to_string(), true),
+            ("platform='*'".to_string(), true),
+            ("platform='linux win32'".to_string(), true),
+            ("python='<3.12'".to_string(), false),
+            (format!("python='=={}'", minor.exact_version()), true),
+            (format!("python='!={}'", minor.exact_version()), false),
+            ("python='>=3.12', platform='win32'".to_string(), false),
+            ("python='<3.12', platform='linux'".to_string(), false),
+            ("python='>=3.12', platform='linux'".to_string(), true),
+            (format!("python='=={}'", minor.version()), true),
+            (format!("python='!={}'", minor.version()), true),
+            (format!("python='<={}'", minor.version()), false),
+            (format!("python='>{}'", minor.version()), true),
+            (format!("python='<{}'", minor.version()), false),
+            (format!("python='>={}'", minor.version()), true),
+            ("python='==2.7'".to_string(), false),
+            ("python='>=3.12,<3.15'".to_string(), true),
+            ("python='^2.7'".to_string(), true),
+            ("python='~=2.7'".to_string(), true),
+            ("python='==3.12.*'".to_string(), true),
+            ("python='UNKNOWN_CONSTRAINT'".to_string(), true),
+            ("platform='!=linux'".to_string(), true),
+            ("platform='linux || win32'".to_string(), true),
+            ("platform=42".to_string(), true),
+            ("python=42".to_string(), true),
+            (
+                "platform='win32', markers='sys_platform == \"linux\"'".to_string(),
+                false,
+            ),
+            (
+                "platform='win32', markers='platform_release == \"UNKNOWN_KERNEL\"'".to_string(),
+                true,
+            ),
+        ] {
+            std::fs::write(project.path().join("pyproject.toml"), format!("[tool.poetry]\nname='app'\npackage-mode=false\n[tool.poetry.dependencies]\npython='*'\ncolorama={{version='*', {selectors}}}\n")).unwrap();
+            assert!(requires_dependency_stage(&fs).unwrap());
+            assert_eq!(
+                requires_dependency_stage_for_target(&fs, minor).unwrap(),
+                required,
+                "{minor:?}: {selectors}"
+            );
+        }
+        for (alternatives, required) in [
+            (
+                "[{version='*', platform='win32'}, {version='*', platform='darwin'}]",
+                false,
+            ),
+            (
+                "[{version='*', platform='win32'}, {version='*', platform='linux'}]",
+                true,
+            ),
+            (
+                "[{version='*', platform='win32'}, {version='*', python='^2.7'}]",
+                true,
+            ),
+        ] {
+            std::fs::write(project.path().join("pyproject.toml"), format!("[tool.poetry]\nname='app'\npackage-mode=false\n[tool.poetry.dependencies]\npython='*'\ncolorama={alternatives}\n")).unwrap();
+            assert_eq!(
+                requires_dependency_stage_for_target(&fs, minor).unwrap(),
+                required,
+                "{minor:?}: {alternatives}"
+            );
+        }
+    }
 }
 
 #[test]

@@ -3,6 +3,53 @@ use super::*;
 use axum::http::StatusCode;
 
 #[test]
+fn config_explain_rejects_inconsistent_toolchain_selection() {
+    for (config, expected) in [
+        (
+            "[build]\ntoolchain='node'\npython_version='3.12'\n",
+            "build.python_version requires the Python build toolchain",
+        ),
+        (
+            "[build]\ntoolchain='bun'\npython_version='3.12'\n",
+            "build.python_version requires the Python build toolchain",
+        ),
+        (
+            "[build]\ntoolchain='native'\npython_version='3.12'\n",
+            "build.python_version requires the Python build toolchain",
+        ),
+        (
+            "[deploy]\ncompute='invalid'\n",
+            "invalid compute type; expected static or process",
+        ),
+        (
+            "[deploy]\ncompute='static'\nruntime='python'\npython_version='3.12'\n",
+            "STATIC serving conflicts with explicit PROCESS launch fields",
+        ),
+        (
+            "[deploy]\nruntime='node'\npython_version='3.12'\n",
+            "Python launch conflicts with the declared application runtime",
+        ),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("onreza.toml"), config).unwrap();
+        for mode in ["--json", "--human"] {
+            let mut command = nrz();
+            command
+                .current_dir(&temp)
+                .args([mode, "config", "explain", "--local"]);
+            let result = command.assert().failure();
+            if mode == "--human" {
+                result.stdout("").stderr(contains(expected));
+            } else {
+                result
+                    .stdout(contains("\"error\""))
+                    .stdout(contains(expected));
+            }
+        }
+    }
+}
+
+#[test]
 fn config_explain_human_shows_separate_build_and_serving_python_selection() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(

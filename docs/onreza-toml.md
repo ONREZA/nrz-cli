@@ -135,6 +135,8 @@ output_dirs = ["dist"]
 `nrz config explain --app web --json`. По умолчанию `config explain` также
 подтягивает server project settings для `project.id`, как `nrz deploy`; для
 локального-only просмотра используйте `nrz config explain --local`.
+Несовместимые build/serving selectors возвращают ошибку и в JSON, и в human
+режиме. Эта проверка выбора не требует готовой точки запуска или lock-файла.
 
 Для Python поля `entry`, `module` и `application` задают разные режимы запуска.
 Явный режим дочернего приложения заменяет конкурирующие настройки родителя.
@@ -388,6 +390,10 @@ dependencies `--skip-install` требует файлов
 Пустого каталога `site-packages` недостаточно. Известные PEP 508 markers,
 исключающие все зависимости для этого target, допускают пустое дерево;
 непрозрачные inputs и markers с неизвестными значениями сохраняют требование дерева.
+Для Poetry также учитываются буквальный `platform` и стабильные Python-версии
+с операторами `==`, `!=`, `<`, `<=`, `>` и `>=`. Poetry-диапазоны с `^`, `~`,
+wildcards, unions и другие неизвестные selectors сохраняют требование дерева;
+их полную семантику обрабатывает установщик.
 Автоматическая локальная установка использует target wheels без editable
 installations и source builds зависимостей. Для editable project dependency
 подготовьте wheel или используйте Git/Builder.
