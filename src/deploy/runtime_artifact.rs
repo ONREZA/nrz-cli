@@ -574,8 +574,40 @@ pub(crate) fn apply_application_runtime_manifest(
     build_runtime_version: Option<&str>,
     framework: &str,
 ) -> anyhow::Result<()> {
+    let sole_compute = compute_layer_count(manifest) == 1;
     // The selected primary must exist before independent sibling owners can
     // be retained or untyped JS siblings can inherit its defaults.
+    if let Some(declaration) = declaration
+        && declaration.entry.is_none()
+        && !manifest.layers.iter().any(|layer| {
+            if layer.target != crate::build::manifest::LayerTarget::Compute || layer.entry.is_none()
+            {
+                return false;
+            }
+            let runtime = layer.runtime.as_ref();
+            let Some(intent) = runtime.and_then(|runtime| runtime.application_runtime.as_ref())
+            else {
+                // Untyped owners retain the existing selected-runtime defaults.
+                return true;
+            };
+            // Runtime-only config leaves the authored owner's literal argv open;
+            // an explicit nonempty argv remains part of the selected launch.
+            intent.family == declaration.family
+                && (declaration.args.is_empty() || intent.args == declaration.args)
+                && match runtime.and_then(|runtime| runtime.build_runtime_version.as_deref()) {
+                    Some(target) => {
+                        declaration.validate_target(Some(target)).is_ok()
+                            && build_runtime_version.is_none_or(|primary| primary == target)
+                    }
+                    None => sole_compute,
+                }
+        })
+    {
+        return Err(output::coded_error(
+            "APPLICATION_RUNTIME_INVALID",
+            "build manifest lacks a compatible COMPUTE primary for the selected application runtime; include that primary alongside independent runtime layers",
+        ));
+    }
     if let Some(declaration) = declaration
         && let Some(entry) = declaration.entry.as_deref()
     {
@@ -620,7 +652,6 @@ pub(crate) fn apply_application_runtime_manifest(
             }
         }
     }
-    let sole_compute = compute_layer_count(manifest) == 1;
     for layer in &mut manifest.layers {
         if layer.target != crate::build::manifest::LayerTarget::Compute {
             continue;

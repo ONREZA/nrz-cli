@@ -342,28 +342,8 @@ fn find_native_python_payload(root: &Path) -> anyhow::Result<Option<PathBuf>> {
                     return Ok(Some(payload));
                 }
             }
-        } else if metadata.is_file() {
-            let name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_ascii_lowercase();
-            if NATIVE_PAYLOAD_EXTENSIONS
-                .iter()
-                .any(|extension| name.ends_with(extension))
-            {
-                return Ok(Some(path.to_owned()));
-            }
-            let mut header = Vec::with_capacity(8);
-            std::fs::File::open(path)?
-                .take(8)
-                .read_to_end(&mut header)?;
-            if NATIVE_PAYLOAD_MAGICS
-                .iter()
-                .any(|magic| header.starts_with(magic))
-            {
-                return Ok(Some(path.to_owned()));
-            }
+        } else if metadata.is_file() && is_native_python_payload_file(path)? {
+            return Ok(Some(path.to_owned()));
         }
         Ok(None)
     }
@@ -372,6 +352,64 @@ fn find_native_python_payload(root: &Path) -> anyhow::Result<Option<PathBuf>> {
         Err(error) => Err(error.into()),
         Ok(_) => visit(root, &mut std::collections::HashSet::new()),
     }
+}
+
+fn is_native_python_payload_file(path: &Path) -> anyhow::Result<bool> {
+    let name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_ascii_lowercase();
+    if NATIVE_PAYLOAD_EXTENSIONS
+        .iter()
+        .any(|extension| name.ends_with(extension))
+    {
+        return Ok(true);
+    }
+    let mut header = Vec::with_capacity(8);
+    std::fs::File::open(path)?
+        .take(8)
+        .read_to_end(&mut header)?;
+    Ok(NATIVE_PAYLOAD_MAGICS
+        .iter()
+        .any(|magic| header.starts_with(magic)))
+}
+
+/// The scan and classification already own custody, pruning and symlink bounds.
+/// Managed dependency wheels have their separate Linux target qualification.
+pub(super) fn validate_local_python_build_output(
+    artifact: &crate::artifact::RuntimeArtifact,
+    files: &crate::artifact::ArtifactFileCollection,
+) -> anyhow::Result<()> {
+    use crate::artifact::ArtifactFileRole;
+    for file in &files.files {
+        if file.role != ArtifactFileRole::Compute
+            || artifact.scan.owns_as_python_dependency(&file.path)
+            || !artifact.manifest.layers.iter().any(|layer| {
+                file.layer.as_deref() == Some(layer.name.as_str())
+                    && layer
+                        .runtime
+                        .as_ref()
+                        .and_then(|runtime| runtime.application_runtime.as_ref())
+                        .is_some_and(|runtime| {
+                            runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+                        })
+            })
+        {
+            continue;
+        }
+        let path = artifact.root_dir.join(&file.path);
+        if std::fs::metadata(&path)?.is_file() && is_native_python_payload_file(&path)? {
+            return Err(crate::output::coded_error(
+                "PYTHON_PLATFORM_UNSUPPORTED",
+                format!(
+                    "Local Python application build contains native payload '{}'; use ONREZA Cloud Builder for qualified Linux builds, or deploy an explicitly qualified prebuilt artifact with --skip-build.",
+                    file.path,
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 async fn build_environment_for_interpreter(
@@ -742,6 +780,7 @@ fn ensure_python_output_path(project_dir: &Path, output: &Path) -> anyhow::Resul
 
 pub(super) fn ensure_python_directory(project_dir: &Path, directory: &Path) -> anyhow::Result<()> {
     ensure_python_output_path(project_dir, directory)?;
+    crate::init::add_to_gitignore(project_dir);
     std::fs::create_dir_all(directory).context("cannot create Python output directory")?;
     ensure_python_output_path(project_dir, directory)
 }
@@ -1140,3 +1179,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 #[path = "python_host_tests.rs"]
 mod host_tests;
+
+#[cfg(test)]
+#[path = "python_output_tests.rs"]
+mod output_tests;

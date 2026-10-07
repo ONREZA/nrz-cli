@@ -383,6 +383,9 @@ output; runtime dependencies требуют совпадающих qualified min
 определённую glibc не ниже целевого manylinux ABI (сейчас 2.39). На macOS,
 Windows, non-x64 host, musl либо неизвестной libc используйте Git/Builder
 для нативных dependencies. Чистые Python packages доступны для локальной сборки.
+Нативные расширения самого Python-приложения собирайте через Git/Builder.
+После локальной пользовательской build-команды CLI проверяет публикуемые
+Python-файлы: нативный application output требует сборки в Builder.
 Установленные `.pth` paths и import hooks обрабатываются при сборке и запуске;
 повторный bootstrap в том же interpreter не запускает hooks второй раз. Публикация готового output через `--skip-build` не запускает
 host interpreter.

@@ -176,6 +176,10 @@ impl RuntimeArtifactScan {
         )
     }
 
+    pub(crate) fn owns_as_python_dependency(&self, path: &str) -> bool {
+        self.file_category(path) == RuntimeArtifactFileCategory::PythonSitePackages
+    }
+
     pub(crate) fn source_layer_match<'a>(
         &'a self,
         manifest: &'a Manifest,

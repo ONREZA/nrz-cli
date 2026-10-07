@@ -616,6 +616,81 @@ fn unknown_primary_identity_does_not_supply_a_typed_sibling_target() {
 }
 
 #[test]
+fn declaration_without_entry_requires_a_compatible_compute_primary() {
+    let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
+        family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
+        python_version: None,
+        entry: None,
+        args: vec![],
+    };
+    for (family, target, args, selected_args) in [
+        ("PYTHON", "python-3.14", vec![], vec![]),
+        ("NODE", "node-22", vec![], vec![]),
+        ("NODE", "node-24", vec!["--independent"], vec!["--selected"]),
+    ] {
+        let mut manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "version": 1, "routes": [], "layers": [
+                {"name": "worker", "target": "COMPUTE", "directory": ".", "entry": "worker.py",
+                 "runtime": {"applicationRuntime": {"family": family, "args": args},
+                             "buildRuntimeVersion": target}}
+            ]
+        }))
+        .unwrap();
+        let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
+            args: selected_args.into_iter().map(str::to_owned).collect(),
+            ..declaration.clone()
+        };
+        let before = serde_json::to_value(&manifest).unwrap();
+        let error = apply_application_runtime_manifest(
+            &mut manifest,
+            Some(&declaration),
+            Some("node-24"),
+            "other",
+        )
+        .expect_err("independent worker replaced the selected primary runtime");
+        assert!(error.to_string().contains("primary"), "{error:#}");
+        assert_eq!(serde_json::to_value(manifest).unwrap(), before);
+    }
+}
+
+#[test]
+fn declaration_without_entry_keeps_compatible_owners_and_independent_siblings() {
+    let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
+        family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
+        python_version: None,
+        entry: None,
+        args: vec![],
+    };
+    for compatible_count in [1, 2] {
+        let mut layers = vec![serde_json::json!({
+            "name": "worker", "target": "COMPUTE", "directory": "python", "entry": "worker.py",
+            "runtime": {"applicationRuntime": {"family": "PYTHON", "args": []},
+                        "buildRuntimeVersion": "python-3.14"}
+        })];
+        for index in 0..compatible_count {
+            layers.push(serde_json::json!({
+                "name": format!("primary-{index}"), "target": "COMPUTE", "directory": format!("node-{index}"), "entry": "server.js",
+                "runtime": {"applicationRuntime": {"family": "NODE", "args": ["$(id)", "two words", format!("--owner-{index}")]},
+                            "buildRuntimeVersion": "node-24"}
+            }));
+        }
+        let mut manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "version": 1, "routes": [], "layers": layers
+        }))
+        .unwrap();
+        let before = serde_json::to_value(&manifest).unwrap();
+        apply_application_runtime_manifest(
+            &mut manifest,
+            Some(&declaration),
+            Some("node-24"),
+            "other",
+        )
+        .unwrap();
+        assert_eq!(serde_json::to_value(manifest).unwrap(), before);
+    }
+}
+
+#[test]
 fn untyped_manifest_cannot_bind_a_different_frozen_primary_entry() {
     use nrz_source_bundle::{ApplicationRuntimeDeclaration, ApplicationRuntimeFamily, PythonMinor};
     for (family, target, entry) in [

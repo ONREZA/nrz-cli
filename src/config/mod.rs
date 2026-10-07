@@ -991,6 +991,14 @@ impl EffectiveProjectConfig {
     }
 
     pub fn explain(&self) -> EffectiveConfigExplanation {
+        let detection = crate::detect::detect_with_framework_override(
+            &self.project_dir,
+            self.framework_override(),
+        );
+        let build_python_version =
+            crate::detect::application_runtime::resolve_build_toolchain(&detection, &self.config)
+                .map(|build| build.resolved_python_minor())
+                .unwrap_or(self.config.build.python_version);
         EffectiveConfigExplanation {
             project_dir: self.project_dir.display().to_string(),
             project_id: explain_origin_value(self.project_id(), self.project_id_source, "absent"),
@@ -1023,11 +1031,14 @@ impl EffectiveProjectConfig {
                 "auto",
             ),
             build_python_version: explain_config_option(
-                self.config
-                    .build
-                    .python_version
-                    .map(nrz_source_bundle::PythonMinor::version),
-                "onreza.toml",
+                build_python_version.map(nrz_source_bundle::PythonMinor::version),
+                if self.config.build.python_version.is_some()
+                    || self.config.deploy.python_version.is_some()
+                {
+                    "onreza.toml"
+                } else {
+                    "default"
+                },
                 "default",
             ),
             deploy_compute: explain_config_option(self.deploy_compute(), "onreza.toml", "auto"),

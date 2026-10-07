@@ -448,6 +448,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
                 .await?;
         build_env = super::merge_command_environment(&build_env, &python_env);
     }
+    let mut build_executed = false;
     if let Some(plan) = &native_plan {
         super::run_native_build_step(
             plan,
@@ -459,11 +460,13 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             request.platform_runner,
         )
         .await?;
+        build_executed = true;
     } else if !args.skip_build
         && let Some(cmd) = build_command.as_deref()
     {
         crate::frameworks::clear_before_build(project_dir)?;
         super::run_build_step(cmd, project_dir, json, &build_env, request.build_logs)?;
+        build_executed = true;
     }
 
     if let Some(declaration) = detection
@@ -806,6 +809,12 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         json,
     );
     let files = artifact_files.deployable_entries();
+    if build_executed && !request.platform_runner {
+        super::python_toolchain::validate_local_python_build_output(
+            &runtime_artifact,
+            &artifact_files,
+        )?;
+    }
     if files.is_empty() {
         return Err(output::coded_error(
             "INVALID_BUILD_OUTPUT",

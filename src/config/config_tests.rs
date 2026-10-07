@@ -1455,6 +1455,56 @@ fn explained_python_toolchain_matches_the_shared_build_selection() {
             assert_eq!(effective.config().build.toolchain.is_some(), explicit);
         }
     }
+    for build_family in [
+        None,
+        Some(nrz_source_bundle::BuildToolchainFamily::Python),
+        Some(nrz_source_bundle::BuildToolchainFamily::Node),
+        Some(nrz_source_bundle::BuildToolchainFamily::Bun),
+        Some(nrz_source_bundle::BuildToolchainFamily::Native),
+    ] {
+        for minor in nrz_source_bundle::PythonMinor::ALL {
+            let mut config = ProjectConfig::default();
+            config.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Python);
+            config.deploy.python_version = Some(minor);
+            config.build.toolchain = build_family;
+            let selected =
+                crate::detect::application_runtime::resolve_build_toolchain(&detection, &config)
+                    .unwrap();
+            let explained =
+                EffectiveProjectConfig::from_project_config(dir.path().to_owned(), config)
+                    .explain();
+            assert_eq!(
+                explained.build_python_version.value.as_deref(),
+                selected
+                    .resolved_python_minor()
+                    .map(nrz_source_bundle::PythonMinor::version),
+                "{build_family:?} / {minor:?}"
+            );
+            assert_eq!(
+                explained.build_python_version.source,
+                if selected.resolved_python_minor().is_some() {
+                    "onreza.toml"
+                } else {
+                    "default"
+                }
+            );
+        }
+    }
+    let mut default_python = ProjectConfig::default();
+    default_python.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Python);
+    let selected =
+        crate::detect::application_runtime::resolve_build_toolchain(&detection, &default_python)
+            .unwrap();
+    let explained =
+        EffectiveProjectConfig::from_project_config(dir.path().to_owned(), default_python)
+            .explain();
+    assert_eq!(
+        explained.build_python_version.value.as_deref(),
+        selected
+            .resolved_python_minor()
+            .map(nrz_source_bundle::PythonMinor::version)
+    );
+    assert_eq!(explained.build_python_version.source, "default");
     let empty = EffectiveProjectConfig::from_project_config(
         dir.path().to_owned(),
         ProjectConfig::default(),
