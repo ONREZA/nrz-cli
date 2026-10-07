@@ -574,8 +574,8 @@ pub(crate) fn apply_application_runtime_manifest(
     build_runtime_version: Option<&str>,
     framework: &str,
 ) -> anyhow::Result<()> {
-    // Untyped layers can inherit a launch only after its selected file has
-    // been identified. Retained JS siblings may share the primary defaults.
+    // The selected primary must exist before independent sibling owners can
+    // be retained or untyped JS siblings can inherit its defaults.
     if let Some(declaration) = declaration
         && let Some(entry) = declaration.entry.as_deref()
     {
@@ -592,6 +592,12 @@ pub(crate) fn apply_application_runtime_manifest(
             .iter()
             .filter(|layer| layer.target == crate::build::manifest::LayerTarget::Compute)
             .any(&matches_entry);
+        if !primary_present {
+            return Err(output::coded_error(
+                "APPLICATION_RUNTIME_INVALID",
+                "build manifest lacks a COMPUTE layer for the frozen application entry; include the selected primary alongside independent runtime layers",
+            ));
+        }
         for layer in &manifest.layers {
             if layer.target == crate::build::manifest::LayerTarget::Compute
                 && layer

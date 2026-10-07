@@ -660,12 +660,77 @@ fn untyped_manifest_cannot_bind_a_different_frozen_primary_entry() {
     }
 }
 
+#[test]
+fn typed_siblings_cannot_replace_a_declared_primary_entry() {
+    use nrz_source_bundle::{ApplicationRuntimeDeclaration, ApplicationRuntimeFamily, PythonMinor};
+    for (family, target, entry) in [
+        (ApplicationRuntimeFamily::Node, "node-24", "selected.js"),
+        (ApplicationRuntimeFamily::Bun, "bun-1.3.11", "selected.ts"),
+        (
+            ApplicationRuntimeFamily::Python,
+            "python-3.14",
+            ".onreza/python/launch.py",
+        ),
+        (
+            ApplicationRuntimeFamily::Executable,
+            "native-linux-x86_64-glibc",
+            "bin/selected",
+        ),
+    ] {
+        let declaration = ApplicationRuntimeDeclaration {
+            family,
+            python_version: (family == ApplicationRuntimeFamily::Python)
+                .then_some(PythonMinor::Python314),
+            entry: Some(entry.into()),
+            args: vec![],
+        };
+        for static_first in [false, true] {
+            for directory in [".", "other"] {
+                let sibling = serde_json::json!({
+                    "name": "worker", "target": "COMPUTE", "directory": directory,
+                    "entry": if directory == "." { "worker.js" } else { entry.rsplit('/').next().unwrap() }, "runtime": {
+                        "applicationRuntime": {"family": "NODE", "args": []},
+                        "buildRuntimeVersion": "node-22"
+                    }
+                });
+                // A STATIC layer pointing at the selected file is not a serving owner.
+                let assets = serde_json::json!({
+                    "name": "assets", "target": "STATIC", "directory": entry
+                });
+                let layers = if static_first {
+                    vec![assets, sibling]
+                } else {
+                    vec![sibling, assets]
+                };
+                let mut manifest: Manifest = serde_json::from_value(serde_json::json!({
+                    "version": 1, "routes": [], "layers": layers
+                }))
+                .unwrap();
+                let before = serde_json::to_value(&manifest).unwrap();
+                let error = apply_application_runtime_manifest(
+                    &mut manifest,
+                    Some(&declaration),
+                    Some(target),
+                    "other",
+                )
+                .expect_err("typed worker silently replaced the selected primary");
+                assert!(error.to_string().contains("entry"), "{error:#}");
+                assert_eq!(serde_json::to_value(manifest).unwrap(), before);
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn build_binds_only_the_selected_entry_in_the_output_coordinate_frame() {
-    for (selected, manifest_entry, accepted) in [
-        ("server.js", "old.js", false),
-        ("server.js", "server.js", true),
-        ("nested/server.js", "server.js", false),
+    for (selected, manifest_entry, typed, accepted) in [
+        ("server.js", "old.js", false, false),
+        ("server.js", "server.js", false, true),
+        ("nested/server.js", "server.js", false, false),
+        ("server.js", "old.js", true, false),
+        ("server.js", "server.js", true, true),
+        ("nested/server.js", "server.js", true, false),
+        ("server.js", "", false, false),
     ] {
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("dist");
@@ -674,7 +739,20 @@ async fn build_binds_only_the_selected_entry_in_the_output_coordinate_frame() {
         for entry in ["server.js", "old.js", "nested/server.js"] {
             std::fs::write(output.join(entry), "console.log('hello')").unwrap();
         }
-        let manifest = crate::build::manifest::generate_compute_manifest(manifest_entry);
+        let mut manifest = if manifest_entry.is_empty() {
+            crate::build::manifest::generate_static_manifest()
+        } else {
+            crate::build::manifest::generate_compute_manifest(manifest_entry)
+        };
+        if typed {
+            manifest.layers[0].runtime = Some(
+                serde_json::from_value(serde_json::json!({
+                    "applicationRuntime": {"family": "NODE", "args": []},
+                    "buildRuntimeVersion": "node-24"
+                }))
+                .unwrap(),
+            );
+        }
         std::fs::write(
             output.join(".onreza/manifest.json"),
             serde_json::to_vec(&manifest).unwrap(),
@@ -710,7 +788,7 @@ async fn build_binds_only_the_selected_entry_in_the_output_coordinate_frame() {
         assert_eq!(
             result.is_ok(),
             accepted,
-            "{selected} / {manifest_entry}: {result:?}"
+            "{selected} / {manifest_entry} (typed={typed}): {result:?}"
         );
     }
 }

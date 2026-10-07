@@ -36,6 +36,17 @@ Hugo автоматически определяется по `hugo.toml`, `hugo
 само по себе не определяет генератор. Hugo STATIC может содержать только
 вложенные страницы без корневого `index.html`.
 
+В автоматической Go-сборке ищется один `main` package в корне или `cmd/*`,
+подходящий для Linux amd64, `CGO=0` и выбранного compiler. Учитываются суффиксы
+имён файлов и build constraints; Windows-only и cgo-only entry не выбираются.
+
+Автосборка Hugo требует неизменных dependency inputs: `go.mod`, `go.sum` и
+`hugo.direct.sum`, если они нужны вашим модулям. Если Hugo разрешает новые
+зависимости или обновляет эти файлы, публикация прерывается без изменения
+исходников. Сначала соберите сайт локально, проверьте и закоммитьте полученные
+файлы зависимостей. Go workspaces и источники модулей вне проекта требуют
+собственной `build.command`.
+
 ---
 
 ## [dev]
@@ -182,6 +193,9 @@ CLI toolchain. Platform runner проверяет frozen intent и trusted runti
 graph compiler отвергают несовместимые family/target, в том числе без dependencies.
 Соседний слой может сохранять другой поддерживаемый target без дерева
 зависимостей; его зависимости требуют отдельного build policy.
+При заданном primary entry build manifest должен содержать COMPUTE-слой с этим
+полным путём (directory + entry). Независимый typed-слой и STATIC-слой не
+заменяют выбранный primary.
 Default direct publication без явного intent сохраняет существующий Bun launcher.
 
 Если entry не удалось определить однозначно:

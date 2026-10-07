@@ -310,6 +310,125 @@ impl GoModuleInputs {
     }
 }
 
+/// Hugo overrides GOFLAGS and writes its module checksums while loading config.
+/// Keep those writes in an isolated source tree, then require reviewed inputs.
+pub(crate) struct HugoModuleInputs {
+    _temporary: tempfile::TempDir,
+    source: std::path::PathBuf,
+    inputs: Vec<(&'static str, Option<Vec<u8>>)>,
+}
+
+impl HugoModuleInputs {
+    pub(crate) fn freeze(project_dir: &Path, command: &mut NativeCommand) -> anyhow::Result<Self> {
+        if project_dir.join("go.mod").exists() {
+            ensure_go_inputs(&LocalFs::new(project_dir))?;
+        }
+        let temporary = tempfile::tempdir()?;
+        let root = project_dir.canonicalize()?;
+        let staging = temporary.path().canonicalize()?;
+        let source = staging.join("source");
+        copy_hugo_source(&root, &source, &root, &staging)?;
+        // Versioned config imports can resolve without go.mod and otherwise
+        // omit hugo.direct.sum entirely. The private module makes Hugo record
+        // that checksum, without introducing an authored module for plain sites.
+        if !source.join("go.mod").exists() {
+            std::fs::write(
+                source.join("go.mod"),
+                "module onreza.invalid/frozen-hugo\n\ngo 1.18\n",
+            )?;
+        }
+        let inputs = ["go.mod", "go.sum", "hugo.direct.sum"]
+            .into_iter()
+            .map(|name| Ok((name, read_hugo_module_input(&source.join(name))?)))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let index = command
+            .arguments
+            .iter()
+            .position(|arg| arg == "--destination")
+            .context("Hugo recipe requires an explicit destination")?;
+        let output = command
+            .arguments
+            .get_mut(index + 1)
+            .context("Hugo recipe destination has no value")?;
+        *output = project_dir
+            .canonicalize()?
+            .join(&*output)
+            .to_string_lossy()
+            .into_owned();
+        command
+            .arguments
+            .extend(["--source".into(), source.to_string_lossy().into_owned()]);
+        Ok(Self {
+            _temporary: temporary,
+            source,
+            inputs,
+        })
+    }
+
+    pub(crate) fn verify(&self) -> anyhow::Result<()> {
+        for (name, original) in &self.inputs {
+            if &read_hugo_module_input(&self.source.join(name))? != original {
+                bail!(
+                    "Hugo build requires changes to dependency inputs ({name}); generate and review go.mod/go.sum/hugo.direct.sum before deploying"
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+fn read_hugo_module_input(path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn copy_hugo_source(
+    source: &Path,
+    destination: &Path,
+    root: &Path,
+    staging: &Path,
+) -> anyhow::Result<()> {
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let path = entry.path();
+        // TMPDIR may be inside the project. Omit only this invocation's
+        // generated staging tree, while preserving other authored temp paths.
+        if path == staging {
+            continue;
+        }
+        let output = destination.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            let target = std::fs::read_link(&path)?;
+            let resolved = path.canonicalize()?;
+            if target.is_absolute() || !resolved.starts_with(root) {
+                bail!(
+                    "Hugo source symlinks must be relative and contained in the project; use an explicit build.command for external source inputs"
+                );
+            }
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(target, output)?;
+            #[cfg(windows)]
+            if resolved.is_dir() {
+                std::os::windows::fs::symlink_dir(target, output)?;
+            } else {
+                std::os::windows::fs::symlink_file(target, output)?;
+            }
+        } else if kind.is_dir() {
+            copy_hugo_source(&path, &output, root, staging)?;
+        } else if kind.is_file() {
+            std::fs::copy(path, output)?;
+        } else {
+            bail!("Hugo source inputs must be regular files, directories, or contained symlinks");
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn recipe_commands(
     project_dir: &Path,
     recipe: NativeRecipe,
@@ -393,6 +512,7 @@ pub(crate) fn recipe_commands(
                 ("GOWORK".into(), "off".into()),
                 ("GOENV".into(), "off".into()),
                 ("GOFLAGS".into(), String::new()),
+                ("GOEXPERIMENT".into(), String::new()),
             ]);
             (
                 None,
@@ -410,20 +530,29 @@ pub(crate) fn recipe_commands(
                 Some("server".into()),
             )
         }
-        NativeRecipe::HugoStatic => (
-            None,
-            NativeCommand::new(
-                "hugo",
-                &[
-                    "--environment",
-                    "production",
-                    "--destination",
-                    "public",
-                    "--cleanDestinationDir",
-                ],
-            ),
-            None,
-        ),
+        NativeRecipe::HugoStatic => {
+            // A workspace can redirect Go's module/checksum writes outside the
+            // isolated site. The default recipe supports one frozen module.
+            environment.extend([
+                ("HUGO_MODULE_WORKSPACE".into(), "off".into()),
+                ("GOTOOLCHAIN".into(), "local".into()),
+                ("GOENV".into(), "off".into()),
+            ]);
+            (
+                None,
+                NativeCommand::new(
+                    "hugo",
+                    &[
+                        "--environment",
+                        "production",
+                        "--destination",
+                        "public",
+                        "--cleanDestinationDir",
+                    ],
+                ),
+                None,
+            )
+        }
     };
     Ok(NativeBuildPlan {
         install,

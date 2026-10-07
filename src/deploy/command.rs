@@ -743,6 +743,14 @@ pub(super) async fn run_native_build_step(
         .then(|| std::fs::read(project_dir.join("pubspec.lock")))
         .transpose()?;
     super::plan::clear_native_build_output(project_dir, &plan.output_directory)?;
+    let hugo_inputs = if recipe == NativeRecipe::HugoStatic {
+        Some(super::native_build::HugoModuleInputs::freeze(
+            project_dir,
+            &mut command,
+        )?)
+    } else {
+        None
+    };
     super::native_build::select_platform_program(&mut command, platform_runner);
     let display = command.display();
     output::status(
@@ -772,6 +780,9 @@ pub(super) async fn run_native_build_step(
         },
     );
     if let Some(inputs) = go_inputs {
+        inputs.verify()?;
+    }
+    if let Some(inputs) = hugo_inputs {
         inputs.verify()?;
     }
     if let Some(lock) = pub_lock

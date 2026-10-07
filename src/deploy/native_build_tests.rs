@@ -583,24 +583,24 @@ fn real_flutter_web_build_is_static_and_keeps_the_pub_lock() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[ignore = "requires Hugo; compiles and cleans a real standard-edition STATIC fixture"]
-fn real_hugo_build_preserves_pages_and_static_assets() {
+async fn real_hugo_build_preserves_pages_and_static_assets() {
     let project = tempfile::tempdir().unwrap();
     copy_fixture(&fixture_root().join("hugo-static"), project.path());
     file(project.path(), "public/stale.txt", "stale output");
-    let hugo = std::env::var("NRZ_HUGO_BIN").unwrap_or_else(|_| "hugo".into());
     let plan = recipe_commands(project.path(), NativeRecipe::HugoStatic, false).unwrap();
-    let result = std::process::Command::new(hugo)
-        .args(&plan.build.arguments)
-        .current_dir(project.path())
-        .output()
-        .unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
+    crate::deploy::run_native_build_step(
+        &plan,
+        NativeRecipe::HugoStatic,
+        project.path(),
+        true,
+        &hugo_tests::hugo_environment(project.path()),
+        None,
+        false,
+    )
+    .await
+    .unwrap();
     let output = project.path().join(&plan.output_directory);
     assert!(
         validate_output(&output, NativeRecipe::HugoStatic, None)
@@ -978,4 +978,79 @@ async fn real_dart_bundle_reads_artifact_assets_and_literal_argv() {
     let body: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(body["message"], "native asset ready\n");
     assert_eq!(body["args"], serde_json::json!(["$(id)", "two words"]));
+}
+
+#[path = "native_hugo_tests.rs"]
+mod hugo_tests;
+
+#[test]
+fn go_discovery_and_default_recipe_share_the_qualified_file_selection() {
+    for (case, eligible, ambiguous) in [
+        ("windows-only", false, false),
+        ("eligible-cmd", true, false),
+        ("ambiguous", true, true),
+    ] {
+        let project = tempfile::tempdir().unwrap();
+        file(
+            project.path(),
+            "go.mod",
+            "module example.com/app\ngo 1.27\n",
+        );
+        file(
+            project.path(),
+            "main_windows.go",
+            "package main\nfunc main() {}\n",
+        );
+        if eligible {
+            file(
+                project.path(),
+                "cmd/windows/main_windows.go",
+                "package main\nfunc main() {}\n",
+            );
+            file(
+                project.path(),
+                "cmd/cgo/main.go",
+                "package main\nimport \"C\"\nfunc main() {}\n",
+            );
+            file(
+                project.path(),
+                "cmd/server/service_linux_amd64.go",
+                "package main\nfunc main() {}\n",
+            );
+        }
+        if ambiguous {
+            file(
+                project.path(),
+                "service_linux_amd64.go",
+                "package main\nfunc main() {}\n",
+            );
+        }
+        let detected =
+            crate::detect::native::detect_native(&crate::detect::fs::LocalFs::new(project.path()));
+        assert_eq!(detected.is_some(), eligible, "{case}");
+        if let Some(detected) = detected {
+            assert_eq!(detected.framework, "go");
+            assert_eq!(
+                detected.suggested_compute,
+                crate::detect::types::ComputeType::Process
+            );
+        }
+        let plan = recipe_commands(project.path(), NativeRecipe::GoServer, false);
+        assert_eq!(plan.is_ok(), eligible && !ambiguous, "{case}");
+        if let Ok(plan) = plan {
+            assert_eq!(plan.build.arguments.last().unwrap(), "./cmd/server");
+            for (key, value) in [
+                ("GOOS", "linux"),
+                ("GOARCH", "amd64"),
+                ("GOAMD64", "v1"),
+                ("CGO_ENABLED", "0"),
+                ("GOEXPERIMENT", ""),
+            ] {
+                assert!(
+                    plan.environment.contains(&(key.into(), value.into())),
+                    "{case}: {key}"
+                );
+            }
+        }
+    }
 }

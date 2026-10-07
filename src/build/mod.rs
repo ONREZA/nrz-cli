@@ -298,21 +298,24 @@ pub(crate) async fn run_with_effective_config(
         (None, BuildManifestSource::Absent)
     };
 
-    if let Some(manifest) = &mut loaded_manifest
-        && manifest
+    if let Some(manifest) = &mut loaded_manifest {
+        let target = if manifest
             .layers
             .iter()
             .any(|layer| layer.target == manifest::LayerTarget::Compute)
-    {
-        let target = crate::deploy::canonical_build_runtime_target(
-            &detection.metadata.runtime,
-            effective.platform_source_build_context().is_some(),
-            Some(manifest),
-            application_runtime,
-            effective.node_version(),
-            effective.config().build.toolchain.is_none()
-                && effective.config().build.python_version.is_none(),
-        )?;
+        {
+            crate::deploy::canonical_build_runtime_target(
+                &detection.metadata.runtime,
+                effective.platform_source_build_context().is_some(),
+                Some(manifest),
+                application_runtime,
+                effective.node_version(),
+                effective.config().build.toolchain.is_none()
+                    && effective.config().build.python_version.is_none(),
+            )?
+        } else {
+            None
+        };
         let application_runtime = crate::deploy::application_runtime_in_output(
             application_runtime,
             project_dir,

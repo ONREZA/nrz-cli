@@ -102,7 +102,11 @@ pub fn go_main_packages(fs: &dyn Fs) -> Vec<String> {
 
 fn is_go_main_package(fs: &dyn Fs, directory: &str) -> bool {
     fs.list_dir(directory).into_iter().any(|name| {
-        if !name.ends_with(".go") || name.ends_with("_test.go") || name.starts_with(['.', '_']) {
+        if !name.ends_with(".go")
+            || name.ends_with("_test.go")
+            || name.starts_with(['.', '_'])
+            || !go_target_filename(&name)
+        {
             return false;
         }
         let path = if directory.is_empty() {
@@ -113,17 +117,303 @@ fn is_go_main_package(fs: &dyn Fs, directory: &str) -> bool {
         !fs.is_dir(&path)
             && fs.read_file(&path).is_some_and(|source| {
                 let source = source.strip_prefix('\u{feff}').unwrap_or(&source);
+                if !go_target_constraints(source) {
+                    return false;
+                }
                 let Some(("package", rest)) = go_identifier(source) else {
                     return false;
                 };
-                matches!(go_identifier(rest), Some(("main", _)))
+                matches!(go_identifier(rest), Some(("main", rest)) if !go_imports_c(rest))
             })
     })
 }
 
-// Only the initial package clause determines discovery. Go compilation remains
-// responsible for build constraints and the rest of the source's validity.
-fn go_identifier(mut source: &str) -> Option<(&str, &str)> {
+// Match the automatic recipe, independent of the detector host or installed Go:
+// linux/amd64, GOAMD64=v1, CGO_ENABLED=0, empty GOFLAGS and GOEXPERIMENT.
+// Filename/header semantics follow the qualified Go SDK's go/build package.
+fn go_target_filename(name: &str) -> bool {
+    const OS: &[&str] = &[
+        "aix",
+        "android",
+        "darwin",
+        "dragonfly",
+        "freebsd",
+        "hurd",
+        "illumos",
+        "ios",
+        "js",
+        "linux",
+        "nacl",
+        "netbsd",
+        "openbsd",
+        "plan9",
+        "solaris",
+        "wasip1",
+        "windows",
+        "zos",
+    ];
+    const ARCH: &[&str] = &[
+        "386",
+        "amd64",
+        "amd64p32",
+        "arm",
+        "armbe",
+        "arm64",
+        "arm64be",
+        "loong64",
+        "mips",
+        "mipsle",
+        "mips64",
+        "mips64le",
+        "mips64p32",
+        "mips64p32le",
+        "ppc",
+        "ppc64",
+        "ppc64le",
+        "riscv",
+        "riscv64",
+        "s390",
+        "s390x",
+        "sparc",
+        "sparc64",
+        "wasm",
+    ];
+    let stem = name.split('.').next().unwrap_or(name);
+    let Some((_, suffix)) = stem.split_once('_') else {
+        return true;
+    };
+    let parts: Vec<_> = suffix.split('_').collect();
+    let last = parts[parts.len() - 1];
+    if parts.len() >= 2 && OS.contains(&parts[parts.len() - 2]) && ARCH.contains(&last) {
+        return parts[parts.len() - 2] == "linux" && last == "amd64";
+    }
+    !(OS.contains(&last) || ARCH.contains(&last)) || matches!(last, "linux" | "amd64")
+}
+
+fn go_target_tag(tag: &str) -> bool {
+    // Baseline tool tags observed in the pinned Go 1.27.1 linux/amd64 SDK.
+    // Compiler upgrades must qualify these together with the automatic recipe.
+    if matches!(
+        tag,
+        "linux"
+            | "amd64"
+            | "unix"
+            | "gc"
+            | "amd64.v1"
+            | "goexperiment.regabiwrappers"
+            | "goexperiment.regabiargs"
+            | "goexperiment.dwarf5"
+            | "goexperiment.randomizedheapbase64"
+            | "goexperiment.greenteagc"
+            | "goexperiment.jsonv2"
+            | "goexperiment.sizespecializedmalloc"
+    ) {
+        return true;
+    }
+    static RELEASE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let release = *RELEASE.get_or_init(|| {
+        let pins: serde_json::Value =
+            serde_json::from_str(include_str!("../../assets/native-toolchains.json"))
+                .expect("trusted native toolchain pins");
+        pins["go"]
+            .as_str()
+            .expect("qualified Go version")
+            .strip_prefix("1.")
+            .expect("qualified Go 1.x version")
+            .split('.')
+            .next()
+            .unwrap()
+            .parse()
+            .expect("qualified Go minor version")
+    });
+    tag.strip_prefix("go1.")
+        .and_then(|minor| minor.parse::<usize>().ok())
+        .is_some_and(|minor| minor > 0 && minor <= release && tag == format!("go1.{minor}"))
+}
+
+fn go_directive<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
+    let rest = line.strip_prefix(prefix)?;
+    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then(|| rest.trim())
+}
+
+fn go_target_constraints(source: &str) -> bool {
+    let mut modern = None;
+    let mut legacy_end = 0;
+    let mut offset = 0;
+    let mut ended = false;
+    let mut block_comment = false;
+    'header: for raw_line in source.split_inclusive('\n') {
+        offset += raw_line.len();
+        let mut line = raw_line.trim();
+        if line.is_empty() && !ended {
+            legacy_end = offset;
+            continue;
+        }
+        if !line.starts_with("//") {
+            ended = true;
+        }
+        if !block_comment
+            && let Some(expression) = go_directive(line, "//go:build")
+            && modern.replace(expression).is_some()
+        {
+            return false;
+        }
+        loop {
+            if block_comment {
+                let Some((_, rest)) = line.split_once("*/") else {
+                    continue 'header;
+                };
+                block_comment = false;
+                line = rest.trim();
+            } else if line.starts_with("//") || line.is_empty() {
+                continue 'header;
+            } else if let Some(rest) = line.strip_prefix("/*") {
+                block_comment = true;
+                line = rest.trim();
+            } else {
+                break 'header;
+            }
+        }
+    }
+    if let Some(expression) = modern {
+        return go_boolean_constraint(expression).unwrap_or(false);
+    }
+    source[..legacy_end].lines().all(|line| {
+        let Some(comment) = line.trim().strip_prefix("//") else {
+            return true;
+        };
+        let Some(expression) = go_directive(comment.trim(), "+build") else {
+            return true;
+        };
+        // go/build ignores legacy expressions exceeding the old parser's limit.
+        go_legacy_constraint(expression).unwrap_or(true)
+    })
+}
+
+fn go_tag_character(character: char) -> bool {
+    character.is_alphanumeric() || matches!(character, '_' | '.')
+}
+
+fn go_valid_tag(tag: &str) -> bool {
+    static TAG: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    TAG.get_or_init(|| regex::Regex::new(r"^[\p{L}\p{Nd}_.]+$").unwrap())
+        .is_match(tag)
+}
+
+fn go_legacy_constraint(expression: &str) -> Option<bool> {
+    let mut size = 0;
+    let mut result = false;
+    for (clause_index, clause) in expression.split_whitespace().enumerate() {
+        size += usize::from(clause_index > 0);
+        let mut matches = true;
+        for (index, literal) in clause.split(',').enumerate() {
+            size += usize::from(index > 0);
+            if size > 100 {
+                return None;
+            }
+            let (negative, tag) = literal
+                .strip_prefix('!')
+                .map_or((false, literal), |tag| (true, tag));
+            let value = go_valid_tag(tag) && go_target_tag(tag);
+            matches &= if literal.starts_with("!!") || literal == "!" {
+                false
+            } else {
+                value != negative
+            };
+        }
+        result |= matches;
+    }
+    Some(result)
+}
+
+// Evaluate with explicit stacks so even deeply nested untrusted expressions do
+// not consume the Rust call stack. Go allows at most 1000 expression terms.
+fn go_boolean_constraint(mut expression: &str) -> Option<bool> {
+    let mut values = Vec::new();
+    let mut operators = Vec::new();
+    let mut operand = true;
+    let mut size = 0;
+    loop {
+        expression = expression.trim_start_matches([' ', '\t']);
+        let Some(first) = expression.chars().next() else {
+            break;
+        };
+        if operand {
+            if first == '!' && operators.last() != Some(&'!') {
+                operators.push('!');
+                expression = &expression[1..];
+                continue;
+            }
+            size += 1;
+            if size > 1000 {
+                return None;
+            }
+            if first == '(' {
+                operators.push('(');
+                expression = &expression[1..];
+                continue;
+            }
+            let end = expression
+                .char_indices()
+                .find(|(_, ch)| !go_tag_character(*ch))
+                .map_or(expression.len(), |(offset, _)| offset);
+            if end == 0 || !go_valid_tag(&expression[..end]) {
+                return None;
+            }
+            values.push(go_target_tag(&expression[..end]));
+            expression = &expression[end..];
+            operand = false;
+        } else if first == ')' {
+            while operators.last().is_some_and(|op| *op != '(') {
+                go_reduce_operator(&mut values, operators.pop()?)?;
+            }
+            if operators.pop()? != '(' {
+                return None;
+            }
+            expression = &expression[1..];
+        } else {
+            let (operator, rest) = if let Some(rest) = expression.strip_prefix("&&") {
+                ('&', rest)
+            } else {
+                ('|', expression.strip_prefix("||")?)
+            };
+            while operators
+                .last()
+                .is_some_and(|op| *op == '&' || (*op == '|' && operator == '|'))
+            {
+                go_reduce_operator(&mut values, operators.pop()?)?;
+            }
+            operators.push(operator);
+            expression = rest;
+            operand = true;
+        }
+        if operators.last() == Some(&'!') {
+            operators.pop();
+            go_reduce_operator(&mut values, '!')?;
+        }
+    }
+    if operand {
+        return None;
+    }
+    while let Some(operator) = operators.pop() {
+        go_reduce_operator(&mut values, operator)?;
+    }
+    (values.len() == 1).then(|| values[0])
+}
+
+fn go_reduce_operator(values: &mut Vec<bool>, operator: char) -> Option<()> {
+    let right = values.pop()?;
+    let value = match operator {
+        '!' => !right,
+        '&' => values.pop()? & right,
+        '|' => values.pop()? | right,
+        _ => return None,
+    };
+    values.push(value);
+    Some(())
+}
+
+fn go_skip_trivia(mut source: &str) -> Option<&str> {
     loop {
         source = source.trim_start_matches([' ', '\t', '\r', '\n']);
         if let Some(comment) = source.strip_prefix("//") {
@@ -134,6 +424,13 @@ fn go_identifier(mut source: &str) -> Option<(&str, &str)> {
             break;
         }
     }
+    Some(source)
+}
+
+// The initial package clause and imports are enough for discovery; compilation
+// remains responsible for the complete source's validity and a main function.
+fn go_identifier(source: &str) -> Option<(&str, &str)> {
+    let source = go_skip_trivia(source)?;
     let first = source.chars().next()?;
     if first != '_' && !first.is_alphabetic() {
         return None;
@@ -143,6 +440,121 @@ fn go_identifier(mut source: &str) -> Option<(&str, &str)> {
         .find(|(_, character)| *character != '_' && !character.is_alphanumeric())
         .map_or(source.len(), |(offset, _)| offset);
     Some(source.split_at(end))
+}
+
+fn go_imports_c(mut source: &str) -> bool {
+    loop {
+        let Some(rest) = go_skip_trivia(source) else {
+            return false;
+        };
+        source = rest.trim_start_matches(';');
+        let Some(("import", rest)) = go_identifier(source) else {
+            return false;
+        };
+        let Some(rest) = go_skip_trivia(rest) else {
+            return false;
+        };
+        let grouped = rest.starts_with('(');
+        source = if grouped { &rest[1..] } else { rest };
+        loop {
+            let Some(rest) = go_skip_trivia(source) else {
+                return false;
+            };
+            source = rest.trim_start_matches(';');
+            let Some(rest) = go_skip_trivia(source) else {
+                return false;
+            };
+            source = rest;
+            if grouped && let Some(rest) = source.strip_prefix(')') {
+                source = rest;
+                break;
+            }
+            if let Some(rest) = source.strip_prefix('.') {
+                source = rest;
+            } else if let Some((_, rest)) = go_identifier(source) {
+                source = rest;
+            }
+            let Some((path, rest)) = go_import_string(source) else {
+                return false;
+            };
+            if path == "C" {
+                return true;
+            }
+            source = rest;
+            if !grouped {
+                break;
+            }
+        }
+    }
+}
+
+fn go_import_string(source: &str) -> Option<(String, &str)> {
+    let source = go_skip_trivia(source)?;
+    if let Some(raw) = source.strip_prefix('`') {
+        let (value, rest) = raw.split_once('`')?;
+        return Some((value.replace('\r', ""), rest));
+    }
+    let mut chars = source.strip_prefix('"')?.char_indices();
+    let mut value = String::new();
+    while let Some((offset, character)) = chars.next() {
+        match character {
+            '"' => return Some((value, &source[offset + 2..])),
+            '\n' | '\r' => return None,
+            '\\' => {
+                let (_, escaped) = chars.next()?;
+                let (digits, radix) = match escaped {
+                    'x' => (2, 16),
+                    'u' => (4, 16),
+                    'U' => (8, 16),
+                    '0'..='7' => (3, 8),
+                    'a' => {
+                        value.push('\x07');
+                        continue;
+                    }
+                    'b' => {
+                        value.push('\x08');
+                        continue;
+                    }
+                    'f' => {
+                        value.push('\x0c');
+                        continue;
+                    }
+                    'n' => {
+                        value.push('\n');
+                        continue;
+                    }
+                    'r' => {
+                        value.push('\r');
+                        continue;
+                    }
+                    't' => {
+                        value.push('\t');
+                        continue;
+                    }
+                    'v' => {
+                        value.push('\x0b');
+                        continue;
+                    }
+                    '\\' | '"' => {
+                        value.push(escaped);
+                        continue;
+                    }
+                    _ => return None,
+                };
+                let mut code = if radix == 8 {
+                    escaped.to_digit(radix)?
+                } else {
+                    0
+                };
+                for _ in usize::from(radix == 8)..digits {
+                    code = code * radix + chars.next()?.1.to_digit(radix)?;
+                }
+                value.push(char::from_u32(code)?);
+            }
+            _ => value.push(character),
+        }
+    }
+    None
 }
 
 fn hugo_config(fs: &dyn Fs) -> Option<&'static str> {
