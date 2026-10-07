@@ -109,17 +109,22 @@ export class NrzCli {
       .withExec(["sh", "-ceu", "cd .dagger && bun run typecheck && bun test scripts"])
       .sync();
 
+    const toolchains = JSON.parse(
+      await source.file("crates/nrz-source-bundle/assets/runtime-toolchains.json").contents(),
+    );
+    const nodeMajors: unknown = toolchains.node?.supported;
+    // Platform handoff fixtures freeze Node 24.
+    const nodeMajor = 24;
+    if (!Array.isArray(nodeMajors) || !nodeMajors.includes(nodeMajor)) {
+      throw new Error(`Runtime toolchain catalog does not qualify CI Node ${nodeMajor}`);
+    }
     let ctr = rustContainer(source)
-      .withFile("/usr/local/bin/bun", dag.container().from(BUN_IMAGE).file("/usr/local/bin/bun"));
-    ctr = ctr.withExec([
-      "sh",
-      "-ceu",
-      [
-        "apt-get update",
-        "apt-get install -y --no-install-recommends nodejs npm",
-        "rm -rf /var/lib/apt/lists/*",
-      ].join("\n"),
-    ]);
+      .withFile("/usr/local/bin/bun", dag.container().from(BUN_IMAGE).file("/usr/local/bin/bun"))
+      .withMountedDirectory(
+        "/opt/node",
+        dag.container().from(`node:${nodeMajor}-bookworm`).directory("/usr/local"),
+      )
+      .withEnvVariable("PATH", "/opt/node/bin:$PATH", { expand: true });
     ctr = ctr.withExec(["rustup", "component", "add", "rustfmt", "clippy"]);
     ctr = ctr.withExec(["cargo", "test", "--locked", "--workspace", "--features", "nrz-contract/codegen"]);
     ctr = ctr.withExec(["cargo", "fmt", "--all", "--check"]);
