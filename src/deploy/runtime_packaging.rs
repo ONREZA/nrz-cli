@@ -10,45 +10,66 @@ pub(super) fn resolve_runtime_artifact(
     workspace_root_dir: &Path,
     project_dir: &Path,
     build_output_dir: PathBuf,
-    manifest: build_manifest::Manifest,
+    mut manifest: build_manifest::Manifest,
     detection: &crate::detect::types::DetectionResult,
     json: bool,
 ) -> anyhow::Result<RuntimeArtifact> {
     let python_minor = detection
         .metadata
-        .application_runtime()
-        .filter(|runtime| runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python)
-        .and_then(|runtime| runtime.python_version)
+        .source_build_context
+        .as_ref()
+        .and_then(|context| context.build_toolchain.resolved_python_minor())
         .or_else(|| {
-            manifest
-                .layers
-                .iter()
-                .filter(|layer| layer.target == build_manifest::LayerTarget::Compute)
-                .filter_map(|layer| layer.runtime.as_ref())
+            detection
+                .metadata
+                .application_runtime()
                 .filter(|runtime| {
-                    runtime.application_runtime.as_ref().is_some_and(|intent| {
-                        intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+                    runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+                })
+                .and_then(|runtime| runtime.python_version)
+        })
+        .unwrap_or_default();
+    let python_runtime = detection
+        .metadata
+        .application_runtime()
+        .is_some_and(|runtime| {
+            runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+        })
+        || manifest.layers.iter().any(|layer| {
+            layer.target == build_manifest::LayerTarget::Compute
+                && layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.application_runtime.as_ref())
+                    .is_some_and(|runtime| {
+                        runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
                     })
-                })
-                .filter_map(|runtime| {
-                    runtime
-                        .build_runtime_version
-                        .as_deref()?
-                        .strip_prefix("python-")
-                        .and_then(nrz_source_bundle::PythonMinor::from_version)
-                })
-                .next()
         });
-    if let Some(minor) = python_minor
-        && manifest_has_compute_layer(&manifest)
-    {
-        return resolve_python_runtime_artifact(
+    let mut javascript_dependency_closure = false;
+    if python_runtime && manifest_has_compute_layer(&manifest) {
+        let artifact = resolve_python_runtime_artifact(
             project_dir,
-            build_output_dir,
+            build_output_dir.clone(),
             manifest,
             json,
-            minor,
-        );
+            python_minor,
+        )?;
+        if validate_python_layer_dependencies(
+            workspace_root_dir,
+            project_dir,
+            &artifact.manifest,
+            detection,
+            python_minor,
+        )? {
+            javascript_dependency_closure = true;
+            manifest = artifact.manifest;
+            if let RuntimeArtifactScan::Relocated { ownership, .. } = artifact.scan {
+                manifest.layers = ownership.layers;
+            }
+        } else {
+            validate_compute_entry_ownership(&artifact.manifest, &artifact.scan)?;
+            return Ok(artifact);
+        }
     }
     let Some(plan) = plan_node_project_runtime_artifact(
         workspace_root_dir,
@@ -57,15 +78,51 @@ pub(super) fn resolve_runtime_artifact(
         &manifest,
         detection,
     ) else {
-        let scan = if matches!(
-            detection.metadata.runtime.runtime_type,
-            RuntimeType::Node | RuntimeType::Bun
-        ) && manifest_has_compute_layer(&manifest)
+        let javascript_layer = manifest.layers.iter().any(|layer| {
+            layer.target == build_manifest::LayerTarget::Compute
+                && layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.application_runtime.as_ref())
+                    .is_some_and(|runtime| {
+                        matches!(
+                            runtime.family,
+                            nrz_source_bundle::ApplicationRuntimeFamily::Node
+                                | nrz_source_bundle::ApplicationRuntimeFamily::Bun
+                        )
+                    })
+        });
+        let dependency_root = select_node_project_runtime_root(workspace_root_dir, project_dir);
+        let external_javascript_dependencies = javascript_layer
+            && compute_layer_count(&manifest) > 1
+            && is_node_project_runtime_framework(&detection.framework)
+            && dependency_root
+                .join("node_modules")
+                .read_dir()
+                .is_ok_and(|mut entries| entries.next().is_some());
+        if (javascript_dependency_closure || external_javascript_dependencies)
+            && dependency_root != build_output_dir
+            && !build_output_dir.join("node_modules").is_dir()
+        {
+            return Err(output::coded_error(
+                "APPLICATION_RUNTIME_INVALID",
+                "JavaScript dependency closure requires a supported runtime root relocation; the declared layer layout cannot retain dependencies outside the build output",
+            ));
+        }
+        let scan = if (javascript_layer
+            || matches!(
+                detection.metadata.runtime.runtime_type,
+                RuntimeType::Node | RuntimeType::Bun
+            ))
+            && manifest_has_compute_layer(&manifest)
         {
             RuntimeArtifactScan::NodeRuntimeRoot
         } else {
             RuntimeArtifactScan::All
         };
+        if compute_layer_count(&manifest) > 1 {
+            validate_compute_entry_ownership(&manifest, &scan)?;
+        }
         return Ok(RuntimeArtifact {
             root_dir: build_output_dir,
             manifest,
@@ -79,6 +136,35 @@ pub(super) fn resolve_runtime_artifact(
         layers: manifest.layers.clone(),
     };
     let manifest = rewrite_manifest_for_node_project_runtime(manifest, &plan.build_output_prefix)?;
+    if compute_layer_count(&manifest) > 1 {
+        for root in [
+            "node_modules".to_string(),
+            join_runtime_artifact_paths(&plan.project_prefix, "node_modules")?,
+        ] {
+            if !plan.runtime_root.join(&root).is_dir() {
+                continue;
+            }
+            let owner = RuntimeArtifactScan::NodeRuntimeRoot.source_layer_match(&manifest, &root);
+            if !owner
+                .and_then(|layer| layer.runtime.as_ref())
+                .and_then(|runtime| runtime.application_runtime.as_ref())
+                .is_some_and(|runtime| {
+                    matches!(
+                        runtime.family,
+                        nrz_source_bundle::ApplicationRuntimeFamily::Node
+                            | nrz_source_bundle::ApplicationRuntimeFamily::Bun
+                    )
+                })
+            {
+                return Err(output::coded_error(
+                    "APPLICATION_RUNTIME_INVALID",
+                    format!(
+                        "JavaScript dependency root '{root}' is not owned by a JavaScript runtime layer"
+                    ),
+                ));
+            }
+        }
+    }
     build_manifest::verify_files(&plan.runtime_root, &manifest)
         .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
     let roots = node_project_runtime_scan_roots(
@@ -102,17 +188,207 @@ pub(super) fn resolve_runtime_artifact(
         output::Phase::Deploy,
     );
 
+    let scan = RuntimeArtifactScan::Relocated {
+        base: Box::new(RuntimeArtifactScan::Selected {
+            roots,
+            symlink_roots,
+        }),
+        ownership,
+    };
+    if compute_layer_count(&manifest) > 1 {
+        validate_compute_entry_ownership(&manifest, &scan)?;
+    }
     Ok(RuntimeArtifact {
         root_dir: plan.runtime_root,
         manifest,
-        scan: RuntimeArtifactScan::Relocated {
-            base: Box::new(RuntimeArtifactScan::Selected {
-                roots,
-                symlink_roots,
-            }),
-            ownership,
-        },
+        scan,
     })
+}
+
+fn validate_compute_entry_ownership(
+    manifest: &build_manifest::Manifest,
+    scan: &RuntimeArtifactScan,
+) -> anyhow::Result<()> {
+    for layer in manifest
+        .layers
+        .iter()
+        .filter(|layer| layer.target == build_manifest::LayerTarget::Compute)
+    {
+        let entry = layer
+            .entry
+            .as_deref()
+            .context("COMPUTE layer missing entry")?;
+        let path = join_runtime_artifact_paths(&layer.directory, entry)?;
+        if scan
+            .source_layer_match(manifest, &path)
+            .map(|owner| owner.name.as_str())
+            != Some(layer.name.as_str())
+        {
+            return Err(output::coded_error(
+                "APPLICATION_RUNTIME_INVALID",
+                format!(
+                    "COMPUTE entry '{path}' is not owned by its declared layer '{}'",
+                    layer.name
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The automatic installer owns one Python minor. A typed serving layer cannot
+/// replace that materialization ABI, including when the primary serves STATIC.
+fn validate_python_layer_dependencies(
+    workspace_root_dir: &Path,
+    project_dir: &Path,
+    manifest: &build_manifest::Manifest,
+    detection: &crate::detect::types::DetectionResult,
+    minor: nrz_source_bundle::PythonMinor,
+) -> anyhow::Result<bool> {
+    use nrz_source_bundle::{ApplicationRuntimeFamily as Family, PythonMinor};
+    let installed_minor = detection
+        .metadata
+        .source_build_context
+        .as_ref()
+        .and_then(|context| context.build_toolchain.resolved_python_minor());
+    let primary = detection.metadata.application_runtime();
+    let primary_javascript =
+        primary.is_some_and(|runtime| matches!(runtime.family, Family::Node | Family::Bun));
+    let python_materialization = installed_minor.is_some() && !primary_javascript
+        || primary.is_some_and(|runtime| runtime.family == Family::Python);
+    let authored_dependencies = python_materialization
+        && crate::detect::python::requires_dependency_stage(&crate::detect::fs::LocalFs::new(
+            project_dir,
+        ))?;
+    let staged_minors = PythonMinor::ALL
+        .into_iter()
+        .filter(|minor| {
+            project_dir
+                .join(minor.site_packages_root())
+                .read_dir()
+                .is_ok_and(|mut entries| entries.next().is_some())
+        })
+        .collect::<Vec<_>>();
+    let scan = RuntimeArtifactScan::PythonRuntimeRoot(minor);
+    // A stale unselected tree stays excluded. A layer explicitly claiming that
+    // tree's minor would turn it into runtime input, so it cannot replace the installer.
+    for staged in &staged_minors {
+        if *staged != minor
+            && scan
+                .source_layer_match(manifest, staged.site_packages_root())
+                .and_then(|layer| layer.runtime.as_ref())
+                .and_then(|runtime| runtime.build_runtime_version.as_deref())
+                == Some(staged.target())
+        {
+            return Err(output::coded_error(
+                "APPLICATION_RUNTIME_INVALID",
+                "Python runtime dependencies require matching build and serving Python minors; independent toolchains are supported for code-only output",
+            ));
+        }
+    }
+    let staged_owner = scan.source_layer_match(manifest, minor.site_packages_root());
+    let staged_runtime_dependencies = staged_minors.contains(&minor)
+        && (python_materialization
+            || staged_owner
+                .and_then(|layer| layer.runtime.as_ref())
+                .and_then(|runtime| runtime.application_runtime.as_ref())
+                .is_some_and(|runtime| runtime.family == Family::Python));
+    let dependencies = authored_dependencies || staged_runtime_dependencies;
+    if dependencies {
+        let owner = scan.source_layer_match(manifest, minor.site_packages_root());
+        let compatible = owner.is_some_and(|layer| {
+            let runtime = layer.runtime.as_ref();
+            let primary = detection.metadata.application_runtime();
+            layer.target == build_manifest::LayerTarget::Compute
+                && runtime
+                    .and_then(|runtime| runtime.application_runtime.as_ref())
+                    .map(|runtime| runtime.family)
+                    .or_else(|| primary.map(|runtime| runtime.family))
+                    == Some(Family::Python)
+                && runtime
+                    .and_then(|runtime| runtime.build_runtime_version.as_deref())
+                    .or_else(|| {
+                        primary
+                            .and_then(|runtime| runtime.python_version)
+                            .map(PythonMinor::target)
+                    })
+                    == Some(minor.target())
+        });
+        if !compatible
+            || detection.metadata.source_build_context.is_some() && installed_minor != Some(minor)
+        {
+            return Err(output::coded_error(
+                "APPLICATION_RUNTIME_INVALID",
+                format!(
+                    "Python dependency root '{}' conflicts with selected installer {} or owning layer '{}'; runtime dependency owners require matching build and serving Python minors",
+                    minor.site_packages_root(),
+                    minor.version(),
+                    owner.map_or("<none>", |layer| layer.name.as_str())
+                ),
+            ));
+        }
+    }
+    if authored_dependencies && !project_dir.join(minor.site_packages_root()).is_dir() {
+        return Err(output::coded_error(
+            "MISSING_RUNTIME_DEPENDENCIES",
+            "Python PROCESS runtime requires installed dependencies. Run the install step before deploy, or remove --skip-install.",
+        ));
+    }
+    let javascript_dependencies = manifest
+        .layers
+        .iter()
+        .filter(|layer| {
+            layer.target == build_manifest::LayerTarget::Compute
+                && layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.application_runtime.as_ref())
+                    .is_some_and(|runtime| matches!(runtime.family, Family::Node | Family::Bun))
+        })
+        .any(|layer| {
+            project_dir
+                .join(&layer.directory)
+                .ancestors()
+                .take_while(|root| root.starts_with(project_dir))
+                .any(|root| {
+                    root.join("node_modules")
+                        .read_dir()
+                        .is_ok_and(|mut entries| entries.next().is_some())
+                })
+        })
+        || manifest.layers.iter().any(|layer| {
+            layer
+                .runtime
+                .as_ref()
+                .and_then(|runtime| runtime.application_runtime.as_ref())
+                .is_some_and(|runtime| matches!(runtime.family, Family::Node | Family::Bun))
+        }) && select_node_project_runtime_root(workspace_root_dir, project_dir)
+            .join("node_modules")
+            .read_dir()
+            .is_ok_and(|mut entries| entries.next().is_some());
+    if javascript_dependencies {
+        if dependencies {
+            return Err(output::coded_error(
+                "APPLICATION_RUNTIME_INVALID",
+                "Python and JavaScript runtime dependency trees require different materialization ABIs; mixed runtime layers are supported for code-only output",
+            ));
+        }
+        let owner =
+            RuntimeArtifactScan::NodeRuntimeRoot.source_layer_match(manifest, "node_modules");
+        if !owner
+            .and_then(|layer| layer.runtime.as_ref())
+            .and_then(|runtime| runtime.application_runtime.as_ref())
+            .is_some_and(|runtime| matches!(runtime.family, Family::Node | Family::Bun))
+        {
+            return Err(output::coded_error(
+                "APPLICATION_RUNTIME_INVALID",
+                "JavaScript dependency root 'node_modules' is not owned by a JavaScript runtime layer",
+            ));
+        }
+        // The Python sibling carries code only; retain the sole JavaScript closure.
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 fn resolve_python_runtime_artifact(
@@ -139,16 +415,6 @@ fn resolve_python_runtime_artifact(
     } else {
         rewrite_manifest_for_node_project_runtime(manifest, &build_output_prefix)?
     };
-    let dependency_root = project_dir.join(minor.site_packages_root());
-    if crate::detect::python::requires_dependency_stage(&crate::detect::fs::LocalFs::new(
-        project_dir,
-    ))? && !dependency_root.is_dir()
-    {
-        return Err(output::coded_error(
-            "MISSING_RUNTIME_DEPENDENCIES",
-            "Python PROCESS runtime requires installed dependencies. Run the install step before deploy, or remove --skip-install.",
-        ));
-    }
     output::status(
         json,
         "~",
@@ -183,6 +449,9 @@ pub(super) fn plan_node_project_runtime_artifact(
         return None;
     }
     let runtime_root = select_node_project_runtime_root(workspace_root_dir, project_dir);
+    if build_output_dir == project_dir && runtime_root == project_dir {
+        return None;
+    }
     let build_output_prefix =
         relative_runtime_artifact_path(&runtime_root, build_output_dir).ok()?;
     let project_prefix = relative_runtime_artifact_path(&runtime_root, project_dir).ok()?;
@@ -236,9 +505,26 @@ pub(super) fn is_node_project_runtime_candidate(
         return false;
     }
     if compute_layer_count(manifest) != 1 {
-        return false;
+        let compute_layers = manifest
+            .layers
+            .iter()
+            .filter(|layer| layer.target == build_manifest::LayerTarget::Compute)
+            .collect::<Vec<_>>();
+        if compute_layers.iter().any(|layer| {
+            layer
+                .runtime
+                .as_ref()
+                .and_then(|runtime| runtime.application_runtime.as_ref())
+                .is_none()
+        }) || compute_layers.iter().enumerate().any(|(index, layer)| {
+            compute_layers[index + 1..]
+                .iter()
+                .any(|sibling| sibling.directory == layer.directory)
+        }) {
+            return false;
+        }
     }
-    if build_output_dir == project_dir || build_output_dir.join("node_modules").is_dir() {
+    if build_output_dir != project_dir && build_output_dir.join("node_modules").is_dir() {
         return false;
     }
     is_node_project_runtime_framework(&detection.framework)

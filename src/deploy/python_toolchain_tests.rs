@@ -1189,6 +1189,7 @@ async fn different_python_minors_preserve_code_only_and_reject_runtime_dependenc
     config.build.python_version = Some(nrz_source_bundle::PythonMinor::Python312);
     config.build.output_directory = Some(".".into());
     config.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python314);
+    config.deploy.entry = Some("main.py".into());
     std::fs::write(
         project.path().join("onreza.toml"),
         toml::to_string(&config).unwrap(),
@@ -1205,7 +1206,12 @@ async fn different_python_minors_preserve_code_only_and_reject_runtime_dependenc
         "--skip-build",
     ])
     .unwrap();
-    for requirements in ["", "# no runtime dependencies\n", "packaging==26.3\n"] {
+    for requirements in [
+        "",
+        "# no runtime dependencies\n",
+        "packaging==26.3\n",
+        "-r production.txt\n",
+    ] {
         std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
         let result = super::plan::build(super::plan::DeployPlanRequest {
             args: &args,
@@ -1217,7 +1223,7 @@ async fn different_python_minors_preserve_code_only_and_reject_runtime_dependenc
             platform_runner: false,
         })
         .await;
-        if requirements.starts_with("packaging") {
+        if requirements.starts_with("packaging") || requirements.starts_with("-r") {
             assert!(
                 result
                     .err()
@@ -1240,6 +1246,166 @@ async fn different_python_minors_preserve_code_only_and_reject_runtime_dependenc
             let source = plan.materialize_source_bundle(true, crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization).unwrap();
             assert!(source.logical_manifest.files.iter().all(|file| file.role
                 != crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Dependency));
+        }
+    }
+}
+
+#[tokio::test]
+async fn typed_python_layers_cannot_replace_the_selected_dependency_abi() {
+    use clap::Parser as _;
+    use nrz_source_bundle::{BuildToolchainFamily, PythonMinor};
+
+    for (target, python_dependencies, javascript_dependencies, node_layer, accepted) in [
+        (PythonMinor::Python312, false, false, false, true),
+        (PythonMinor::Python312, false, false, true, true),
+        (PythonMinor::Python312, true, false, false, false),
+        (PythonMinor::Python314, true, false, true, true),
+        (PythonMinor::Python314, true, true, true, false),
+    ] {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("main.py"), "print('ready')\n").unwrap();
+        std::fs::create_dir_all(project.path().join("node")).unwrap();
+        std::fs::write(project.path().join("node/server.js"), "require('demo')\n").unwrap();
+        std::fs::write(project.path().join("index.html"), "<h1>ready</h1>").unwrap();
+        let mut config = nrz::config::ProjectConfig::default();
+        config.project.framework = Some("static-html".into());
+        config.build.toolchain = Some(BuildToolchainFamily::Python);
+        config.build.python_version = Some(PythonMinor::Python314);
+        config.build.output_directory = Some(".".into());
+        std::fs::write(
+            project.path().join("onreza.toml"),
+            toml::to_string(&config).unwrap(),
+        )
+        .unwrap();
+        if python_dependencies {
+            let dependencies = project.path().join(target.site_packages_root());
+            std::fs::create_dir_all(&dependencies).unwrap();
+            std::fs::write(dependencies.join("demo.py"), "VALUE = 42\n").unwrap();
+        }
+        if javascript_dependencies {
+            let dependencies = project.path().join("node_modules/demo");
+            std::fs::create_dir_all(&dependencies).unwrap();
+            std::fs::write(dependencies.join("index.js"), "module.exports = 42\n").unwrap();
+        }
+        let mut layers = vec![serde_json::json!({
+            "name":"api", "target":"COMPUTE", "directory":".", "entry":"main.py",
+            "runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},
+                "buildRuntimeVersion":target.target()}
+        })];
+        if node_layer {
+            layers.push(serde_json::json!({
+            "name":"node", "target":"COMPUTE", "directory":"node", "entry":"server.js",
+            "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}
+        }));
+        }
+        std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
+        std::fs::write(
+            project.path().join(".onreza/manifest.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "version":1, "layers":layers, "routes":[{"pattern":"^/.*$","layer":"api"}]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let command =
+            crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
+                .unwrap();
+        let args = crate::cli::DeployArgs::try_parse_from([
+            "deploy",
+            project.path().to_str().unwrap(),
+            "--dry",
+            "--skip-install",
+            "--skip-build",
+        ])
+        .unwrap();
+        let result = super::plan::build(super::plan::DeployPlanRequest {
+            args: &args,
+            command: &command,
+            explicit_compute: None,
+            build_logs: None,
+            execution_env: &[],
+            target_production: None,
+            platform_runner: false,
+        })
+        .await;
+        if accepted {
+            let plan = result.unwrap();
+            assert!(
+                plan.artifact
+                    .build
+                    .detection
+                    .metadata
+                    .source_build_context
+                    .as_ref()
+                    .unwrap()
+                    .application_runtime
+                    .is_none()
+            );
+            let source = plan.materialize_source_bundle(true, crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization).unwrap();
+            let logical: nrz_source_bundle::SourceLogicalManifest =
+                serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap())
+                    .unwrap();
+            nrz_runtime_artifact::validate_source_bundle_application_graph(
+                &source.logical_manifest_sha256,
+                &source.source_sha256,
+                source.source_size_bytes,
+                &logical,
+            )
+            .unwrap();
+            for layer in logical
+                .layers
+                .iter()
+                .filter(|layer| layer.target == "COMPUTE")
+            {
+                let file = logical
+                    .files
+                    .iter()
+                    .find(|file| Some(file.path.as_str()) == layer.entrypoint.as_deref())
+                    .unwrap();
+                assert_eq!(file.role, "compute");
+                assert_eq!(file.layer_name.as_deref(), Some(layer.name.as_str()));
+                let target = layer.runtime_config.as_ref().unwrap()["buildRuntimeVersion"]
+                    .as_str()
+                    .unwrap();
+                nrz_runtime_artifact::compile_source_runtime_layer_for_target(
+                    layer,
+                    &[],
+                    Some(target),
+                )
+                .unwrap();
+            }
+            assert_eq!(source.logical_manifest.files.iter().filter(|file| file.role == crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Dependency).count(), usize::from(python_dependencies));
+            assert_eq!(
+                source.logical_manifest.layers[0]
+                    .runtime_config
+                    .as_ref()
+                    .unwrap()["buildRuntimeVersion"],
+                target.target()
+            );
+            if node_layer {
+                assert_eq!(
+                    source.logical_manifest.layers[1]
+                        .runtime_config
+                        .as_ref()
+                        .unwrap()["buildRuntimeVersion"],
+                    "node-24"
+                );
+            }
+            if python_dependencies {
+                let dependency = source.logical_manifest.files.iter().find(|file| file.role == crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Dependency).unwrap();
+                assert_eq!(dependency.layer_name.as_deref(), Some("api"));
+            }
+        } else {
+            let error = result
+                .err()
+                .expect("foreign dependency ABI must fail before scanning or publication");
+            assert!(
+                error
+                    .chain()
+                    .filter_map(|cause| cause.downcast_ref::<crate::output::CodedError>())
+                    .any(|error| error.code == "APPLICATION_RUNTIME_INVALID"),
+                "{error:#}"
+            );
         }
     }
 }

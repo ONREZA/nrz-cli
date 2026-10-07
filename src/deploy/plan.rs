@@ -906,9 +906,7 @@ fn validate_python_dependency_context(
         return Ok(());
     }
     let fs = crate::detect::fs::LocalFs::new(project_dir);
-    let authored_dependencies = crate::detect::python::dependency_plan(&fs)?
-        .is_some_and(|plan| plan.install_project)
-        || !crate::detect::python::dependency_names(&fs)?.is_empty();
+    let authored_dependencies = crate::detect::python::requires_dependency_stage(&fs)?;
     let staged_dependencies = staged
         && nrz_source_bundle::PythonMinor::ALL
             .into_iter()

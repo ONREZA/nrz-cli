@@ -82,10 +82,29 @@ pub fn validate_source_bundle_application_graph(
     let mut application = manifest.clone();
     nrz_source_bundle::source_application_runtime(manifest)
         .map_err(RuntimeArtifactError::Invariant)?;
-    // This preflight checks source ownership before a trusted target exists.
-    // Final materialization validates the declaration against that admitted target.
+    let mut declared_targets = HashMap::new();
+    // Source targets validate their declarations here; they do not attest an
+    // admitted target. Final materialization still checks independent custody.
     for layer in &mut application.layers {
-        if let Some(config) = layer.runtime_config.as_mut().and_then(Value::as_object_mut) {
+        let intent = nrz_source_bundle::layer_application_runtime(layer.runtime_config.as_ref())
+            .map_err(RuntimeArtifactError::Invariant)?;
+        let unresolved_node = intent.as_ref().is_some_and(|intent| {
+            intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Node
+        }) && layer
+            .runtime_config
+            .as_ref()
+            .is_none_or(|config| config.get("buildRuntimeVersion").is_none());
+        if intent.is_some() && !unresolved_node {
+            if let Some(target) = layer
+                .runtime_config
+                .as_ref()
+                .and_then(|config| config.get("buildRuntimeVersion"))
+                .and_then(Value::as_str)
+            {
+                declared_targets.insert(layer.name.clone(), target.to_owned());
+            }
+        } else if let Some(config) = layer.runtime_config.as_mut().and_then(Value::as_object_mut) {
+            // DEPRECATED: legacy/unresolved Node keeps ownership-only preflight.
             config.remove(nrz_source_bundle::APPLICATION_RUNTIME_CONFIG_KEY);
             config.remove("buildRuntimeVersion");
         }
@@ -93,11 +112,14 @@ pub fn validate_source_bundle_application_graph(
     application
         .files
         .retain(|file| file.role != DEPENDENCY_FILE_ROLE);
-    finalize_source_bundle_runtime_graph(
+    finalize_source_bundle_runtime_graph_with_targets(
         logical_manifest_sha256,
         source_sha256,
         source_size_bytes,
         &application,
+        &[],
+        None,
+        Some(&declared_targets),
     )?;
     Ok(())
 }
