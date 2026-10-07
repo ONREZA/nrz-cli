@@ -33,6 +33,72 @@ fn compute_manifest() -> crate::build::manifest::Manifest {
     .unwrap()
 }
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+#[test]
+#[ignore = "requires a C compiler; verifies generic typed-native publication custody"]
+fn native_source_bundle_requires_archived_libraries_owned_by_its_compute_layer() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("lib")).unwrap();
+    fs::write(dir.path().join("foo.c"), "int foo(void) { return 42; }").unwrap();
+    fs::write(
+        dir.path().join("main.c"),
+        "int foo(void); int main(void) { return foo() == 42 ? 0 : 1; }",
+    )
+    .unwrap();
+    for args in [
+        vec![
+            "-shared",
+            "-fPIC",
+            "foo.c",
+            "-Wl,-soname,libfoo.so",
+            "-o",
+            "lib/libfoo.so",
+        ],
+        vec![
+            "main.c",
+            "-Llib",
+            "-lfoo",
+            "-Wl,-rpath,$ORIGIN/lib",
+            "-o",
+            "server",
+        ],
+    ] {
+        let result = std::process::Command::new("cc")
+            .args(args)
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    let mut manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({"version":1,"layers":[{"name":"native","target":"COMPUTE","directory":".","entry":"server","runtime":{"applicationRuntime":{"family":"EXECUTABLE","args":[]},"buildRuntimeVersion":"native-linux-x86_64-glibc"}}],"routes":[]})).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
+    build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+    let excluded = files
+        .iter()
+        .filter(|file| file.path != "lib/libfoo.so")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        build_source_bundle_plan(dir.path(), &manifest, &excluded).is_err(),
+        "filesystem-present but unarchived library was accepted"
+    );
+    manifest.layers.insert(
+        0,
+        serde_json::from_value(
+            serde_json::json!({"name":"foreign","target":"STATIC","directory":"lib"}),
+        )
+        .unwrap(),
+    );
+    assert!(
+        build_source_bundle_plan(dir.path(), &manifest, &files).is_err(),
+        "foreign layer library ownership was accepted"
+    );
+}
+
 #[test]
 fn source_bundle_retains_prebuild_launcher_args_and_version_witness() {
     let dir = tempdir().unwrap();

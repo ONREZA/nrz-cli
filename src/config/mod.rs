@@ -316,11 +316,28 @@ pub struct EnvSection {
 impl ProjectConfig {
     pub fn merge_child(&self, child: ProjectConfig) -> ProjectConfig {
         let mut parent = self.clone();
-        let inherit_python_fields = !child
+        let parent_runtime = parent.deploy.runtime.or_else(|| {
+            (parent.deploy.python_version.is_some()
+                || parent.deploy.module.is_some()
+                || parent.deploy.application.is_some()
+                || parent.deploy.server.is_some())
+            .then_some(nrz_source_bundle::ApplicationRuntimeFamily::Python)
+        });
+        if child.deploy.runtime.is_some() && child.deploy.runtime != parent_runtime {
+            // A new runtime family owns a fresh launch namespace. Preserve child
+            // declarations so incompatible authored fields still fail validation.
+            parent.deploy.entry = None;
+            parent.deploy.args = None;
+            parent.deploy.python_version = None;
+            parent.deploy.module = None;
+            parent.deploy.application = None;
+            parent.deploy.server = None;
+        }
+        if child
             .deploy
             .runtime
-            .is_some_and(|family| family != nrz_source_bundle::ApplicationRuntimeFamily::Python);
-        if inherit_python_fields {
+            .is_none_or(|family| family == nrz_source_bundle::ApplicationRuntimeFamily::Python)
+        {
             // An explicit child launch mode replaces competing parent defaults.
             // Keep every authored child field so invalid combinations still fail.
             if child.deploy.entry.is_some() || child.deploy.module.is_some() {
@@ -390,28 +407,12 @@ impl ProjectConfig {
                     .or(parent.build.output_directory),
             },
             deploy: DeploySection {
-                python_version: if inherit_python_fields {
-                    child.deploy.python_version.or(parent.deploy.python_version)
-                } else {
-                    child.deploy.python_version
-                },
+                python_version: child.deploy.python_version.or(parent.deploy.python_version),
                 runtime: child.deploy.runtime.or(parent.deploy.runtime),
                 args: child.deploy.args.or(parent.deploy.args),
-                module: if inherit_python_fields {
-                    child.deploy.module.or(parent.deploy.module)
-                } else {
-                    child.deploy.module
-                },
-                application: if inherit_python_fields {
-                    child.deploy.application.or(parent.deploy.application)
-                } else {
-                    child.deploy.application
-                },
-                server: if inherit_python_fields {
-                    child.deploy.server.or(parent.deploy.server)
-                } else {
-                    child.deploy.server
-                },
+                module: child.deploy.module.or(parent.deploy.module),
+                application: child.deploy.application.or(parent.deploy.application),
+                server: child.deploy.server.or(parent.deploy.server),
                 compute: child.deploy.compute.or(parent.deploy.compute),
                 entry: child.deploy.entry.or(parent.deploy.entry),
                 health_check_path: child

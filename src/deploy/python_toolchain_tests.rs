@@ -1181,6 +1181,177 @@ async fn real_mkdocs_static_builds_publish_without_process_runtime() {
 }
 
 #[tokio::test]
+async fn python_published_nonroot_output_keeps_project_owned_bootstrap() {
+    use clap::Parser as _;
+    for mode in ["MODULE", "CALLABLE", "AUTHORED", "SCRIPT"] {
+        let project = tempfile::tempdir().unwrap();
+        let minor = nrz_source_bundle::PythonMinor::default();
+        std::fs::create_dir_all(project.path().join("dist")).unwrap();
+        std::fs::create_dir_all(project.path().join("src")).unwrap();
+        std::fs::create_dir_all(project.path().join(minor.site_packages_root())).unwrap();
+        std::fs::write(project.path().join("requirements.txt"), "").unwrap();
+        std::fs::write(project.path().join("dist/asset.txt"), "build asset").unwrap();
+        std::fs::write(
+        project.path().join("src/demo.py"),
+        "import dependency, sys\ndef main():\n print(dependency.VALUE, sys.argv[1])\nif __name__ == '__main__':\n main()\n",
+    )
+    .unwrap();
+        std::fs::write(
+            project
+                .path()
+                .join(minor.site_packages_root())
+                .join("dependency.py"),
+            "VALUE = 'PUBLISHED_DEPENDENCY'\n",
+        )
+        .unwrap();
+        let mut config = nrz::config::ProjectConfig::default();
+        config.project.framework = Some("python".into());
+        config.build.output_directory = Some("dist".into());
+        if mode == "CALLABLE" {
+            config.deploy.application = Some("demo:main".into());
+        } else if mode == "SCRIPT" {
+            config.deploy.entry = Some("main.py".into());
+            std::fs::copy(
+                project.path().join("src/demo.py"),
+                project.path().join("dist/main.py"),
+            )
+            .unwrap();
+        } else {
+            config.deploy.module = Some("demo".into());
+        }
+        if mode == "AUTHORED" {
+            std::fs::create_dir_all(project.path().join("dist/.onreza/python")).unwrap();
+            std::fs::write(
+                project.path().join("dist/.onreza/python/launch.py"),
+                "print('AUTHORED_DIST')\n",
+            )
+            .unwrap();
+            let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "layers": [{"name":"compute", "target":"COMPUTE", "directory":".", "entry":crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY,
+                "runtime":{"applicationRuntime":{"family":"PYTHON", "args":["MODULE","demo","literal argument"]}, "buildRuntimeVersion":minor.target()}}],
+            "routes": [{"pattern":"^/.*$", "layer":"compute"}]
+        })).unwrap();
+            std::fs::write(
+                project.path().join("dist/.onreza/manifest.json"),
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap();
+        }
+        config.deploy.args = Some(vec!["literal argument".into()]);
+        let command =
+            crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
+                .unwrap();
+        let args = crate::cli::DeployArgs::try_parse_from([
+            "deploy",
+            project.path().to_str().unwrap(),
+            "--dry",
+            "--skip-install",
+            "--skip-build",
+        ])
+        .unwrap();
+        let plan = super::plan::build(super::plan::DeployPlanRequest {
+            args: &args,
+            command: &command,
+            explicit_compute: None,
+            build_logs: None,
+            execution_env: &[],
+            target_production: None,
+            platform_runner: false,
+        })
+        .await
+        .unwrap();
+        assert_eq!(plan.artifact.build.output_dir, project.path().join("dist"));
+        assert_eq!(plan.artifact.runtime.root_dir, project.path());
+        let source = plan
+        .materialize_source_bundle(
+            true,
+            crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+        )
+        .unwrap();
+        let entry = match mode {
+            "AUTHORED" => "dist/.onreza/python/launch.py",
+            "SCRIPT" => "dist/main.py",
+            _ => crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY,
+        };
+        assert_eq!(source.logical_manifest.entrypoints, [entry]);
+        let bootstrap = source
+            .logical_manifest
+            .files
+            .iter()
+            .find(|file| file.path == entry)
+            .unwrap();
+        assert_eq!(
+            bootstrap.role,
+            crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Compute
+        );
+        assert_eq!(
+            bootstrap.layer_name.as_deref(),
+            Some(plan.artifact.runtime.manifest.layers[0].name.as_str())
+        );
+        let logical: nrz_source_bundle::SourceLogicalManifest =
+            serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap())
+                .unwrap();
+        let owner = uuid::Uuid::nil().to_string();
+        nrz_source_bundle::verify_source_bundle_bytes(
+            nrz_source_bundle::SourceBundleVerificationInput {
+                owner_workspace_id: owner.clone(),
+                source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
+                    &owner,
+                    &source.logical_manifest_sha256,
+                    &source.source_sha256,
+                    None,
+                ),
+                source_sha256: source.source_sha256.clone(),
+                logical_manifest_sha256: source.logical_manifest_sha256.clone(),
+                budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical)
+                    .unwrap(),
+            },
+            std::fs::read(source.source_path()).unwrap().into(),
+        )
+        .await
+        .unwrap();
+        let unpacked = tempfile::tempdir().unwrap();
+        let decoder =
+            zstd::stream::read::Decoder::new(std::fs::File::open(source.source_path()).unwrap())
+                .unwrap();
+        tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+        std::fs::remove_dir_all(project.path()).unwrap();
+        let launch_args = &plan.artifact.runtime.manifest.layers[0]
+            .runtime
+            .as_ref()
+            .unwrap()
+            .application_runtime
+            .as_ref()
+            .unwrap()
+            .args;
+        let output = std::process::Command::new("python3")
+            .args([if mode == "SCRIPT" { "-S" } else { "-I" }, entry])
+            .args(launch_args)
+            .env(
+                "PYTHONPATH",
+                unpacked.path().join(minor.site_packages_root()),
+            )
+            .current_dir(unpacked.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            if mode == "AUTHORED" {
+                "AUTHORED_DIST"
+            } else {
+                "PUBLISHED_DEPENDENCY literal argument"
+            }
+        );
+    }
+}
+
+#[tokio::test]
 async fn different_python_minors_preserve_code_only_and_reject_runtime_dependencies() {
     use clap::Parser as _;
     let project = tempfile::tempdir().unwrap();

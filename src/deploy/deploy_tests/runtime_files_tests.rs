@@ -250,6 +250,128 @@ fn python_scan_excludes_local_environments_and_keeps_the_frozen_bootstrap() {
 }
 
 #[test]
+fn python_published_staged_dependencies_keep_assets_named_like_project_build_outputs() {
+    let project = tempdir().unwrap();
+    let minor = nrz_source_bundle::PythonMinor::default();
+    let package = format!("{}/demo", minor.site_packages_root());
+    let asset_names = [
+        "node_modules",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".tox",
+        ".nox",
+    ];
+    fs::create_dir_all(project.path().join(&package)).unwrap();
+    fs::write(
+        project.path().join("main.py"),
+        "import demo; print(demo.read())\n",
+    )
+    .unwrap();
+    fs::write(project.path().join("requirements.txt"), "").unwrap();
+    fs::write(project.path().join(&package).join("__init__.py"),
+        "from pathlib import Path\ndef read():\n return ','.join(sorted(p.read_text() for p in Path(__file__).parent.rglob('payload.txt')))\n",
+    ).unwrap();
+    for name in asset_names {
+        for root in [name.to_string(), format!("{package}/{name}")] {
+            fs::create_dir_all(project.path().join(&root)).unwrap();
+            fs::write(project.path().join(root).join("payload.txt"), name).unwrap();
+        }
+    }
+    // Virtualenv detection must likewise apply to authored project build state,
+    // not to an installed package's data directory.
+    fs::write(
+        project.path().join(&package).join("venv/pyvenv.cfg"),
+        "package data",
+    )
+    .unwrap();
+    let mut detection =
+        crate::detect::detect_with_framework_override(project.path(), Some("python"));
+    detection.metadata.runtime.runtime_type = RuntimeType::Python;
+    let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "layers": [{"name":"compute", "target":"COMPUTE", "directory":".", "entry":"main.py",
+            "runtime":{"applicationRuntime":{"family":"PYTHON","args":[]}, "buildRuntimeVersion":minor.target()}}],
+        "routes": [{"pattern":"^/.*$", "layer":"compute"}]
+    })).unwrap();
+    let artifact = resolve_runtime_artifact(
+        project.path(),
+        project.path(),
+        project.path().into(),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let files = prepare_artifact_files(
+        &artifact.manifest,
+        scanned,
+        &detection,
+        crate::artifact::ArtifactRootScope::ProjectRoot,
+        &artifact.scan,
+        true,
+    )
+    .deployable_entries();
+    let source = source_bundle_v1::build_source_bundle_plan_with_scan(
+        &artifact.root_dir,
+        &artifact.manifest,
+        &files,
+        &artifact.scan,
+        source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap();
+    for name in asset_names {
+        assert!(
+            !source
+                .logical_manifest
+                .files
+                .iter()
+                .any(|file| file.path == format!("{name}/payload.txt"))
+        );
+        let file = source
+            .logical_manifest
+            .files
+            .iter()
+            .find(|file| file.path == format!("{package}/{name}/payload.txt"))
+            .unwrap();
+        assert_eq!(
+            file.role,
+            source_bundle_v1::SourceLogicalManifestFileRole::Dependency
+        );
+    }
+    let unpacked = tempdir().unwrap();
+    let decoder =
+        zstd::stream::read::Decoder::new(fs::File::open(source.source_path()).unwrap()).unwrap();
+    tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+    fs::remove_dir_all(project.path()).unwrap();
+    let output = std::process::Command::new("python3")
+        .args(["-S", "main.py"])
+        .env(
+            "PYTHONPATH",
+            unpacked.path().join(minor.site_packages_root()),
+        )
+        .current_dir(unpacked.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut expected = asset_names.to_vec();
+    expected.sort();
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap().trim(),
+        expected.join(",")
+    );
+}
+
+#[test]
 fn pnpm_install_preserves_project_build_script_policy() {
     let dir = tempdir().unwrap();
 

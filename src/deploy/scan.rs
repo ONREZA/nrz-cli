@@ -71,23 +71,25 @@ fn scan_python_root(
                 && (relative == Path::new("build/lib")
                     || relative == Path::new("build/bdist")
                     || relative.parent() == Some(Path::new("build")) && name.starts_with("bdist."));
-            if (!staged_dependency && name.ends_with(".egg-info"))
-                || backend_output
-                || matches!(
-                    name.as_ref(),
-                    ".venv"
-                        | "venv"
-                        | "__pycache__"
-                        | ".pytest_cache"
-                        | ".mypy_cache"
-                        | ".ruff_cache"
-                        | ".tox"
-                        | ".nox"
-                        | "node_modules"
-                )
+            let project_build_only = !staged_dependency
+                && (name.ends_with(".egg-info")
+                    || backend_output
+                    || matches!(
+                        name.as_ref(),
+                        ".venv"
+                            | "venv"
+                            | "__pycache__"
+                            | ".pytest_cache"
+                            | ".mypy_cache"
+                            | ".ruff_cache"
+                            | ".tox"
+                            | ".nox"
+                            | "node_modules"
+                    )
+                    || (ft.is_dir() && path.join("pyvenv.cfg").is_file()));
+            if project_build_only
                 || name == ".env"
                 || name.starts_with(".env.")
-                || (ft.is_dir() && path.join("pyvenv.cfg").is_file())
                 || is_vcs_internal_path(base, &path)
             {
                 continue;

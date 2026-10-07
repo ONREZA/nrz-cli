@@ -1245,3 +1245,112 @@ fn child_build_toolchain_selection_has_its_own_python_minor_boundary() {
         Some(nrz_source_bundle::PythonMinor::Python313)
     );
 }
+
+#[test]
+fn child_runtime_families_own_their_entry_and_arguments() {
+    use nrz_source_bundle::ApplicationRuntimeFamily as Family;
+    let families = [
+        Family::Python,
+        Family::Node,
+        Family::Bun,
+        Family::Executable,
+    ];
+    for parent_family in families {
+        for child_family in families {
+            let mut parent = ProjectConfig::default();
+            parent.deploy.runtime = Some(parent_family);
+            parent.deploy.entry = Some("parent-entry".into());
+            parent.deploy.args = Some(vec!["parent argument".into()]);
+            if parent_family == Family::Python {
+                parent.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python312);
+            }
+            let mut child = ProjectConfig::default();
+            child.deploy.runtime = Some(child_family);
+            let merged = parent.merge_child(child.clone());
+            if parent_family == child_family {
+                assert_eq!(merged.deploy.entry, parent.deploy.entry);
+                assert_eq!(merged.deploy.args, parent.deploy.args);
+            } else {
+                assert_eq!(
+                    merged.deploy.entry, None,
+                    "{parent_family:?} -> {child_family:?}"
+                );
+                assert_eq!(
+                    merged.deploy.args, None,
+                    "{parent_family:?} -> {child_family:?}"
+                );
+            }
+            let script = if child_family == Family::Bun {
+                "bun child.js inferred-argument"
+            } else {
+                "node child.js inferred-argument"
+            };
+            let input = crate::detect::fs::VirtualFs::from_json(&serde_json::json!({
+                "files":{"main.py":"print(42)","go.mod":"module example.org/server", "main.go":"package main", "package.json":serde_json::json!({"scripts":{"start":script}}).to_string()}
+            }).to_string()).unwrap();
+            let framework = if child_family == Family::Executable {
+                "go"
+            } else {
+                "other"
+            };
+            let declaration =
+                crate::detect::application_runtime::resolve_application_runtime_with_project(
+                    &input,
+                    framework,
+                    &merged.deploy,
+                    None,
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(declaration.family, child_family);
+            if parent_family != child_family {
+                assert_ne!(declaration.entry.as_deref(), Some("parent-entry"));
+                assert!(!declaration.args.iter().any(|arg| arg == "parent argument"));
+                if matches!(child_family, Family::Node | Family::Bun) {
+                    assert_eq!(declaration.entry.as_deref(), Some("child.js"));
+                    assert_eq!(declaration.args, ["inferred-argument"]);
+                }
+            }
+            child.deploy.entry = Some("child-entry".into());
+            child.deploy.args = Some(vec!["child argument".into()]);
+            let merged = parent.merge_child(child);
+            assert_eq!(merged.deploy.entry.as_deref(), Some("child-entry"));
+            assert_eq!(merged.deploy.args, Some(vec!["child argument".into()]));
+        }
+    }
+}
+
+#[test]
+fn runtime_selection_distinguishes_implicit_python_from_an_unknown_parent_launch() {
+    use nrz_source_bundle::{ApplicationRuntimeFamily as Family, PythonMinor};
+    for implicit_python in [false, true] {
+        let mut parent = ProjectConfig::default();
+        parent.deploy.entry = Some("main.py".into());
+        parent.deploy.args = Some(vec!["literal argument".into()]);
+        if implicit_python {
+            parent.deploy.python_version = Some(PythonMinor::Python312);
+        }
+        for family in [
+            Family::Python,
+            Family::Node,
+            Family::Bun,
+            Family::Executable,
+        ] {
+            let mut child = ProjectConfig::default();
+            child.deploy.runtime = Some(family);
+            let merged = parent.merge_child(child);
+            if implicit_python && family == Family::Python {
+                assert_eq!(merged.deploy.entry, parent.deploy.entry);
+                assert_eq!(merged.deploy.args, parent.deploy.args);
+                assert_eq!(merged.deploy.python_version, parent.deploy.python_version);
+            } else {
+                assert_eq!(merged.deploy.entry, None);
+                assert_eq!(merged.deploy.args, None);
+                assert_eq!(merged.deploy.python_version, None);
+            }
+        }
+        let inherited = parent.merge_child(ProjectConfig::default());
+        assert_eq!(inherited.deploy.entry, parent.deploy.entry);
+        assert_eq!(inherited.deploy.args, parent.deploy.args);
+    }
+}

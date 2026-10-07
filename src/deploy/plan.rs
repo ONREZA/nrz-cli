@@ -622,14 +622,26 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         .context("failed to serialize manifest")?;
 
     if compute == ComputeType::Process && !has_build_manifest {
-        super::validate_process_output(
-            &build_artifact.output_dir,
-            project_dir,
-            &build_artifact.detection,
-        )
-        .map_err(|e| output::with_default_code(e, "MISSING_PROCESS_ENTRY"))?;
+        let process_entry_root = if effective.deploy_entry().is_none()
+            && build_artifact
+                .detection
+                .metadata
+                .application_runtime()
+                .is_some_and(|runtime| {
+                    runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+                        && runtime.entry.as_deref()
+                            == Some(crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY)
+                }) {
+            // The generated Python bootstrap and its imports/dependencies are
+            // project-owned even when the build emits a separate output tree.
+            project_dir
+        } else {
+            &build_artifact.output_dir
+        };
+        super::validate_process_output(process_entry_root, project_dir, &build_artifact.detection)
+            .map_err(|e| output::with_default_code(e, "MISSING_PROCESS_ENTRY"))?;
         let (entry, warning) = super::ensure_process_entry(
-            &build_artifact.output_dir,
+            process_entry_root,
             project_dir,
             effective.deploy_entry(),
             &build_artifact.detection,
@@ -663,7 +675,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
                 )?;
                 build_manifest::validate(&auto)
                     .map_err(|error| output::with_default_code(error, "INVALID_MANIFEST"))?;
-                build_manifest::verify_files(&build_artifact.output_dir, &auto)
+                build_manifest::verify_files(process_entry_root, &auto)
                     .map_err(|error| output::with_default_code(error, "MISSING_BUILD_OUTPUT"))?;
                 output::status(
                     json,
@@ -697,13 +709,14 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     let manifest_for_planning: build_manifest::Manifest =
         serde_json::from_value(manifest_raw.clone())
             .context("failed to parse resolved deployment manifest")?;
-    let mut runtime_artifact = super::resolve_runtime_artifact(
+    let mut runtime_artifact = super::resolve_runtime_artifact_with_manifest_source(
         &command.root_dir,
         project_dir,
         build_artifact.output_dir.clone(),
         manifest_for_planning,
         &build_artifact.detection,
         json,
+        deployment_manifest_source,
     )?;
     if native_recipe == Some(crate::detect::native::NativeRecipe::FlutterWeb) {
         super::native_build::apply_flutter_static_cache_policy(&mut runtime_artifact.manifest);

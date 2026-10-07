@@ -6,13 +6,34 @@ pub(super) struct NodeProjectRuntimePlan {
     project_prefix: String,
 }
 
+#[cfg(test)]
 pub(super) fn resolve_runtime_artifact(
+    workspace_root_dir: &Path,
+    project_dir: &Path,
+    build_output_dir: PathBuf,
+    manifest: build_manifest::Manifest,
+    detection: &crate::detect::types::DetectionResult,
+    json: bool,
+) -> anyhow::Result<RuntimeArtifact> {
+    resolve_runtime_artifact_with_manifest_source(
+        workspace_root_dir,
+        project_dir,
+        build_output_dir,
+        manifest,
+        detection,
+        json,
+        crate::artifact::BuildManifestSource::File,
+    )
+}
+
+pub(super) fn resolve_runtime_artifact_with_manifest_source(
     workspace_root_dir: &Path,
     project_dir: &Path,
     build_output_dir: PathBuf,
     mut manifest: build_manifest::Manifest,
     detection: &crate::detect::types::DetectionResult,
     json: bool,
+    manifest_source: crate::artifact::BuildManifestSource,
 ) -> anyhow::Result<RuntimeArtifact> {
     let python_minor = detection
         .metadata
@@ -53,6 +74,15 @@ pub(super) fn resolve_runtime_artifact(
             manifest,
             json,
             python_minor,
+            manifest_source == crate::artifact::BuildManifestSource::Generated
+                && detection
+                    .metadata
+                    .application_runtime()
+                    .is_some_and(|runtime| {
+                        runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+                            && runtime.entry.as_deref()
+                                == Some(crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY)
+                    }),
         )?;
         if validate_python_layer_dependencies(
             workspace_root_dir,
@@ -135,7 +165,8 @@ pub(super) fn resolve_runtime_artifact(
         build_output_prefix: plan.build_output_prefix.clone(),
         layers: manifest.layers.clone(),
     };
-    let manifest = rewrite_manifest_for_node_project_runtime(manifest, &plan.build_output_prefix)?;
+    let manifest =
+        rewrite_manifest_for_project_runtime(manifest, &plan.build_output_prefix, false)?;
     if compute_layer_count(&manifest) > 1 {
         for root in [
             "node_modules".to_string(),
@@ -397,6 +428,7 @@ fn resolve_python_runtime_artifact(
     manifest: build_manifest::Manifest,
     json: bool,
     minor: nrz_source_bundle::PythonMinor,
+    project_owned_bootstrap: bool,
 ) -> anyhow::Result<RuntimeArtifact> {
     let build_output_prefix = relative_runtime_artifact_path(project_dir, &build_output_dir)
         .map_err(|_| {
@@ -413,7 +445,11 @@ fn resolve_python_runtime_artifact(
     let manifest = if build_output_prefix == "." {
         manifest
     } else {
-        rewrite_manifest_for_node_project_runtime(manifest, &build_output_prefix)?
+        rewrite_manifest_for_project_runtime(
+            manifest,
+            &build_output_prefix,
+            project_owned_bootstrap,
+        )?
     };
     output::status(
         json,
@@ -595,13 +631,23 @@ pub(super) fn validate_node_project_runtime_dependencies(
     ))
 }
 
-pub(super) fn rewrite_manifest_for_node_project_runtime(
+fn rewrite_manifest_for_project_runtime(
     mut manifest: build_manifest::Manifest,
     build_output_prefix: &str,
+    project_owned_bootstrap: bool,
 ) -> anyhow::Result<build_manifest::Manifest> {
     for layer in &mut manifest.layers {
         match layer.target {
             build_manifest::LayerTarget::Compute => {
+                // Only the generated adapter entry is anchored at the project
+                // root; authored entries keep their output-relative custody.
+                if project_owned_bootstrap
+                    && layer.directory == "."
+                    && layer.entry.as_deref()
+                        == Some(crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY)
+                {
+                    continue;
+                }
                 let entry = layer
                     .entry
                     .as_deref()

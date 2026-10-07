@@ -675,8 +675,22 @@ pub(crate) fn serving_framework<'a>(
         .as_ref()
         .is_some_and(|command| !command.trim().is_empty())
         && config.deploy.runtime.is_some();
-    let generic_declaration =
-        config.deploy.runtime.is_some() && matches!(detected, "python" | "go" | "dart");
+    let detected_serving_family = match detected {
+        "python" => Some(ApplicationRuntimeFamily::Python),
+        "go" | "dart" => Some(ApplicationRuntimeFamily::Executable),
+        _ => None,
+    };
+    // Confirming the inferred launch family keeps its entry and build recipe,
+    // even when the compiler is selected independently.
+    if !converter
+        && config.deploy.runtime.is_some()
+        && config.deploy.runtime == detected_serving_family
+    {
+        return detected;
+    }
+    let generic_declaration = config.deploy.runtime.is_some()
+        && detected_serving_family.is_some()
+        && config.deploy.runtime != detected_serving_family;
     let independent = config.build.toolchain.is_some()
         || config.build.python_version.is_some()
         || converter

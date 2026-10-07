@@ -263,3 +263,143 @@ fn advertised_remote_inputs_preserve_detected_frameworks() {
         );
     }
 }
+
+#[test]
+fn matching_executable_declarations_preserve_inferred_native_build_recipes() {
+    use nrz_source_bundle::{ApplicationRuntimeFamily, BuildToolchainFamily};
+    for (framework, input) in [
+        (
+            "go",
+            fs(&[
+                ("go.mod", "module example.org/server"),
+                ("main.go", "package main\nfunc main() {}"),
+            ]),
+        ),
+        (
+            "dart",
+            fs(&[
+                ("pubspec.yaml", "name: server"),
+                ("bin/server.dart", "void main() {}"),
+            ]),
+        ),
+    ] {
+        for explicit_compiler in [false, true] {
+            for configured_entry in [None, Some("explicit-server")] {
+                let mut config = crate::config::ProjectConfig::default();
+                config.deploy.runtime = Some(ApplicationRuntimeFamily::Executable);
+                config.build.toolchain = explicit_compiler.then_some(BuildToolchainFamily::Native);
+                config.deploy.entry = configured_entry.map(str::to_owned);
+                let mut detection = detect_native(&input).unwrap();
+                let inferred_entry = detection
+                    .metadata
+                    .build_info
+                    .as_ref()
+                    .unwrap()
+                    .entry_point
+                    .as_deref()
+                    .unwrap()
+                    .to_owned();
+                let inferred_build = serde_json::to_value(&detection.metadata.build_info).unwrap();
+                let context = super::application_runtime::resolve_and_bind_source_build_context(
+                    &input,
+                    &mut detection,
+                    &config,
+                    None,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(detection.framework, framework);
+                assert_eq!(
+                    native_recipe(&detection.framework),
+                    native_recipe(framework)
+                );
+                assert_eq!(
+                    serde_json::to_value(&detection.metadata.build_info).unwrap(),
+                    inferred_build
+                );
+                assert_eq!(context.build_toolchain.family, BuildToolchainFamily::Native);
+                assert_eq!(
+                    context.application_runtime.as_ref().unwrap().family,
+                    ApplicationRuntimeFamily::Executable
+                );
+                assert_eq!(
+                    context
+                        .application_runtime
+                        .as_ref()
+                        .unwrap()
+                        .entry
+                        .as_deref(),
+                    Some(configured_entry.unwrap_or(&inferred_entry))
+                );
+                let mut refreshed = detect_native(&input).unwrap();
+                super::application_runtime::bind_source_build_context(
+                    &input,
+                    &mut refreshed,
+                    &context,
+                    &config,
+                    None,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(refreshed.framework, framework);
+                assert_eq!(
+                    refreshed.metadata.source_build_context.as_ref(),
+                    Some(&context)
+                );
+                assert_eq!(
+                    serde_json::to_value(&refreshed.metadata.build_info).unwrap(),
+                    inferred_build
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn authored_converters_keep_launch_authority_for_each_runtime_family() {
+    use nrz_source_bundle::ApplicationRuntimeFamily as Family;
+    let input = fs(&[
+        ("go.mod", "module example.org/server"),
+        ("main.go", "package main\nfunc main() {}"),
+    ]);
+    for family in [
+        Family::Python,
+        Family::Node,
+        Family::Bun,
+        Family::Executable,
+    ] {
+        let mut config = crate::config::ProjectConfig::default();
+        config.build.command = Some("emit-converted-output".into());
+        config.deploy.runtime = Some(family);
+        config.deploy.entry = Some("converted-server".into());
+        config.deploy.args = Some(vec!["literal argument".into()]);
+        let mut detection = detect_native(&input).unwrap();
+        let context = super::application_runtime::resolve_and_bind_source_build_context(
+            &input,
+            &mut detection,
+            &config,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(native_recipe(&detection.framework).is_none());
+        let serving = context.application_runtime.as_ref().unwrap();
+        assert_eq!(serving.family, family);
+        assert_eq!(serving.entry.as_deref(), Some("converted-server"));
+        assert_eq!(serving.args, ["literal argument"]);
+        if family != Family::Executable {
+            config.project.framework = Some("go".into());
+            let mut declared = detect_native(&input).unwrap();
+            assert!(
+                super::application_runtime::resolve_and_bind_source_build_context(
+                    &input,
+                    &mut declared,
+                    &config,
+                    Some("go"),
+                    None
+                )
+                .is_err()
+            );
+        }
+    }
+}

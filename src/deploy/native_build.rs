@@ -542,57 +542,12 @@ pub(crate) fn validate_output(
     if !binary.starts_with(&root) || !binary.is_file() {
         bail!("native executable entry escapes its artifact output directory");
     }
-    let bytes = std::fs::read(&binary).context("cannot read native executable")?;
-    let requirements = nrz_runtime_artifact::verify_native_executable(&bytes)?;
-    for library_path in &requirements.library_paths {
-        let artifact_relative = library_path
-            .strip_prefix("$ORIGIN")
-            .or_else(|| library_path.strip_prefix("${ORIGIN}"));
-        if artifact_relative
-            .map_or_else(|| library_path.contains('$'), |suffix| suffix.contains('$'))
-        {
-            bail!("native library path contains an unsupported loader token");
-        }
-        let path = if let Some(suffix) = artifact_relative {
-            if !suffix.is_empty() && !suffix.starts_with('/') {
-                bail!("native library path contains an unsupported loader token");
-            }
-            binary
-                .parent()
-                .unwrap()
-                .join(suffix.trim_start_matches('/'))
-        } else if Path::new(library_path).is_absolute() {
-            Path::new(library_path).to_path_buf()
-        } else {
-            root.join(library_path)
-        };
-        let mut normalized = std::path::PathBuf::new();
-        for component in path.components() {
-            if component == std::path::Component::ParentDir {
-                normalized.pop();
-            } else if component != std::path::Component::CurDir {
-                normalized.push(component);
-            }
-        }
-        if artifact_relative.is_none() && Path::new(library_path).is_absolute() {
-            if !["/lib", "/lib64", "/usr/lib", "/usr/lib64"]
-                .iter()
-                .any(|prefix| normalized.starts_with(prefix))
-            {
-                bail!(
-                    "native library path points outside the artifact and qualified system library directories"
-                );
-            }
-            continue;
-        }
-        if !normalized.starts_with(&root)
-            || normalized
-                .canonicalize()
-                .is_ok_and(|path| !path.starts_with(&root))
-        {
-            bail!("native library path escapes the artifact output directory");
-        }
-    }
+    let (requirements, _) =
+        nrz_runtime_artifact::NativeExecutableRequirements::verify_artifact_closure(
+            output_dir,
+            &binary_path,
+            output_dir,
+        )?;
     Ok(NativeOutputEvidence {
         entry: Some(entry.into()),
         target: Some(NATIVE_RUNTIME_TARGET),

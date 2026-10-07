@@ -247,6 +247,304 @@ async fn real_native_compiler_readback_matches_qualified_pins() {
         .await
         .unwrap();
     }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+    real_native_library_closure_rejects_missing_direct_and_transitive_libraries();
+    if std::env::var("ONREZA_BUILDER_QUALIFICATION").as_deref() == Ok("1") {
+        let output = std::env::var_os("NRZ_QUALIFICATION_OUTPUT")
+            .unwrap_or_else(|| "/qualification/output".into());
+        std::fs::create_dir_all(&output).unwrap();
+        std::fs::write(std::path::Path::new(&output).join("native-system-libraries.json"), serde_json::to_vec(&serde_json::json!({
+            "target": NATIVE_RUNTIME_TARGET,
+            "libraries": nrz_runtime_artifact::NativeExecutableRequirements::QUALIFIED_SYSTEM_LIBRARIES,
+        })).unwrap()).unwrap();
+        let source = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(source.path(), "#include <dlfcn.h>\n#include <stdio.h>\nint main(int argc, char **argv) { if (argc < 2) return 2; for (int i=1; i<argc; i++) { void *h=dlopen(argv[i], RTLD_NOW); if (!h) { fprintf(stderr, \"%s: %s\\n\", argv[i], dlerror()); return 1; } dlclose(h); } return 0; }\n").unwrap();
+        let compiled = std::process::Command::new("cc")
+            .args(["-x", "c"])
+            .arg(source.path())
+            .args(["-ldl", "-o"])
+            .arg(std::path::Path::new(&output).join("native-system-libraries-probe"))
+            .output()
+            .unwrap();
+        assert!(
+            compiled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
+    }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+#[test]
+#[ignore = "requires a C compiler; qualified native compiler readback also runs this regression"]
+fn real_native_library_closure_rejects_missing_direct_and_transitive_libraries() {
+    let output = tempfile::tempdir().unwrap();
+    std::fs::create_dir(output.path().join("lib")).unwrap();
+    file(output.path(), "bar.c", "int bar(void) { return 42; }");
+    file(
+        output.path(),
+        "foo.c",
+        "int bar(void); int foo(void) { return bar(); }",
+    );
+    file(
+        output.path(),
+        "main.c",
+        "int foo(void); int main(void) { return foo() == 42 ? 0 : 1; }",
+    );
+    for args in [
+        vec![
+            "-shared",
+            "-fPIC",
+            "bar.c",
+            "-Wl,-soname,libbar.so",
+            "-o",
+            "lib/libbar.so",
+        ],
+        vec![
+            "-shared",
+            "-fPIC",
+            "foo.c",
+            "-Llib",
+            "-lbar",
+            "-Wl,-soname,libfoo.so",
+            "-Wl,-rpath,$ORIGIN",
+            "-o",
+            "lib/libfoo.so",
+        ],
+        vec![
+            "main.c",
+            "-Llib",
+            "-lfoo",
+            "-Wl,-rpath,$ORIGIN/lib",
+            "-o",
+            "server",
+        ],
+    ] {
+        let result = std::process::Command::new("cc")
+            .args(args)
+            .current_dir(output.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    validate_output(output.path(), NativeRecipe::DartServer, Some("server")).unwrap();
+    let bar = std::fs::read(output.path().join("lib/libbar.so")).unwrap();
+    let mut header_only = vec![0; 512];
+    header_only[..64].copy_from_slice(&bar[..64]);
+    // No program/section tables: syntactically ELF64 ET_DYN, but not loadable.
+    header_only[32..48].fill(0);
+    header_only[56..64].fill(0);
+    std::fs::write(output.path().join("lib/libbar.so"), header_only).unwrap();
+    assert!(
+        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        "shared ELF without loadable segments was accepted"
+    );
+    std::fs::write(output.path().join("lib/libbar.so"), bar).unwrap();
+    // A bundled SONAME takes precedence over the qualified Compute fallback.
+    file(output.path(), "lib/libc.so.6", "not ELF");
+    assert!(validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err());
+    std::fs::remove_file(output.path().join("lib/libc.so.6")).unwrap();
+
+    let compile = |args: &[&str]| {
+        let result = std::process::Command::new("cc")
+            .args(args)
+            .arg("-Wl,-rpath-link,lib")
+            .current_dir(output.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    };
+    compile(&[
+        "-shared",
+        "-fPIC",
+        "foo.c",
+        "-Llib",
+        "-lbar",
+        "-Wl,-soname,libfoo.so",
+        "-o",
+        "lib/libfoo.so",
+    ]);
+    assert!(
+        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        "parent RUNPATH incorrectly inherited by libfoo"
+    );
+    compile(&[
+        "main.c",
+        "-Llib",
+        "-lfoo",
+        "-Wl,--disable-new-dtags,-rpath,$ORIGIN/lib",
+        "-o",
+        "server",
+    ]);
+    validate_output(output.path(), NativeRecipe::DartServer, Some("server")).unwrap();
+    compile(&[
+        "-shared",
+        "-fPIC",
+        "foo.c",
+        "-Llib",
+        "-lbar",
+        "-Wl,-soname,libfoo.so",
+        "-Wl,-rpath,$ORIGIN",
+        "-o",
+        "lib/libfoo.so",
+    ]);
+    compile(&[
+        "main.c",
+        "-Llib",
+        "-lfoo",
+        "-Wl,-rpath,$ORIGIN/lib",
+        "-o",
+        "server",
+    ]);
+
+    // Preserve both archive members in a relative SONAME symlink chain.
+    std::fs::rename(
+        output.path().join("lib/libfoo.so"),
+        output.path().join("lib/libfoo.so.1"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink("libfoo.so.1", output.path().join("lib/libfoo.so")).unwrap();
+    let (_, members) = nrz_runtime_artifact::NativeExecutableRequirements::verify_artifact_closure(
+        output.path(),
+        &output.path().join("server"),
+        output.path(),
+    )
+    .unwrap();
+    assert!(members.contains(&std::path::PathBuf::from("lib/libfoo.so")));
+    assert!(members.contains(&std::path::PathBuf::from("lib/libfoo.so.1")));
+    std::fs::remove_file(output.path().join("lib/libfoo.so")).unwrap();
+    std::fs::rename(
+        output.path().join("lib/libfoo.so.1"),
+        output.path().join("lib/libfoo.so"),
+    )
+    .unwrap();
+
+    // The loader derives ORIGIN from the selected link name, not its target.
+    std::fs::create_dir(output.path().join("vendor")).unwrap();
+    for name in ["libfoo.so", "libbar.so"] {
+        std::fs::rename(
+            output.path().join("lib").join(name),
+            output.path().join("vendor").join(name),
+        )
+        .unwrap();
+    }
+    std::os::unix::fs::symlink("../vendor/libfoo.so", output.path().join("lib/libfoo.so")).unwrap();
+    assert!(
+        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        "ORIGIN incorrectly used canonical library directory"
+    );
+    std::os::unix::fs::symlink("../vendor/libbar.so", output.path().join("lib/libbar.so")).unwrap();
+    let (_, members) = nrz_runtime_artifact::NativeExecutableRequirements::verify_artifact_closure(
+        output.path(),
+        &output.path().join("server"),
+        output.path(),
+    )
+    .unwrap();
+    for name in [
+        "lib/libfoo.so",
+        "vendor/libfoo.so",
+        "lib/libbar.so",
+        "vendor/libbar.so",
+    ] {
+        assert!(
+            members.contains(&std::path::PathBuf::from(name)),
+            "missing {name}"
+        );
+    }
+    for name in ["libfoo.so", "libbar.so"] {
+        std::fs::remove_file(output.path().join("lib").join(name)).unwrap();
+        std::fs::rename(
+            output.path().join("vendor").join(name),
+            output.path().join("lib").join(name),
+        )
+        .unwrap();
+    }
+    std::fs::remove_dir(output.path().join("vendor")).unwrap();
+
+    std::fs::create_dir(output.path().join("bin")).unwrap();
+    compile(&[
+        "main.c",
+        "-Llib",
+        "-lfoo",
+        "-Wl,-rpath,$ORIGIN/../lib",
+        "-o",
+        "bin/server",
+    ]);
+    validate_output(output.path(), NativeRecipe::DartServer, Some("bin/server")).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::create_dir(outside.path().join("child")).unwrap();
+    std::os::unix::fs::symlink(outside.path().join("child"), output.path().join("liblink"))
+        .unwrap();
+    compile(&[
+        "main.c",
+        "-Llib",
+        "-lfoo",
+        "-Wl,-rpath,$ORIGIN/liblink/../lib",
+        "-o",
+        "server",
+    ]);
+    assert!(
+        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        "symlink followed by parent was lexically erased"
+    );
+    std::fs::create_dir(output.path().join("unused")).unwrap();
+    compile(&[
+        "main.c",
+        "-Llib",
+        "-lfoo",
+        "-Wl,-rpath,$ORIGIN/unused/../lib",
+        "-o",
+        "server",
+    ]);
+    assert!(
+        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        "empty traversed directory would disappear from the archive"
+    );
+    compile(&[
+        "main.c",
+        "-Llib",
+        "-lfoo",
+        "-Wl,-rpath,$ORIGIN/lib",
+        "-o",
+        "server",
+    ]);
+
+    std::fs::rename(
+        output.path().join("lib/libbar.so"),
+        output.path().join("bar.saved"),
+    )
+    .unwrap();
+    assert!(
+        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        "missing transitive libbar was accepted"
+    );
+    std::fs::rename(
+        output.path().join("bar.saved"),
+        output.path().join("lib/libbar.so"),
+    )
+    .unwrap();
+    std::fs::rename(
+        output.path().join("lib/libfoo.so"),
+        output.path().join("foo.saved"),
+    )
+    .unwrap();
+    assert!(
+        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        "missing direct libfoo was accepted"
+    );
+    std::fs::rename(output.path().join("lib"), output.path().join("lib.saved")).unwrap();
+    assert!(
+        validate_output(output.path(), NativeRecipe::DartServer, Some("server")).is_err(),
+        "missing ORIGIN directory was accepted"
+    );
 }
 
 #[test]

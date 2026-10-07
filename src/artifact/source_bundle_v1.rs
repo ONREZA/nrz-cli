@@ -236,6 +236,7 @@ pub(crate) fn build_source_bundle_plan_with_scan(
     readiness: Option<RuntimeReadinessContract<'_>>,
 ) -> anyhow::Result<SourceBundlePlan> {
     let mut entries = source_entries(output_dir, files, scan)?;
+    let mut native_closures = Vec::new();
     for layer in manifest
         .layers
         .iter()
@@ -263,13 +264,36 @@ pub(crate) fn build_source_bundle_plan_with_scan(
         let SourceBundleEntryKind::File { full_path } = &file.kind else {
             bail!("native entry must be a regular artifact file");
         };
-        nrz_runtime_artifact::verify_native_executable(&std::fs::read(full_path)?)?;
+        let (_, closure) =
+            nrz_runtime_artifact::NativeExecutableRequirements::verify_artifact_closure(
+                output_dir,
+                full_path,
+                &output_dir.join(normalize_layer_root(&layer.directory)?),
+            )?;
+        native_closures.push((&layer.name, closure));
         // Artifact execution permission belongs to the declared native entry,
         // including publication from hosts without POSIX executable bits.
         file.executable = true;
     }
     let logical_manifest =
         build_logical_manifest(manifest, &entries, scan, dependency_packaging, readiness)?;
+    for (layer, closure) in native_closures {
+        for path in closure {
+            let path = path
+                .to_str()
+                .context("native library path must be UTF-8")?
+                .replace('\\', "/");
+            if !logical_manifest.files.iter().any(|file| {
+                file.path == path
+                    && file.layer_name.as_deref() == Some(layer.as_str())
+                    && file.role == SourceLogicalManifestFileRole::Compute
+            }) {
+                bail!(
+                    "native library closure member '{path}' is not archived by its owning compute layer '{layer}'"
+                );
+            }
+        }
+    }
     ensure_manifest_covers_entries(&logical_manifest, &entries)?;
     let logical_manifest_json = canonical_logical_manifest_json(&logical_manifest)?;
     let logical_manifest_sha256 = sha256_hex(logical_manifest_json.as_bytes());
