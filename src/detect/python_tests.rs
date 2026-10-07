@@ -559,6 +559,170 @@ fn python_requirements_continuations_preserve_framework_launch_and_opacity() {
 }
 
 #[test]
+fn python_pyproject_framework_evidence_distinguishes_static_and_backend_metadata() {
+    use super::python::{framework, framework_evidence_complete};
+    use super::python_launch::{PythonLaunchRequest, resolve_launch_for_framework};
+    for (metadata, package_file, lock, expected) in [
+        (
+            "[project]\nname='demo'\nversion='1.0'\ndynamic=['dependencies']\n[build-system]\nrequires=['setuptools']\nbuild-backend='setuptools.build_meta'\n",
+            Some("setup.cfg"),
+            None,
+            None,
+        ),
+        (
+            "[project]\nname='demo'\ndynamic=['dependencies']\n[tool.uv]\npackage=false\n",
+            None,
+            None,
+            None,
+        ),
+        (
+            "[build-system]\nrequires=['setuptools']\nbuild-backend='setuptools.build_meta'\n",
+            Some("setup.cfg"),
+            None,
+            None,
+        ),
+        (
+            "[tool.ruff]\nline-length=88\n",
+            Some("setup.py"),
+            None,
+            None,
+        ),
+        (
+            "[project]\nname='demo'\nversion='1.0'\n[build-system]\nrequires=['setuptools']\nbuild-backend='setuptools.build_meta'\n",
+            Some("setup.cfg"),
+            None,
+            Some("python"),
+        ),
+        (
+            "[project]\nname='demo'\ndynamic=['version']\n",
+            None,
+            None,
+            Some("python"),
+        ),
+        (
+            "[project]\nname='demo'\ndependencies=[]\n",
+            None,
+            None,
+            Some("python"),
+        ),
+        (
+            "[project]\nname='demo'\ndependencies=['fastapi']\n",
+            None,
+            None,
+            Some("fastapi"),
+        ),
+        ("[tool.ruff]\nline-length=88\n", None, None, Some("python")),
+        (
+            "[tool.poetry]\npackage-mode=false\n[tool.poetry.dependencies]\npython='^3.14'\nflask='*'\n",
+            None,
+            Some("poetry.lock"),
+            Some("flask"),
+        ),
+        (
+            "[project]\nname='demo'\ndynamic=['dependencies']\n[tool.poetry.dependencies]\npython='^3.14'\nflask='*'\n",
+            None,
+            Some("poetry.lock"),
+            Some("flask"),
+        ),
+    ] {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("pyproject.toml"), metadata).unwrap();
+        std::fs::write(project.path().join("main.py"), "app = object()\n").unwrap();
+        if let Some(file) = package_file {
+            std::fs::write(
+                project.path().join(file),
+                if file == "setup.py" {
+                    "raise RuntimeError('detection must not execute backend metadata')\n"
+                } else {
+                    "[options]\ninstall_requires =\n    fastapi\n"
+                },
+            )
+            .unwrap();
+        }
+        if let Some(lock) = lock {
+            std::fs::write(project.path().join(lock), "").unwrap();
+        }
+        let input = LocalFs::new(project.path());
+        assert_eq!(
+            framework_evidence_complete(&input).unwrap(),
+            expected.is_some(),
+            "{metadata}"
+        );
+        let request = || PythonLaunchRequest {
+            entry: None,
+            module: None,
+            application: None,
+            server: None,
+            args: &[],
+        };
+        if let Some(expected) = expected {
+            assert_eq!(framework(&input).unwrap(), expected, "{metadata}");
+            assert!(
+                resolve_launch_for_framework(&input, request(), None)
+                    .unwrap()
+                    .is_some()
+            );
+        } else {
+            assert!(
+                resolve_launch_for_framework(&input, request(), None).is_err(),
+                "{metadata}"
+            );
+            assert!(
+                resolve_launch_for_framework(
+                    &input,
+                    PythonLaunchRequest {
+                        module: Some("main"),
+                        ..request()
+                    },
+                    None
+                )
+                .unwrap()
+                .is_some()
+            );
+            assert!(
+                resolve_launch_for_framework(
+                    &input,
+                    PythonLaunchRequest {
+                        application: Some("main:app"),
+                        server: Some("asgi"),
+                        ..request()
+                    },
+                    None
+                )
+                .unwrap()
+                .is_some()
+            );
+        }
+    }
+}
+
+#[test]
+fn opaque_python_pyproject_dependencies_require_a_stage_without_package_installation() {
+    use super::python::{dependency_plan, requires_dependency_stage};
+    let project = tempfile::tempdir().unwrap();
+    let input = LocalFs::new(project.path());
+    std::fs::write(
+        project.path().join("pyproject.toml"),
+        "[project]\nname='demo'\ndynamic=['dependencies']\n[tool.uv]\npackage=false\n",
+    )
+    .unwrap();
+    assert!(!dependency_plan(&input).unwrap().unwrap().install_project);
+    assert!(requires_dependency_stage(&input).unwrap());
+    for metadata in [
+        "[project]\nname='demo'\nversion='1.0'\n",
+        "[project]\nname='demo'\ndependencies=[]\n",
+        "[tool.ruff]\nline-length=88\n",
+        "[tool.poetry]\npackage-mode=false\n[tool.poetry.dependencies]\npython='^3.14'\n",
+    ] {
+        std::fs::write(project.path().join("pyproject.toml"), metadata).unwrap();
+        if metadata.contains("tool.poetry") {
+            std::fs::write(project.path().join("poetry.lock"), "").unwrap();
+        }
+        assert!(!requires_dependency_stage(&input).unwrap(), "{metadata}");
+    }
+}
+
+#[test]
 fn incomplete_python_dependencies_require_an_authored_launch() {
     use super::python_launch::{PythonLaunchRequest, resolve_launch_for_framework};
     for (manifest, metadata) in [

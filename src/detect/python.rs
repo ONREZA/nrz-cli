@@ -159,22 +159,33 @@ pub fn requires_dependency_stage(fs: &dyn Fs) -> anyhow::Result<bool> {
             })
         }));
     }
-    if plan.is_some_and(|plan| plan.manifest == "pyproject.toml")
+    if plan
+        .as_ref()
+        .is_some_and(|plan| plan.manifest == "pyproject.toml")
         && let Some(text) = fs.read_file("pyproject.toml")
     {
         let value: toml::Value = toml::from_str(&text).context("invalid pyproject.toml")?;
-        if let Some(dependencies) = value
+        if value
             .get("project")
             .and_then(|project| project.get("dependencies"))
             .and_then(toml::Value::as_array)
+            .is_some_and(|dependencies| {
+                dependencies
+                    .iter()
+                    .filter_map(toml::Value::as_str)
+                    .any(|requirement| !requirement.trim().is_empty())
+            })
         {
-            return Ok(dependencies
-                .iter()
-                .filter_map(toml::Value::as_str)
-                .any(|requirement| !requirement.trim().is_empty()));
+            return Ok(true);
         }
     }
-    Ok(!dependency_names(fs)?.is_empty())
+    if !dependency_names(fs)?.is_empty() {
+        return Ok(true);
+    }
+    // Backend-provided dependencies require a stage even when own-package
+    // installation is disabled. Detection cannot prove their graph is empty.
+    Ok(plan.is_some_and(|plan| plan.manifest == "pyproject.toml")
+        && !framework_evidence_complete(fs)?)
 }
 
 pub fn dependency_names(fs: &dyn Fs) -> anyhow::Result<BTreeSet<String>> {
@@ -310,33 +321,62 @@ pub(crate) fn framework_evidence_complete(fs: &dyn Fs) -> anyhow::Result<bool> {
                 return Ok(true);
             };
             let value: toml::Value = toml::from_str(&text)?;
-            if let Some(dependencies) = value
-                .get("project")
-                .and_then(|p| p.get("dependencies"))
+            let project = value.get("project");
+            let dynamic_dependencies = project
+                .and_then(|project| project.get("dynamic"))
+                .and_then(toml::Value::as_array)
+                .is_some_and(|fields| {
+                    fields
+                        .iter()
+                        .any(|field| field.as_str() == Some("dependencies"))
+                });
+            if let Some(dependencies) = project
+                .and_then(|project| project.get("dependencies"))
                 .and_then(toml::Value::as_array)
             {
-                return Ok(!dependencies
-                    .iter()
-                    .filter_map(toml::Value::as_str)
-                    .any(conditional_framework));
+                return Ok(!dynamic_dependencies
+                    && !dependencies
+                        .iter()
+                        .filter_map(toml::Value::as_str)
+                        .any(conditional_framework));
             }
-            Ok(value
-                .get("tool")
-                .and_then(|p| p.get("poetry"))
-                .and_then(|p| p.get("dependencies"))
-                .and_then(toml::Value::as_table)
-                .is_none_or(|deps| {
-                    !deps.iter().any(|(name, requirement)| {
-                        is_python_framework(&normalize_package_name(name))
-                            && name != "python"
-                            && requirement.get("optional").and_then(toml::Value::as_bool)
-                                != Some(true)
-                            && (requirement.is_array()
-                                || ["markers", "python", "platform"]
-                                    .iter()
-                                    .any(|key| requirement.get(*key).is_some()))
-                    })
-                }))
+            let plan = dependency_plan(fs)?;
+            if plan
+                .as_ref()
+                .is_some_and(|plan| plan.kind == PythonDependencyKind::Poetry)
+                && let Some(dependencies) = value
+                    .get("tool")
+                    .and_then(|tool| tool.get("poetry"))
+                    .and_then(|poetry| poetry.get("dependencies"))
+                    .and_then(toml::Value::as_table)
+            {
+                return Ok(!dependencies.iter().any(|(name, requirement)| {
+                    is_python_framework(&normalize_package_name(name))
+                        && name != "python"
+                        && requirement.get("optional").and_then(toml::Value::as_bool) != Some(true)
+                        && (requirement.is_array()
+                            || ["markers", "python", "platform"]
+                                .iter()
+                                .any(|key| requirement.get(*key).is_some()))
+                }));
+            }
+            if dynamic_dependencies {
+                return Ok(false);
+            }
+            // A named PEP 621 project without dynamic dependencies has an
+            // authoritative empty runtime graph when dependencies are omitted.
+            if project
+                .and_then(|project| project.get("name"))
+                .and_then(toml::Value::as_str)
+                .is_some()
+            {
+                return Ok(true);
+            }
+            Ok(value.get("build-system").is_none()
+                && !["setup.py", "setup.cfg"]
+                    .iter()
+                    .any(|file| fs.exists(file) && !fs.is_dir(file))
+                && !plan.is_some_and(|plan| plan.install_project))
         }
         _ => Ok(true),
     }
