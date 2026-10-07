@@ -144,9 +144,12 @@ output_dirs = ["dist"]
 
 Явный запуск имеет приоритет над автодетектом. Единственный console script
 из `pyproject.toml` запускается как callable, даже при наличии веб-фреймворка.
-Если зависимости содержат условия или включения других requirements-файлов,
+Если зависимости содержат условия, включения других requirements-файлов
+или доступны только через `setup.py`,
 задайте `application` и `server` явно: этих данных недостаточно для надёжного
 автоматического выбора ASGI/WSGI. Установщик обрабатывает authored dependencies.
+Для script/module укажите `entry`/`module`; для callable без ASGI/WSGI задайте
+`project.framework = "python"` и `deploy.application`.
 
 **Compute types:**
 

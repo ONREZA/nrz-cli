@@ -501,14 +501,88 @@ fn declared_python_launch_replaces_incidental_javascript_defaults() {
 }
 
 #[test]
+fn python_requirements_continuations_preserve_framework_launch_and_opacity() {
+    use super::python::{dependency_names, framework_evidence_complete, requires_dependency_stage};
+    use super::python_launch::{PythonLaunchRequest, resolve_launch_for_framework};
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("main.py"), "app = object()\n").unwrap();
+    let input = LocalFs::new(project.path());
+    let request = || PythonLaunchRequest {
+        entry: None,
+        module: None,
+        application: None,
+        server: None,
+        args: &[],
+    };
+    for requirements in [
+        "fastapi\\\n>=0.100\n",
+        "fastapi \\\n >=0.100\n",
+        "fastapi\\\r\n>=0.100\r\n",
+        "# comment \\\nfastapi>=0.100\n",
+        "fastapi>=0.100 \\\n --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+    ] {
+        std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
+        assert!(
+            requires_dependency_stage(&input).unwrap(),
+            "{requirements:?}"
+        );
+        assert!(
+            dependency_names(&input).unwrap().contains("fastapi"),
+            "{requirements:?}"
+        );
+        assert!(framework_evidence_complete(&input).unwrap());
+        let launch = resolve_launch_for_framework(&input, request(), None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(launch.args, ["ASGI", "main:app"], "{requirements:?}");
+    }
+    for requirements in [
+        "fastapi\\\n>=0.100; python_version < '3.13'\n",
+        "fastapi>=0.100 \\\n; python_version < '3.13'\n",
+        "fastapi\\\r\n>=0.100; python_version < '3.13'\r\n",
+    ] {
+        std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
+        assert!(requires_dependency_stage(&input).unwrap());
+        assert!(
+            !framework_evidence_complete(&input).unwrap(),
+            "{requirements:?}"
+        );
+        assert!(resolve_launch_for_framework(&input, request(), None).is_err());
+    }
+    std::fs::write(
+        project.path().join("requirements.txt"),
+        "# comment \\\n# no dependencies\n",
+    )
+    .unwrap();
+    assert!(!requires_dependency_stage(&input).unwrap());
+    assert!(dependency_names(&input).unwrap().is_empty());
+}
+
+#[test]
 fn incomplete_python_dependencies_require_an_authored_launch() {
     use super::python_launch::{PythonLaunchRequest, resolve_launch_for_framework};
-    for requirements in [
-        "fastapi; python_version < '3.13'\nflask\ngunicorn\n",
-        "-r requirements/base.txt\n",
+    for (manifest, metadata) in [
+        (
+            "requirements.txt",
+            "fastapi; python_version < '3.13'\nflask\ngunicorn\n",
+        ),
+        ("requirements.txt", "-r requirements/base.txt\n"),
+        (
+            "setup.py",
+            "from setuptools import setup\nsetup(name='demo', install_requires=['fastapi'])\n",
+        ),
     ] {
         let project = tempfile::tempdir().unwrap();
-        std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
+        let marker = project.path().join("setup-executed");
+        let metadata = if manifest == "setup.py" {
+            format!(
+                "from pathlib import Path\nPath({:?}).write_text('DETECT_EXECUTED_SETUP')\n{metadata}",
+                marker.to_str().unwrap()
+            )
+        } else {
+            metadata.to_string()
+        };
+        std::fs::write(project.path().join(manifest), metadata).unwrap();
         std::fs::write(
             project.path().join("main.py"),
             "from flask import Flask\napp=Flask(__name__)\n",
@@ -594,6 +668,33 @@ fn incomplete_python_dependencies_require_an_authored_launch() {
         .unwrap()
         .unwrap();
         assert_eq!(preset.args, ["WSGI", "main:app"]);
+        for (entry, module) in [(Some("main.py"), None), (None, Some("main"))] {
+            let launch = resolve_launch_for_framework(
+                &fs,
+                PythonLaunchRequest {
+                    entry,
+                    module,
+                    application: None,
+                    server: None,
+                    args: &[],
+                },
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(
+                launch.entry,
+                if entry.is_some() {
+                    "main.py"
+                } else {
+                    ".onreza/python/launch.py"
+                }
+            );
+        }
+        assert!(
+            !marker.exists(),
+            "detection executed dynamic setup metadata"
+        );
     }
 }
 
@@ -663,6 +764,20 @@ fn python_framework_evidence_keeps_comments_and_django_management_distinct() {
         .unwrap()
         .args,
         ["ASGI", "company.asgi:application"]
+    );
+    // Concrete Django source evidence is independent of opaque package metadata.
+    std::fs::remove_file(project.path().join("requirements.txt")).unwrap();
+    std::fs::write(
+        project.path().join("setup.py"),
+        "raise RuntimeError('never execute for detection')\n",
+    )
+    .unwrap();
+    assert_eq!(
+        resolve_launch_for_framework(&fs, request(), None)
+            .unwrap()
+            .unwrap()
+            .args,
+        ["WSGI", "company.wsgi:application"]
     );
 }
 

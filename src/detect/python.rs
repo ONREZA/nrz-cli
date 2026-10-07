@@ -147,19 +147,16 @@ pub fn requires_dependency_stage(fs: &dyn Fs) -> anyhow::Result<bool> {
         .is_some_and(|plan| plan.kind == PythonDependencyKind::Requirements)
     {
         return Ok(fs.read_file("requirements.txt").is_some_and(|text| {
-            text.replace("\\\r\n", "")
-                .replace("\\\n", "")
-                .lines()
-                .any(|line| {
-                    let line = line.trim();
-                    !line.is_empty()
-                        && !line.starts_with('#')
-                        && (!line.starts_with('-')
-                            || line.starts_with("-r")
-                            || line.starts_with("--requirement")
-                            || line.starts_with("-e")
-                            || line.starts_with("--editable"))
-                })
+            unfold_requirements(&text).lines().any(|line| {
+                let line = line.trim();
+                !line.is_empty()
+                    && !line.starts_with('#')
+                    && (!line.starts_with('-')
+                        || line.starts_with("-r")
+                        || line.starts_with("--requirement")
+                        || line.starts_with("-e")
+                        || line.starts_with("--editable"))
+            })
         }));
     }
     if plan.is_some_and(|plan| plan.manifest == "pyproject.toml")
@@ -187,7 +184,7 @@ pub fn dependency_names(fs: &dyn Fs) -> anyhow::Result<BTreeSet<String>> {
         .then(|| fs.read_file("requirements.txt"))
         .flatten()
     {
-        for requirement in text.lines() {
+        for requirement in unfold_requirements(&text).lines() {
             if let Some(name) = requirement_name(requirement) {
                 names.insert(name);
             }
@@ -262,6 +259,26 @@ fn normalize_package_name(name: &str) -> String {
     name.to_ascii_lowercase().replace(['_', '.'], "-")
 }
 
+/// All requirement evidence uses logical lines. Full-line comments terminate
+/// continuations instead of hiding the following requirement, as in pip.
+fn unfold_requirements(text: &str) -> String {
+    let mut unfolded = String::with_capacity(text.len());
+    for line in text.lines() {
+        let comment = line.trim_start().starts_with('#');
+        if !comment && let Some(prefix) = line.strip_suffix('\\') {
+            unfolded.push_str(prefix);
+            continue;
+        }
+        if comment {
+            // A comment following a continued requirement must remain a comment.
+            unfolded.push(' ');
+        }
+        unfolded.push_str(line);
+        unfolded.push('\n');
+    }
+    unfolded
+}
+
 /// Marker evaluation and recursive requirements acquisition belong to the
 /// installer. Detection must not invent a server from incomplete evidence.
 pub(crate) fn framework_evidence_complete(fs: &dyn Fs) -> anyhow::Result<bool> {
@@ -280,13 +297,14 @@ pub(crate) fn framework_evidence_complete(fs: &dyn Fs) -> anyhow::Result<bool> {
     };
     match dependency_manifest(fs) {
         Some("requirements.txt") => Ok(fs.read_file("requirements.txt").is_none_or(|text| {
-            !text.lines().any(|line| {
+            !unfold_requirements(&text).lines().any(|line| {
                 let line = line.trim();
                 line.starts_with("-r")
                     || line.starts_with("--requirement")
                     || conditional_framework(line)
             })
         })),
+        Some("setup.py") => Ok(false),
         Some("pyproject.toml") => {
             let Some(text) = fs.read_file("pyproject.toml") else {
                 return Ok(true);
@@ -330,7 +348,7 @@ pub fn framework(fs: &dyn Fs) -> anyhow::Result<&'static str> {
     }
     if !framework_evidence_complete(fs)? {
         bail!(
-            "Python framework inference is incomplete because dependencies use conditional framework requirements or requirements includes; declare deploy.entry, module, application with server, or project.framework explicitly"
+            "Python framework inference is incomplete because dependencies use dynamic package metadata, conditional framework requirements or requirements includes; declare deploy.entry, module, application with server, or project.framework explicitly"
         );
     }
     let dependencies = dependency_names(fs)?;
