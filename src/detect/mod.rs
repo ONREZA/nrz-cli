@@ -121,7 +121,7 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
     let preset = presets::get_default_preset();
     let suggested_compute = infer_unknown_compute_type(fs, pkg.as_ref());
     let reason = if suggested_compute == ComputeType::Process {
-        "No known framework detected, but runtime entry signals found (scripts/main/module)"
+        "No known framework detected, but runtime entry signals found (scripts/main/module/root entry)"
             .to_string()
     } else {
         "No known framework detected".to_string()
@@ -774,6 +774,7 @@ fn infer_compute_type(
 /// We avoid framework hardcoding and use generic runtime signals:
 /// - runtime-like scripts (`start`, `serve`, `prod`, ...)
 /// - resolvable `main`/`module` path in package.json
+/// - the same common root entry names accepted by PROCESS entry resolution
 fn infer_unknown_compute_type(fs: &dyn Fs, pkg: Option<&PackageJson>) -> ComputeType {
     let Some(pkg) = pkg else {
         return ComputeType::Static;
@@ -790,6 +791,7 @@ fn has_unknown_runtime_signal(fs: &dyn Fs, pkg: &PackageJson) -> bool {
     has_runtime_script(pkg)
         || has_resolvable_entry(fs, pkg.main.as_deref())
         || has_resolvable_entry(fs, pkg.module.as_deref())
+        || has_root_javascript_entry(fs)
 }
 
 fn has_runtime_script(pkg: &PackageJson) -> bool {
@@ -804,6 +806,7 @@ fn has_javascript_application_signal(fs: &dyn Fs, pkg: &PackageJson) -> bool {
     };
     javascript_entry(pkg.main.as_deref())
         || javascript_entry(pkg.module.as_deref())
+        || has_root_javascript_entry(fs)
         || pkg.scripts.iter().any(|(name, script)| {
             is_runtime_script_name(name)
                 && (script
@@ -1285,10 +1288,10 @@ fn resolve_from_scripts(
     None
 }
 
-fn resolve_bun_default_index(output_dir: &Path) -> Option<ResolvedEntryPoint> {
+fn resolve_bun_default_index(fs: &dyn Fs) -> Option<ResolvedEntryPoint> {
     for ext in RUNNABLE_EXTENSIONS {
         let candidate = format!("index.{ext}");
-        if output_dir.join(&candidate).is_file() {
+        if fs.is_file(&candidate) {
             return Some(ResolvedEntryPoint {
                 path: candidate,
                 source: EntryPointSource::BunIndexDefault,
@@ -1298,12 +1301,19 @@ fn resolve_bun_default_index(output_dir: &Path) -> Option<ResolvedEntryPoint> {
     None
 }
 
-fn resolve_root_patterns(output_dir: &Path) -> EntryPointResolution {
+fn has_root_javascript_entry(fs: &dyn Fs) -> bool {
+    matches!(
+        resolve_root_patterns(fs),
+        EntryPointResolution::Found(_) | EntryPointResolution::Ambiguous(_)
+    )
+}
+
+fn resolve_root_patterns(fs: &dyn Fs) -> EntryPointResolution {
     let mut candidates = Vec::new();
     for base in ROOT_ENTRY_BASENAMES {
         for ext in RUNNABLE_EXTENSIONS {
             let candidate = format!("{base}.{ext}");
-            if output_dir.join(&candidate).is_file() {
+            if fs.is_file(&candidate) {
                 candidates.push(candidate);
             }
         }
@@ -1651,13 +1661,14 @@ pub fn resolve_entry_point_detailed(
     }
 
     // 5. Common root entry names (includes index.*; fail fast on ambiguity)
-    match resolve_root_patterns(output_dir) {
+    let output_fs = LocalFs::new(output_dir);
+    match resolve_root_patterns(&output_fs) {
         EntryPointResolution::NotFound => {}
         other => return other,
     }
 
     // 6. Bun default index.* in output root (defensive fallback)
-    if let Some(resolved) = resolve_bun_default_index(output_dir) {
+    if let Some(resolved) = resolve_bun_default_index(&output_fs) {
         return EntryPointResolution::Found(resolved);
     }
 

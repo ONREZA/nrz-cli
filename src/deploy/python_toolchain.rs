@@ -381,20 +381,9 @@ pub(super) fn validate_local_python_build_output(
     artifact: &crate::artifact::RuntimeArtifact,
     files: &crate::artifact::ArtifactFileCollection,
 ) -> anyhow::Result<()> {
-    use crate::artifact::ArtifactFileRole;
     for file in &files.files {
-        if file.role != ArtifactFileRole::Compute
+        if !is_python_compute_file(artifact, file)
             || artifact.scan.owns_as_python_dependency(&file.path)
-            || !artifact.manifest.layers.iter().any(|layer| {
-                file.layer.as_deref() == Some(layer.name.as_str())
-                    && layer
-                        .runtime
-                        .as_ref()
-                        .and_then(|runtime| runtime.application_runtime.as_ref())
-                        .is_some_and(|runtime| {
-                            runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
-                        })
-            })
         {
             continue;
         }
@@ -410,6 +399,54 @@ pub(super) fn validate_local_python_build_output(
         }
     }
     Ok(())
+}
+
+/// Authored installers do not supply the managed recipe's target-wheel evidence.
+/// Validate only retained dependency files owned by a frozen Python COMPUTE layer.
+pub(super) fn validate_authored_python_dependency_output(
+    artifact: &crate::artifact::RuntimeArtifact,
+    files: &crate::artifact::ArtifactFileCollection,
+    mode: PythonInstallMode,
+) -> anyhow::Result<()> {
+    if mode == PythonInstallMode::PinnedPlatform {
+        return Ok(());
+    }
+    for file in &files.files {
+        if !artifact.scan.owns_as_python_dependency(&file.path)
+            || !is_python_compute_file(artifact, file)
+        {
+            continue;
+        }
+        let path = artifact.root_dir.join(&file.path);
+        if std::fs::metadata(&path)?.is_file() && is_native_python_payload_file(&path)? {
+            return Err(crate::output::coded_error(
+                "PYTHON_PLATFORM_UNSUPPORTED",
+                format!(
+                    "Authored Python install produced native payload '{}'; use ONREZA Cloud Builder for qualified Linux installs, or remove build.install_command to use the managed target-qualified dependency installer.",
+                    file.path,
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_python_compute_file(
+    artifact: &crate::artifact::RuntimeArtifact,
+    file: &crate::artifact::ArtifactFile,
+) -> bool {
+    file.role == crate::artifact::ArtifactFileRole::Compute
+        && artifact.manifest.layers.iter().any(|layer| {
+            layer.target == crate::build::manifest::LayerTarget::Compute
+                && file.layer.as_deref() == Some(layer.name.as_str())
+                && layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.application_runtime.as_ref())
+                    .is_some_and(|runtime| {
+                        runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+                    })
+        })
 }
 
 async fn build_environment_for_interpreter(
@@ -1183,3 +1220,7 @@ mod host_tests;
 #[cfg(test)]
 #[path = "python_output_tests.rs"]
 mod output_tests;
+
+#[cfg(test)]
+#[path = "python_install_tests.rs"]
+mod install_tests;

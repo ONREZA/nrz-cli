@@ -518,14 +518,11 @@ pub fn resolve_build_toolchain(
     Ok(build)
 }
 
-pub(crate) fn resolve_and_bind_source_build_context(
-    fs: &dyn Fs,
-    detection: &mut super::types::DetectionResult,
+fn resolve_static_serving(
+    detection: &super::types::DetectionResult,
     config: &crate::config::ProjectConfig,
-    framework_override: Option<&str>,
     explicit_compute: Option<super::types::ComputeType>,
-) -> anyhow::Result<SourceBuildContext> {
-    let build_toolchain = resolve_build_toolchain(detection, config)?;
+) -> anyhow::Result<bool> {
     let configured_compute = config
         .deploy
         .compute
@@ -546,10 +543,57 @@ pub(crate) fn resolve_and_bind_source_build_context(
         || config.deploy.server.is_some()
         || config.deploy.python_version.is_some();
     let selected_compute = explicit_compute.or(configured_compute);
-    let static_serving = selected_compute == Some(super::types::ComputeType::Static)
+    Ok(selected_compute == Some(super::types::ComputeType::Static)
         || selected_compute.is_none()
             && !process_fields
-            && detection.suggested_compute == super::types::ComputeType::Static;
+            && detection.suggested_compute == super::types::ComputeType::Static)
+}
+
+pub(crate) fn resolve_serving_python_minor(
+    detection: &super::types::DetectionResult,
+    config: &crate::config::ProjectConfig,
+    build_toolchain: &BuildToolchainDeclaration,
+    explicit_compute: Option<super::types::ComputeType>,
+) -> anyhow::Result<Option<nrz_source_bundle::PythonMinor>> {
+    if resolve_static_serving(detection, config, explicit_compute)? {
+        return Ok(None);
+    }
+    let family = config.deploy.selected_runtime_family();
+    let inherited_minor = if family == Some(ApplicationRuntimeFamily::Python)
+        || family.is_none() && super::python::is_python_framework(&detection.framework)
+    {
+        build_toolchain.resolved_python_minor()
+    } else {
+        None
+    };
+    if family != Some(ApplicationRuntimeFamily::Python)
+        && (family.is_some()
+            || inherited_minor.is_none()
+                && !super::python::is_python_framework(serving_framework(
+                    config,
+                    &detection.framework,
+                )))
+    {
+        return Ok(None);
+    }
+    Ok(Some(
+        config
+            .deploy
+            .python_version
+            .or(inherited_minor)
+            .unwrap_or_default(),
+    ))
+}
+
+pub(crate) fn resolve_and_bind_source_build_context(
+    fs: &dyn Fs,
+    detection: &mut super::types::DetectionResult,
+    config: &crate::config::ProjectConfig,
+    framework_override: Option<&str>,
+    explicit_compute: Option<super::types::ComputeType>,
+) -> anyhow::Result<SourceBuildContext> {
+    let build_toolchain = resolve_build_toolchain(detection, config)?;
+    let static_serving = resolve_static_serving(detection, config, explicit_compute)?;
     let serving_framework = serving_framework(config, &detection.framework).to_string();
     let application_runtime = if static_serving {
         if config.deploy.runtime.is_some()
@@ -567,12 +611,13 @@ pub(crate) fn resolve_and_bind_source_build_context(
         None
     } else {
         let mut deploy = config.deploy.clone();
-        if deploy.python_version.is_none()
-            && (deploy.selected_runtime_family() == Some(ApplicationRuntimeFamily::Python)
-                || deploy.selected_runtime_family().is_none()
-                    && super::python::is_python_framework(&detection.framework))
-        {
-            deploy.python_version = build_toolchain.resolved_python_minor();
+        if deploy.python_version.is_none() {
+            deploy.python_version = resolve_serving_python_minor(
+                detection,
+                config,
+                &build_toolchain,
+                explicit_compute,
+            )?;
         }
         resolve_application_runtime_with_project(
             fs,

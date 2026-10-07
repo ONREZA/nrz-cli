@@ -1424,6 +1424,94 @@ fn implicit_child_python_selectors_replace_foreign_parent_launches() {
 }
 
 #[test]
+fn explained_serving_python_minor_matches_deployment_selection() {
+    use crate::detect::application_runtime::resolve_and_bind_source_build_context;
+    use nrz_source_bundle::{ApplicationRuntimeFamily, BuildToolchainFamily, PythonMinor};
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("main.py"), "print('ready')\n").unwrap();
+    let fs = crate::detect::fs::LocalFs::new(dir.path());
+    for family in [
+        None,
+        Some(BuildToolchainFamily::Python),
+        Some(BuildToolchainFamily::Node),
+        Some(BuildToolchainFamily::Bun),
+    ] {
+        for minor in PythonMinor::ALL {
+            for explicit_serving in [false, true] {
+                let mut config = ProjectConfig::default();
+                config.build.toolchain = family;
+                config.build.python_version =
+                    (family == Some(BuildToolchainFamily::Python)).then_some(minor);
+                config.deploy.runtime =
+                    explicit_serving.then_some(ApplicationRuntimeFamily::Python);
+                let mut detection = crate::detect::detect(dir.path());
+                let context =
+                    resolve_and_bind_source_build_context(&fs, &mut detection, &config, None, None)
+                        .unwrap();
+                let expected = context
+                    .application_runtime
+                    .and_then(|runtime| runtime.python_version);
+                let explanation = EffectiveProjectConfig::from_project_config(
+                    dir.path().to_owned(),
+                    config.clone(),
+                )
+                .explain();
+                assert_eq!(
+                    explanation.deploy_python_version.value.as_deref(),
+                    expected.map(PythonMinor::version)
+                );
+                assert_eq!(
+                    explanation.deploy_python_version.source,
+                    if config.build.python_version.is_some() {
+                        "onreza.toml"
+                    } else {
+                        "default"
+                    }
+                );
+                config.deploy.python_version = Some(minor);
+                let explanation =
+                    EffectiveProjectConfig::from_project_config(dir.path().to_owned(), config)
+                        .explain();
+                assert_eq!(
+                    explanation.deploy_python_version.value.as_deref(),
+                    Some(minor.version())
+                );
+                assert_eq!(explanation.deploy_python_version.source, "onreza.toml");
+            }
+        }
+    }
+    for serving in ["compute='static'", "runtime='node'\nentry='server.js'"] {
+        let config: ProjectConfig = toml::from_str(&format!(
+            "[build]\ntoolchain='python'\npython_version='3.12'\n[deploy]\n{serving}"
+        ))
+        .unwrap();
+        let explanation =
+            EffectiveProjectConfig::from_project_config(dir.path().to_owned(), config).explain();
+        assert_eq!(
+            explanation.build_python_version.value.as_deref(),
+            Some("3.12")
+        );
+        assert_eq!(explanation.deploy_python_version.value, None);
+    }
+    // Version selection does not require a valid launch or a resolved lock.
+    std::fs::remove_file(dir.path().join("main.py")).unwrap();
+    std::fs::write(
+        dir.path().join("pyproject.toml"),
+        "[tool.poetry]\npackage-mode=false\n",
+    )
+    .unwrap();
+    let config: ProjectConfig =
+        toml::from_str("[build]\npython_version='3.12'\n[deploy]\nruntime='python'").unwrap();
+    let explanation =
+        EffectiveProjectConfig::from_project_config(dir.path().to_owned(), config).explain();
+    assert_eq!(
+        explanation.deploy_python_version.value.as_deref(),
+        Some("3.12")
+    );
+    assert_eq!(explanation.deploy_python_version.source, "onreza.toml");
+}
+
+#[test]
 fn explained_python_toolchain_matches_the_shared_build_selection() {
     let dir = tempfile::tempdir().unwrap();
     let input = crate::detect::fs::VirtualFs::from_json(r#"{"tree":[],"files":{}}"#).unwrap();

@@ -21,6 +21,9 @@ const MAX_DETECTION_TOTAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 pub trait Fs {
     fn exists(&self, path: &str) -> bool;
     fn is_dir(&self, path: &str) -> bool;
+    fn is_file(&self, path: &str) -> bool {
+        self.exists(path) && !self.is_dir(path)
+    }
     fn read_file(&self, path: &str) -> Option<String>;
     fn read_file_prefix(&self, path: &str, max_bytes: usize) -> Option<String> {
         let content = self.read_file(path)?;
@@ -82,6 +85,11 @@ impl Fs for LocalFs {
     fn is_dir(&self, path: &str) -> bool {
         self.resolve_existing(path)
             .is_some_and(|path| path.is_dir())
+    }
+
+    fn is_file(&self, path: &str) -> bool {
+        self.resolve_existing(path)
+            .is_some_and(|path| path.is_file())
     }
 
     fn read_file(&self, path: &str) -> Option<String> {

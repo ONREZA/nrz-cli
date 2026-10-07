@@ -381,7 +381,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     )
     .await?;
     validate_python_dependency_context(project_dir, &source_build_context, false)?;
-    if !args.skip_build && !args.skip_install {
+    let authored_install_executed = if !args.skip_build && !args.skip_install {
         super::run_install_step(
             project_dir,
             json,
@@ -390,8 +390,10 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             request.build_logs,
             request.platform_runner,
         )
-        .await?;
-    }
+        .await?
+    } else {
+        false
+    };
 
     validate_python_dependency_context(project_dir, &source_build_context, true)?;
 
@@ -819,6 +821,17 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         json,
     );
     let files = artifact_files.deployable_entries();
+    if authored_install_executed {
+        super::python_toolchain::validate_authored_python_dependency_output(
+            &runtime_artifact,
+            &artifact_files,
+            if request.platform_runner {
+                super::python_toolchain::PythonInstallMode::PinnedPlatform
+            } else {
+                super::python_toolchain::PythonInstallMode::ManagedLocal
+            },
+        )?;
+    }
     if build_executed && !request.platform_runner {
         super::python_toolchain::validate_local_python_build_output(
             &runtime_artifact,
