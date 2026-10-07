@@ -13,7 +13,19 @@ use super::detect::DetectArgs;
 pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
     // --needed-files: output files the server should include in the manifest
     if args.needed_files {
-        let files = detect::fs::DETECTION_CONTENT_FILES;
+        let files = if args.stdin {
+            if args.save {
+                anyhow::bail!("--stdin and --save cannot be used together");
+            }
+            read_detection_manifest()?
+                .needed_content_files()
+                .map_err(invalid_detection_manifest)?
+        } else {
+            detect::fs::DETECTION_CONTENT_FILES
+                .iter()
+                .map(|path| (*path).to_string())
+                .collect()
+        };
         if json {
             output::json_output(&serde_json::json!({ "files": files }));
         } else {
@@ -30,27 +42,7 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
             anyhow::bail!("--stdin and --save cannot be used together");
         }
 
-        let mut input = String::new();
-        std::io::stdin()
-            .take(detect::fs::MAX_DETECTION_MANIFEST_BYTES as u64 + 1)
-            .read_to_string(&mut input)
-            .context("failed to read stdin")?;
-        if input.len() > detect::fs::MAX_DETECTION_MANIFEST_BYTES {
-            return Err(output::coded_error(
-                "DETECTION_INPUT_TOO_LARGE",
-                format!(
-                    "stdin detection manifest exceeds {} bytes",
-                    detect::fs::MAX_DETECTION_MANIFEST_BYTES
-                ),
-            ));
-        }
-
-        let vfs = detect::fs::VirtualFs::from_json(&input).map_err(|error| {
-            output::coded_error(
-                "DETECTION_INPUT_INVALID",
-                format!("invalid stdin detection manifest: {error:#}"),
-            )
-        })?;
+        let vfs = read_detection_manifest()?;
 
         let mut result = detect::detect_with_fs(&vfs);
         detect::application_runtime::resolve_and_bind_detection(&vfs, &mut result).map_err(
@@ -90,6 +82,31 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
     }
 
     output_result(&result, &args, json)
+}
+
+fn read_detection_manifest() -> anyhow::Result<detect::fs::VirtualFs> {
+    let mut input = String::new();
+    std::io::stdin()
+        .take(detect::fs::MAX_DETECTION_MANIFEST_BYTES as u64 + 1)
+        .read_to_string(&mut input)
+        .context("failed to read stdin")?;
+    if input.len() > detect::fs::MAX_DETECTION_MANIFEST_BYTES {
+        return Err(output::coded_error(
+            "DETECTION_INPUT_TOO_LARGE",
+            format!(
+                "stdin detection manifest exceeds {} bytes",
+                detect::fs::MAX_DETECTION_MANIFEST_BYTES
+            ),
+        ));
+    }
+    detect::fs::VirtualFs::from_json(&input).map_err(invalid_detection_manifest)
+}
+
+fn invalid_detection_manifest(error: anyhow::Error) -> anyhow::Error {
+    output::coded_error(
+        "DETECTION_INPUT_INVALID",
+        format!("invalid stdin detection manifest: {error:#}"),
+    )
 }
 
 fn output_result(

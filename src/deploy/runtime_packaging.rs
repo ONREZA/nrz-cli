@@ -295,9 +295,10 @@ fn requires_authored_python_dependencies(
     detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<bool> {
     Ok(uses_python_dependency_materialization(detection)
-        && crate::detect::python::requires_dependency_stage(&crate::detect::fs::LocalFs::new(
-            project_dir,
-        ))?)
+        && crate::detect::python::requires_dependency_stage_for_target(
+            &crate::detect::fs::LocalFs::new(project_dir),
+            selected_python_runtime_minor(detection),
+        )?)
 }
 
 /// Required dependencies must survive the plan's actual scan and retention.

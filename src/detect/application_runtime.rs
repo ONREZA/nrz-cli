@@ -654,6 +654,8 @@ pub(crate) fn bind_source_build_context(
 ) -> anyhow::Result<()> {
     context.validate().map_err(anyhow::Error::msg)?;
     let build_framework = detection.framework.clone();
+    let build_info = detection.metadata.build_info.clone();
+    let build_package_manager = detection.metadata.package_manager.clone();
     detection.framework = serving_framework(config, &build_framework).into();
     bind_application_runtime(
         fs,
@@ -664,6 +666,8 @@ pub(crate) fn bind_source_build_context(
     )?;
     if config.build.selected_toolchain_family().is_some() {
         detection.framework = build_framework;
+        detection.metadata.build_info = build_info;
+        detection.metadata.package_manager = build_package_manager;
     }
     if explicit_compute == Some(super::types::ComputeType::Static)
         || config.deploy.compute.as_deref() == Some("static")
@@ -673,7 +677,12 @@ pub(crate) fn bind_source_build_context(
     if let Some(minor) = context.build_toolchain.resolved_python_minor() {
         let python = super::python::detect_configured_python(fs);
         detection.metadata.package_manager = python.metadata.package_manager;
-        detection.metadata.build_info = python.metadata.build_info;
+        if let Some(python_build) = python.metadata.build_info {
+            match detection.metadata.build_info.as_mut() {
+                Some(build) => build.install_command = python_build.install_command,
+                None => detection.metadata.build_info = Some(python_build),
+            }
+        }
         if context
             .application_runtime
             .as_ref()

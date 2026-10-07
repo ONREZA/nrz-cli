@@ -1,11 +1,12 @@
 import * as assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "bun:test";
 
 import {
   artifactChecksums,
+  createNpmPackage,
   createPackageJson,
   createPostinstall,
   releaseAssets,
@@ -63,6 +64,45 @@ test("generated npm package declares ESM for generated .js scripts", () => {
   assert.equal(packageJson.scripts.postinstall, "node scripts/postinstall.js");
   assert.equal(packageJson.bin.nrz, "bin/nrz.js");
   assert.equal(packageJson.publishConfig.tag, "beta");
+});
+
+test("generated npm tarball carries third-party notice bytes with its license and launch scripts", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nrz-npm-notices-"));
+  try {
+    const sourceDir = join(dir, "source");
+    const distDir = join(dir, "dist");
+    const outDir = join(dir, "npm");
+    mkdirSync(sourceDir);
+    mkdirSync(distDir);
+    const notice = Buffer.from("Fixture third-party notice\nSource: https://example.invalid/source\n", "utf8");
+    writeFileSync(join(sourceDir, "THIRD_PARTY_NOTICES"), notice);
+    writeFileSync(join(sourceDir, "LICENSE"), "Fixture MIT license\n");
+    writeFileSync(join(sourceDir, "npm-README.md"), "Fixture README\n");
+    for (const asset of REQUIRED_RELEASE_ASSETS) writeFileSync(join(distDir, asset), asset);
+    createNpmPackage({
+      version: "0.33.0-beta.1",
+      tag: "v0.33.0-beta.1",
+      channel: "beta",
+      sourceDir,
+      distDir,
+      outDir,
+    });
+    const packed = Bun.spawnSync(
+      [process.execPath, "pm", "pack", "--ignore-scripts", "--filename", join(dir, "fixture.tgz")],
+      { cwd: outDir },
+    );
+    assert.equal(packed.exitCode, 0, packed.stderr.toString());
+    for (const member of ["THIRD_PARTY_NOTICES", "LICENSE", "bin/nrz.js", "scripts/postinstall.js"]) {
+      const extracted = Bun.spawnSync(["tar", "-xOf", join(dir, "fixture.tgz"), `package/${member}`]);
+      assert.equal(extracted.exitCode, 0, `${member}: ${extracted.stderr.toString()}`);
+      assert.deepEqual(
+        extracted.stdout,
+        member === "THIRD_PARTY_NOTICES" ? notice : readFileSync(join(outDir, member)),
+      );
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("release assets are tied to the selected GitHub release tag", () => {

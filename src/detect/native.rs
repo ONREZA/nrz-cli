@@ -102,11 +102,7 @@ pub fn go_main_packages(fs: &dyn Fs) -> Vec<String> {
 
 fn is_go_main_package(fs: &dyn Fs, directory: &str) -> bool {
     fs.list_dir(directory).into_iter().any(|name| {
-        if !name.ends_with(".go")
-            || name.ends_with("_test.go")
-            || name.starts_with(['.', '_'])
-            || !go_target_filename(&name)
-        {
+        if !is_go_detection_filename(&name) {
             return false;
         }
         let path = if directory.is_empty() {
@@ -126,6 +122,26 @@ fn is_go_main_package(fs: &dyn Fs, directory: &str) -> bool {
                 matches!(go_identifier(rest), Some(("main", rest)) if !go_imports_c(rest))
             })
     })
+}
+
+// Remote content discovery covers exactly the package directories inspected above.
+// Build constraints and package declarations still require the fetched contents.
+pub(super) fn is_go_detection_source_path(path: &str) -> bool {
+    let mut parts = path.split('/');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some(name), None, None, None) => is_go_detection_filename(name),
+        (Some("cmd"), Some(directory), Some(name), None) if !directory.is_empty() => {
+            is_go_detection_filename(name)
+        }
+        _ => false,
+    }
+}
+
+fn is_go_detection_filename(name: &str) -> bool {
+    name.ends_with(".go")
+        && !name.ends_with("_test.go")
+        && !name.starts_with(['.', '_'])
+        && go_target_filename(name)
 }
 
 // Match the automatic recipe, independent of the detector host or installed Go:

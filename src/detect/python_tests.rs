@@ -286,6 +286,137 @@ fn python_uv_and_poetry_locks_have_explicit_package_manager_identity() {
 }
 
 #[test]
+fn python_stage_markers_use_the_frozen_target_and_keep_unknown_inputs_conservative() {
+    use super::python::{requires_dependency_stage, requires_dependency_stage_for_target};
+    use nrz_source_bundle::PythonMinor;
+    let project = tempfile::tempdir().unwrap();
+    let fs = LocalFs::new(project.path());
+    for minor in PythonMinor::ALL {
+        for (requirement, required) in [
+            ("colorama; sys_platform == 'win32'", false),
+            ("colorama; os_name == 'nt'", false),
+            ("colorama; platform_machine == 'aarch64'", false),
+            ("colorama; platform_system != 'Linux'", false),
+            ("colorama; implementation_name != 'cpython'", false),
+            (
+                "colorama; platform_python_implementation != 'CPython'",
+                false,
+            ),
+            ("colorama; sys_platform == 'linux'", true),
+            ("colorama; platform_release == 'UNKNOWN_KERNEL'", true),
+            ("colorama; 'UNKNOWN_KERNEL' in platform_version", true),
+            ("colorama; extra == 'feature'", true),
+            ("colorama; platform_release in 'UNKNOWN_KERNEL'", true),
+            ("colorama; unexpected_variable == 'x'", true),
+            (
+                "colorama; sys_platform == 'win32' or python_version >= '3.0'",
+                true,
+            ),
+            (
+                "colorama; sys_platform == 'win32' and python_version >= '3.0'",
+                false,
+            ),
+            ("../localproject", true),
+            ("-r included.txt", true),
+            ("-e ../localproject", true),
+        ] {
+            std::fs::write(project.path().join("requirements.txt"), requirement).unwrap();
+            assert!(requires_dependency_stage(&fs).unwrap());
+            assert_eq!(
+                requires_dependency_stage_for_target(&fs, minor).unwrap(),
+                required,
+                "{minor:?}: {requirement}"
+            );
+        }
+        for key in ["python_full_version", "implementation_version"] {
+            for (operator, required) in [("==", true), ("!=", false)] {
+                let requirement = format!("colorama; {key} {operator} '{}'", minor.exact_version());
+                std::fs::write(project.path().join("requirements.txt"), &requirement).unwrap();
+                assert_eq!(
+                    requires_dependency_stage_for_target(&fs, minor).unwrap(),
+                    required,
+                    "{requirement}"
+                );
+            }
+        }
+        for (operator, required) in [("==", true), ("!=", false)] {
+            let requirement = format!("colorama; python_version {operator} '{}'", minor.version());
+            std::fs::write(project.path().join("requirements.txt"), &requirement).unwrap();
+            assert_eq!(
+                requires_dependency_stage_for_target(&fs, minor).unwrap(),
+                required,
+                "{requirement}"
+            );
+        }
+        for (marker, required) in [
+            ("python_version in '0.0 1.0'".to_string(), false),
+            (format!("python_version in '{}'", minor.version()), true),
+            (
+                format!("python_version not in '{}'", minor.version()),
+                false,
+            ),
+            ("python_version not in '0.0 1.0'".to_string(), true),
+            (
+                "python_version in '0.0 1.0' or sys_platform == 'win32'".to_string(),
+                false,
+            ),
+            (
+                format!(
+                    "python_version in '{}' and sys_platform == 'win32'",
+                    minor.version()
+                ),
+                false,
+            ),
+            (
+                format!(
+                    "python_version not in '{}' or sys_platform == 'win32'",
+                    minor.version()
+                ),
+                false,
+            ),
+        ] {
+            let requirement = format!("colorama; {marker}");
+            std::fs::write(project.path().join("requirements.txt"), &requirement).unwrap();
+            assert_eq!(
+                requires_dependency_stage_for_target(&fs, minor).unwrap(),
+                required,
+                "{minor:?}: {requirement}"
+            );
+        }
+    }
+    std::fs::remove_file(project.path().join("requirements.txt")).unwrap();
+    for (project_metadata, required) in [
+        (
+            "[project]\nname='app'\ndependencies=['colorama; sys_platform == \"win32\"']\n",
+            false,
+        ),
+        (
+            "[project]\nname='app'\ndependencies=['colorama; sys_platform == \"win32\"']\ndynamic=['dependencies']\n",
+            true,
+        ),
+        (
+            "[build-system]\nrequires=['setuptools']\nbuild-backend='setuptools.build_meta'\n[tool.uv]\npackage=false\n",
+            true,
+        ),
+    ] {
+        std::fs::write(project.path().join("pyproject.toml"), project_metadata).unwrap();
+        assert!(requires_dependency_stage(&fs).unwrap());
+        for minor in PythonMinor::ALL {
+            assert_eq!(
+                requires_dependency_stage_for_target(&fs, minor).unwrap(),
+                required
+            );
+        }
+    }
+    std::fs::write(project.path().join("pyproject.toml"), "[tool.poetry]\nname='app'\npackage-mode=false\n[tool.poetry.dependencies]\npython='*'\ncolorama={version='*', markers='sys_platform == \"win32\"'}\n").unwrap();
+    std::fs::write(project.path().join("poetry.lock"), "").unwrap();
+    assert!(requires_dependency_stage(&fs).unwrap());
+    for minor in PythonMinor::ALL {
+        assert!(!requires_dependency_stage_for_target(&fs, minor).unwrap());
+    }
+}
+
+#[test]
 fn unpackaged_python_src_imports_do_not_request_project_installation() {
     use super::python::{
         PythonDependencyKind, dependency_names, dependency_plan, requires_dependency_stage,

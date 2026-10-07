@@ -72,6 +72,7 @@ fn requirements_install_uses_managed_python_and_copy_materialization() {
             "x86_64-manylinux_2_39",
             "--only-binary",
             ":all:",
+            "--no-editable",
             "--requirements",
             "requirements.txt",
         ]

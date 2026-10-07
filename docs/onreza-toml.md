@@ -380,9 +380,17 @@ launcher замораживаются раздельно в `metadata.sourceBuil
 Python-команда сборки получает выбранный pinned interpreter, staged packages и
 console scripts. Различные build/serving Python minor допустимы для code-only
 output; runtime dependencies требуют совпадающих qualified minor.
-Для приложения с объявленными dependencies `--skip-install` требует файлов
+Выбор compiler не заменяет обнаруженные framework output и entry hints;
+явный `build.output_directory` сохраняет приоритет.
+Для приложения с активными для Linux x86_64 и выбранной версии CPython
+dependencies `--skip-install` требует файлов
 подготовленного дерева зависимостей, которые войдут в Python COMPUTE слой.
-Пустого каталога `site-packages` недостаточно.
+Пустого каталога `site-packages` недостаточно. Известные PEP 508 markers,
+исключающие все зависимости для этого target, допускают пустое дерево;
+непрозрачные inputs и markers с неизвестными значениями сохраняют требование дерева.
+Автоматическая локальная установка использует target wheels без editable
+installations и source builds зависимостей. Для editable project dependency
+подготовьте wheel или используйте Git/Builder.
 
 Локальная Python-сборка с нативными dependencies требует Linux x86_64 и
 определённую glibc не ниже целевого manylinux ABI (сейчас 2.39). На macOS,

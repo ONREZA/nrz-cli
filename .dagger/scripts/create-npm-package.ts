@@ -10,10 +10,6 @@ import {
   releaseAssetName,
 } from "./release-assets";
 
-const outDir = "/out/npm";
-const binDir = join(outDir, "bin");
-const scriptsDir = join(outDir, "scripts");
-
 interface NpmPackageOptions {
   version: string;
   channel: string;
@@ -73,7 +69,7 @@ export function createPackageJson({ version, channel }: NpmPackageOptions): Rele
     private: false,
     type: "module",
     description: "ONREZA platform CLI - dev, build, deploy",
-    files: ["bin", "scripts", "README.md", "LICENSE"],
+    files: ["bin", "scripts", "README.md", "LICENSE", "THIRD_PARTY_NOTICES"],
     scripts: {
       postinstall: "node scripts/postinstall.js",
     },
@@ -298,20 +294,21 @@ try {
 `;
 }
 
-function main(): void {
-  const version = process.env.NRZ_RELEASE_VERSION;
-  const tag = process.env.NRZ_RELEASE_TAG;
-  const channel = process.env.NRZ_RELEASE_CHANNEL || "stable";
-
-  if (!version || !tag) {
-    throw new Error("NRZ_RELEASE_VERSION and NRZ_RELEASE_TAG are required");
-  }
-
+export function createNpmPackage(
+  { version, tag, channel, sourceDir, distDir, outDir }: NpmPackageOptions & {
+    tag: string;
+    sourceDir: string;
+    distDir: string;
+    outDir: string;
+  },
+): void {
+  const binDir = join(outDir, "bin");
+  const scriptsDir = join(outDir, "scripts");
   mkdirSync(binDir, { recursive: true });
   mkdirSync(scriptsDir, { recursive: true });
 
   const assets = releaseAssets(tag);
-  const checksums = artifactChecksums("/dist");
+  const checksums = artifactChecksums(distDir);
   writeFileSync(join(outDir, "package.json"), `${JSON.stringify(createPackageJson({ version, channel }), null, 2)}\n`);
   writeFileSync(
     join(scriptsDir, "postinstall.js"),
@@ -320,8 +317,20 @@ function main(): void {
   writeFileSync(join(binDir, "nrz.js"), createShim());
   chmodSync(join(scriptsDir, "postinstall.js"), 0o755);
   chmodSync(join(binDir, "nrz.js"), 0o755);
-  copyFileSync("npm-README.md", join(outDir, "README.md"));
-  copyFileSync("LICENSE", join(outDir, "LICENSE"));
+  copyFileSync(join(sourceDir, "npm-README.md"), join(outDir, "README.md"));
+  copyFileSync(join(sourceDir, "LICENSE"), join(outDir, "LICENSE"));
+  copyFileSync(join(sourceDir, "THIRD_PARTY_NOTICES"), join(outDir, "THIRD_PARTY_NOTICES"));
+}
+
+function main(): void {
+  const version = process.env.NRZ_RELEASE_VERSION;
+  const tag = process.env.NRZ_RELEASE_TAG;
+  const channel = process.env.NRZ_RELEASE_CHANNEL || "stable";
+
+  if (!version || !tag) {
+    throw new Error("NRZ_RELEASE_VERSION and NRZ_RELEASE_TAG are required");
+  }
+  createNpmPackage({ version, tag, channel, sourceDir: ".", distDir: "/dist", outDir: "/out/npm" });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

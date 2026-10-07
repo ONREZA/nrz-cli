@@ -16,6 +16,8 @@ pub mod types;
 pub mod vite_config;
 
 #[cfg(test)]
+mod build_context_output_tests;
+#[cfg(test)]
 mod fs_tests;
 #[cfg(test)]
 mod mod_tests;

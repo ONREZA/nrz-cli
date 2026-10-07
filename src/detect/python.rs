@@ -1,9 +1,14 @@
 //! Python project evidence and deployment dependency inputs.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
+use std::str::FromStr;
 
 use anyhow::{Context, bail};
+use pep508_rs::{
+    MarkerEnvironment, MarkerEnvironmentBuilder, MarkerTree, MarkerTreeKind, MarkerValueString,
+    Requirement,
+};
 
 use super::fs::Fs;
 use super::types::{
@@ -140,6 +145,40 @@ pub fn dependency_plan(fs: &dyn Fs) -> anyhow::Result<Option<PythonDependencyPla
 /// Installation evidence is broader than confidently named dependencies:
 /// local paths, archives and unnamed URLs also require a materialized stage.
 pub fn requires_dependency_stage(fs: &dyn Fs) -> anyhow::Result<bool> {
+    requires_dependency_stage_with_environment(fs, None)
+}
+
+/// Serving admission evaluates only values fixed by the managed Linux runtime.
+/// Detection itself keeps its conservative dependency and framework evidence.
+pub fn requires_dependency_stage_for_target(
+    fs: &dyn Fs,
+    minor: nrz_source_bundle::PythonMinor,
+) -> anyhow::Result<bool> {
+    if !requires_dependency_stage(fs)? {
+        return Ok(false);
+    }
+    let environment = MarkerEnvironment::try_from(MarkerEnvironmentBuilder {
+        implementation_name: "cpython",
+        implementation_version: minor.exact_version(),
+        os_name: "posix",
+        platform_machine: "x86_64",
+        platform_python_implementation: "CPython",
+        // These values are never evaluated: the AST guard treats them as unknown.
+        platform_release: "",
+        platform_system: "Linux",
+        platform_version: "",
+        python_full_version: minor.exact_version(),
+        python_version: minor.version(),
+        sys_platform: "linux",
+    })
+    .context("invalid frozen Python marker environment")?;
+    requires_dependency_stage_with_environment(fs, Some(&environment))
+}
+
+fn requires_dependency_stage_with_environment(
+    fs: &dyn Fs,
+    environment: Option<&MarkerEnvironment>,
+) -> anyhow::Result<bool> {
     let plan = dependency_plan(fs)?;
     if plan.as_ref().is_some_and(|plan| plan.install_project) {
         return Ok(true);
@@ -158,6 +197,8 @@ pub fn requires_dependency_stage(fs: &dyn Fs) -> anyhow::Result<bool> {
                         || line.starts_with("--requirement")
                         || line.starts_with("-e")
                         || line.starts_with("--editable"))
+                    && environment
+                        .is_none_or(|environment| requirement_applies_to_target(line, environment))
             })
         }));
     }
@@ -167,17 +208,57 @@ pub fn requires_dependency_stage(fs: &dyn Fs) -> anyhow::Result<bool> {
         && let Some(text) = fs.read_file("pyproject.toml")
     {
         let value: toml::Value = toml::from_str(&text).context("invalid pyproject.toml")?;
-        if value
+        let project = value.get("project");
+        let dependencies = value
             .get("project")
             .and_then(|project| project.get("dependencies"))
-            .and_then(toml::Value::as_array)
-            .is_some_and(|dependencies| {
-                dependencies
-                    .iter()
-                    .filter_map(toml::Value::as_str)
-                    .any(|requirement| !requirement.trim().is_empty())
-            })
-        {
+            .and_then(toml::Value::as_array);
+        if let Some(environment) = environment {
+            let dynamic = project
+                .and_then(|project| project.get("dynamic"))
+                .and_then(toml::Value::as_array)
+                .is_some_and(|fields| {
+                    fields
+                        .iter()
+                        .any(|field| field.as_str() == Some("dependencies"))
+                });
+            if let Some(dependencies) = dependencies {
+                return Ok(dynamic
+                    || dependencies.iter().any(|requirement| {
+                        requirement.as_str().is_none_or(|requirement| {
+                            requirement_applies_to_target(requirement, environment)
+                        })
+                    }));
+            }
+            if plan
+                .as_ref()
+                .is_some_and(|plan| plan.kind == PythonDependencyKind::Poetry)
+                && let Some(dependencies) = value
+                    .get("tool")
+                    .and_then(|tool| tool.get("poetry"))
+                    .and_then(|poetry| poetry.get("dependencies"))
+                    .and_then(toml::Value::as_table)
+            {
+                return Ok(dependencies.iter().any(|(name, requirement)| {
+                    name != "python"
+                        && requirement.get("optional").and_then(toml::Value::as_bool) != Some(true)
+                        && requirement
+                            .get("markers")
+                            .and_then(toml::Value::as_str)
+                            .is_none_or(|marker| {
+                                MarkerTree::parse_str::<url::Url>(marker).map_or(true, |marker| {
+                                    marker_applies_to_target(&marker, environment)
+                                })
+                            })
+                }));
+            }
+        }
+        if dependencies.is_some_and(|dependencies| {
+            dependencies
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .any(|requirement| !requirement.trim().is_empty())
+        }) {
             return Ok(true);
         }
     }
@@ -188,6 +269,57 @@ pub fn requires_dependency_stage(fs: &dyn Fs) -> anyhow::Result<bool> {
     // installation is disabled. Detection cannot prove their graph is empty.
     Ok(plan.is_some_and(|plan| plan.manifest == "pyproject.toml")
         && !framework_evidence_complete(fs)?)
+}
+
+fn requirement_applies_to_target(requirement: &str, environment: &MarkerEnvironment) -> bool {
+    if requirement.trim().is_empty() {
+        return false;
+    }
+    Requirement::<url::Url>::from_str(requirement).map_or(true, |requirement| {
+        marker_applies_to_target(&requirement.marker, environment)
+    })
+}
+
+fn marker_applies_to_target(marker: &MarkerTree, environment: &MarkerEnvironment) -> bool {
+    let unknown_key = |key: &MarkerValueString| {
+        matches!(
+            key,
+            MarkerValueString::PlatformRelease
+                | MarkerValueString::PlatformVersion
+                | MarkerValueString::PlatformVersionDeprecated
+        )
+    };
+    let mut pending = vec![marker.clone()];
+    let mut visited = HashSet::new();
+    while let Some(node) = pending.pop() {
+        if !visited.insert(node.clone()) {
+            continue;
+        }
+        match node.kind() {
+            MarkerTreeKind::True | MarkerTreeKind::False => {}
+            MarkerTreeKind::Version(node) => pending.extend(node.edges().map(|(_, child)| child)),
+            MarkerTreeKind::String(node) => {
+                if unknown_key(node.key()) {
+                    return true;
+                }
+                pending.extend(node.children().map(|(_, child)| child));
+            }
+            MarkerTreeKind::In(node) => {
+                if unknown_key(node.key()) {
+                    return true;
+                }
+                pending.extend(node.children().map(|(_, child)| child));
+            }
+            MarkerTreeKind::Contains(node) => {
+                if unknown_key(node.key()) {
+                    return true;
+                }
+                pending.extend(node.children().map(|(_, child)| child));
+            }
+            MarkerTreeKind::Extra(_) => return true,
+        }
+    }
+    marker.evaluate(environment, &[])
 }
 
 pub fn dependency_names(fs: &dyn Fs) -> anyhow::Result<BTreeSet<String>> {

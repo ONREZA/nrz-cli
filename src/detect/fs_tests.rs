@@ -96,6 +96,64 @@ fn virtual_fs_files_create_tree_entries() {
 }
 
 #[test]
+fn needed_contents_follow_qualified_go_package_discovery() {
+    let tree = [
+        "cmd/server/main.go",
+        "server.go",
+        "main_linux_amd64.go",
+        "go.mod",
+        "cmd/.tool/main.go",
+        "cmd/server/part_linux.go",
+        "package.json",
+        "main_windows.go",
+        "cmd/server/main_arm64.go",
+        "main_test.go",
+        "_ignored.go",
+        ".ignored.go",
+        "lib/main.go",
+        "cmd/server/deep/main.go",
+        "cmd/server/directory.go/",
+        "README.md",
+    ];
+    let fs =
+        VirtualFs::from_json(&serde_json::json!({"tree":tree,"files":{}}).to_string()).unwrap();
+    assert_eq!(
+        fs.needed_content_files().unwrap(),
+        [
+            "cmd/.tool/main.go",
+            "cmd/server/main.go",
+            "cmd/server/part_linux.go",
+            "go.mod",
+            "main_linux_amd64.go",
+            "package.json",
+            "server.go",
+        ]
+    );
+}
+
+#[test]
+fn needed_contents_reject_candidate_overflow_without_truncation() {
+    let mut tree = (0..MAX_DETECTION_CONTENT_FILES)
+        .map(|index| format!("cmd/server_{index}/main.go"))
+        .collect::<Vec<_>>();
+    let fs =
+        VirtualFs::from_json(&serde_json::json!({"tree":tree,"files":{}}).to_string()).unwrap();
+    assert_eq!(
+        fs.needed_content_files().unwrap().len(),
+        MAX_DETECTION_CONTENT_FILES
+    );
+    tree.push("go.mod".into());
+    let fs =
+        VirtualFs::from_json(&serde_json::json!({"tree":tree,"files":{}}).to_string()).unwrap();
+    assert!(
+        fs.needed_content_files()
+            .unwrap_err()
+            .to_string()
+            .contains("max 256")
+    );
+}
+
+#[test]
 fn virtual_fs_bounds_file_content() {
     let oversized = "x".repeat(MAX_DETECTION_FILE_CONTENT_BYTES + 1);
     let json = serde_json::json!({

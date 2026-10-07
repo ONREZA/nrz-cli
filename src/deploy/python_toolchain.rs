@@ -857,6 +857,7 @@ fn pip_arguments(mode: PythonInstallMode, minor: PythonMinor) -> Vec<OsString> {
                 PLATFORM_PYTHON_TARGET,
                 "--only-binary",
                 ":all:",
+                "--no-editable",
             ]
             .map(OsString::from),
         );
@@ -1224,3 +1225,7 @@ mod output_tests;
 #[cfg(test)]
 #[path = "python_install_tests.rs"]
 mod install_tests;
+
+#[cfg(test)]
+#[path = "python_editable_tests.rs"]
+mod editable_tests;

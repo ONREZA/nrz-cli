@@ -89,6 +89,7 @@ percent-encoding = "2"
 # Config (onreza.toml + onreza.rules.toml authoring → JSON transport)
 toml = "1"
 serde_yaml_ng = "0.10"
+pep508_rs = "=0.9.2"
 
 anyhow = "1"
 

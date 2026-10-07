@@ -395,6 +395,251 @@ fn detect_needed_files_includes_server_entry_candidates() {
 }
 
 #[test]
+fn tree_aware_needed_files_preserves_local_go_detection() {
+    for path in ["server.go", "main_linux_amd64.go", "cmd/server/main.go"] {
+        let temp = tempfile::tempdir().unwrap();
+        let contents = std::collections::BTreeMap::from([
+            ("go.mod", "module example.org/server\n"),
+            (
+                path,
+                "//go:build linux && amd64\n\npackage main\nfunc main() {}\n",
+            ),
+        ]);
+        for (name, content) in &contents {
+            let target = temp.path().join(name);
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(target, content).unwrap();
+        }
+        let tree = contents.keys().copied().collect::<Vec<_>>();
+        let output = nrz()
+            .args(["detect", "--needed-files", "--stdin", "--json"])
+            .write_stdin(json!({"tree":tree,"files":{}}).to_string())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let requested = stdout_json(&output);
+        assert_eq!(
+            requested["files"],
+            json!(
+                ["go.mod", path]
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+            )
+        );
+        let fetched = requested["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|name| {
+                let name = name.as_str().unwrap();
+                (name, contents[name])
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let remote = nrz()
+            .args(["detect", "--stdin", "--json"])
+            .write_stdin(json!({"tree":tree,"files":fetched}).to_string())
+            .output()
+            .unwrap();
+        let local = nrz()
+            .current_dir(&temp)
+            .args(["detect", "--json"])
+            .output()
+            .unwrap();
+        assert!(remote.status.success() && local.status.success());
+        let remote = stdout_json(&remote);
+        let local = stdout_json(&local);
+        assert_eq!(remote, local, "{path}");
+        assert_eq!(remote["framework"], "go");
+        assert_eq!(remote["suggestedCompute"], "PROCESS");
+        assert_eq!(
+            remote["metadata"]["sourceBuildContext"]["applicationRuntime"]["family"],
+            "EXECUTABLE"
+        );
+    }
+}
+
+#[test]
+fn tree_aware_needed_files_reports_invalid_or_over_budget_manifests() {
+    for manifest in [
+        json!({"tree":["../outside.go"],"files":{}}),
+        json!({"tree":(0..257).map(|index|format!("cmd/server_{index}/main.go")).collect::<Vec<_>>(),"files":{}}),
+    ] {
+        let output = nrz()
+            .args(["detect", "--needed-files", "--stdin", "--json"])
+            .write_stdin(manifest.to_string())
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert_eq!(stdout_json(&output)["code"], "DETECTION_INPUT_INVALID");
+    }
+    let output = nrz()
+        .args(["detect", "--needed-files", "--stdin", "--json"])
+        .write_stdin(" ".repeat(4 * 1024 * 1024 + 1))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(stdout_json(&output)["code"], "DETECTION_INPUT_TOO_LARGE");
+}
+
+#[test]
+fn tree_aware_content_fetch_preserves_constraints_and_framework_precedence() {
+    let main = "package main\nfunc main() {}\n";
+    let module = ("go.mod", "module example.org/server\n");
+    let cases = [
+        (
+            "windows filename",
+            vec![module, ("cmd/server/main_windows.go", main)],
+            "other",
+        ),
+        (
+            "windows header",
+            vec![
+                module,
+                (
+                    "cmd/server/main.go",
+                    "//go:build windows\n\npackage main\nfunc main() {}\n",
+                ),
+            ],
+            "other",
+        ),
+        (
+            "library",
+            vec![module, ("cmd/server/library.go", "package library\n")],
+            "other",
+        ),
+        (
+            "cgo",
+            vec![
+                module,
+                (
+                    "cmd/server/main.go",
+                    "package main\nimport \"C\"\nfunc main() {}\n",
+                ),
+            ],
+            "other",
+        ),
+        (
+            "nested package",
+            vec![module, ("cmd/server/deep/main.go", main)],
+            "other",
+        ),
+        (
+            "ambiguous packages",
+            vec![
+                module,
+                ("cmd/first/main.go", main),
+                ("cmd/second/serve.go", main),
+            ],
+            "go",
+        ),
+        (
+            "tool metadata",
+            vec![
+                module,
+                ("cmd/server/main.go", main),
+                (
+                    "package.json",
+                    r#"{"devDependencies":{"prettier":"3.0.0"}}"#,
+                ),
+            ],
+            "go",
+        ),
+        (
+            "javascript entry",
+            vec![
+                module,
+                ("cmd/server/main.go", main),
+                ("server.js", "console.log('server');\n"),
+                ("package.json", r#"{"scripts":{"start":"npm run boot"}}"#),
+            ],
+            "other",
+        ),
+        (
+            "python application",
+            vec![
+                module,
+                ("cmd/server/main.go", main),
+                ("requirements.txt", "fastapi>=0.100\n"),
+                ("main.py", "from fastapi import FastAPI\napp = FastAPI()\n"),
+            ],
+            "fastapi",
+        ),
+        (
+            "flutter web",
+            vec![
+                module,
+                ("cmd/server/main.go", main),
+                (
+                    "pubspec.yaml",
+                    "name: fixture\ndependencies:\n  flutter:\n    sdk: flutter\n",
+                ),
+                ("web/index.html", "<html></html>"),
+            ],
+            "flutter",
+        ),
+        (
+            "hugo generator",
+            vec![
+                module,
+                ("cmd/server/main.go", main),
+                ("hugo.toml", "baseURL = 'https://example.org/'\n"),
+            ],
+            "hugo",
+        ),
+    ];
+    for (label, files, framework) in cases {
+        let temp = tempfile::tempdir().unwrap();
+        let contents = files
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for (name, content) in &contents {
+            let target = temp.path().join(name);
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(target, content).unwrap();
+        }
+        let tree = contents.keys().copied().collect::<Vec<_>>();
+        let query = nrz()
+            .args(["detect", "--needed-files", "--stdin", "--json"])
+            .write_stdin(json!({"tree":tree,"files":{}}).to_string())
+            .output()
+            .unwrap();
+        assert!(query.status.success(), "{label}");
+        let request = stdout_json(&query);
+        let fetched = request["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|path| {
+                let path = path.as_str().unwrap();
+                (path, contents[path])
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let remote = nrz()
+            .args(["detect", "--stdin", "--json"])
+            .write_stdin(json!({"tree":tree,"files":fetched}).to_string())
+            .output()
+            .unwrap();
+        let local = nrz()
+            .current_dir(&temp)
+            .args(["detect", "--json"])
+            .output()
+            .unwrap();
+        assert!(
+            remote.status.success() && local.status.success(),
+            "{label}: {} {}",
+            String::from_utf8_lossy(&remote.stdout),
+            String::from_utf8_lossy(&local.stdout)
+        );
+        assert_eq!(stdout_json(&remote), stdout_json(&local), "{label}");
+        assert_eq!(stdout_json(&remote)["framework"], framework, "{label}");
+    }
+}
+
+#[test]
 fn detect_save_writes_framework_to_toml() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(

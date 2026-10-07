@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 pub const MAX_DETECTION_MANIFEST_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DETECTION_TREE_ENTRIES: usize = 100_000;
-const MAX_DETECTION_CONTENT_FILES: usize = 256;
+pub(super) const MAX_DETECTION_CONTENT_FILES: usize = 256;
 const MAX_DETECTION_PATH_BYTES: usize = 1024;
 pub(super) const MAX_DETECTION_PATH_DEPTH: usize = 64;
 pub(super) const MAX_DETECTION_FILE_CONTENT_BYTES: usize = 512 * 1024;
@@ -217,6 +217,28 @@ impl VirtualFs {
         }
 
         Ok(Self { tree, dirs, files })
+    }
+
+    /// Exact content paths needed for this validated tree, within the manifest budget.
+    pub fn needed_content_files(&self) -> anyhow::Result<Vec<String>> {
+        let fixed: HashSet<&str> = DETECTION_CONTENT_FILES.iter().copied().collect();
+        let mut files = Vec::new();
+        for path in &self.tree {
+            if !self.dirs.contains(path)
+                && (fixed.contains(path.as_str())
+                    || super::native::is_go_detection_source_path(path))
+            {
+                if files.len() == MAX_DETECTION_CONTENT_FILES {
+                    anyhow::bail!(
+                        "detection manifest requires too many file contents (max {})",
+                        MAX_DETECTION_CONTENT_FILES
+                    );
+                }
+                files.push(path.clone());
+            }
+        }
+        files.sort();
+        Ok(files)
     }
 }
 

@@ -991,7 +991,10 @@ fn validate_python_dependency_context(
         return Ok(());
     }
     let fs = crate::detect::fs::LocalFs::new(project_dir);
-    let authored_dependencies = crate::detect::python::requires_dependency_stage(&fs)?;
+    let authored_dependencies = crate::detect::python::requires_dependency_stage_for_target(
+        &fs,
+        serving.python_version.unwrap_or_default(),
+    )?;
     let staged_dependencies = staged
         && serving.python_version.is_some_and(|minor| {
             project_dir
