@@ -14,6 +14,17 @@ pub enum NativeRecipe {
     HugoStatic,
 }
 
+impl NativeRecipe {
+    pub fn output_directory(self) -> &'static str {
+        match self {
+            Self::FlutterWeb => "build/web",
+            Self::DartServer => "build/onreza-dart/bundle",
+            Self::GoServer => "build/onreza-go",
+            Self::HugoStatic => "public",
+        }
+    }
+}
+
 pub const NATIVE_RUNTIME_TARGET: &str = nrz_runtime_artifact::NATIVE_EXECUTION_TARGET;
 
 pub fn native_recipe(framework: &str) -> Option<NativeRecipe> {
@@ -148,14 +159,13 @@ fn hugo_config(fs: &dyn Fs) -> Option<&'static str> {
 }
 
 fn detection(fs: &dyn Fs, recipe: NativeRecipe, configured: bool) -> DetectionResult {
-    let (framework, name, compute, runtime, manager, output, build, install, entry) = match recipe {
+    let (framework, name, compute, runtime, manager, build, install, entry) = match recipe {
         NativeRecipe::FlutterWeb => (
             "flutter",
             "Flutter Web",
             ComputeType::Static,
             RuntimeType::Dart,
             Some(PackageManagerType::Pub),
-            "build/web",
             Some("flutter build web --release"),
             Some("flutter pub get --enforce-lockfile"),
             None,
@@ -166,7 +176,6 @@ fn detection(fs: &dyn Fs, recipe: NativeRecipe, configured: bool) -> DetectionRe
             ComputeType::Process,
             RuntimeType::Dart,
             Some(PackageManagerType::Pub),
-            "build/onreza-dart/bundle",
             None,
             Some("dart pub get --enforce-lockfile"),
             unique(dart_entries(fs))
@@ -178,7 +187,6 @@ fn detection(fs: &dyn Fs, recipe: NativeRecipe, configured: bool) -> DetectionRe
             ComputeType::Process,
             RuntimeType::Go,
             Some(PackageManagerType::Go),
-            "build/onreza-go",
             None,
             None,
             Some("server".to_string()),
@@ -189,7 +197,6 @@ fn detection(fs: &dyn Fs, recipe: NativeRecipe, configured: bool) -> DetectionRe
             ComputeType::Static,
             RuntimeType::Go,
             None,
-            "public",
             Some("hugo --environment production --destination public --cleanDestinationDir"),
             None,
             None,
@@ -236,7 +243,7 @@ fn detection(fs: &dyn Fs, recipe: NativeRecipe, configured: bool) -> DetectionRe
             build_info: Some(BuildInfo {
                 build_command: build.map(str::to_string),
                 install_command: install.map(str::to_string),
-                output_dir: Some(output.into()),
+                output_dir: Some(recipe.output_directory().into()),
                 entry_point: entry,
             }),
             monorepo: None,

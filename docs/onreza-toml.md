@@ -360,3 +360,8 @@ launcher замораживаются раздельно в `metadata.sourceBuil
 Python-команда сборки получает выбранный pinned interpreter, staged packages и
 console scripts. Различные build/serving Python minor допустимы для code-only
 output; runtime dependencies требуют совпадающих qualified minor.
+
+На macOS, Windows и non-x64 host локальная Python-сборка использует это дерево
+только при отсутствии native payload. Для Linux native dependencies используйте
+Git/Builder deployment. Публикация готового output через `--skip-build` не запускает
+host interpreter.

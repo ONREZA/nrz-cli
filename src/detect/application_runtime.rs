@@ -432,7 +432,7 @@ fn direct_start(script: &str) -> anyhow::Result<Option<ApplicationRuntimeDeclara
     }))
 }
 
-fn direct_launcher_family(executor: &str) -> Option<ApplicationRuntimeFamily> {
+pub(super) fn direct_launcher_family(executor: &str) -> Option<ApplicationRuntimeFamily> {
     match executor.trim_matches(['\'', '"']) {
         "bun" => Some(ApplicationRuntimeFamily::Bun),
         "node" => Some(ApplicationRuntimeFamily::Node),

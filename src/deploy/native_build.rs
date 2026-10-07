@@ -317,7 +317,7 @@ pub(crate) fn recipe_commands(
 ) -> anyhow::Result<NativeBuildPlan> {
     let fs = LocalFs::new(project_dir);
     let mut environment = Vec::new();
-    let (install, build, output_directory, executable_entry) = match recipe {
+    let (install, build, executable_entry) = match recipe {
         NativeRecipe::FlutterWeb => {
             require_pub_inputs(&fs)?;
             if !fs.exists("web/index.html") {
@@ -331,7 +331,6 @@ pub(crate) fn recipe_commands(
                     &["pub", "get", "--enforce-lockfile"],
                 )),
                 NativeCommand::new("flutter", &["build", "web", "--release", "--no-pub"]),
-                "build/web",
                 None,
             )
         }
@@ -374,7 +373,6 @@ pub(crate) fn recipe_commands(
                         "--output=build/onreza-dart",
                     ],
                 ),
-                "build/onreza-dart/bundle",
                 Some(executable),
             )
         }
@@ -409,7 +407,6 @@ pub(crate) fn recipe_commands(
                         package,
                     ],
                 ),
-                "build/onreza-go",
                 Some("server".into()),
             )
         }
@@ -425,7 +422,6 @@ pub(crate) fn recipe_commands(
                     "--cleanDestinationDir",
                 ],
             ),
-            "public",
             None,
         ),
     };
@@ -433,7 +429,7 @@ pub(crate) fn recipe_commands(
         install,
         build,
         environment,
-        output_directory: output_directory.into(),
+        output_directory: recipe.output_directory().into(),
         executable_entry,
     })
 }

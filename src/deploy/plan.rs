@@ -21,6 +21,10 @@ use crate::output;
 #[path = "plan_python_scan_tests.rs"]
 mod python_scan_tests;
 
+#[cfg(test)]
+#[path = "plan_native_output_tests.rs"]
+mod native_output_tests;
+
 pub(super) struct DeployPlanRequest<'a> {
     pub(super) args: &'a DeployArgs,
     pub(super) command: &'a crate::context::CommandContext,
@@ -344,6 +348,27 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         .map_err(|error| {
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
         })?;
+    let native_recipe = (source_build_context.build_toolchain.family
+        == nrz_source_bundle::BuildToolchainFamily::Native)
+        .then(|| crate::detect::native::native_recipe(&detection.framework))
+        .flatten();
+    if !args.skip_build
+        && let Some(recipe) = native_recipe
+        && super::native_build::default_command(
+            args.build_command.as_deref(),
+            effective.build_command(),
+        )
+        && let Some(output) = effective
+            .output_directory()
+            .and_then(|setting| setting.value())
+        && Path::new(output) != Path::new(recipe.output_directory())
+    {
+        anyhow::bail!(
+            "build.output_directory '{output}' differs from the default {} recipe output '{}'; use that output or set build.command for a custom output directory",
+            detection.framework,
+            recipe.output_directory(),
+        );
+    }
     super::validate_application_runtime_before_build(
         &source_build_context,
         effective,
@@ -367,10 +392,6 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
 
     validate_python_dependency_context(project_dir, &source_build_context, true)?;
 
-    let native_recipe = (source_build_context.build_toolchain.family
-        == nrz_source_bundle::BuildToolchainFamily::Native)
-        .then(|| crate::detect::native::native_recipe(&detection.framework))
-        .flatten();
     let build_preparation = if native_recipe.is_some() {
         crate::frameworks::BuildPreparation::default()
     } else {

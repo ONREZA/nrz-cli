@@ -51,3 +51,17 @@ The test builds and extracts a source archive, then runs `server.js` with Node
 and requires successful image encoding. The fixture must print
 `sharp-runtime-ok` only after that operation. New CLI releases require a Builder
 Agent that supplies the explicit target and a Builder rootfs pinned to that CLI.
+
+## Executable PROCESS artifacts
+
+Go and Dart artifacts use the qualified `native-linux-x86_64-glibc` target.
+The shared artifact validator resolves declared `DT_NEEDED` libraries from the
+artifact or the qualified Compute system baseline. Each `DT_VERNEED` version
+must be exported by the selected library; the validator reads loader dynamic
+tags even when section headers are absent. The baseline records exact export
+names per SONAME and is checked against the minimal Compute image during
+Builder qualification. Developer-host and Builder libraries are not authority
+for the runtime baseline.
+
+This validates declared loader/version requirements. Applications remain
+responsible for readiness checks of dynamically loaded FFI libraries and assets.

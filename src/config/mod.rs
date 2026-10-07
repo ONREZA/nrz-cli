@@ -4,6 +4,8 @@
 mod config_tests;
 #[cfg(test)]
 mod env_decl_tests;
+#[cfg(test)]
+mod serving_mode_tests;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -342,9 +344,31 @@ impl ProjectConfig {
         let mut parent = self.clone();
         let parent_runtime = parent.deploy.selected_runtime_family();
         let child_runtime = child.deploy.selected_runtime_family();
-        if child_runtime.is_some() && child_runtime != parent_runtime {
-            // A new runtime family owns a fresh launch namespace. Preserve child
-            // declarations so incompatible authored fields still fail validation.
+        let parent_static = parent
+            .deploy
+            .compute
+            .as_deref()
+            .is_some_and(|compute| compute.eq_ignore_ascii_case("static"));
+        let child_static = child
+            .deploy
+            .compute
+            .as_deref()
+            .is_some_and(|compute| compute.eq_ignore_ascii_case("static"));
+        let child_process = child
+            .deploy
+            .compute
+            .as_deref()
+            .is_some_and(|compute| compute.eq_ignore_ascii_case("process"));
+        let child_process_declaration = child_process
+            || child_runtime.is_some()
+            || child.deploy.entry.is_some()
+            || child.deploy.args.is_some();
+        if child_static
+            || parent_static && child_process_declaration
+            || child_runtime.is_some() && child_runtime != parent_runtime
+        {
+            // A new serving mode or runtime family owns a fresh launch namespace.
+            // Preserve authored child fields so invalid combinations still fail.
             parent.deploy.runtime = None;
             parent.deploy.entry = None;
             parent.deploy.args = None;
@@ -352,6 +376,9 @@ impl ProjectConfig {
             parent.deploy.module = None;
             parent.deploy.application = None;
             parent.deploy.server = None;
+        }
+        if parent_static && child_process_declaration {
+            parent.deploy.compute = None;
         }
         if child_runtime
             .is_none_or(|family| family == nrz_source_bundle::ApplicationRuntimeFamily::Python)

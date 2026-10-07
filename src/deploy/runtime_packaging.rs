@@ -938,7 +938,11 @@ pub(super) fn node_project_runtime_scan_roots(
         "node_modules",
         crate::artifact::RuntimeArtifactScanRootKind::NodeModules,
     );
-    for file in crate::artifact::NODE_RUNTIME_METADATA_FILES {
+    for file in crate::artifact::NODE_RUNTIME_METADATA_FILES
+        .iter()
+        .copied()
+        .chain(["onreza.toml"])
+    {
         push_existing_runtime_scan_root(
             &mut roots,
             runtime_root,
@@ -955,7 +959,11 @@ pub(super) fn node_project_runtime_scan_roots(
                 .expect("project node_modules path must be safe"),
             crate::artifact::RuntimeArtifactScanRootKind::NodeModules,
         );
-        for file in crate::artifact::NODE_RUNTIME_METADATA_FILES {
+        for file in crate::artifact::NODE_RUNTIME_METADATA_FILES
+            .iter()
+            .copied()
+            .chain(["onreza.toml"])
+        {
             push_existing_runtime_scan_root(
                 &mut roots,
                 runtime_root,

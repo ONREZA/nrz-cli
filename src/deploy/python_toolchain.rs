@@ -19,6 +19,20 @@ const UV_RELEASE_ORIGIN: &str = "https://github.com";
 const MAX_UV_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_UV_BINARY_BYTES: u64 = 96 * 1024 * 1024;
 const PLATFORM_PYTHON_TARGET: &str = "x86_64-manylinux_2_39";
+const NATIVE_PAYLOAD_EXTENSIONS: &[&str] = &[".so", ".pyd", ".dll", ".dylib", ".a", ".o"];
+const NATIVE_PAYLOAD_MAGICS: &[&[u8]] = &[
+    b"\x7fELF",
+    b"\xfe\xed\xfa\xce",
+    b"\xce\xfa\xed\xfe",
+    b"\xfe\xed\xfa\xcf",
+    b"\xcf\xfa\xed\xfe",
+    b"\xca\xfe\xba\xbe",
+    b"\xbe\xba\xfe\xca",
+    b"\xca\xfe\xba\xbf",
+    b"\xbf\xba\xfe\xca",
+    b"MZ",
+    b"!<arch>\n",
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum PythonInstallMode {
@@ -129,6 +143,24 @@ pub(super) async fn build_environment(
     minor: PythonMinor,
     environment: &[(String, String)],
 ) -> anyhow::Result<Vec<(String, String)>> {
+    build_environment_for_host(
+        project_dir,
+        mode,
+        minor,
+        environment,
+        (std::env::consts::OS, std::env::consts::ARCH),
+    )
+    .await
+}
+
+async fn build_environment_for_host(
+    project_dir: &Path,
+    mode: PythonInstallMode,
+    minor: PythonMinor,
+    environment: &[(String, String)],
+    host: (&str, &str),
+) -> anyhow::Result<Vec<(String, String)>> {
+    validate_local_build_dependency_host(project_dir, mode, minor, host)?;
     let interpreter = match mode {
         PythonInstallMode::PinnedPlatform => PathBuf::from(minor.platform_interpreter()),
         PythonInstallMode::ManagedLocal => {
@@ -189,6 +221,81 @@ pub(super) async fn build_environment(
     build_environment_for_interpreter(project_dir, minor, &interpreter, environment).await
 }
 
+fn validate_local_build_dependency_host(
+    project_dir: &Path,
+    mode: PythonInstallMode,
+    minor: PythonMinor,
+    host: (&str, &str),
+) -> anyhow::Result<()> {
+    if mode == PythonInstallMode::PinnedPlatform || host == ("linux", "x86_64") {
+        return Ok(());
+    }
+    let root = project_dir.join(minor.site_packages_root());
+    let payload = find_native_python_payload(&root).map_err(|error| crate::output::coded_error(
+        "PYTHON_PLATFORM_UNSUPPORTED",
+        format!("Cannot inspect Linux-target Python dependency stage for host {}/{}: {error:#}. Use ONREZA Cloud Builder for qualified Linux builds.", host.0, host.1),
+    ))?;
+    if let Some(payload) = payload {
+        return Err(crate::output::coded_error(
+            "PYTHON_PLATFORM_UNSUPPORTED",
+            format!(
+                "Linux-target Python dependency stage contains native payload '{}'; host {}/{} cannot use it for local build commands. Use ONREZA Cloud Builder for qualified Linux builds, or deploy a prebuilt artifact with --skip-build.",
+                payload.strip_prefix(project_dir)?.display(),
+                host.0,
+                host.1
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn find_native_python_payload(root: &Path) -> anyhow::Result<Option<PathBuf>> {
+    fn visit(
+        path: &Path,
+        visited: &mut std::collections::HashSet<PathBuf>,
+    ) -> anyhow::Result<Option<PathBuf>> {
+        let metadata = std::fs::metadata(path)?;
+        if metadata.is_dir() {
+            if !visited.insert(path.canonicalize()?) {
+                return Ok(None);
+            }
+            for entry in std::fs::read_dir(path)? {
+                if let Some(payload) = visit(&entry?.path(), visited)? {
+                    return Ok(Some(payload));
+                }
+            }
+        } else if metadata.is_file() {
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_ascii_lowercase();
+            if NATIVE_PAYLOAD_EXTENSIONS
+                .iter()
+                .any(|extension| name.ends_with(extension))
+            {
+                return Ok(Some(path.to_owned()));
+            }
+            let mut header = Vec::with_capacity(8);
+            std::fs::File::open(path)?
+                .take(8)
+                .read_to_end(&mut header)?;
+            if NATIVE_PAYLOAD_MAGICS
+                .iter()
+                .any(|magic| header.starts_with(magic))
+            {
+                return Ok(Some(path.to_owned()));
+            }
+        }
+        Ok(None)
+    }
+    match std::fs::symlink_metadata(root) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+        Ok(_) => visit(root, &mut std::collections::HashSet::new()),
+    }
+}
+
 async fn build_environment_for_interpreter(
     project_dir: &Path,
     minor: PythonMinor,
@@ -244,15 +351,13 @@ const PROJECT_WHEELS: &str = ".onreza/python/build/wheels";
 const PORTABLE_WHEEL_CHECK: &str = r#"from pathlib import Path
 import sys
 import zipfile
+import json
 
 wheels = list(Path(sys.argv[1]).glob('*.whl'))
 if not wheels:
     sys.exit('Python application build produced no wheel')
-native_extensions = ('.so', '.pyd', '.dll', '.dylib', '.a', '.o')
-native_magic = (b'\x7fELF', b'\xfe\xed\xfa\xce', b'\xce\xfa\xed\xfe',
-                b'\xfe\xed\xfa\xcf', b'\xcf\xfa\xed\xfe',
-                b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca',
-                b'\xca\xfe\xba\xbf', b'\xbf\xba\xfe\xca')
+native_extensions = tuple(json.loads(sys.argv[2]))
+native_magic = tuple(bytes(values) for values in json.loads(sys.argv[3]))
 for wheel in wheels:
     with zipfile.ZipFile(wheel) as archive:
         for entry in archive.infolist():
@@ -261,8 +366,7 @@ for wheel in wheels:
             with archive.open(entry) as stream:
                 header = stream.read(8)
             if (entry.filename.lower().endswith(native_extensions)
-                    or header[:4] in native_magic or header[:2] == b'MZ'
-                    or header == b'!<arch>\n'):
+                    or any(header.startswith(magic) for magic in native_magic)):
                 sys.exit('local Python application wheel contains native payload ' + entry.filename + '; use ONREZA Cloud Builder for qualified Linux builds or an explicitly qualified custom artifact')
 "#;
 
@@ -465,14 +569,19 @@ pub(super) fn install_commands(
             "build Python application wheel".into(),
         ));
         if mode == PythonInstallMode::ManagedLocal {
-            commands.push(python_tool_command(
+            let mut qualification = python_tool_command(
                 mode,
                 minor,
                 &format!("packaging=={}", python_toolchain_versions().packaging),
                 PORTABLE_WHEEL_CHECK,
                 PROJECT_WHEELS,
                 "qualify portable application wheel",
-            ));
+            );
+            qualification.arguments.extend([
+                OsString::from(serde_json::to_string(NATIVE_PAYLOAD_EXTENSIONS)?),
+                OsString::from(serde_json::to_string(NATIVE_PAYLOAD_MAGICS)?),
+            ]);
+            commands.push(qualification);
         }
         let mut install = pip_arguments(mode, minor);
         install.extend(
@@ -912,3 +1021,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
             encoded
         })
 }
+
+#[cfg(test)]
+#[path = "python_host_tests.rs"]
+mod host_tests;

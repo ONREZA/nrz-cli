@@ -22,6 +22,8 @@ mod mod_tests;
 #[cfg(test)]
 mod monorepo_tests;
 #[cfg(test)]
+mod native_precedence_tests;
+#[cfg(test)]
 mod native_tests;
 #[cfg(test)]
 mod package_json_tests;
@@ -69,10 +71,28 @@ pub fn detect_with_framework_override(
 ///
 /// Used by `nrz detect --stdin` with a `VirtualFs` manifest.
 pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
-    if let Some(result) = native::detect_native(fs) {
-        return result;
-    }
-    if let Some(result) = python::detect_python(fs) {
+    // Qualified web generators own the app; generic Go/Dart entry discovery
+    // can instead describe an auxiliary command in a JavaScript/Python app.
+    let native = match native::detect_native(fs) {
+        Some(result)
+            if matches!(
+                native::native_recipe(&result.framework),
+                Some(native::NativeRecipe::FlutterWeb | native::NativeRecipe::HugoStatic)
+            ) =>
+        {
+            return result;
+        }
+        result => result,
+    };
+    if let Some(result) = python::detect_python(fs)
+        && (native.is_none()
+            || result.framework != "python"
+            || result
+                .metadata
+                .build_info
+                .as_ref()
+                .is_some_and(|build| build.entry_point.is_some()))
+    {
         return result;
     }
     let pkg = PackageJson::load_from_fs(fs);
@@ -82,6 +102,14 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
 
     // 2. Try to detect framework from declarative detector rules.
     if let Some(result) = detect_from_framework_rules(fs, pkg.as_ref(), &pm_info) {
+        return result;
+    }
+
+    if let Some(result) = native
+        && !pkg
+            .as_ref()
+            .is_some_and(|pkg| has_javascript_application_signal(fs, pkg))
+    {
         return result;
     }
 
@@ -776,17 +804,37 @@ fn has_runtime_script(pkg: &PackageJson) -> bool {
         .any(|(name, _)| is_runtime_script_name(name))
 }
 
+fn has_javascript_application_signal(fs: &dyn Fs, pkg: &PackageJson) -> bool {
+    let javascript_entry = |entry: Option<&str>| {
+        resolve_package_entry(fs, entry).is_some_and(|path| is_runnable_file(&path))
+    };
+    javascript_entry(pkg.main.as_deref())
+        || javascript_entry(pkg.module.as_deref())
+        || pkg.scripts.iter().any(|(name, script)| {
+            is_runtime_script_name(name)
+                && (script
+                    .split_whitespace()
+                    .next()
+                    .and_then(application_runtime::direct_launcher_family)
+                    .is_some()
+                    || extract_script_path_tokens(script)
+                        .iter()
+                        .any(|entry| javascript_entry(Some(entry))))
+        })
+}
+
 /// Check if a package.json main/module field points to an existing file.
 fn has_resolvable_entry(fs: &dyn Fs, raw: Option<&str>) -> bool {
-    let Some(raw) = raw else { return false };
-    let Some(rel) = sanitize_relative_path(raw) else {
-        return false;
-    };
+    resolve_package_entry(fs, raw).is_some()
+}
+
+fn resolve_package_entry(fs: &dyn Fs, raw: Option<&str>) -> Option<PathBuf> {
+    let rel = sanitize_relative_path(raw?)?;
     let rel_str = stringify_path(&rel);
 
     // Direct match
     if fs.exists(&rel_str) && !fs.is_dir(&rel_str) {
-        return true;
+        return Some(rel);
     }
 
     // Try with extensions
@@ -794,7 +842,7 @@ fn has_resolvable_entry(fs: &dyn Fs, raw: Option<&str>) -> bool {
         for ext in RUNNABLE_EXTENSIONS {
             let candidate = format!("{rel_str}.{ext}");
             if fs.exists(&candidate) && !fs.is_dir(&candidate) {
-                return true;
+                return Some(PathBuf::from(candidate));
             }
         }
     }
@@ -803,11 +851,11 @@ fn has_resolvable_entry(fs: &dyn Fs, raw: Option<&str>) -> bool {
     for ext in RUNNABLE_EXTENSIONS {
         let candidate = format!("{rel_str}/index.{ext}");
         if fs.exists(&candidate) {
-            return true;
+            return Some(PathBuf::from(candidate));
         }
     }
 
-    false
+    None
 }
 
 // ── Public convenience wrappers (for init/deploy) ────────────

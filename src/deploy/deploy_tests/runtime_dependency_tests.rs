@@ -512,3 +512,229 @@ fn relocated_python_dependencies_refuse_ambiguous_or_incompatible_primary() {
         }
     }
 }
+
+#[tokio::test]
+async fn workspace_node_closure_excludes_python_build_state_without_package_metadata() {
+    assert_workspace_python_state_boundary(false, false).await;
+}
+
+#[tokio::test]
+async fn workspace_node_closure_keeps_required_python_bootstrap_after_relocation() {
+    for package_metadata in [true, false] {
+        assert_workspace_python_state_boundary(true, package_metadata).await;
+    }
+}
+
+async fn assert_workspace_python_state_boundary(bootstrap: bool, package_metadata: bool) {
+    use nrz_source_bundle::PythonMinor;
+    let workspace = tempdir().unwrap();
+    let project = workspace.path().join("apps/site");
+    fs::create_dir_all(project.join("api")).unwrap();
+    fs::write(
+        project.join("api/main.js"),
+        "console.log(require('demo'))\n",
+    )
+    .unwrap();
+    if package_metadata {
+        fs::write(
+            project.join("package.json"),
+            r#"{"dependencies":{"demo":"1.0.0"}}"#,
+        )
+        .unwrap();
+    }
+    fs::write(project.join("onreza.toml"), "[project]\nframework='other'\n[build]\ntoolchain='python'\npython_version='3.14'\noutput_directory='.'\n[deploy]\nruntime='node'\nentry='api/main.js'\n").unwrap();
+    fs::create_dir_all(workspace.path().join("node_modules/demo")).unwrap();
+    fs::write(
+        workspace.path().join("node_modules/demo/index.js"),
+        "module.exports='PUBLISHED_JS_DEPENDENCY'\n",
+    )
+    .unwrap();
+    fs::create_dir_all(project.join("dist/.onreza/python/build")).unwrap();
+    fs::write(
+        project.join("dist/.onreza/python/build/authored.txt"),
+        "AUTHORED_ASSET",
+    )
+    .unwrap();
+    let mut detection = crate::detect::detect_with_framework_override(&project, None);
+    crate::detect::application_runtime::resolve_and_bind_detection(
+        &crate::detect::fs::LocalFs::new(&project),
+        &mut detection,
+    )
+    .unwrap();
+    let mut manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version":1,"routes":[{"pattern":"^/.*$","layer":"api"}],"layers":[{"name":"api","target":"COMPUTE","directory":".","entry":"api/main.js","runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}}]
+    })).unwrap();
+    if bootstrap {
+        let launch = crate::detect::python_launch::PythonLaunch {
+            entry: crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY.into(),
+            args: vec!["MODULE".into(), "main".into(), "literal argument".into()],
+        };
+        super::super::python_launch::materialize_python_entry(
+            &project,
+            &launch,
+            PythonMinor::Python312,
+        )
+        .unwrap();
+        fs::write(
+            project.join("main.py"),
+            "import sys\nprint('PUBLISHED_PYTHON_BOOTSTRAP:' + sys.argv[1])\n",
+        )
+        .unwrap();
+        manifest.layers.push(serde_json::from_value(serde_json::json!({
+            "name":"side","target":"COMPUTE","directory":".onreza/python","entry":"launch.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":launch.args},"buildRuntimeVersion":"python-3.12"}
+        })).unwrap());
+    } else {
+        let stage = project.join(PythonMinor::Python314.site_packages_root());
+        fs::create_dir_all(stage.join("demo")).unwrap();
+        fs::write(stage.join("demo/__init__.py"), "VALUE='BUILD_ONLY'\n").unwrap();
+        fs::write(
+            project.join(".onreza/python/launch.py"),
+            "print('UNUSED_BOOTSTRAP')\n",
+        )
+        .unwrap();
+    }
+    let artifact = resolve_runtime_artifact(
+        workspace.path(),
+        &project,
+        project.clone(),
+        manifest,
+        &detection,
+        true,
+    )
+    .unwrap();
+    assert_eq!(artifact.root_dir, workspace.path());
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let collection = crate::artifact::classify_artifact_files(
+        &artifact.manifest,
+        scanned,
+        &detection,
+        crate::artifact::ArtifactRootScope::ProjectRoot,
+        &artifact.scan,
+    );
+    let source = source_bundle_v1::build_source_bundle_plan_with_scan(
+        &artifact.root_dir,
+        &artifact.manifest,
+        &collection.deployable_entries(),
+        &artifact.scan,
+        source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap();
+    let private = source
+        .logical_manifest
+        .files
+        .iter()
+        .filter(|file| file.path.starts_with("apps/site/.onreza/"))
+        .collect::<Vec<_>>();
+    if bootstrap {
+        assert_eq!(private.len(), 1);
+        assert_eq!(private[0].path, "apps/site/.onreza/python/launch.py");
+        assert_eq!(private[0].layer_name.as_deref(), Some("side"));
+        assert_eq!(
+            private[0].role,
+            source_bundle_v1::SourceLogicalManifestFileRole::Compute
+        );
+    } else {
+        assert!(
+            private.is_empty(),
+            "published build state: {:?}",
+            private.iter().map(|file| &file.path).collect::<Vec<_>>()
+        );
+    }
+    let node = source
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "node_modules/demo/index.js")
+        .unwrap();
+    assert_eq!(node.layer_name.as_deref(), Some("api"));
+    assert_eq!(
+        node.role,
+        source_bundle_v1::SourceLogicalManifestFileRole::Dependency
+    );
+    let logical: nrz_source_bundle::SourceLogicalManifest =
+        serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap()).unwrap();
+    nrz_runtime_artifact::validate_source_bundle_application_graph(
+        &source.logical_manifest_sha256,
+        &source.source_sha256,
+        source.source_size_bytes,
+        &logical,
+    )
+    .unwrap();
+    let owner = uuid::Uuid::nil().to_string();
+    nrz_source_bundle::verify_source_bundle_bytes(
+        nrz_source_bundle::SourceBundleVerificationInput {
+            owner_workspace_id: owner.clone(),
+            source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
+                &owner,
+                &source.logical_manifest_sha256,
+                &source.source_sha256,
+                None,
+            ),
+            source_sha256: source.source_sha256.clone(),
+            logical_manifest_sha256: source.logical_manifest_sha256.clone(),
+            budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical)
+                .unwrap(),
+        },
+        fs::read(source.source_path()).unwrap().into(),
+    )
+    .await
+    .unwrap();
+    let unpacked = tempdir().unwrap();
+    tar::Archive::new(
+        zstd::stream::read::Decoder::new(fs::File::open(source.source_path()).unwrap()).unwrap(),
+    )
+    .unpack(unpacked.path())
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(
+            unpacked
+                .path()
+                .join("apps/site/dist/.onreza/python/build/authored.txt")
+        )
+        .unwrap(),
+        "AUTHORED_ASSET"
+    );
+    if !bootstrap {
+        assert!(!unpacked.path().join("apps/site/.onreza").exists());
+    }
+    fs::remove_dir_all(workspace.path()).unwrap();
+    for (name, program, expected) in [
+        ("api", "node", "PUBLISHED_JS_DEPENDENCY"),
+        (
+            "side",
+            "python3",
+            "PUBLISHED_PYTHON_BOOTSTRAP:literal argument",
+        ),
+    ] {
+        if name == "side" && !bootstrap {
+            continue;
+        }
+        let layer = logical
+            .layers
+            .iter()
+            .find(|layer| layer.name == name)
+            .unwrap();
+        let output = assert_cmd::Command::new(program)
+            .arg(layer.entrypoint.as_deref().unwrap())
+            .args(
+                layer.runtime_config.as_ref().unwrap()["applicationRuntime"]["args"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.as_str().unwrap()),
+            )
+            .current_dir(unpacked.path())
+            .env_remove("NODE_PATH")
+            .env_remove("PYTHONPATH")
+            .timeout(std::time::Duration::from_secs(10))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), expected);
+    }
+}

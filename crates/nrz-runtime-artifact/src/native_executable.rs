@@ -1,8 +1,12 @@
 //! Native entry admission is independent of managed interpreter authorization.
-use goblin::elf::{Elf, dynamic, header, program_header};
+use goblin::{
+    container::{Container, Ctx, Endian},
+    elf::{Elf, dynamic, header, program_header, section_header, symver},
+};
 use std::{
-    collections::{BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     path::{Component, Path, PathBuf},
+    sync::OnceLock,
 };
 
 use crate::{RuntimeArtifactError, invariant};
@@ -109,6 +113,10 @@ fn inspect_elf(
 }
 
 impl NativeExecutableRequirements {
+    /// Exported version definitions of the qualified Compute system libraries.
+    pub const QUALIFIED_SYSTEM_LIBRARY_VERSIONS_JSON: &'static str =
+        include_str!("../assets/native-system-library-versions.json");
+
     /// Qualified minimal Ubuntu 26.04 Compute SONAMEs, not the Builder/host cache.
     pub const QUALIFIED_SYSTEM_LIBRARIES: &'static [&'static str] = &[
         "libc.so.6",
@@ -150,6 +158,245 @@ impl NativeExecutableRequirements {
         )?;
         Ok((requirements, members.into_iter().collect()))
     }
+}
+
+const MAX_VERSION_ENTRIES: usize = 4096;
+
+fn version_error() -> RuntimeArtifactError {
+    RuntimeArtifactError::Invariant(
+        "native ELF has malformed or unsupported version metadata".into(),
+    )
+}
+
+fn dynamic_tag(elf: &Elf<'_>, tag: u64) -> Result<Option<u64>, RuntimeArtifactError> {
+    let mut values = elf
+        .dynamic
+        .iter()
+        .flat_map(|value| &value.dyns)
+        .filter(|value| value.d_tag == tag);
+    let first = values.next().map(|value| value.d_val);
+    if values.next().is_some() {
+        return Err(version_error());
+    }
+    Ok(first)
+}
+
+/// The loader uses dynamic tags even when an ELF has no section headers. Give
+/// goblin a bounded view of that file-backed segment instead of trusting SHT_*.
+fn version_section(
+    elf: &Elf<'_>,
+    bytes: &[u8],
+    pointer_tag: u64,
+    count_tag: u64,
+    section_type: u32,
+) -> Result<Option<section_header::SectionHeader>, RuntimeArtifactError> {
+    let pair = (dynamic_tag(elf, pointer_tag)?, dynamic_tag(elf, count_tag)?);
+    let (address, count) = match pair {
+        (None, None) => return Ok(None),
+        (Some(address), Some(count)) if count > 0 && count <= MAX_VERSION_ENTRIES as u64 => {
+            (address, count)
+        }
+        _ => return Err(version_error()),
+    };
+    let mut segments = elf.program_headers.iter().filter(|segment| {
+        segment.p_type == program_header::PT_LOAD
+            && address >= segment.p_vaddr
+            && segment
+                .p_vaddr
+                .checked_add(segment.p_filesz)
+                .is_some_and(|end| address < end)
+    });
+    let segment = segments.next().ok_or_else(version_error)?;
+    if segments.next().is_some() {
+        return Err(version_error());
+    }
+    let offset = segment
+        .p_offset
+        .checked_add(address - segment.p_vaddr)
+        .ok_or_else(version_error)?;
+    let end = segment
+        .p_offset
+        .checked_add(segment.p_filesz)
+        .filter(|end| *end <= bytes.len() as u64)
+        .ok_or_else(version_error)?;
+    Ok(Some(section_header::SectionHeader {
+        sh_type: section_type,
+        sh_offset: offset,
+        sh_size: end - offset,
+        sh_info: count as u32,
+        ..Default::default()
+    }))
+}
+
+fn version_name(elf: &Elf<'_>, offset: usize) -> Result<String, RuntimeArtifactError> {
+    elf.dynstrtab
+        .get_at(offset)
+        .filter(|name| !name.is_empty() && name.len() <= 256)
+        .map(str::to_owned)
+        .ok_or_else(version_error)
+}
+
+// GNU version nodes use the SysV ELF name hash, not the GNU symbol-table hash.
+fn version_name_hash(name: &str) -> u32 {
+    let mut hash = 0_u32;
+    for byte in name.bytes() {
+        hash = (hash << 4).wrapping_add(u32::from(byte));
+        let high = hash & 0xf000_0000;
+        hash ^= high >> 24;
+        hash &= !high;
+    }
+    hash
+}
+
+fn version_needs(
+    elf: &Elf<'_>,
+    bytes: &[u8],
+) -> Result<BTreeMap<String, BTreeSet<String>>, RuntimeArtifactError> {
+    let Some(section) = version_section(
+        elf,
+        bytes,
+        dynamic::DT_VERNEED,
+        dynamic::DT_VERNEEDNUM,
+        section_header::SHT_GNU_VERNEED,
+    )?
+    else {
+        return Ok(BTreeMap::new());
+    };
+    let count = section.sh_info as usize;
+    let sections = [section];
+    let parsed =
+        symver::VerneedSection::parse(bytes, &sections, Ctx::new(Container::Big, Endian::Little))
+            .map_err(|_| version_error())?
+            .ok_or_else(version_error)?;
+    let needs = parsed.iter().collect::<Vec<_>>();
+    if needs.len() != count {
+        return Err(version_error());
+    }
+    let mut result = BTreeMap::new();
+    let mut total = 0;
+    for (index, need) in needs.iter().enumerate() {
+        total += usize::from(need.vn_cnt);
+        if need.vn_version != 1
+            || need.vn_cnt == 0
+            || need.vn_aux < 16
+            || total > MAX_VERSION_ENTRIES
+            || (index + 1 == count && need.vn_next != 0)
+            || (index + 1 < count && need.vn_next < 16)
+        {
+            return Err(version_error());
+        }
+        let library = version_name(elf, need.vn_file)?;
+        if !elf.libraries.contains(&library.as_str()) || result.contains_key(&library) {
+            return Err(version_error());
+        }
+        let auxiliary = need.iter().collect::<Vec<_>>();
+        if auxiliary.len() != usize::from(need.vn_cnt) {
+            return Err(version_error());
+        }
+        let mut versions = BTreeSet::new();
+        for (index, version) in auxiliary.iter().enumerate() {
+            if (index + 1 == auxiliary.len() && version.vna_next != 0)
+                || (index + 1 < auxiliary.len() && version.vna_next < 16)
+                || version.vna_flags & !symver::VER_FLG_WEAK != 0
+            {
+                return Err(version_error());
+            }
+            let name = version_name(elf, version.vna_name)?;
+            if version.vna_flags & symver::VER_FLG_WEAK == 0 {
+                if version.vna_hash != version_name_hash(&name) {
+                    return Err(version_error());
+                }
+                versions.insert(name);
+            }
+        }
+        result.insert(library, versions);
+    }
+    Ok(result)
+}
+
+fn version_definitions(
+    elf: &Elf<'_>,
+    bytes: &[u8],
+) -> Result<BTreeSet<String>, RuntimeArtifactError> {
+    let Some(section) = version_section(
+        elf,
+        bytes,
+        dynamic::DT_VERDEF,
+        dynamic::DT_VERDEFNUM,
+        section_header::SHT_GNU_VERDEF,
+    )?
+    else {
+        return Ok(BTreeSet::new());
+    };
+    let count = section.sh_info as usize;
+    let sections = [section];
+    let parsed =
+        symver::VerdefSection::parse(bytes, &sections, Ctx::new(Container::Big, Endian::Little))
+            .map_err(|_| version_error())?
+            .ok_or_else(version_error)?;
+    let definitions = parsed.iter().collect::<Vec<_>>();
+    if definitions.len() != count {
+        return Err(version_error());
+    }
+    let mut result = BTreeSet::new();
+    let mut total = 0;
+    for (index, definition) in definitions.iter().enumerate() {
+        total += usize::from(definition.vd_cnt);
+        if definition.vd_version != 1
+            || definition.vd_cnt == 0
+            || definition.vd_aux < 20
+            || total > MAX_VERSION_ENTRIES
+            || (index + 1 == count && definition.vd_next != 0)
+            || (index + 1 < count && definition.vd_next < 20)
+        {
+            return Err(version_error());
+        }
+        let auxiliary = definition.iter().collect::<Vec<_>>();
+        if auxiliary.len() != usize::from(definition.vd_cnt) {
+            return Err(version_error());
+        }
+        for (index, name) in auxiliary.iter().enumerate() {
+            if (index + 1 == auxiliary.len() && name.vda_next != 0)
+                || (index + 1 < auxiliary.len() && name.vda_next < 8)
+            {
+                return Err(version_error());
+            }
+            let name = version_name(elf, name.vda_name)?;
+            if index == 0 {
+                if definition.vd_hash != version_name_hash(&name) {
+                    return Err(version_error());
+                }
+                // Later verdaux names describe parents, not additional exports.
+                result.insert(name);
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn qualified_versions() -> &'static BTreeMap<String, BTreeSet<String>> {
+    static VERSIONS: OnceLock<BTreeMap<String, BTreeSet<String>>> = OnceLock::new();
+    VERSIONS.get_or_init(|| {
+        let baseline: serde_json::Value = serde_json::from_str(
+            NativeExecutableRequirements::QUALIFIED_SYSTEM_LIBRARY_VERSIONS_JSON,
+        )
+        .expect("qualified native version baseline must be valid JSON");
+        serde_json::from_value(baseline["libraries"].clone())
+            .expect("qualified native version baseline must contain library exports")
+    })
+}
+
+fn verify_versions(
+    library: &str,
+    required: &BTreeSet<String>,
+    provided: &BTreeSet<String>,
+) -> Result<(), RuntimeArtifactError> {
+    if let Some(missing) = required.difference(provided).next() {
+        return invariant(format!(
+            "native library '{library}' does not provide required version '{missing}'"
+        ));
+    }
+    Ok(())
 }
 
 fn fs_error(error: std::io::Error) -> RuntimeArtifactError {
@@ -321,6 +568,8 @@ fn inspect_closure(
         RuntimeArtifactError::Invariant(format!("invalid native artifact ELF: {error}"))
     })?;
     let requirements = inspect_elf(&elf, &bytes, executable)?;
+    let version_needs = version_needs(&elf, &bytes)?;
+    version_definitions(&elf, &bytes)?;
     if elf.dynamic.as_ref().is_some_and(|value| {
         value.info.flags_1 & dynamic::DF_1_NODEFLIB != 0
             || value.dyns.iter().any(|value| {
@@ -362,6 +611,17 @@ fn inspect_closure(
             }
         }
         if let Some((loader_path, canonical)) = resolved {
+            if let Some(required) = version_needs.get(library) {
+                let provider_bytes = std::fs::read(&canonical).map_err(fs_error)?;
+                let provider = Elf::parse(&provider_bytes).map_err(|error| {
+                    RuntimeArtifactError::Invariant(format!("invalid native library ELF: {error}"))
+                })?;
+                verify_versions(
+                    library,
+                    required,
+                    &version_definitions(&provider, &provider_bytes)?,
+                )?;
+            }
             if !visited.contains(&canonical) {
                 inspect_closure(root, cwd, &loader_path, false, &inherited, visited, members)?;
             }
@@ -372,6 +632,8 @@ fn inspect_closure(
                 "native artifact lacks required library '{library}' requested by {}",
                 object.strip_prefix(root).unwrap().display()
             ));
+        } else if let Some(required) = version_needs.get(library) {
+            verify_versions(library, required, &qualified_versions()[library])?;
         }
     }
     Ok(requirements)

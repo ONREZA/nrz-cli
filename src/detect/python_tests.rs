@@ -684,6 +684,12 @@ fn implicit_python_selectors_bind_native_evidence_like_explicit_python() {
         let mut files = native_files
             .into_iter()
             .collect::<std::collections::HashMap<_, _>>();
+        // Keep native autodetection while the Python entry belongs to an authored
+        // serving override; package metadata here only describes build tooling.
+        files.insert(
+            "package.json",
+            r#"{"scripts":{"build":"echo auxiliary tooling"}}"#,
+        );
         files.insert("main.py", "print(42)");
         let fs = super::fs::VirtualFs::from_json(&serde_json::json!({"files":files}).to_string())
             .unwrap();
