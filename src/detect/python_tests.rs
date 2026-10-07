@@ -353,3 +353,211 @@ fn python_minor_selection_is_frozen_but_not_part_of_normalized_launch_intent() {
     .unwrap();
     assert!(declaration.validate().is_err());
 }
+
+#[test]
+fn declared_python_launch_replaces_incidental_javascript_defaults() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"devDependencies":{"vite":"7.0.0"},"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("pyproject.toml"),
+        "[project]\nname='company'\ndependencies=['fastapi','uvicorn']\n",
+    )
+    .unwrap();
+    std::fs::write(project.path().join("onreza.toml"), "[deploy]\nruntime='python'\npython_version='3.12'\napplication='company.web:app'\nserver='asgi'\n").unwrap();
+    let mut detection = detect(project.path());
+    super::application_runtime::resolve_and_bind_detection(
+        &LocalFs::new(project.path()),
+        &mut detection,
+    )
+    .unwrap();
+    assert_eq!(detection.framework, "fastapi");
+    assert_eq!(detection.suggested_compute, ComputeType::Process);
+    assert_eq!(detection.metadata.runtime.version.as_deref(), Some("3.12"));
+    let build = detection.metadata.build_info.unwrap();
+    assert_eq!(build.build_command, None);
+    assert_eq!(build.output_dir.as_deref(), Some("."));
+    assert!(
+        build
+            .install_command
+            .as_deref()
+            .unwrap()
+            .starts_with("python3.12 ")
+    );
+    assert!(
+        !build
+            .install_command
+            .as_deref()
+            .unwrap_or_default()
+            .contains("npm")
+    );
+}
+
+#[test]
+fn incomplete_python_dependencies_require_an_authored_launch() {
+    use super::python_launch::{PythonLaunchRequest, resolve_launch_for_framework};
+    for requirements in [
+        "fastapi; python_version < '3.13'\nflask\ngunicorn\n",
+        "-r requirements/base.txt\n",
+    ] {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
+        std::fs::write(
+            project.path().join("main.py"),
+            "from flask import Flask\napp=Flask(__name__)\n",
+        )
+        .unwrap();
+        let fs = LocalFs::new(project.path());
+        let result = resolve_launch_for_framework(
+            &fs,
+            PythonLaunchRequest {
+                entry: None,
+                module: None,
+                application: None,
+                server: None,
+                args: &[],
+            },
+            None,
+        );
+        assert!(
+            result.is_err(),
+            "incomplete dependencies inferred a launch: {result:?}"
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("framework inference")
+        );
+        assert!(
+            resolve_launch_for_framework(
+                &fs,
+                PythonLaunchRequest {
+                    entry: None,
+                    module: None,
+                    application: Some("main:app"),
+                    server: None,
+                    args: &[]
+                },
+                None
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("framework inference")
+        );
+        let callable = resolve_launch_for_framework(
+            &fs,
+            PythonLaunchRequest {
+                entry: None,
+                module: None,
+                application: Some("main:app"),
+                server: None,
+                args: &[],
+            },
+            Some("python"),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(callable.args, ["CALLABLE", "main:app"]);
+        let declared = resolve_launch_for_framework(
+            &fs,
+            PythonLaunchRequest {
+                entry: None,
+                module: None,
+                application: Some("main:app"),
+                server: Some("wsgi"),
+                args: &[],
+            },
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(declared.args, ["WSGI", "main:app"]);
+        let preset = resolve_launch_for_framework(
+            &fs,
+            PythonLaunchRequest {
+                entry: None,
+                module: None,
+                application: None,
+                server: None,
+                args: &[],
+            },
+            Some("flask"),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(preset.args, ["WSGI", "main:app"]);
+    }
+}
+
+#[test]
+fn python_framework_evidence_keeps_comments_and_django_management_distinct() {
+    use super::python_launch::{PythonLaunchRequest, resolve_launch_for_framework};
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("requirements.txt"),
+        "flask # deploy; production\ngunicorn\n",
+    )
+    .unwrap();
+    std::fs::write(project.path().join("main.py"), "app = object()\n").unwrap();
+    let fs = LocalFs::new(project.path());
+    let request = || PythonLaunchRequest {
+        entry: None,
+        module: None,
+        application: None,
+        server: None,
+        args: &[],
+    };
+    assert_eq!(
+        resolve_launch_for_framework(&fs, request(), None)
+            .unwrap()
+            .unwrap()
+            .args,
+        ["WSGI", "main:app"]
+    );
+    std::fs::write(
+        project.path().join("requirements.txt"),
+        "-r requirements/base.txt\nfastapi; python_version < '3.13'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("manage.py"),
+        "# Django management entry\n",
+    )
+    .unwrap();
+    std::fs::create_dir(project.path().join("company")).unwrap();
+    std::fs::write(
+        project.path().join("company/wsgi.py"),
+        "application=object()\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("company/asgi.py"),
+        "application=object()\n",
+    )
+    .unwrap();
+    assert_eq!(
+        resolve_launch_for_framework(&fs, request(), None)
+            .unwrap()
+            .unwrap()
+            .args,
+        ["WSGI", "company.wsgi:application"]
+    );
+    assert_eq!(
+        resolve_launch_for_framework(
+            &fs,
+            PythonLaunchRequest {
+                server: Some("asgi"),
+                ..request()
+            },
+            None
+        )
+        .unwrap()
+        .unwrap()
+        .args,
+        ["ASGI", "company.asgi:application"]
+    );
+}

@@ -1045,10 +1045,9 @@ fn map_candidate_to_output(
     output_dir: &Path,
     package_dir: &Path,
 ) -> Option<PathBuf> {
-    if output_dir.join(candidate).is_file() {
-        return Some(candidate.to_path_buf());
-    }
-
+    // Package fields and direct start paths belong to the package root. Map
+    // that path into the artifact before trying an output-relative fallback.
+    // Otherwise `dist/server.js` can select `dist/dist/server.js` by accident.
     if package_dir != output_dir {
         if let Ok(output_rel_to_package) = output_dir.strip_prefix(package_dir)
             && !output_rel_to_package.as_os_str().is_empty()
@@ -1067,6 +1066,10 @@ fn map_candidate_to_output(
         {
             return Some(stripped.to_path_buf());
         }
+    }
+
+    if output_dir.join(candidate).is_file() {
+        return Some(candidate.to_path_buf());
     }
 
     None

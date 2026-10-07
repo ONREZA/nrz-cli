@@ -30,6 +30,12 @@ workspace = "myteam"
 framework = "next"
 ```
 
+Hugo автоматически определяется по `hugo.toml`, `hugo.yaml` или `hugo.json`
+в корне либо в `config/_default`. Для проекта с `config.toml`, `config.yaml`
+или `config.json` в этих каталогах укажите `framework = "hugo"`: общее имя конфигурации
+само по себе не определяет генератор. Hugo STATIC может содержать только
+вложенные страницы без корневого `index.html`.
+
 ---
 
 ## [dev]
@@ -100,7 +106,13 @@ output_dirs = ["dist"]
 | Поле | Тип | По умолчанию | Описание |
 |------|-----|-------------|---------|
 | `compute` | string | авто | Принудительно задать compute type вместо авто-определения. Значения: `"static"`, `"process"`. Используйте только если авто-определение даёт неверный результат. |
-| `entry` | string | авто | Точка входа для `PROCESS`-деплоев (Node.js/Bun сервер). Должна быть относительным путём без `..`, не shell-командой. Пример: `"server.ts"`, `"dist/index.js"`. Compatibility alias: `entrypoint`. Если не задана, CLI определяет автоматически. |
+| `runtime` | string | авто | Launcher приложения: `"node"`, `"bun"`, `"python"` или `"executable"`. Язык сборки выбирается отдельно. |
+| `python_version` | string | `"3.14"` | Minor CPython: `"3.12"`, `"3.13"` или `"3.14"`. |
+| `entry` | string | авто | Файл запуска `PROCESS`: JS/TS, Python script или готовый executable. Относительный путь без `..`, не shell-команда. Compatibility alias: `entrypoint`. |
+| `module` | string | нет | Python import module для запуска как `python -m`, например `"company.worker"`. |
+| `application` | string | нет | Python import reference, например `"api.main:app"` или `"api.main:create_app()"`. |
+| `server` | string | авто | Python server: `"asgi"` / `"uvicorn"` либо `"wsgi"` / `"gunicorn"`. Зависимость сервера должна быть объявлена в проекте. |
+| `args` | string[] | `[]` | Буквальные аргументы приложения после точки запуска. |
 | `app` | string | нет | Монорепо: какой workspace/пакет деплоить. Матчится по имени пакета из `package.json`, имени директории, или относительному пути. Эквивалент CLI флага `--app` / `--filter`. |
 
 Для `nrz deploy --app web` CLI сначала выбирает workspace из root config, затем
@@ -111,12 +123,24 @@ output_dirs = ["dist"]
 подтягивает server project settings для `project.id`, как `nrz deploy`; для
 локального-only просмотра используйте `nrz config explain --local`.
 
+Для Python поля `entry`, `module` и `application` задают разные режимы запуска.
+Явный режим дочернего приложения заменяет конкурирующие настройки родителя.
+`server` наследуется в режиме application; явный `server` без `application`
+выбирает application inference вместо родительского script/module.
+Конфликтующие поля самого дочернего приложения отклоняются.
+
+Явный запуск имеет приоритет над автодетектом. Единственный console script
+из `pyproject.toml` запускается как callable, даже при наличии веб-фреймворка.
+Если зависимости содержат условия или включения других requirements-файлов,
+задайте `application` и `server` явно: этих данных недостаточно для надёжного
+автоматического выбора ASGI/WSGI. Установщик обрабатывает authored dependencies.
+
 **Compute types:**
 
 | Тип | Когда использовать |
 |-----|--------------------|
 | `static` | Статические сайты без серверного кода (Vite, CRA, Astro static) |
-| `process` | Полноценный Node.js/Bun сервер (Next.js standalone, Hono, Elysia, кастомный сервер) |
+| `process` | Сервер на Node.js, Bun, CPython или готовый Linux executable |
 
 Матрица приоритетов `frameworkPreset`/`compute`/`outputDirectory` описана в
 [output-directory-contract.md](./output-directory-contract.md). Ключевое правило:
@@ -125,7 +149,7 @@ output_dirs = ["dist"]
 
 `compute = "process"` и `compute = "static"` выполняются без `.onreza/manifest.json`.
 
-**Приоритет entry point для PROCESS:**
+**Приоритет entry point для JS/TS PROCESS:**
 `[deploy] entry` > файл из прямого `scripts.start` с Bun/Node > авто-определение по фреймворку > `package.json "main"/"module"` > остальные script hints > `index.*` > heuristic scan по build output
 
 Приложение выбирает launcher до install/build: `[deploy] runtime = "bun"` или
@@ -153,7 +177,9 @@ script aliases в прямом Bun/Node start отвергаются до уст
 проверяет actual local Node major до install/build. Bun проверяется по pinned
 CLI toolchain. Platform runner проверяет frozen intent и trusted runtime target.
 `SOURCE_BUNDLE_V1` сохраняет family/args и `buildRuntimeVersion`; materializer и
-graph compiler отвергают несовпадающий target, в том числе без dependencies.
+graph compiler отвергают несовместимые family/target, в том числе без dependencies.
+Соседний слой может сохранять другой поддерживаемый target без дерева
+зависимостей; его зависимости требуют отдельного build policy.
 Default direct publication без явного intent сохраняет существующий Bun launcher.
 
 Если entry не удалось определить однозначно:

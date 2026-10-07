@@ -9,11 +9,20 @@ use super::fs::Fs;
 #[derive(Debug, Default, Deserialize)]
 struct RuntimeProject {
     #[serde(default)]
+    project: RuntimeFramework,
+    #[serde(default)]
     deploy: RuntimeDeploy,
 }
 
 #[derive(Debug, Default, Deserialize)]
+struct RuntimeFramework {
+    framework: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct RuntimeDeploy {
+    #[serde(skip)]
+    framework_override: Option<String>,
     python_version: Option<nrz_source_bundle::PythonMinor>,
     runtime: Option<ApplicationRuntimeFamily>,
     #[serde(alias = "entrypoint")]
@@ -29,18 +38,24 @@ pub fn resolve_application_runtime(
     fs: &dyn Fs,
     framework: &str,
 ) -> anyhow::Result<Option<ApplicationRuntimeDeclaration>> {
-    let config = read_runtime_config(fs)?;
+    let mut config = read_runtime_config(fs)?;
+    config
+        .framework_override
+        .get_or_insert_with(|| framework.to_string());
     resolve_runtime(fs, framework, config)
 }
 
 fn read_runtime_config(fs: &dyn Fs) -> anyhow::Result<RuntimeDeploy> {
-    Ok(fs
+    let config = fs
         .read_file("onreza.toml")
         .map(|text| toml::from_str::<RuntimeProject>(&text))
         .transpose()
         .context("invalid application runtime declaration in onreza.toml")?
-        .unwrap_or_default()
-        .deploy)
+        .unwrap_or_default();
+    Ok(RuntimeDeploy {
+        framework_override: config.project.framework,
+        ..config.deploy
+    })
 }
 
 #[allow(dead_code)] // Shared detect module is also compiled by the public library.
@@ -50,16 +65,28 @@ pub(crate) fn resolve_and_bind_detection(
 ) -> anyhow::Result<()> {
     let config = read_runtime_config(fs)?;
     let configured_entry = config.entry.clone();
-    let declaration = resolve_runtime(fs, &detection.framework, config)?;
-    bind_application_runtime(detection, declaration, configured_entry.as_deref())
+    let framework_override = config.framework_override.clone();
+    let framework = framework_override
+        .as_deref()
+        .unwrap_or(&detection.framework);
+    let declaration = resolve_runtime(fs, framework, config)?;
+    bind_application_runtime(
+        fs,
+        detection,
+        declaration,
+        configured_entry.as_deref(),
+        framework_override.as_deref(),
+    )
 }
 
 /// Bind frozen launch intent to fresh framework/build-output inference.
 #[allow(dead_code)] // CLI-only binding; keep it out of the public library API.
 pub(crate) fn bind_application_runtime(
+    fs: &dyn Fs,
     detection: &mut super::types::DetectionResult,
     declaration: Option<ApplicationRuntimeDeclaration>,
     configured_entry: Option<&str>,
+    framework_override: Option<&str>,
 ) -> anyhow::Result<()> {
     if let Some(entry) = configured_entry {
         normalize_application_entry(entry)?;
@@ -78,14 +105,30 @@ pub(crate) fn bind_application_runtime(
     if let Some(declaration) = &declaration {
         match declaration.family {
             ApplicationRuntimeFamily::Python => {
+                if !super::python::is_python_framework(&detection.framework)
+                    && framework_override.is_none()
+                {
+                    *detection = super::python::detect_configured_python(fs);
+                } else if let Some(slug) =
+                    framework_override.filter(|slug| super::python::is_python_framework(slug))
+                {
+                    *detection = super::python::detect_configured_python_framework(fs, slug);
+                }
+                let minor = declaration.python_version.unwrap_or_default();
+                detection.suggested_compute = super::types::ComputeType::Process;
                 detection.metadata.runtime.runtime_type = super::types::RuntimeType::Python;
-                detection.metadata.runtime.version = Some(
-                    declaration
-                        .python_version
-                        .unwrap_or_default()
-                        .version()
-                        .into(),
-                );
+                detection.metadata.runtime.version = Some(minor.version().into());
+                if detection
+                    .metadata
+                    .package_manager
+                    .as_ref()
+                    .is_some_and(|manager| manager.pm_type == super::types::PackageManagerType::Pip)
+                    && let Some(build) = detection.metadata.build_info.as_mut()
+                    && let Some(manifest) = super::python::dependency_manifest(fs)
+                {
+                    build.install_command =
+                        Some(super::python::install_command_for_minor(manifest, minor));
+                }
             }
             ApplicationRuntimeFamily::Executable => {
                 detection.suggested_compute = super::types::ComputeType::Process;
@@ -112,6 +155,7 @@ pub fn resolve_application_runtime_with_config(
             runtime,
             entry,
             args,
+            framework_override: Some(framework.to_string()),
             ..Default::default()
         },
     )
@@ -121,11 +165,13 @@ pub fn resolve_application_runtime_with_project(
     fs: &dyn Fs,
     framework: &str,
     deploy: &crate::config::DeploySection,
+    framework_override: Option<&str>,
 ) -> anyhow::Result<Option<ApplicationRuntimeDeclaration>> {
     resolve_runtime(
         fs,
         framework,
         RuntimeDeploy {
+            framework_override: framework_override.map(str::to_string),
             runtime: deploy.runtime,
             python_version: deploy.python_version,
             entry: deploy.entry.clone(),
@@ -163,7 +209,7 @@ fn resolve_runtime(
         let launch = super::python_launch::resolve_launch_for_framework(fs, super::python_launch::PythonLaunchRequest {
             entry: config.entry.as_deref(), module: config.module.as_deref(), application: config.application.as_deref(),
             server: config.server.as_deref(), args,
-        }, Some(framework))?.context("Python application entry is ambiguous or absent; declare deploy.entry, module or application")?;
+        }, config.framework_override.as_deref())?.context("Python application entry is ambiguous or absent; declare deploy.entry, module or application")?;
         let declaration = ApplicationRuntimeDeclaration {
             family: ApplicationRuntimeFamily::Python,
             python_version: Some(config.python_version.unwrap_or_default()),

@@ -206,7 +206,77 @@ fn normalize_package_name(name: &str) -> String {
     name.to_ascii_lowercase().replace(['_', '.'], "-")
 }
 
+/// Marker evaluation and recursive requirements acquisition belong to the
+/// installer. Detection must not invent a server from incomplete evidence.
+pub(crate) fn framework_evidence_complete(fs: &dyn Fs) -> anyhow::Result<bool> {
+    let conditional_framework = |requirement: &str| {
+        let end = requirement
+            .char_indices()
+            .find_map(|(offset, ch)| {
+                (ch == '#' && requirement[..offset].ends_with(char::is_whitespace))
+                    .then_some(offset)
+            })
+            .unwrap_or(requirement.len());
+        let requirement = &requirement[..end];
+        requirement.contains(';')
+            && requirement_name(requirement)
+                .is_some_and(|name| is_python_framework(&name) && name != "python")
+    };
+    match dependency_manifest(fs) {
+        Some("requirements.txt") => Ok(fs.read_file("requirements.txt").is_none_or(|text| {
+            !text.lines().any(|line| {
+                let line = line.trim();
+                line.starts_with("-r")
+                    || line.starts_with("--requirement")
+                    || conditional_framework(line)
+            })
+        })),
+        Some("pyproject.toml") => {
+            let Some(text) = fs.read_file("pyproject.toml") else {
+                return Ok(true);
+            };
+            let value: toml::Value = toml::from_str(&text)?;
+            if let Some(dependencies) = value
+                .get("project")
+                .and_then(|p| p.get("dependencies"))
+                .and_then(toml::Value::as_array)
+            {
+                return Ok(!dependencies
+                    .iter()
+                    .filter_map(toml::Value::as_str)
+                    .any(conditional_framework));
+            }
+            Ok(value
+                .get("tool")
+                .and_then(|p| p.get("poetry"))
+                .and_then(|p| p.get("dependencies"))
+                .and_then(toml::Value::as_table)
+                .is_none_or(|deps| {
+                    !deps.iter().any(|(name, requirement)| {
+                        is_python_framework(&normalize_package_name(name))
+                            && name != "python"
+                            && requirement.get("optional").and_then(toml::Value::as_bool)
+                                != Some(true)
+                            && (requirement.is_array()
+                                || ["markers", "python", "platform"]
+                                    .iter()
+                                    .any(|key| requirement.get(*key).is_some()))
+                    })
+                }))
+        }
+        _ => Ok(true),
+    }
+}
+
 pub fn framework(fs: &dyn Fs) -> anyhow::Result<&'static str> {
+    if fs.exists("manage.py") && !fs.is_dir("manage.py") {
+        return Ok("django");
+    }
+    if !framework_evidence_complete(fs)? {
+        bail!(
+            "Python framework inference is incomplete because dependencies use conditional framework requirements or requirements includes; declare deploy.entry, module, application with server, or project.framework explicitly"
+        );
+    }
     let dependencies = dependency_names(fs)?;
     // FastAPI itself depends on Starlette: the specific framework wins.
     if dependencies.contains("fastapi") {

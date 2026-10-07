@@ -77,23 +77,61 @@ pub fn dart_entries(fs: &dyn Fs) -> Vec<String> {
 
 pub fn go_main_packages(fs: &dyn Fs) -> Vec<String> {
     let mut packages = Vec::new();
-    if is_go_main(fs, "main.go") {
+    if is_go_main_package(fs, "") {
         packages.push(".".to_string());
     }
     for name in fs.list_dir("cmd") {
-        if is_go_main(fs, &format!("cmd/{name}/main.go")) {
+        let path = format!("cmd/{name}");
+        if fs.is_dir(&path) && is_go_main_package(fs, &path) {
             packages.push(format!("./cmd/{name}"));
         }
     }
     packages
 }
 
-fn is_go_main(fs: &dyn Fs, path: &str) -> bool {
-    fs.read_file(path).is_some_and(|source| {
-        source.lines().any(|line| {
-            line.split_once("//").map_or(line, |(code, _)| code).trim() == "package main"
-        })
+fn is_go_main_package(fs: &dyn Fs, directory: &str) -> bool {
+    fs.list_dir(directory).into_iter().any(|name| {
+        if !name.ends_with(".go") || name.ends_with("_test.go") || name.starts_with(['.', '_']) {
+            return false;
+        }
+        let path = if directory.is_empty() {
+            name
+        } else {
+            format!("{directory}/{name}")
+        };
+        !fs.is_dir(&path)
+            && fs.read_file(&path).is_some_and(|source| {
+                let source = source.strip_prefix('\u{feff}').unwrap_or(&source);
+                let Some(("package", rest)) = go_identifier(source) else {
+                    return false;
+                };
+                matches!(go_identifier(rest), Some(("main", _)))
+            })
     })
+}
+
+// Only the initial package clause determines discovery. Go compilation remains
+// responsible for build constraints and the rest of the source's validity.
+fn go_identifier(mut source: &str) -> Option<(&str, &str)> {
+    loop {
+        source = source.trim_start_matches([' ', '\t', '\r', '\n']);
+        if let Some(comment) = source.strip_prefix("//") {
+            source = comment.split_once('\n').map_or("", |(_, rest)| rest);
+        } else if let Some(comment) = source.strip_prefix("/*") {
+            source = comment.split_once("*/")?.1;
+        } else {
+            break;
+        }
+    }
+    let first = source.chars().next()?;
+    if first != '_' && !first.is_alphabetic() {
+        return None;
+    }
+    let end = source
+        .char_indices()
+        .find(|(_, character)| *character != '_' && !character.is_alphanumeric())
+        .map_or(source.len(), |(offset, _)| offset);
+    Some(source.split_at(end))
 }
 
 fn hugo_config(fs: &dyn Fs) -> Option<&'static str> {

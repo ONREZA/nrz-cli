@@ -305,8 +305,8 @@ fn python_script_preserves_all_64_arguments_and_module_reserves_intent_slots() {
 #[test]
 fn python_declared_console_script_freezes_callable_and_runs_literal_arguments() {
     for metadata in [
-        "[project]\nname='demo'\n[project.scripts]\ndemo='demo:main'\n",
-        "[tool.poetry]\nname='demo'\n[tool.poetry.scripts]\ndemo={reference='demo:main',type='console'}\n",
+        "[project]\nname='demo'\ndependencies=['fastapi','uvicorn']\n[project.scripts]\ndemo='demo:main'\n",
+        "[tool.poetry]\nname='demo'\n[tool.poetry.dependencies]\nfastapi='*'\nuvicorn='*'\n[tool.poetry.scripts]\ndemo={reference='demo:main',type='console'}\n",
     ] {
         let project = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(project.path().join("src/demo")).unwrap();

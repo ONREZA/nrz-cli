@@ -2190,6 +2190,34 @@ fn resolve_entry_point_from_project_start_script_when_output_is_nested() {
 }
 
 #[test]
+fn project_relative_entry_precedes_output_relative_collision() {
+    let project = tempfile::tempdir().unwrap();
+    let output = project.path().join("dist");
+    std::fs::create_dir_all(output.join("dist")).unwrap();
+    std::fs::write(output.join("server.js"), "console.log('authored')").unwrap();
+    std::fs::write(output.join("dist/server.js"), "console.log('other root')").unwrap();
+
+    for package in [
+        r#"{"scripts":{"start":"node dist/server.js"}}"#,
+        r#"{"main":"dist/server.js"}"#,
+        r#"{"module":"dist/server.js"}"#,
+    ] {
+        std::fs::write(project.path().join("package.json"), package).unwrap();
+        let entry = resolve_entry_point("other", &output, project.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(output.join(entry)).unwrap(),
+            "console.log('authored')"
+        );
+    }
+
+    let entry = resolve_application_entry("dist/server.js", &output, project.path()).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(output.join(entry)).unwrap(),
+        "console.log('authored')"
+    );
+}
+
+#[test]
 fn resolve_entry_point_root_prefers_server_over_main() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("server.js"), "").unwrap();

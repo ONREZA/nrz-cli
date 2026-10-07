@@ -1,5 +1,5 @@
 use super::fs::VirtualFs;
-use super::native::{NativeRecipe, detect_native, native_recipe};
+use super::native::{NativeRecipe, detect_native, go_main_packages, native_recipe};
 use super::types::{ComputeType, PackageManagerType, RuntimeType};
 
 fn fs(files: &[(&str, &str)]) -> VirtualFs {
@@ -96,6 +96,18 @@ fn hugo_with_go_modules_stays_static_without_fake_package_manager() {
 }
 
 #[test]
+fn go_root_main_package_does_not_require_a_main_go_filename() {
+    let input = fs(&[
+        ("go.mod", "module example.org/server"),
+        ("server.go", "package main\nfunc main() {}"),
+    ]);
+    assert_eq!(go_main_packages(&input), ["."]);
+    let result = detect_native(&input).unwrap();
+    assert_eq!(result.framework, "go");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
 fn go_main_package_has_process_intent_but_library_does_not() {
     let input = fs(&[
         ("go.mod", "module example.org/server"),
@@ -115,6 +127,74 @@ fn go_main_package_has_process_intent_but_library_does_not() {
         ]))
         .is_none()
     );
+}
+
+#[test]
+fn go_packages_are_discovered_from_any_direct_non_test_source_file() {
+    let input = fs(&[
+        ("go.mod", "module example.org/server"),
+        ("types.go", "package main\ntype Server struct{}"),
+        ("server.go", "package main\nfunc main() {}"),
+        ("cmd/worker/worker.go", "package main; func main() {}"),
+        ("cmd/worker/types.go", "package main"),
+        ("cmd/library/library.go", "package library"),
+        ("cmd/nested/internal/main.go", "package main"),
+        ("main_test.go", "package main"),
+        ("cmd/tests/main_test.go", "package main"),
+        (".hidden.go", "package main"),
+        ("_ignored.go", "package main"),
+    ]);
+    // One candidate per package directory, including both ambiguous candidates.
+    assert_eq!(go_main_packages(&input), [".", "./cmd/worker"]);
+    let result = detect_native(&input).unwrap();
+    assert_eq!(result.framework, "go");
+    assert_eq!(result.suggested_compute, ComputeType::Process);
+}
+
+#[test]
+fn go_package_clause_is_lexical_and_precedes_other_source_tokens() {
+    for source in [
+        "package main; func main() {}",
+        "\u{feff}//go:build linux\r\n/* license */\r\npackage/* separator */main\r\nfunc main() {}",
+        "package\nmain // package clause comment\nfunc main() {}",
+    ] {
+        assert_eq!(
+            go_main_packages(&fs(&[("server.go", source)])),
+            ["."],
+            "{source}"
+        );
+    }
+    for source in [
+        "/*\npackage main\n*/\npackage library",
+        "package library\nvar text = `\npackage main\n`",
+        "package mainish\nfunc main() {}",
+        "packagemain",
+        "/* unterminated\npackage main",
+        "// package main",
+        "var text = \"package main\"",
+    ] {
+        assert!(
+            go_main_packages(&fs(&[("server.go", source)])).is_empty(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn go_test_hidden_and_nested_files_do_not_make_a_deployable_package() {
+    let input = fs(&[
+        ("go.mod", "module example.org/library"),
+        ("library.go", "package library"),
+        ("main_test.go", "package main"),
+        (".hidden.go", "package main"),
+        ("_ignored.go", "package main"),
+        ("cmd/tests/main_test.go", "package main"),
+        ("cmd/hidden/.hidden.go", "package main"),
+        ("cmd/ignored/_ignored.go", "package main"),
+        ("cmd/deep/internal/server.go", "package main"),
+    ]);
+    assert!(go_main_packages(&input).is_empty());
+    assert!(detect_native(&input).is_none());
 }
 
 #[test]

@@ -420,6 +420,121 @@ async fn mixed_python_node_and_native_bundle_preserves_per_layer_runtime_authori
 }
 
 #[tokio::test]
+async fn admitted_node_build_preserves_code_only_sibling_target() {
+    let directory = tempdir().unwrap();
+    fs::create_dir_all(directory.path().join(".onreza")).unwrap();
+    fs::create_dir_all(directory.path().join("secondary")).unwrap();
+    fs::write(directory.path().join("server.js"), "console.log('primary')").unwrap();
+    fs::write(
+        directory.path().join("secondary/server.js"),
+        "console.log('secondary')",
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("package.json"),
+        r#"{"scripts":{"start":"node server.js"}}"#,
+    )
+    .unwrap();
+    let manifest = serde_json::json!({
+        "version":1,
+        "routes":[{"pattern":"^/.*$","layer":"primary","priority":0},
+                  {"pattern":"^/secondary/.*$","layer":"secondary","priority":1}],
+        "layers":[
+            {"name":"primary","target":"COMPUTE","directory":".","entry":"server.js",
+             "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
+            {"name":"secondary","target":"COMPUTE","directory":"secondary","entry":"server.js",
+             "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}}
+        ]
+    });
+    fs::write(
+        directory.path().join(".onreza/manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.output_dirs = Some(vec![".".into()]);
+    let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
+        directory.path().to_owned(),
+        config,
+    );
+    effective.bind_admitted_node_version("NODE_24").unwrap();
+    let built = crate::build::run_with_effective_config(
+        crate::cli::BuildArgs {
+            dir: directory.path().to_string_lossy().into_owned(),
+            skip_validation: false,
+        },
+        true,
+        &effective,
+        None,
+        false,
+        directory.path(),
+    )
+    .await
+    .unwrap()
+    .manifest
+    .unwrap();
+    let plan = build_source_bundle_plan_with_scan(
+        directory.path(),
+        &built,
+        &scan_dir(directory.path()).unwrap(),
+        &RuntimeArtifactScan::NodeRuntimeRoot,
+        RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap();
+    let secondary = plan
+        .logical_manifest
+        .layers
+        .iter()
+        .find(|layer| layer.name == "secondary")
+        .unwrap();
+    assert_eq!(
+        secondary.runtime_config.as_ref().unwrap()["buildRuntimeVersion"],
+        "node-22"
+    );
+    assert!(
+        plan.logical_manifest
+            .files
+            .iter()
+            .all(|file| file.role != SourceLogicalManifestFileRole::Dependency)
+    );
+    let primary = plan
+        .logical_manifest
+        .layers
+        .iter()
+        .find(|layer| layer.name == "primary")
+        .unwrap();
+    assert_eq!(
+        primary.runtime_config.as_ref().unwrap()["buildRuntimeVersion"],
+        "node-24"
+    );
+    let logical: nrz_source_bundle::SourceLogicalManifest =
+        serde_json::from_value(serde_json::to_value(&plan.logical_manifest).unwrap()).unwrap();
+    let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph_for_layer_targets(
+        &plan.logical_manifest_sha256,
+        &plan.source_sha256,
+        plan.source_size_bytes,
+        &logical,
+        &[],
+        &std::collections::HashMap::from([
+            ("primary".into(), "node-24".into()),
+            ("secondary".into(), "node-22".into()),
+        ]),
+    )
+    .unwrap();
+    nrz_runtime_artifact::verify_source_runtime_graph_dependencies(&logical, &graph).unwrap();
+    for (name, profile) in [("primary", "NODE_24"), ("secondary", "NODE_22")] {
+        let layer = graph
+            .wire()
+            .runtime_layers
+            .iter()
+            .find(|layer| layer.layer_name.as_str() == name)
+            .unwrap();
+        assert_eq!(layer.launch.as_ref().unwrap().profile.to_string(), profile);
+    }
+}
+
+#[tokio::test]
 async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitted_selection() {
     let directory = tempdir().unwrap();
     fs::write(directory.path().join("index.html"), b"<html></html>").unwrap();
@@ -549,6 +664,54 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
                 .as_ref()
                 .unwrap()["buildRuntimeVersion"],
             "bun-1.4.2"
+        );
+    }
+}
+
+#[test]
+fn sibling_target_exemption_rejects_invalid_targets_and_primary_override() {
+    let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
+        family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
+        entry: Some("server.js".into()),
+        args: vec![],
+        python_version: None,
+    };
+    for (directory, target) in [
+        ("secondary", "node-21"),
+        ("secondary", "node-invalid"),
+        ("secondary", "bun-1.4.2"),
+        (".", "node-22"),
+    ] {
+        let mut manifest = compute_manifest();
+        manifest.layers[0].directory = directory.into();
+        manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
+            application_runtime: Some(declaration.intent()),
+            build_runtime_version: Some(target.into()),
+            ..Default::default()
+        });
+        let error = crate::deploy::apply_application_runtime_manifest(
+            &mut manifest,
+            Some(&declaration),
+            Some("node-24"),
+            "other",
+        )
+        .unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<crate::output::CodedError>()
+                .unwrap()
+                .code
+                .as_str(),
+            "APPLICATION_RUNTIME_INVALID"
+        );
+        assert_eq!(
+            manifest.layers[0]
+                .runtime
+                .as_ref()
+                .unwrap()
+                .build_runtime_version
+                .as_deref(),
+            Some(target)
         );
     }
 }

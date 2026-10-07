@@ -27,6 +27,36 @@ pub(super) struct DeployPlanRequest<'a> {
     pub(super) platform_runner: bool,
 }
 
+/// A typed recipe owns only its generated output, never the project or a symlink target.
+pub(super) fn clear_native_build_output(
+    project_dir: &Path,
+    output_directory: &str,
+) -> anyhow::Result<()> {
+    if output_directory.contains(['\\', ':'])
+        || output_directory
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        anyhow::bail!("native build output must be a canonical relative directory");
+    }
+    let mut output = project_dir.canonicalize()?;
+    for component in Path::new(output_directory).components() {
+        let std::path::Component::Normal(component) = component else {
+            anyhow::bail!("native build output must stay inside the project directory");
+        };
+        output.push(component);
+        let metadata = match std::fs::symlink_metadata(&output) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error).context("cannot inspect native build output"),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            anyhow::bail!("native build output must not contain symlinks or source files");
+        }
+    }
+    std::fs::remove_dir_all(&output).context("cannot remove stale native build output")
+}
+
 pub(super) async fn scan_runtime_artifact_for_plan(
     root_dir: PathBuf,
     scan: RuntimeArtifactScan,
@@ -298,14 +328,17 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             &crate::detect::fs::LocalFs::new(project_dir),
             &detection.framework,
             &effective.config().deploy,
+            effective.framework_override(),
         )
         .map_err(|error| {
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
         })?;
     crate::detect::application_runtime::bind_application_runtime(
+        &crate::detect::fs::LocalFs::new(project_dir),
         &mut detection,
         application_runtime,
         effective.deploy_entry(),
+        effective.framework_override(),
     )
     .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
     let build_runtime_version = super::validate_application_runtime_before_build(
@@ -414,9 +447,11 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     detection =
         crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
     crate::detect::application_runtime::bind_application_runtime(
+        &crate::detect::fs::LocalFs::new(project_dir),
         &mut detection,
         application_runtime,
         effective.deploy_entry(),
+        effective.framework_override(),
     )
     .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
     if let Some(version) = &build_runtime_version

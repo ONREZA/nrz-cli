@@ -493,6 +493,27 @@ fn version_probes_observe_exact_toolchain_versions() {
 }
 
 #[test]
+fn hugo_nested_pages_do_not_require_a_home_page() {
+    let output = tempfile::tempdir().unwrap();
+    file(output.path(), "about/index.html", "<h1>About</h1>");
+    assert!(!output.path().join("index.html").exists());
+    let evidence = validate_output(output.path(), NativeRecipe::HugoStatic, None).unwrap();
+    assert!(evidence.entry.is_none());
+    assert!(evidence.target.is_none());
+    let manifest = crate::build::manifest::generate_static_manifest();
+    crate::build::manifest::verify_files(output.path(), &manifest).unwrap();
+    assert!(validate_output(output.path(), NativeRecipe::FlutterWeb, None).is_err());
+    assert!(
+        validate_output(
+            &output.path().join("missing"),
+            NativeRecipe::HugoStatic,
+            None
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn static_and_native_outputs_are_checked_before_publication() {
     let output = tempfile::tempdir().unwrap();
     assert!(validate_output(output.path(), NativeRecipe::FlutterWeb, None).is_err());

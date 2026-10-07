@@ -521,7 +521,7 @@ pub(crate) fn validate_output(
         bail!("native recipe output is missing: {}", output_dir.display());
     }
     if matches!(recipe, NativeRecipe::FlutterWeb | NativeRecipe::HugoStatic) {
-        if !output_dir.join("index.html").is_file() {
+        if recipe == NativeRecipe::FlutterWeb && !output_dir.join("index.html").is_file() {
             bail!("STATIC recipe output lacks index.html");
         }
         return Ok(NativeOutputEvidence {

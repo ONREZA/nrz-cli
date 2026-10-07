@@ -565,13 +565,12 @@ pub(crate) fn apply_application_runtime_manifest(
         {
             if declaration.is_some_and(|declaration| {
                 (declaration.family != intent.family
-                    || declaration.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
-                        && layer
-                            .runtime
-                            .as_ref()
-                            .and_then(|runtime| runtime.build_runtime_version.as_deref())
-                            .zip(build_runtime_version)
-                            .is_some_and(|(sibling, primary)| sibling != primary))
+                    || layer
+                        .runtime
+                        .as_ref()
+                        .and_then(|runtime| runtime.build_runtime_version.as_deref())
+                        .zip(build_runtime_version)
+                        .is_some_and(|(sibling, primary)| sibling != primary))
                     && !(layer.directory == "."
                         && declaration.entry.is_some()
                         && declaration.entry.as_deref() == layer.entry.as_deref())

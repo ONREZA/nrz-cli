@@ -221,21 +221,40 @@ fn materializes_dependency_images_and_exact_runtime_graph_from_one_source_bundle
 
 #[test]
 fn primary_dependencies_keep_their_build_target_while_siblings_use_their_frozen_declarations() {
-    for (config, expected_profile) in [
+    for (primary_family, primary_version, primary_profile, config, expected_profile) in [
         (
+            "bun",
+            "1.4.2",
+            "BUN",
             json!({"runtimeFamily":"PYTHON","buildRuntimeVersion":"python-3.14"}),
             "CPYTHON_3_14",
         ),
         (
+            "bun",
+            "1.4.2",
+            "BUN",
             json!({"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}),
             "NODE_24",
+        ),
+        (
+            "javascript",
+            "node-24",
+            "NODE_24",
+            json!({"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}),
+            "NODE_22",
         ),
     ] {
         let temp = TempDir::new().unwrap();
         let mut manifest = source_manifest();
-        manifest.layers[0].runtime_config = Some(
-            json!({"applicationRuntime":{"family":"BUN","args":[]},"buildRuntimeVersion":"bun-1.4.2"}),
-        );
+        let primary_target = if primary_family == "bun" {
+            format!("bun-{primary_version}")
+        } else {
+            primary_version.to_owned()
+        };
+        manifest.layers[0].runtime_config = Some(json!({
+            "applicationRuntime":{"family":if primary_family == "bun" {"BUN"} else {"NODE"},"args":[]},
+            "buildRuntimeVersion":primary_target
+        }));
         let mut python = manifest.layers[0].clone();
         python.name = "python".into();
         python.root_path = Some("python".into());
@@ -252,8 +271,8 @@ fn primary_dependencies_keep_their_build_target_while_siblings_use_their_frozen_
         let manifest_sha =
             compute_logical_manifest_sha256(&serde_json::to_value(&manifest).unwrap());
         let mut primary_compatibility = compatibility();
-        primary_compatibility["runtimeFamily"] = json!("bun");
-        primary_compatibility["runtimeVersion"] = json!("1.4.2");
+        primary_compatibility["runtimeFamily"] = json!(primary_family);
+        primary_compatibility["runtimeVersion"] = json!(primary_version);
         let result = materialize_source_bundle_runtime(
             &fake_erofs_toolchain(temp.path()),
             SourceBundleMaterializationRequest {
@@ -274,6 +293,10 @@ fn primary_dependencies_keep_their_build_target_while_siblings_use_their_frozen_
         )
         .unwrap();
         assert_eq!(result.dependencies.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&result.dependencies[0].manifest.wire().compatibility).unwrap()["runtimeVersion"],
+            primary_version
+        );
         let layers = &result.graph.wire().runtime_layers;
         assert_eq!(layers.len(), 2);
         assert_eq!(
@@ -286,7 +309,7 @@ fn primary_dependencies_keep_their_build_target_while_siblings_use_their_frozen_
                 .unwrap()
                 .profile
                 .to_string(),
-            "BUN"
+            primary_profile
         );
         let python = layers
             .iter()
@@ -297,6 +320,10 @@ fn primary_dependencies_keep_their_build_target_while_siblings_use_their_frozen_
             expected_profile
         );
         assert!(python.dependency_materialization_ids.is_empty());
+        // Without its own target, a same-family layer belongs to the primary policy.
+        if primary_family == "javascript" {
+            continue;
+        }
         manifest.layers[1]
             .runtime_config
             .as_mut()
@@ -689,6 +716,8 @@ fn interpreter_sibling_dependencies_require_their_own_build_policy() {
     for (primary_family, primary_version, sibling_family, sibling_version) in [
         ("javascript", "node-24", "BUN", "bun-1.4.2"),
         ("bun", "1.4.2", "NODE", "node-24"),
+        ("javascript", "node-24", "NODE", "node-22"),
+        ("javascript", "node-22", "NODE", "node-24"),
         ("python", "python-3.12", "PYTHON", "python-3.13"),
     ] {
         let temp = TempDir::new().unwrap();
@@ -764,7 +793,11 @@ fn interpreter_sibling_dependencies_require_their_own_build_policy() {
             },
         );
         assert!(
-            result.is_err(),
+            result
+                .err()
+                .expect("foreign dependencies must fail admission")
+                .to_string()
+                .contains("sibling dependencies require their own frozen build policy"),
             "foreign interpreter dependencies cannot inherit primary build provenance"
         );
         assert!(

@@ -161,15 +161,18 @@ pub(crate) async fn run_with_effective_config(
             &crate::detect::fs::LocalFs::new(project_dir),
             &detection.framework,
             &effective.config().deploy,
+            effective.framework_override(),
         )
         .map_err(|error| {
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
         })?,
     };
     crate::detect::application_runtime::bind_application_runtime(
+        &crate::detect::fs::LocalFs::new(project_dir),
         &mut detection,
         application_runtime.clone(),
         effective.deploy_entry(),
+        effective.framework_override(),
     )
     .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
     let detection = &detection;

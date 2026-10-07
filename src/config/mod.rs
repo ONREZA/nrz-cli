@@ -282,11 +282,31 @@ pub struct EnvSection {
 
 impl ProjectConfig {
     pub fn merge_child(&self, child: ProjectConfig) -> ProjectConfig {
-        let parent = self.clone();
+        let mut parent = self.clone();
         let inherit_python_fields = !child
             .deploy
             .runtime
             .is_some_and(|family| family != nrz_source_bundle::ApplicationRuntimeFamily::Python);
+        if inherit_python_fields {
+            // An explicit child launch mode replaces competing parent defaults.
+            // Keep every authored child field so invalid combinations still fail.
+            if child.deploy.entry.is_some() || child.deploy.module.is_some() {
+                parent.deploy.application = None;
+                parent.deploy.server = None;
+            }
+            if child.deploy.entry.is_some()
+                || child.deploy.application.is_some()
+                || child.deploy.server.is_some()
+            {
+                parent.deploy.module = None;
+            }
+            if child.deploy.module.is_some()
+                || child.deploy.application.is_some()
+                || child.deploy.server.is_some()
+            {
+                parent.deploy.entry = None;
+            }
+        }
 
         let mut aliases = parent.dev.aliases;
         aliases.extend(child.dev.aliases);

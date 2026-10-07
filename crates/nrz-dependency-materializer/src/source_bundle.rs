@@ -337,14 +337,14 @@ fn freeze_layer_targets(
                 }
                 _ => false,
             });
-        let foreign_python_minor = actual == "PYTHON"
+        let foreign_build_target = (actual == "PYTHON" || intent.is_some())
             && layer
                 .runtime_config
                 .as_ref()
                 .and_then(|config| config.get("buildRuntimeVersion"))
                 .and_then(Value::as_str)
                 .is_some_and(|target| target != primary_target);
-        if actual == expected && !foreign_javascript_interpreter && !foreign_python_minor {
+        if actual == expected && !foreign_javascript_interpreter && !foreign_build_target {
             targets.insert(layer.name.clone(), primary_target.to_owned());
         } else if matches!(actual.as_str(), "JAVASCRIPT" | "PYTHON") {
             siblings.push((layer, actual));

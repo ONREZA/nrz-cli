@@ -14,6 +14,11 @@ pub(super) fn resolve_build_command(
     if let Some(setting) = effective.build_command() {
         return setting.value().map(str::to_string);
     }
+    if uses_python_recipe(project_dir, effective) {
+        // Python own-package building belongs to its installer, not incidental
+        // package.json scripts. Authored commands above retain authority.
+        return None;
+    }
     if crate::detect::native::native_recipe(
         &crate::detect::detect_with_framework_override(project_dir, effective.framework_override())
             .framework,
@@ -459,21 +464,7 @@ pub(super) async fn run_install_step(
         return Ok(());
     }
     let deploy = &effective.config().deploy;
-    let explicit_python = deploy.runtime
-        == Some(nrz_source_bundle::ApplicationRuntimeFamily::Python)
-        || deploy.module.is_some()
-        || deploy.application.is_some()
-        || deploy.server.is_some()
-        || deploy.python_version.is_some();
-    let python_recipe = explicit_python
-        || crate::detect::detect_with_framework_override(
-            project_dir,
-            effective.framework_override(),
-        )
-        .metadata
-        .runtime
-        .runtime_type
-            == crate::detect::types::RuntimeType::Python;
+    let python_recipe = uses_python_recipe(project_dir, effective);
     let python_recipe = python_recipe && authored_install_setting(effective).is_none();
     let python_minor = deploy.python_version.unwrap_or_default();
     if python_recipe {
@@ -624,6 +615,23 @@ pub(super) fn remove_private_cli_environment(command: &mut std::process::Command
     }
 }
 
+fn uses_python_recipe(project_dir: &Path, effective: &EffectiveProjectConfig) -> bool {
+    let deploy = &effective.config().deploy;
+    deploy.runtime == Some(nrz_source_bundle::ApplicationRuntimeFamily::Python)
+        || deploy.module.is_some()
+        || deploy.application.is_some()
+        || deploy.server.is_some()
+        || deploy.python_version.is_some()
+        || crate::detect::detect_with_framework_override(
+            project_dir,
+            effective.framework_override(),
+        )
+        .metadata
+        .runtime
+        .runtime_type
+            == crate::detect::types::RuntimeType::Python
+}
+
 fn authored_install_setting(
     effective: &EffectiveProjectConfig,
 ) -> Option<&nrz::config::SourceAwareSetting> {
@@ -640,12 +648,7 @@ pub(super) fn resolve_install_command(
     if let Some(setting) = authored_install_setting(effective) {
         return setting.value().map(str::to_string);
     }
-    if crate::detect::detect_with_framework_override(project_dir, effective.framework_override())
-        .metadata
-        .runtime
-        .runtime_type
-        == crate::detect::types::RuntimeType::Python
-    {
+    if uses_python_recipe(project_dir, effective) {
         let fs = crate::detect::fs::LocalFs::new(project_dir);
         return crate::detect::python::dependency_manifest(&fs).map(|manifest| {
             crate::detect::python::install_command_for_minor(
@@ -726,6 +729,7 @@ pub(super) async fn run_native_build_step(
     let pub_lock = matches!(recipe, NativeRecipe::DartServer | NativeRecipe::FlutterWeb)
         .then(|| std::fs::read(project_dir.join("pubspec.lock")))
         .transpose()?;
+    super::plan::clear_native_build_output(project_dir, &plan.output_directory)?;
     super::native_build::select_platform_program(&mut command, platform_runner);
     let display = command.display();
     output::status(

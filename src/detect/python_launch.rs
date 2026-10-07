@@ -3,7 +3,9 @@
 use anyhow::bail;
 
 use super::fs::Fs;
-use super::python::{PYTHON_ENTRY_CANDIDATES, dependency_plan, framework};
+use super::python::{
+    PYTHON_ENTRY_CANDIDATES, dependency_plan, framework, framework_evidence_complete,
+};
 
 pub(crate) const PYTHON_BOOTSTRAP_ENTRY: &str = ".onreza/python/launch.py";
 
@@ -68,8 +70,28 @@ pub(crate) fn resolve_launch_for_framework(
         validate_module(module)?;
         return Ok(Some(bootstrap_launch("MODULE", module, request.args)?));
     }
-    let inferred = framework(fs)?;
-    let detected = framework_override.unwrap_or(inferred);
+    // An authored callable owns its invocation; dependencies only infer a
+    // server when no launch declaration exists.
+    if request.application.is_none()
+        && request.server.is_none()
+        && let Some(application) = console_application(fs)?
+    {
+        return Ok(Some(bootstrap_launch(
+            "CALLABLE",
+            &application,
+            request.args,
+        )?));
+    }
+    let detected = match framework_override {
+        Some(framework) => framework,
+        None if request.server.is_some()
+            && !fs.exists("manage.py")
+            && !framework_evidence_complete(fs)? =>
+        {
+            "python"
+        }
+        None => framework(fs)?,
+    };
     let server = request
         .server
         .map(parse_server)
@@ -122,13 +144,6 @@ pub(crate) fn resolve_launch_for_framework(
             unique_application(applications)?
         };
         return Ok(Some(bootstrap_launch(server, &application, request.args)?));
-    }
-    if let Some(application) = console_application(fs)? {
-        return Ok(Some(bootstrap_launch(
-            "CALLABLE",
-            &application,
-            request.args,
-        )?));
     }
     let entries: Vec<_> = PYTHON_ENTRY_CANDIDATES
         .iter()
