@@ -149,6 +149,11 @@ pub(super) async fn build_environment(
         minor,
         environment,
         (std::env::consts::OS, std::env::consts::ARCH),
+        if mode == PythonInstallMode::ManagedLocal {
+            host_glibc_version()
+        } else {
+            None
+        },
     )
     .await
 }
@@ -159,8 +164,9 @@ async fn build_environment_for_host(
     minor: PythonMinor,
     environment: &[(String, String)],
     host: (&str, &str),
+    glibc_version: Option<(u32, u32)>,
 ) -> anyhow::Result<Vec<(String, String)>> {
-    validate_local_build_dependency_host(project_dir, mode, minor, host)?;
+    validate_local_build_dependency_host_with_glibc(project_dir, mode, minor, host, glibc_version)?;
     let interpreter = match mode {
         PythonInstallMode::PinnedPlatform => PathBuf::from(minor.platform_interpreter()),
         PythonInstallMode::ManagedLocal => {
@@ -221,13 +227,34 @@ async fn build_environment_for_host(
     build_environment_for_interpreter(project_dir, minor, &interpreter, environment).await
 }
 
+#[cfg(test)]
 fn validate_local_build_dependency_host(
     project_dir: &Path,
     mode: PythonInstallMode,
     minor: PythonMinor,
     host: (&str, &str),
 ) -> anyhow::Result<()> {
-    if mode == PythonInstallMode::PinnedPlatform || host == ("linux", "x86_64") {
+    validate_local_build_dependency_host_with_glibc(
+        project_dir,
+        mode,
+        minor,
+        host,
+        host_glibc_version(),
+    )
+}
+
+fn validate_local_build_dependency_host_with_glibc(
+    project_dir: &Path,
+    mode: PythonInstallMode,
+    minor: PythonMinor,
+    host: (&str, &str),
+    glibc_version: Option<(u32, u32)>,
+) -> anyhow::Result<()> {
+    let glibc_floor = python_target_glibc_floor();
+    if mode == PythonInstallMode::PinnedPlatform
+        || host == ("linux", "x86_64")
+            && glibc_version.is_some_and(|version| version >= glibc_floor)
+    {
         return Ok(());
     }
     let root = project_dir.join(minor.site_packages_root());
@@ -239,14 +266,65 @@ fn validate_local_build_dependency_host(
         return Err(crate::output::coded_error(
             "PYTHON_PLATFORM_UNSUPPORTED",
             format!(
-                "Linux-target Python dependency stage contains native payload '{}'; host {}/{} cannot use it for local build commands. Use ONREZA Cloud Builder for qualified Linux builds, or deploy a prebuilt artifact with --skip-build.",
+                "Linux-target Python dependency stage contains native payload '{}'; host {}/{} with {} cannot use target {PLATFORM_PYTHON_TARGET} for local build commands. Native local builds require Linux x86_64 and verified glibc {}.{} or newer (getconf GNU_LIBC_VERSION). Use ONREZA Cloud Builder for qualified Linux builds, or deploy a prebuilt artifact with --skip-build.",
                 payload.strip_prefix(project_dir)?.display(),
                 host.0,
-                host.1
+                host.1,
+                glibc_version.map_or_else(
+                    || "musl or unverified libc".to_string(),
+                    |(major, minor)| format!("glibc {major}.{minor}")
+                ),
+                glibc_floor.0,
+                glibc_floor.1,
             ),
         ));
     }
     Ok(())
+}
+
+fn python_target_glibc_floor() -> (u32, u32) {
+    let version = PLATFORM_PYTHON_TARGET
+        .rsplit_once("manylinux_")
+        .expect("qualified Python target must identify manylinux ABI")
+        .1;
+    let (major, minor) = version
+        .split_once('_')
+        .expect("qualified manylinux ABI must identify glibc major and minor");
+    (
+        major
+            .parse()
+            .expect("qualified glibc major must be numeric"),
+        minor
+            .parse()
+            .expect("qualified glibc minor must be numeric"),
+    )
+}
+
+fn parse_host_glibc_version(output: &str) -> Option<(u32, u32)> {
+    let version = output.trim().strip_prefix("glibc ")?;
+    let (major, minor) = version.split_once('.')?;
+    if !major.bytes().all(|byte| byte.is_ascii_digit())
+        || !minor.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+fn host_glibc_version() -> Option<(u32, u32)> {
+    if std::env::consts::OS != "linux" {
+        return None;
+    }
+    // The released CLI is musl-linked; its own libc is not host ABI evidence.
+    // Probe the host utility without a shell or any target-stage Python imports.
+    let output = std::process::Command::new("getconf")
+        .arg("GNU_LIBC_VERSION")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_host_glibc_version(std::str::from_utf8(&output.stdout).ok()?)
 }
 
 fn find_native_python_payload(root: &Path) -> anyhow::Result<Option<PathBuf>> {
@@ -317,6 +395,7 @@ async fn build_environment_for_interpreter(
         );
     }
     let dependency_root = project_dir.join(minor.site_packages_root());
+    let startup = materialize_python_build_startup(project_dir, &dependency_root)?;
     let inherited_path = environment
         .iter()
         .rev()
@@ -340,10 +419,46 @@ async fn build_environment_for_interpreter(
         ),
         (
             "PYTHONPATH".into(),
-            dependency_root.to_string_lossy().into_owned(),
+            std::env::join_paths([startup, dependency_root])?
+                .to_string_lossy()
+                .into_owned(),
         ),
         ("PYTHONHOME".into(), String::new()),
     ])
+}
+
+/// `PYTHONPATH` alone does not initialize wheel .pth files. Keep this standard
+/// startup hook in the build-only namespace, which is excluded from artifacts.
+fn materialize_python_build_startup(
+    project_dir: &Path,
+    dependency_root: &Path,
+) -> anyhow::Result<PathBuf> {
+    let directory = project_dir.join(".onreza/python/build/startup");
+    ensure_python_directory(project_dir, &directory)?;
+    let initialize = format!(
+        "onreza_add_site_packages({}, ({}, {}))",
+        serde_json::to_string(&dependency_root.to_string_lossy())?,
+        serde_json::to_string(&project_dir.to_string_lossy())?,
+        serde_json::to_string(&project_dir.join("src").to_string_lossy())?
+    );
+    let source = format!(
+        "{}\n{initialize}\n{}\n{}",
+        nrz_runtime_artifact::PYTHON_SITE_PACKAGES_INITIALIZER,
+        "import importlib.machinery, importlib.util, pathlib, sys",
+        r#"_startup_root = pathlib.Path(__file__).resolve().parent
+_spec = importlib.machinery.PathFinder.find_spec("sitecustomize", [path for path in sys.path if pathlib.Path(path or ".").resolve() != _startup_root])
+if _spec is not None and _spec.loader is not None:
+    _module = importlib.util.module_from_spec(_spec)
+    sys.modules["sitecustomize"] = _module
+    _spec.loader.exec_module(_module)
+"#
+    );
+    let mut temporary = tempfile::NamedTempFile::new_in(&directory)?;
+    std::io::Write::write_all(&mut temporary, source.as_bytes())?;
+    temporary
+        .persist(directory.join("sitecustomize.py"))
+        .map_err(|error| error.error)?;
+    Ok(directory)
 }
 
 const GENERATED_REQUIREMENTS: &str = ".onreza/python/build/requirements.txt";

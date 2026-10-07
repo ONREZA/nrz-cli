@@ -8,9 +8,11 @@ use thiserror::Error;
 mod execution_compatibility;
 mod launch;
 mod native_executable;
+mod python_startup;
 pub use native_executable::{
     NATIVE_EXECUTION_TARGET, NativeExecutableRequirements, verify_native_executable,
 };
+pub use python_startup::{PYTHON_SITE_PACKAGES_INITIALIZER, python_script_launch_arguments};
 mod source_graph;
 pub use execution_compatibility::{
     ExecutionRuntimeFamily, ExecutionRuntimeTarget, verify_execution_runtime_compatibility,

@@ -73,8 +73,10 @@ use health_check::resolve_health_check;
 #[cfg(test)]
 use health_check::validate_health_path;
 use ignored_build::{IgnoredBuildOutcome, IgnoredBuildRequest};
-pub(crate) use runtime_artifact::apply_application_runtime_manifest;
 use runtime_artifact::*;
+pub(crate) use runtime_artifact::{
+    application_runtime_in_output, apply_application_runtime_manifest,
+};
 use runtime_packaging::*;
 pub(crate) use scan::hash_file_streaming;
 #[cfg(test)]

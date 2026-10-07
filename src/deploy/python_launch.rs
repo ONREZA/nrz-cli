@@ -38,7 +38,11 @@ pub(crate) fn materialize_python_entry(
     let mut temporary = tempfile::NamedTempFile::new_in(&directory)?;
     // Preserve build-minor custody even when an authorized successor runtime
     // later proves compatible with this artifact.
-    let bootstrap = PYTHON_BOOTSTRAP.replace("@SITE_PACKAGES_ROOT@", minor.site_packages_root());
+    let bootstrap = format!(
+        "{}\n{}",
+        nrz_runtime_artifact::PYTHON_SITE_PACKAGES_INITIALIZER,
+        PYTHON_BOOTSTRAP.replace("@SITE_PACKAGES_ROOT@", minor.site_packages_root())
+    );
     std::io::Write::write_all(&mut temporary, bootstrap.as_bytes())?;
     temporary
         .persist(project_dir.join(PYTHON_BOOTSTRAP_ENTRY))
@@ -53,10 +57,10 @@ import runpy
 import sys
 
 root = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(root / "@SITE_PACKAGES_ROOT@"))
-sys.path.insert(1, str(root))
+source_paths = [root]
 if (root / "src").is_dir():
-    sys.path.insert(2, str(root / "src"))
+    source_paths.append(root / "src")
+onreza_add_site_packages(root / "@SITE_PACKAGES_ROOT@", source_paths)
 mode, target, *arguments = sys.argv[1:]
 if mode == "MODULE":
     sys.argv = [target, *arguments]

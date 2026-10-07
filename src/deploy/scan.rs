@@ -42,8 +42,15 @@ pub(super) fn scan_runtime_artifact(
 ) -> anyhow::Result<Vec<FileEntry>> {
     match scan {
         RuntimeArtifactScan::All | RuntimeArtifactScan::NodeRuntimeRoot => scan_dir(root_dir),
-        RuntimeArtifactScan::PythonRuntimeRoot(minor) => scan_python_root(root_dir, *minor),
-        RuntimeArtifactScan::Relocated { base, .. } => scan_runtime_artifact(root_dir, base),
+        RuntimeArtifactScan::PythonRuntimeRoot(minor) => scan_python_root(root_dir, *minor, None),
+        RuntimeArtifactScan::Relocated { base, ownership } => match base.as_ref() {
+            RuntimeArtifactScan::PythonRuntimeRoot(minor) => scan_python_root(
+                root_dir,
+                *minor,
+                Some(Path::new(&ownership.build_output_prefix)),
+            ),
+            _ => scan_runtime_artifact(root_dir, base),
+        },
         RuntimeArtifactScan::Selected {
             roots,
             symlink_roots,
@@ -54,14 +61,21 @@ pub(super) fn scan_runtime_artifact(
 fn scan_python_root(
     root: &Path,
     minor: nrz_source_bundle::PythonMinor,
+    build_output: Option<&Path>,
 ) -> anyhow::Result<Vec<FileEntry>> {
+    struct Pruning<'a> {
+        project_package: bool,
+        minor: nrz_source_bundle::PythonMinor,
+        build_output: Option<&'a Path>,
+    }
+
     fn visit(
         base: &Path,
         current: &Path,
         canonical: &Path,
         files: &mut Vec<FileEntry>,
-        project_package: bool,
-        minor: nrz_source_bundle::PythonMinor,
+        pruning: &Pruning<'_>,
+        inherited_project_build_only: bool,
     ) -> anyhow::Result<()> {
         for entry in std::fs::read_dir(current)? {
             let entry = entry?;
@@ -70,23 +84,24 @@ fn scan_python_root(
             let name = name.to_string_lossy();
             let ft = entry.file_type()?;
             let relative = path.strip_prefix(base)?;
-            let staged_dependency = relative.starts_with(minor.site_packages_root());
+            let staged_dependency = relative.starts_with(pruning.minor.site_packages_root());
             if is_python_installer_staging_path(base, &path) {
                 continue;
             }
             // A previous build may leave another minor's incompatible wheel tree.
             if relative.parent() == Some(Path::new(".onreza/python"))
                 && nrz_source_bundle::PythonMinor::from_version(&name)
-                    .is_some_and(|other| other != minor)
+                    .is_some_and(|other| other != pruning.minor)
             {
                 continue;
             }
-            let backend_output = project_package
+            let backend_output = pruning.project_package
                 && (relative == Path::new("build/lib")
                     || relative == Path::new("build/bdist")
                     || relative.parent() == Some(Path::new("build")) && name.starts_with("bdist."));
             let project_build_only = !staged_dependency
-                && (name.ends_with(".egg-info")
+                && (inherited_project_build_only
+                    || name.ends_with(".egg-info")
                     || backend_output
                     || matches!(
                         name.as_ref(),
@@ -101,15 +116,22 @@ fn scan_python_root(
                             | "node_modules"
                     )
                     || (ft.is_dir() && path.join("pyvenv.cfg").is_file()));
-            if project_build_only
-                || name == ".env"
-                || name.starts_with(".env.")
+            // The planner's selected output is authoritative, including when a
+            // packaging backend uses the same directory name. Traverse its
+            // ancestors, but keep their unrelated cache children excluded.
+            let selected_output = pruning.build_output.is_some_and(|output| {
+                relative.starts_with(output) || ft.is_dir() && output.starts_with(relative)
+            });
+            let project_dotenv =
+                !staged_dependency && (name == ".env" || name.starts_with(".env."));
+            if project_build_only && !selected_output
+                || project_dotenv
                 || is_vcs_internal_path(base, &path)
             {
                 continue;
             }
             if ft.is_dir() {
-                visit(base, &path, canonical, files, project_package, minor)?;
+                visit(base, &path, canonical, files, pruning, project_build_only)?;
             } else {
                 scan_runtime_path_with_type(
                     base,
@@ -129,7 +151,14 @@ fn scan_python_root(
     let project_package =
         crate::detect::python::dependency_plan(&crate::detect::fs::LocalFs::new(root))?
             .is_some_and(|plan| plan.install_project);
-    visit(root, root, &canonical, &mut files, project_package, minor)?;
+    let pruning = Pruning {
+        project_package,
+        minor,
+        // A project-root output retains the established local-cache exclusions.
+        // Only a distinct selected subtree overrides project filename heuristics.
+        build_output: build_output.filter(|path| *path != Path::new(".")),
+    };
+    visit(root, root, &canonical, &mut files, &pruning, false)?;
     files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }

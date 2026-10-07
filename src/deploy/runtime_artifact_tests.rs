@@ -614,3 +614,155 @@ fn unknown_primary_identity_does_not_supply_a_typed_sibling_target() {
             .is_none()
     );
 }
+
+#[test]
+fn untyped_manifest_cannot_bind_a_different_frozen_primary_entry() {
+    use nrz_source_bundle::{ApplicationRuntimeDeclaration, ApplicationRuntimeFamily, PythonMinor};
+    for (family, target, entry) in [
+        (ApplicationRuntimeFamily::Node, "node-24", "selected.js"),
+        (ApplicationRuntimeFamily::Bun, "bun-1.3.11", "selected.ts"),
+        (
+            ApplicationRuntimeFamily::Python,
+            "python-3.14",
+            ".onreza/python/launch.py",
+        ),
+        (
+            ApplicationRuntimeFamily::Executable,
+            "native-linux-x86_64-glibc",
+            "bin/selected",
+        ),
+    ] {
+        let declaration = ApplicationRuntimeDeclaration {
+            family,
+            python_version: (family == ApplicationRuntimeFamily::Python)
+                .then_some(PythonMinor::Python314),
+            entry: Some(entry.into()),
+            args: vec!["MODULE".into(), "selected".into()],
+        };
+        for directory in [".", "other"] {
+            let mut manifest: Manifest = serde_json::from_value(serde_json::json!({
+                "version": 1, "routes": [], "layers": [
+                    {"name":"old", "target":"COMPUTE", "directory":directory, "entry":"old.py"}
+                ]
+            }))
+            .unwrap();
+            let before = serde_json::to_value(&manifest).unwrap();
+            let error = apply_application_runtime_manifest(
+                &mut manifest,
+                Some(&declaration),
+                Some(target),
+                "other",
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("entry"), "{error:#}");
+            assert_eq!(serde_json::to_value(manifest).unwrap(), before);
+        }
+    }
+}
+
+#[tokio::test]
+async fn build_binds_only_the_selected_entry_in_the_output_coordinate_frame() {
+    for (selected, manifest_entry, accepted) in [
+        ("server.js", "old.js", false),
+        ("server.js", "server.js", true),
+        ("nested/server.js", "server.js", false),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("dist");
+        std::fs::create_dir_all(output.join(".onreza")).unwrap();
+        std::fs::create_dir_all(output.join("nested")).unwrap();
+        for entry in ["server.js", "old.js", "nested/server.js"] {
+            std::fs::write(output.join(entry), "console.log('hello')").unwrap();
+        }
+        let manifest = crate::build::manifest::generate_compute_manifest(manifest_entry);
+        std::fs::write(
+            output.join(".onreza/manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let mut config = nrz::config::ProjectConfig::default();
+        config.build.output_directory = Some("dist".into());
+        config.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Node);
+        config.deploy.entry = Some(selected.into());
+        std::fs::write(
+            directory.path().join("onreza.toml"),
+            toml::to_string(&config).unwrap(),
+        )
+        .unwrap();
+        let detection = crate::detect::detect_with_framework_override(directory.path(), None);
+        let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
+            directory.path().to_owned(),
+            config,
+        );
+        effective.bind_admitted_node_version("NODE_24").unwrap();
+        let result = crate::build::run_with_effective_config(
+            crate::cli::BuildArgs {
+                dir: directory.path().to_string_lossy().into_owned(),
+                skip_validation: false,
+            },
+            true,
+            &effective,
+            Some(&detection),
+            false,
+            directory.path(),
+        )
+        .await;
+        assert_eq!(
+            result.is_ok(),
+            accepted,
+            "{selected} / {manifest_entry}: {result:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn inferred_source_entry_uses_process_output_mapping_before_manifest_binding() {
+    let project = tempfile::tempdir().unwrap();
+    let output = project.path().join("dist");
+    std::fs::create_dir_all(output.join(".onreza")).unwrap();
+    std::fs::create_dir_all(output.join("dist")).unwrap();
+    for entry in ["server.js", "dist/server.js"] {
+        std::fs::write(output.join(entry), "console.log('hello')").unwrap();
+    }
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"scripts":{"start":"node dist/server.js"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        output.join(".onreza/manifest.json"),
+        serde_json::to_vec(&crate::build::manifest::generate_compute_manifest(
+            "server.js",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.output_directory = Some("dist".into());
+    std::fs::write(
+        project.path().join("onreza.toml"),
+        toml::to_string(&config).unwrap(),
+    )
+    .unwrap();
+    let detection = crate::detect::detect_with_framework_override(project.path(), None);
+    let mut effective =
+        nrz::config::EffectiveProjectConfig::from_project_config(project.path().to_owned(), config);
+    effective.bind_admitted_node_version("NODE_24").unwrap();
+    let result = crate::build::run_with_effective_config(
+        crate::cli::BuildArgs {
+            dir: project.path().to_string_lossy().into_owned(),
+            skip_validation: false,
+        },
+        true,
+        &effective,
+        Some(&detection),
+        false,
+        project.path(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        result.manifest.unwrap().layers[0].entry.as_deref(),
+        Some("server.js")
+    );
+}

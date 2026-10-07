@@ -313,9 +313,15 @@ pub(crate) async fn run_with_effective_config(
             effective.config().build.toolchain.is_none()
                 && effective.config().build.python_version.is_none(),
         )?;
+        let application_runtime = crate::deploy::application_runtime_in_output(
+            application_runtime,
+            project_dir,
+            &output_dir,
+            effective.deploy_entry().is_some(),
+        );
         crate::deploy::apply_application_runtime_manifest(
             manifest,
-            application_runtime,
+            application_runtime.as_ref(),
             target.as_deref(),
             crate::detect::application_runtime::serving_framework(
                 effective.config(),

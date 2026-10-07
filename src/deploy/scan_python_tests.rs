@@ -1,5 +1,238 @@
 use super::*;
 
+#[tokio::test]
+async fn selected_python_output_named_like_backend_state_survives_verified_publication() {
+    for minor in nrz_source_bundle::PythonMinor::ALL {
+        for output in [
+            "build/lib",
+            "build/lib/authored",
+            "build/bdist.fixture/runtime",
+        ] {
+            let project = tempfile::tempdir().unwrap();
+            std::fs::write(project.path().join("pyproject.toml"), "[build-system]\nrequires=['setuptools']\nbuild-backend='setuptools.build_meta'\n[project]\nname='demo'\nversion='1.0'\n").unwrap();
+            std::fs::write(project.path().join("onreza.toml"), format!("[build]\ntoolchain='python'\npython_version='{}'\noutput_directory='{output}'\n[deploy]\nruntime='python'\npython_version='{}'\nentry='{output}/main.py'\n", minor.version(), minor.version())).unwrap();
+            let retained = [
+                (format!("{output}/main.py"), "print('AUTHORED_OUTPUT')"),
+                (format!("{output}/data/payload.txt"), "AUTHORED_RESOURCE"),
+                (
+                    format!("{}/demo/__init__.py", minor.site_packages_root()),
+                    "# INSTALLED_PROJECT_WHEEL",
+                ),
+            ];
+            let excluded = [
+                "build/bdist.unselected/installer.txt",
+                "src/demo.egg-info/PKG-INFO",
+                ".venv/pyvenv.cfg",
+                ".onreza/python/build/wheels/debris.whl",
+                ".env.defaults",
+            ];
+            for (path, body) in &retained {
+                let file = project.path().join(path);
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, body).unwrap();
+            }
+            for path in excluded {
+                let file = project.path().join(path);
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, "PROJECT_BUILD_STATE").unwrap();
+            }
+            // Only this nested selected subtree survives, not its backend siblings.
+            if output != "build/lib" {
+                std::fs::create_dir_all(project.path().join("build/lib")).unwrap();
+                std::fs::write(
+                    project.path().join("build/lib/stale.py"),
+                    "BACKEND_DUPLICATE",
+                )
+                .unwrap();
+            }
+            let dependency = crate::detect::python::dependency_plan(
+                &crate::detect::fs::LocalFs::new(project.path()),
+            )
+            .unwrap()
+            .unwrap();
+            assert!(dependency.install_project);
+            let mut detection = crate::detect::detect_with_framework_override(project.path(), None);
+            crate::detect::application_runtime::resolve_and_bind_detection(
+                &crate::detect::fs::LocalFs::new(project.path()),
+                &mut detection,
+            )
+            .unwrap();
+            let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
+                "version":1,"routes":[{"pattern":"^/.*$","layer":"python"}],"layers":[{"name":"python","target":"COMPUTE","directory":".","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":minor.target()}}]
+            })).unwrap();
+            let artifact = resolve_runtime_artifact(
+                project.path(),
+                project.path(),
+                project.path().join(output),
+                manifest,
+                &detection,
+                true,
+            )
+            .unwrap();
+            assert_eq!(
+                artifact.scan.explain()["sourceOwnershipBuildOutputPrefix"],
+                output
+            );
+            assert_python_scan_archive(&artifact, &detection, &retained, &excluded).await;
+            if output != "build/lib" {
+                let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+                assert!(!scanned.iter().any(|file| file.path == "build/lib/stale.py"));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn staged_python_dotenv_resources_survive_verified_publication() {
+    for minor in nrz_source_bundle::PythonMinor::ALL {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("main.py"), "print('ENTRY')").unwrap();
+        std::fs::write(project.path().join("onreza.toml"), format!("[build]\ntoolchain='python'\npython_version='{}'\n[deploy]\nruntime='python'\npython_version='{}'\nentry='main.py'\n", minor.version(), minor.version())).unwrap();
+        let package = format!("{}/demo", minor.site_packages_root());
+        let retained = [
+            ("main.py".to_string(), "print('ENTRY')"),
+            (format!("{package}/__init__.py"), "# INSTALLED_PACKAGE"),
+            (format!("{package}/.env.defaults"), "PACKAGE_DEFAULTS"),
+            (
+                format!("{package}/templates/.env.example"),
+                "PACKAGE_EXAMPLE",
+            ),
+            (format!("{package}/.env"), "PACKAGE_RESOURCE"),
+        ];
+        let excluded = [
+            ".env",
+            "app/.env.production",
+            ".onreza/python/build/.env.defaults",
+        ];
+        for (path, body) in &retained {
+            let file = project.path().join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, body).unwrap();
+        }
+        for path in excluded {
+            let file = project.path().join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, "PROJECT_SECRET").unwrap();
+        }
+        let mut detection =
+            crate::detect::detect_with_framework_override(project.path(), Some("python"));
+        crate::detect::application_runtime::resolve_and_bind_detection(
+            &crate::detect::fs::LocalFs::new(project.path()),
+            &mut detection,
+        )
+        .unwrap();
+        let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
+            "version":1,"routes":[{"pattern":"^/.*$","layer":"python"}],"layers":[{"name":"python","target":"COMPUTE","directory":".","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":minor.target()}}]
+        })).unwrap();
+        let artifact = resolve_runtime_artifact(
+            project.path(),
+            project.path(),
+            project.path().into(),
+            manifest,
+            &detection,
+            true,
+        )
+        .unwrap();
+        assert_python_scan_archive(&artifact, &detection, &retained, &excluded).await;
+    }
+}
+
+async fn assert_python_scan_archive(
+    artifact: &RuntimeArtifact,
+    detection: &crate::detect::types::DetectionResult,
+    retained: &[(String, &str)],
+    excluded: &[&str],
+) {
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    for (path, _) in retained {
+        assert!(
+            scanned.iter().any(|file| file.path == *path),
+            "scanner lost {path}"
+        );
+    }
+    let files = prepare_artifact_files(
+        &artifact.manifest,
+        scanned,
+        detection,
+        ArtifactRootScope::ProjectRoot,
+        &artifact.scan,
+        true,
+    )
+    .deployable_entries();
+    let source = crate::artifact::source_bundle_v1::build_source_bundle_plan_with_scan(
+        &artifact.root_dir,
+        &artifact.manifest,
+        &files,
+        &artifact.scan,
+        crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap();
+    let logical: nrz_source_bundle::SourceLogicalManifest =
+        serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap()).unwrap();
+    let owner = uuid::Uuid::nil().to_string();
+    nrz_source_bundle::verify_source_bundle_bytes(
+        nrz_source_bundle::SourceBundleVerificationInput {
+            owner_workspace_id: owner.clone(),
+            source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
+                &owner,
+                &source.logical_manifest_sha256,
+                &source.source_sha256,
+                None,
+            ),
+            source_sha256: source.source_sha256.clone(),
+            logical_manifest_sha256: source.logical_manifest_sha256.clone(),
+            budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical)
+                .unwrap(),
+        },
+        std::fs::read(source.source_path()).unwrap().into(),
+    )
+    .await
+    .unwrap();
+    nrz_runtime_artifact::validate_source_bundle_application_graph(
+        &source.logical_manifest_sha256,
+        &source.source_sha256,
+        source.source_size_bytes,
+        &logical,
+    )
+    .unwrap();
+    let unpacked = tempfile::tempdir().unwrap();
+    let decoder =
+        zstd::stream::read::Decoder::new(std::fs::File::open(source.source_path()).unwrap())
+            .unwrap();
+    tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+    for (path, bytes) in retained {
+        let file = logical
+            .files
+            .iter()
+            .find(|file| file.path == *path)
+            .expect("retained logical file");
+        assert_eq!(file.layer_name.as_deref(), Some("python"));
+        assert_eq!(
+            file.role,
+            if path.starts_with(".onreza/python/") {
+                "dependency"
+            } else {
+                "compute"
+            }
+        );
+        assert_eq!(file.sha256, sha256_hex(bytes.as_bytes()));
+        assert_eq!(
+            std::fs::read_to_string(unpacked.path().join(path)).unwrap(),
+            *bytes
+        );
+    }
+    for path in excluded {
+        assert!(
+            !logical.files.iter().any(|file| file.path == *path),
+            "published {path}"
+        );
+        assert!(!unpacked.path().join(path).exists());
+    }
+    let entry = logical.layers[0].entrypoint.as_ref().unwrap();
+    assert!(unpacked.path().join(entry).is_file());
+}
+
 #[test]
 fn published_python_bundle_excludes_installer_staging_and_retains_installed_assets() {
     for minor in nrz_source_bundle::PythonMinor::ALL {

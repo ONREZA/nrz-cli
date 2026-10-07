@@ -548,12 +548,72 @@ pub(super) fn is_windows_drive_absolute(path: &str) -> bool {
         && (bytes[2] == b'/' || bytes[2] == b'\\')
 }
 
+/// Resolve an inferred source entry using the same output mapping as PROCESS
+/// generation. Authored deploy entries are already output-relative.
+pub(crate) fn application_runtime_in_output(
+    declaration: Option<&nrz_source_bundle::ApplicationRuntimeDeclaration>,
+    project_dir: &Path,
+    output_dir: &Path,
+    configured_output_entry: bool,
+) -> Option<nrz_source_bundle::ApplicationRuntimeDeclaration> {
+    declaration.cloned().map(|mut declaration| {
+        if !configured_output_entry
+            && let Some(entry) = declaration.entry.as_deref()
+            && let Some(entry) =
+                crate::detect::resolve_application_entry(entry, output_dir, project_dir)
+        {
+            declaration.entry = Some(entry);
+        }
+        declaration
+    })
+}
+
 pub(crate) fn apply_application_runtime_manifest(
     manifest: &mut crate::build::manifest::Manifest,
     declaration: Option<&nrz_source_bundle::ApplicationRuntimeDeclaration>,
     build_runtime_version: Option<&str>,
     framework: &str,
 ) -> anyhow::Result<()> {
+    // Untyped layers can inherit a launch only after its selected file has
+    // been identified. Retained JS siblings may share the primary defaults.
+    if let Some(declaration) = declaration
+        && let Some(entry) = declaration.entry.as_deref()
+    {
+        let entry = normalize_runtime_artifact_path(entry)
+            .map_err(|error| output::with_default_code(error, "APPLICATION_RUNTIME_INVALID"))?;
+        let matches_entry = |layer: &crate::build::manifest::Layer| {
+            layer.entry.as_deref().is_some_and(|layer_entry| {
+                join_runtime_artifact_paths(&layer.directory, layer_entry)
+                    .is_ok_and(|layer_entry| layer_entry == entry)
+            })
+        };
+        let primary_present = manifest
+            .layers
+            .iter()
+            .filter(|layer| layer.target == crate::build::manifest::LayerTarget::Compute)
+            .any(&matches_entry);
+        for layer in &manifest.layers {
+            if layer.target == crate::build::manifest::LayerTarget::Compute
+                && layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.application_runtime.as_ref())
+                    .is_none()
+                && !matches_entry(layer)
+                && !(primary_present
+                    && matches!(
+                        declaration.family,
+                        nrz_source_bundle::ApplicationRuntimeFamily::Node
+                            | nrz_source_bundle::ApplicationRuntimeFamily::Bun
+                    ))
+            {
+                return Err(output::coded_error(
+                    "APPLICATION_RUNTIME_INVALID",
+                    "untyped COMPUTE manifest entry differs from the frozen application entry; select the declared entry or give an independent layer its own runtime and frozen target",
+                ));
+            }
+        }
+    }
     let sole_compute = compute_layer_count(manifest) == 1;
     for layer in &mut manifest.layers {
         if layer.target != crate::build::manifest::LayerTarget::Compute {

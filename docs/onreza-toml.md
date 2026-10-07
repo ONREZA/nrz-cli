@@ -361,7 +361,10 @@ Python-команда сборки получает выбранный pinned in
 console scripts. Различные build/serving Python minor допустимы для code-only
 output; runtime dependencies требуют совпадающих qualified minor.
 
-На macOS, Windows и non-x64 host локальная Python-сборка использует это дерево
-только при отсутствии native payload. Для Linux native dependencies используйте
-Git/Builder deployment. Публикация готового output через `--skip-build` не запускает
+Локальная Python-сборка с нативными dependencies требует Linux x86_64 и
+определённую glibc не ниже целевого manylinux ABI (сейчас 2.39). На macOS,
+Windows, non-x64 host, musl либо неизвестной libc используйте Git/Builder
+для нативных dependencies. Чистые Python packages доступны для локальной сборки.
+Установленные `.pth` paths и import hooks обрабатываются при сборке и запуске;
+повторный bootstrap в том же interpreter не запускает hooks второй раз. Публикация готового output через `--skip-build` не запускает
 host interpreter.

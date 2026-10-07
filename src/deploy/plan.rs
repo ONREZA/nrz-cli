@@ -689,9 +689,15 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
                     effective.config().build.toolchain.is_none()
                         && effective.config().build.python_version.is_none(),
                 )?;
+                let application_runtime = super::application_runtime_in_output(
+                    build_artifact.detection.metadata.application_runtime(),
+                    project_dir,
+                    process_entry_root,
+                    effective.deploy_entry().is_some(),
+                );
                 super::apply_application_runtime_manifest(
                     &mut auto,
-                    build_artifact.detection.metadata.application_runtime(),
+                    application_runtime.as_ref(),
                     target.as_deref(),
                     crate::detect::application_runtime::serving_framework(
                         effective.config(),
