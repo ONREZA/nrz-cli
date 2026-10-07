@@ -76,6 +76,8 @@ debug = "node --inspect src/index.js"
 
 | Поле | Тип | По умолчанию | Описание |
 |------|-----|-------------|---------|
+| `toolchain` | string | авто | Инструменты сборки: `"node"`, `"bun"`, `"python"` или `"native"`. Выбор не задаёт launcher приложения. |
+| `python_version` | string | serving minor или `"3.14"` | Minor Python для compiler/installer: `"3.12"`, `"3.13"`, `"3.14"`. Без `toolchain` подразумевает `"python"`. |
 | `install_command` | string | авто | Команда установки зависимостей перед build/deploy. Если не задана, определяется по package manager. Пустая строка означает явный skip. |
 | `command` | string | нет | Команда сборки, которая выполняется автоматически перед `nrz deploy` (если не передан `--skip-build`). Пример: `"npm run build"`. |
 | `output_directory` | string | авто | Единственная авторитетная директория build output. Если задана в `onreza.toml`, CLI не делает silent fallback в другие директории. Compatibility alias: `output_dir`. |
@@ -107,7 +109,7 @@ output_dirs = ["dist"]
 |------|-----|-------------|---------|
 | `compute` | string | авто | Принудительно задать compute type вместо авто-определения. Значения: `"static"`, `"process"`. Используйте только если авто-определение даёт неверный результат. |
 | `runtime` | string | авто | Launcher приложения: `"node"`, `"bun"`, `"python"` или `"executable"`. Язык сборки выбирается отдельно. |
-| `python_version` | string | `"3.14"` | Minor CPython: `"3.12"`, `"3.13"` или `"3.14"`. |
+| `python_version` | string | Python build minor или `"3.14"` | Minor CPython для `PROCESS` launcher: `"3.12"`, `"3.13"` или `"3.14"`. |
 | `entry` | string | авто | Файл запуска `PROCESS`: JS/TS, Python script или готовый executable. Относительный путь без `..`, не shell-команда. Compatibility alias: `entrypoint`. |
 | `module` | string | нет | Python import module для запуска как `python -m`, например `"company.worker"`. |
 | `application` | string | нет | Python import reference, например `"api.main:app"` или `"api.main:create_app()"`. |
@@ -334,3 +336,27 @@ CLI flag > env var (NRZ_*) > onreza.toml > hardcoded default
 | `.onreza/data/dev.db` | SQLite для локальной эмуляции |
 | `.onreza/data/kv.<env>.json` | Персистенция local KV store по environment namespace |
 | `.onreza/environment.json` | Личный выбор environment разработчика |
+
+Для STATIC Python-сборки настройте build toolchain без полей запуска `PROCESS`:
+
+```toml
+[build]
+toolchain = "python"
+python_version = "3.13"
+command = "mkdocs build"
+output_directory = "site"
+
+[deploy]
+compute = "static"
+```
+
+`deploy.runtime`, `entry`, `module`, `application`, `server`, `args` и
+`deploy.python_version` несовместимы с явно выбранным STATIC. Build toolchain и
+launcher замораживаются раздельно в `metadata.sourceBuildContext` при детекции.
+Для Git-деплоя задайте команду `mkdocs build` и output `site` в настройках
+проекта ONREZA: Builder использует immutable Project snapshot. Эти два поля
+из `onreza.toml` не импортируются автоматически и не переопределяют snapshot;
+локальный CLI использует их из файла.
+Python-команда сборки получает выбранный pinned interpreter, staged packages и
+console scripts. Различные build/serving Python minor допустимы для code-only
+output; runtime dependencies требуют совпадающих qualified minor.

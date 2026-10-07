@@ -111,6 +111,11 @@ fn explicit_process_rejects_conflicting_authored_static_manifest() {
 #[test]
 fn static_mode_rejects_an_authored_process_runtime() {
     let dir = fixture(Some("static"));
+    fs::write(
+        dir.path().join("onreza.toml"),
+        "[build]\noutput_directory='dist'\n[deploy]\ncompute='static'\n",
+    )
+    .unwrap();
     fs::create_dir(dir.path().join("dist/.onreza")).unwrap();
     fs::write(dir.path().join("dist/.onreza/manifest.json"), r#"{"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.mjs"}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#).unwrap();
     let output = nrz()
@@ -131,7 +136,7 @@ fn static_mode_rejects_an_authored_process_runtime() {
 }
 
 #[test]
-fn configured_entry_infers_generic_process_and_preserves_explicit_static() {
+fn configured_entry_infers_process_and_rejects_explicit_static() {
     for compute in [None, Some("static")] {
         let dir = fixture(compute);
         fs::write(
@@ -152,23 +157,18 @@ fn configured_entry_infers_generic_process_and_preserves_explicit_static() {
             ])
             .output()
             .unwrap();
+        if compute.is_some() {
+            assert!(!output.status.success());
+            assert_eq!(stdout_json(&output)["code"], "APPLICATION_RUNTIME_INVALID");
+            continue;
+        }
         assert!(
             output.status.success(),
             "{}",
             String::from_utf8_lossy(&output.stdout)
         );
         let plan = stdout_json(&output);
-        assert_eq!(
-            plan["compute"],
-            if compute.is_some() {
-                "STATIC"
-            } else {
-                "PROCESS"
-            }
-        );
-        assert_eq!(
-            plan["runtimeArtifact"]["hasComputeLayer"],
-            compute.is_none()
-        );
+        assert_eq!(plan["compute"], "PROCESS");
+        assert_eq!(plan["runtimeArtifact"]["hasComputeLayer"], true);
     }
 }

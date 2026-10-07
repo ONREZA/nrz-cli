@@ -1219,3 +1219,29 @@ fn a_child_python_server_selects_the_application_mode() {
         );
     }
 }
+
+#[test]
+fn child_build_toolchain_selection_has_its_own_python_minor_boundary() {
+    let parent:ProjectConfig=toml::from_str("[build]\ntoolchain='python'\npython_version='3.12'\n[deploy]\nruntime='python'\npython_version='3.14'\n").unwrap();
+    let child: ProjectConfig = toml::from_str("[build]\ntoolchain='node'\n").unwrap();
+    let merged = parent.merge_child(child);
+    assert_eq!(
+        merged.build.toolchain,
+        Some(nrz_source_bundle::BuildToolchainFamily::Node)
+    );
+    assert_eq!(merged.build.python_version, None);
+    assert_eq!(
+        merged.deploy.python_version,
+        Some(nrz_source_bundle::PythonMinor::Python314)
+    );
+    let child: ProjectConfig = toml::from_str("[build]\npython_version='3.13'\n").unwrap();
+    let merged = merged.merge_child(child);
+    assert_eq!(
+        merged.build.toolchain,
+        Some(nrz_source_bundle::BuildToolchainFamily::Python)
+    );
+    assert_eq!(
+        merged.build.python_version,
+        Some(nrz_source_bundle::PythonMinor::Python313)
+    );
+}

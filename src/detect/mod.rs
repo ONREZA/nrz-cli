@@ -111,7 +111,7 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
         version: None,
         suggested_compute,
         metadata: DetectionMetadata {
-            application_runtime: None,
+            source_build_context: None,
             uses_typescript: detect_typescript(fs),
             config_files: Vec::new(),
             runtime: RuntimeInfo {
@@ -145,7 +145,7 @@ fn static_html_detection(
         version: None,
         suggested_compute: ComputeType::Static,
         metadata: DetectionMetadata {
-            application_runtime: None,
+            source_build_context: None,
             uses_typescript: None,
             config_files: Vec::new(),
             runtime: RuntimeInfo {
@@ -272,7 +272,7 @@ fn detection_from_configured_preset(
         version,
         suggested_compute,
         metadata: DetectionMetadata {
-            application_runtime: None,
+            source_build_context: None,
             uses_typescript: detect_typescript(fs),
             config_files: detect_config_files(fs, preset.slug),
             runtime: RuntimeInfo {
@@ -485,7 +485,7 @@ fn detection_from_rule_match(
         version: matched.version,
         suggested_compute,
         metadata: DetectionMetadata {
-            application_runtime: None,
+            source_build_context: None,
             uses_typescript: detect_typescript(fs),
             config_files,
             runtime: RuntimeInfo {

@@ -62,6 +62,15 @@ impl ApplicationRuntimeDeclaration {
         if self.python_version.is_some() && self.family != ApplicationRuntimeFamily::Python {
             return Err("pythonVersion is only valid for PYTHON applications".into());
         }
+        if let Some(entry) = &self.entry {
+            if entry.len() > 4096 || entry.contains(':') {
+                return Err(
+                    "application entry must be a relative source path within 4096 UTF-8 bytes"
+                        .into(),
+                );
+            }
+            crate::normalize_source_path(entry)?;
+        }
         self.intent().validate()
     }
 

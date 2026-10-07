@@ -19,11 +19,15 @@ pub(super) fn resolve_build_command(
         // package.json scripts. Authored commands above retain authority.
         return None;
     }
-    if crate::detect::native::native_recipe(
-        &crate::detect::detect_with_framework_override(project_dir, effective.framework_override())
+    if uses_native_recipe(project_dir, effective)
+        && crate::detect::native::native_recipe(
+            &crate::detect::detect_with_framework_override(
+                project_dir,
+                effective.framework_override(),
+            )
             .framework,
-    )
-    .is_some()
+        )
+        .is_some()
     {
         // Native defaults execute through their typed recipe, never package.json tooling.
         return None;
@@ -404,7 +408,8 @@ pub(super) async fn run_install_step(
 ) -> anyhow::Result<()> {
     let detection =
         crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
-    if let Some(recipe) = crate::detect::native::native_recipe(&detection.framework)
+    if uses_native_recipe(project_dir, effective)
+        && let Some(recipe) = crate::detect::native::native_recipe(&detection.framework)
         && super::native_build::default_command(None, effective.install_command())
     {
         let Some(mut command) = super::native_build::install_command(project_dir, recipe)? else {
@@ -463,10 +468,10 @@ pub(super) async fn run_install_step(
         output::success(json, "Dependencies installed", output::Phase::Deploy);
         return Ok(());
     }
-    let deploy = &effective.config().deploy;
-    let python_recipe = uses_python_recipe(project_dir, effective);
+    let build_toolchain = selected_build_toolchain(project_dir, effective)?;
+    let python_recipe = build_toolchain.family == nrz_source_bundle::BuildToolchainFamily::Python;
     let python_recipe = python_recipe && authored_install_setting(effective).is_none();
-    let python_minor = deploy.python_version.unwrap_or_default();
+    let python_minor = build_toolchain.resolved_python_minor().unwrap_or_default();
     if python_recipe {
         let target = project_dir.join(python_minor.site_packages_root());
         super::python_toolchain::ensure_python_directory(
@@ -615,21 +620,26 @@ pub(super) fn remove_private_cli_environment(command: &mut std::process::Command
     }
 }
 
+fn selected_build_toolchain(
+    project_dir: &Path,
+    effective: &EffectiveProjectConfig,
+) -> anyhow::Result<nrz_source_bundle::BuildToolchainDeclaration> {
+    if let Some(context) = effective.platform_source_build_context() {
+        return Ok(context.build_toolchain.clone());
+    }
+    let detection =
+        crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
+    crate::detect::application_runtime::resolve_build_toolchain(&detection, effective.config())
+}
+
 fn uses_python_recipe(project_dir: &Path, effective: &EffectiveProjectConfig) -> bool {
-    let deploy = &effective.config().deploy;
-    deploy.runtime == Some(nrz_source_bundle::ApplicationRuntimeFamily::Python)
-        || deploy.module.is_some()
-        || deploy.application.is_some()
-        || deploy.server.is_some()
-        || deploy.python_version.is_some()
-        || crate::detect::detect_with_framework_override(
-            project_dir,
-            effective.framework_override(),
-        )
-        .metadata
-        .runtime
-        .runtime_type
-            == crate::detect::types::RuntimeType::Python
+    selected_build_toolchain(project_dir, effective)
+        .is_ok_and(|build| build.family == nrz_source_bundle::BuildToolchainFamily::Python)
+}
+
+fn uses_native_recipe(project_dir: &Path, effective: &EffectiveProjectConfig) -> bool {
+    selected_build_toolchain(project_dir, effective)
+        .is_ok_and(|build| build.family == nrz_source_bundle::BuildToolchainFamily::Native)
 }
 
 fn authored_install_setting(
@@ -650,12 +660,11 @@ pub(super) fn resolve_install_command(
     }
     if uses_python_recipe(project_dir, effective) {
         let fs = crate::detect::fs::LocalFs::new(project_dir);
-        return crate::detect::python::dependency_manifest(&fs).map(|manifest| {
-            crate::detect::python::install_command_for_minor(
-                manifest,
-                effective.config().deploy.python_version.unwrap_or_default(),
-            )
-        });
+        let minor = selected_build_toolchain(project_dir, effective)
+            .ok()?
+            .resolved_python_minor()?;
+        return crate::detect::python::dependency_manifest(&fs)
+            .map(|manifest| crate::detect::python::install_command_for_minor(manifest, minor));
     }
     // Python defaults execute through the manifest recipe above; authored
     // commands retain authority. Shell-driven runtimes use the frozen command
@@ -663,11 +672,15 @@ pub(super) fn resolve_install_command(
     if let Some(setting) = effective.install_command() {
         return setting.value().map(str::to_string);
     }
-    if crate::detect::native::native_recipe(
-        &crate::detect::detect_with_framework_override(project_dir, effective.framework_override())
+    if uses_native_recipe(project_dir, effective)
+        && crate::detect::native::native_recipe(
+            &crate::detect::detect_with_framework_override(
+                project_dir,
+                effective.framework_override(),
+            )
             .framework,
-    )
-    .is_some()
+        )
+        .is_some()
     {
         return None;
     }

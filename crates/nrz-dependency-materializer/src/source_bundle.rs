@@ -9,7 +9,8 @@ use nrz_runtime_artifact::{
     finalize_source_bundle_runtime_graph_for_layer_targets,
 };
 use nrz_source_bundle::{
-    DependencySourceTreeError, PythonMinor, SourceLogicalManifest, extract_dependency_source_trees,
+    DependencySourceTreeError, PythonMinor, SourceLogicalManifest, dependency_source_tree_specs,
+    extract_dependency_source_trees,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -99,6 +100,19 @@ pub fn materialize_source_bundle_runtime(
             targets.get(&layer.name).map(String::as_str),
         )?;
     }
+    for tree in dependency_source_tree_specs(request.manifest)? {
+        let kind = request.policy.kind.ok_or_else(|| {
+            SourceBundleMaterializationError::UnexpectedDependencies {
+                source_root: tree.source_root.clone(),
+            }
+        })?;
+        if !dependency_root_matches_kind(&tree.source_root, kind) {
+            return Err(SourceBundleMaterializationError::DependencyKindMismatch {
+                source_root: tree.source_root,
+                kind,
+            });
+        }
+    }
     // A single dependency policy cannot attest a second interpreter's tree.
     // Code-only siblings retain their independent frozen launch target.
     if request.policy.kind.is_some()
@@ -108,18 +122,7 @@ pub fn materialize_source_bundle_runtime(
                     .layer_name
                     .as_ref()
                     .and_then(|name| targets.get(name))
-                    .is_some_and(|target| {
-                        target != &version
-                            && match request.policy.kind {
-                                Some(DependencyMaterializationKind::JavaScriptNodeModules) => {
-                                    target.starts_with("bun-") || target.starts_with("node-")
-                                }
-                                Some(DependencyMaterializationKind::PythonSitePackages) => {
-                                    target.starts_with("python-")
-                                }
-                                None => false,
-                            }
-                    })
+                    .is_some_and(|target| target != &version)
         })
     {
         return Err(RuntimeArtifactError::Invariant(
@@ -178,12 +181,6 @@ pub fn materialize_source_bundle_runtime(
                 source_root: tree.source_root.clone(),
             }
         })?;
-        if !dependency_root_matches_kind(&tree.source_root, kind) {
-            return Err(SourceBundleMaterializationError::DependencyKindMismatch {
-                source_root: tree.source_root,
-                kind,
-            });
-        }
         let allowed_mount_points = allowed_mount_points_by_layer
             .get(&tree.layer_name)
             .expect("every dependency tree has an allowed mount set");
@@ -357,7 +354,12 @@ fn freeze_layer_targets(
         }
     }
     if targets.is_empty()
-        && let Some((layer, actual)) = siblings.first()
+        && let Some((layer, actual)) = siblings.iter().find(|(layer, _)| {
+            // Untyped legacy layers still depend on their primary policy for
+            // interpreter selection. Independent serving requires typed intent.
+            nrz_source_bundle::layer_application_runtime(layer.runtime_config.as_ref())
+                .is_ok_and(|intent| intent.is_none())
+        })
     {
         if actual == expected {
             return Err(RuntimeArtifactError::Invariant(

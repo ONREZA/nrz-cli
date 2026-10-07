@@ -152,15 +152,15 @@ async fn admission_preserves_selection_and_rejects_another_scope() {
 #[tokio::test]
 async fn runner_context_validates_identity_and_protocol_before_applying_settings() {
     for (id, protocol) in [
-        (DEPLOYMENT, "runner-context-v5"),
+        (DEPLOYMENT, "runner-context-v6"),
         (DEPLOYMENT, "runner-context-v4"),
         (DEPLOYMENT, "runner-context-v99"),
-        ("00000000-0000-0000-0000-000000000009", "runner-context-v5"),
+        ("00000000-0000-0000-0000-000000000009", "runner-context-v6"),
     ] {
         let app = Router::new().route("/v1/deployments/{id}/runner-context", axum::routing::get(move || async move {
             Json(json!({"protocolVersion":protocol,"context":context_json(),
                 "deployment":{"id":id,"attempt":5,"status":"BUILDING","url":null,"branch":"main","commitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-                "settings":{"nodeVersion":"NODE_24","applicationRuntime":null,"frameworkPreset":null,"rootDirectory":".","gitLfsEnabled":false,"packageManager":"BUN",
+                "settings":{"nodeVersion":"NODE_24","sourceBuildContext":null,"frameworkPreset":null,"rootDirectory":".","gitLfsEnabled":false,"packageManager":"BUN",
                     "installCommand":null,"installCommandSource":"PRESET","buildCommand":"bun run build","buildCommandSource":"USER",
                     "outputDirectory":null,"outputDirectorySource":"DETECTED","ignoredBuildBehavior":"AUTOMATIC","ignoredBuildFolder":null,"ignoredBuildCommand":null}}))
         }));
@@ -173,7 +173,7 @@ async fn runner_context_validates_identity_and_protocol_before_applying_settings
                     .to_string()
                     .contains("another deployment")
             );
-        } else if protocol != "runner-context-v5" {
+        } else if protocol != "runner-context-v6" {
             assert!(result.unwrap_err().to_string().contains("OpenAPI contract"));
         } else {
             let result = result.unwrap();
@@ -188,24 +188,24 @@ async fn runner_context_validates_identity_and_protocol_before_applying_settings
 }
 
 #[tokio::test]
-async fn runner_v5_rejects_absent_intent_and_accepts_explicit_null() {
+async fn runner_v6_rejects_absent_context_and_accepts_explicit_null() {
     for present in [false, true] {
         let mut settings = json!({"nodeVersion":"NODE_24","frameworkPreset":null,"rootDirectory":".","gitLfsEnabled":false,"packageManager":"NPM",
             "installCommand":null,"installCommandSource":"PRESET","buildCommand":null,"buildCommandSource":"PRESET",
             "outputDirectory":null,"outputDirectorySource":"PRESET","ignoredBuildBehavior":"AUTOMATIC","ignoredBuildFolder":null,"ignoredBuildCommand":null});
         if present {
-            settings["applicationRuntime"] = Value::Null;
+            settings["sourceBuildContext"] = Value::Null;
         }
         let app = Router::new().route("/v1/deployments/{id}/runner-context", axum::routing::get(move || {
             let settings = settings.clone();
-            async move { Json(json!({"protocolVersion":"runner-context-v5","context":context_json(),
+            async move { Json(json!({"protocolVersion":"runner-context-v6","context":context_json(),
                 "deployment":{"id":DEPLOYMENT,"attempt":5,"status":"BUILDING","url":null,"branch":"main","commitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"settings":settings})) }
         }));
         let (client, server) = serve(app).await;
         let result = wire::load_runner_context(&client, DEPLOYMENT.parse().unwrap()).await;
         if present {
             let settings = result.unwrap().settings;
-            assert_eq!(settings.application_runtime, Some(None));
+            assert_eq!(settings.source_build_context, None);
             assert_eq!(settings.node_version.as_deref(), Some("NODE_24"));
         } else {
             assert!(result.unwrap_err().to_string().contains("OpenAPI contract"));

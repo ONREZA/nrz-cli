@@ -135,6 +135,25 @@ pub fn dependency_plan(fs: &dyn Fs) -> anyhow::Result<Option<PythonDependencyPla
     }))
 }
 
+/// An empty declaration does not create runtime dependencies. Includes remain
+/// unresolved evidence until the installer materializes their selected graph.
+pub fn requires_dependency_stage(fs: &dyn Fs) -> anyhow::Result<bool> {
+    if dependency_plan(fs)?.is_some_and(|plan| plan.install_project)
+        || !dependency_names(fs)?.is_empty()
+    {
+        return Ok(true);
+    }
+    Ok(fs.read_file("requirements.txt").is_some_and(|text| {
+        text.lines().any(|line| {
+            let line = line.trim_start();
+            line.starts_with("-r")
+                || line.starts_with("--requirement")
+                || line.starts_with("-e")
+                || line.starts_with("--editable")
+        })
+    }))
+}
+
 pub fn dependency_names(fs: &dyn Fs) -> anyhow::Result<BTreeSet<String>> {
     let mut names = BTreeSet::new();
     let manifest = dependency_manifest(fs);
@@ -381,7 +400,7 @@ fn python_detection(
         version: None,
         suggested_compute: ComputeType::Process,
         metadata: DetectionMetadata {
-            application_runtime: None,
+            source_build_context: None,
             uses_typescript: None,
             config_files: [dependency_file, lockfile]
                 .into_iter()

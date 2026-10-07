@@ -327,7 +327,12 @@ fn python_minor_selection_is_frozen_but_not_part_of_normalized_launch_intent() {
             &mut detection,
         )
         .unwrap();
-        let declaration = detection.metadata.application_runtime.unwrap();
+        let declaration = detection
+            .metadata
+            .source_build_context
+            .unwrap()
+            .application_runtime
+            .unwrap();
         assert_eq!(declaration.python_version, Some(minor));
         assert_eq!(
             detection.metadata.runtime.version.as_deref(),
@@ -560,4 +565,100 @@ fn python_framework_evidence_keeps_comments_and_django_management_distinct() {
         .args,
         ["ASGI", "company.asgi:application"]
     );
+}
+
+#[test]
+fn source_build_context_separates_static_python_tools_and_serving() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("requirements.txt"), "mkdocs\n").unwrap();
+    for minor in nrz_source_bundle::PythonMinor::ALL {
+        let text = format!(
+            "[build]\ntoolchain='python'\npython_version='{}'\ncommand='mkdocs build'\noutput_directory='site'\n[deploy]\ncompute='static'\n",
+            minor.version()
+        );
+        std::fs::write(project.path().join("onreza.toml"), &text).unwrap();
+        let fs = LocalFs::new(project.path());
+        let mut detection = detect(project.path());
+        super::application_runtime::resolve_and_bind_detection(&fs, &mut detection).unwrap();
+        let context = detection.metadata.source_build_context.unwrap();
+        assert_eq!(context.build_toolchain.resolved_python_minor(), Some(minor));
+        assert_eq!(context.application_runtime, None);
+        assert_eq!(detection.suggested_compute, ComputeType::Static);
+        assert_eq!(
+            detection.metadata.runtime.version.as_deref(),
+            Some(minor.version())
+        );
+        let virtual_fs=VirtualFs::from_json(&serde_json::json!({"tree":["requirements.txt","onreza.toml"],"files":{"requirements.txt":"mkdocs\n","onreza.toml":text}}).to_string()).unwrap();
+        let mut remote = detect_with_fs(&virtual_fs);
+        super::application_runtime::resolve_and_bind_detection(&virtual_fs, &mut remote).unwrap();
+        assert_eq!(remote.metadata.source_build_context, Some(context));
+        for launch in [
+            "runtime='python'",
+            "module='company.worker'",
+            "application='company.web:app'\nserver='asgi'",
+            "entry='server.js'",
+            "args=[]",
+            "python_version='3.12'",
+        ] {
+            let config: crate::config::ProjectConfig =
+                toml::from_str(&format!("[deploy]\ncompute='static'\n{launch}\n")).unwrap();
+            let mut detection = detect(project.path());
+            assert!(
+                super::application_runtime::resolve_and_bind_source_build_context(
+                    &fs,
+                    &mut detection,
+                    &config,
+                    None,
+                    None
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("STATIC serving conflicts")
+            );
+        }
+    }
+}
+
+#[test]
+fn source_build_context_defaults_follow_compiler_manager_and_python_minors() {
+    use nrz_source_bundle::BuildToolchainFamily;
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"scripts":{"start":"bun server.js"},"dependencies":{"express":"5.0.0"}}"#,
+    )
+    .unwrap();
+    let fs = LocalFs::new(project.path());
+    let mut detection = detect(project.path());
+    super::application_runtime::resolve_and_bind_detection(&fs, &mut detection).unwrap();
+    let context = detection.metadata.source_build_context.unwrap();
+    assert_eq!(context.build_toolchain.family, BuildToolchainFamily::Node);
+    assert_eq!(
+        context.application_runtime.unwrap().family,
+        nrz_source_bundle::ApplicationRuntimeFamily::Bun
+    );
+    std::fs::remove_file(project.path().join("package.json")).unwrap();
+    std::fs::write(project.path().join("main.py"), "print('ready')\n").unwrap();
+    for config in [
+        "[deploy]\npython_version='3.12'",
+        "[build]\npython_version='3.12'",
+        "[build]\npython_version='3.12'\n[deploy]\npython_version='3.14'",
+    ] {
+        std::fs::write(project.path().join("onreza.toml"), config).unwrap();
+        let mut detection = detect(project.path());
+        super::application_runtime::resolve_and_bind_detection(&fs, &mut detection).unwrap();
+        let context = detection.metadata.source_build_context.unwrap();
+        assert_eq!(
+            context.build_toolchain.resolved_python_minor(),
+            Some(nrz_source_bundle::PythonMinor::Python312)
+        );
+        assert_eq!(
+            context.application_runtime.unwrap().python_version,
+            Some(if config.contains("3.14") {
+                nrz_source_bundle::PythonMinor::Python314
+            } else {
+                nrz_source_bundle::PythonMinor::Python312
+            })
+        );
+    }
 }

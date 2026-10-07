@@ -108,6 +108,12 @@ pub struct DevSection {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BuildSection {
+    #[serde(
+        deserialize_with = "deserialize_build_toolchain",
+        serialize_with = "serialize_build_toolchain"
+    )]
+    pub toolchain: Option<nrz_source_bundle::BuildToolchainFamily>,
+    pub python_version: Option<nrz_source_bundle::PythonMinor>,
     pub output_dirs: Option<Vec<String>>,
     pub command: Option<String>,
     pub install_command: Option<String>,
@@ -141,6 +147,33 @@ pub struct DeploySection {
     pub health_check_path: Option<HealthCheckPathConfig>,
     /// Monorepo app/workspace to deploy (name, directory basename, or path).
     pub app: Option<String>,
+}
+
+fn deserialize_build_toolchain<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<nrz_source_bundle::BuildToolchainFamily>, D::Error> {
+    let value: Option<String> = Option::deserialize(deserializer)?;
+    value
+        .map(|value| {
+            serde_json::from_value(serde_json::Value::String(value.to_ascii_uppercase()))
+                .map_err(serde::de::Error::custom)
+        })
+        .transpose()
+}
+
+fn serialize_build_toolchain<S: serde::Serializer>(
+    family: &Option<nrz_source_bundle::BuildToolchainFamily>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    family
+        .map(|family| {
+            serde_json::to_value(family)
+                .expect("build toolchain family serializes")
+                .as_str()
+                .expect("family is a string")
+                .to_ascii_lowercase()
+        })
+        .serialize(serializer)
 }
 
 fn serialize_runtime_family<S: serde::Serializer>(
@@ -329,6 +362,25 @@ impl ProjectConfig {
                 aliases,
             },
             build: BuildSection {
+                toolchain: child
+                    .build
+                    .toolchain
+                    .or_else(|| {
+                        child
+                            .build
+                            .python_version
+                            .map(|_| nrz_source_bundle::BuildToolchainFamily::Python)
+                    })
+                    .or(parent.build.toolchain),
+                python_version: if child
+                    .build
+                    .toolchain
+                    .is_some_and(|family| family != nrz_source_bundle::BuildToolchainFamily::Python)
+                {
+                    child.build.python_version
+                } else {
+                    child.build.python_version.or(parent.build.python_version)
+                },
                 output_dirs: child.build.output_dirs.or(parent.build.output_dirs),
                 command: child.build.command.or(parent.build.command),
                 install_command: child.build.install_command.or(parent.build.install_command),
@@ -534,12 +586,8 @@ impl IgnoredBuildBehavior {
 pub struct ProjectBuildSettings {
     #[serde(default)]
     pub node_version: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_runtime_presence",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub application_runtime: Option<Option<nrz_source_bundle::ApplicationRuntimeDeclaration>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_build_context: Option<nrz_source_bundle::SourceBuildContext>,
     pub framework_preset: Option<String>,
     pub root_directory: String,
     pub git_lfs_enabled: Option<bool>,
@@ -553,12 +601,6 @@ pub struct ProjectBuildSettings {
     pub ignored_build_behavior: Option<IgnoredBuildBehavior>,
     pub ignored_build_folder: Option<String>,
     pub ignored_build_command: Option<String>,
-}
-
-fn deserialize_runtime_presence<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Option<nrz_source_bundle::ApplicationRuntimeDeclaration>>, D::Error> {
-    Option::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -675,6 +717,8 @@ pub struct EffectiveConfigExplanation {
     pub build_command: EffectiveConfigValue,
     pub output_directory: EffectiveConfigValue,
     pub output_dirs: EffectiveConfigList,
+    pub build_toolchain: EffectiveConfigValue,
+    pub build_python_version: EffectiveConfigValue,
     pub deploy_compute: EffectiveConfigValue,
     pub deploy_entry: EffectiveConfigValue,
     pub deploy_python_version: EffectiveConfigValue,
@@ -684,7 +728,7 @@ pub struct EffectiveConfigExplanation {
 #[derive(Debug, Clone)]
 pub struct EffectiveProjectConfig {
     node_version: Option<String>,
-    application_runtime: Option<Option<nrz_source_bundle::ApplicationRuntimeDeclaration>>,
+    source_build_context: Option<nrz_source_bundle::SourceBuildContext>,
     project_dir: PathBuf,
     config: ProjectConfig,
     project_id: Option<String>,
@@ -726,7 +770,7 @@ impl EffectiveProjectConfig {
 
         Self {
             node_version: None,
-            application_runtime: None,
+            source_build_context: None,
             project_dir,
             config,
             project_id,
@@ -818,8 +862,8 @@ impl EffectiveProjectConfig {
 
     pub fn apply_platform_runner_settings(&mut self, settings: &ProjectBuildSettings) {
         self.node_version.clone_from(&settings.node_version);
-        self.application_runtime
-            .clone_from(&settings.application_runtime);
+        self.source_build_context
+            .clone_from(&settings.source_build_context);
         self.framework_override =
             normalize_authoritative_framework(settings.framework_preset.as_deref())
                 .map(str::to_string);
@@ -858,10 +902,8 @@ impl EffectiveProjectConfig {
         Ok(())
     }
 
-    pub fn platform_application_runtime(
-        &self,
-    ) -> Option<&Option<nrz_source_bundle::ApplicationRuntimeDeclaration>> {
-        self.application_runtime.as_ref()
+    pub fn platform_source_build_context(&self) -> Option<&nrz_source_bundle::SourceBuildContext> {
+        self.source_build_context.as_ref()
     }
 
     pub fn config(&self) -> &ProjectConfig {
@@ -927,6 +969,24 @@ impl EffectiveProjectConfig {
                     "default".to_string()
                 },
             },
+            build_toolchain: explain_config_option(
+                self.config.build.toolchain.map(|family| match family {
+                    nrz_source_bundle::BuildToolchainFamily::Node => "node",
+                    nrz_source_bundle::BuildToolchainFamily::Bun => "bun",
+                    nrz_source_bundle::BuildToolchainFamily::Python => "python",
+                    nrz_source_bundle::BuildToolchainFamily::Native => "native",
+                }),
+                "onreza.toml",
+                "auto",
+            ),
+            build_python_version: explain_config_option(
+                self.config
+                    .build
+                    .python_version
+                    .map(nrz_source_bundle::PythonMinor::version),
+                "onreza.toml",
+                "default",
+            ),
             deploy_compute: explain_config_option(self.deploy_compute(), "onreza.toml", "auto"),
             deploy_entry: explain_config_option(self.deploy_entry(), "onreza.toml", "absent"),
             deploy_python_version: explain_config_option(

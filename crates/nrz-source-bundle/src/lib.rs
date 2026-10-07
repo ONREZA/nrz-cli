@@ -6,7 +6,13 @@ pub mod handoff;
 pub mod manifest;
 pub mod python;
 pub use python::{PythonMinor, PythonToolchainVersions, python_toolchain_versions};
+pub mod source_build_context;
 pub mod verifier;
+
+pub use source_build_context::{
+    BuildToolchainDeclaration, BuildToolchainFamily, SOURCE_BUILD_CONTEXT_SCHEMA_VERSION,
+    SourceBuildContext,
+};
 
 pub use application_runtime::{
     APPLICATION_RUNTIME_CONFIG_KEY, ApplicationRuntimeDeclaration, ApplicationRuntimeFamily,

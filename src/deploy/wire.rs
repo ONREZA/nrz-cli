@@ -40,18 +40,28 @@ impl TryFrom<nrz_api::Admit200Response> for AdmissionResponse {
 fn runner_settings(
     value: nrz_api::RunnerContext200ResponseSettings,
 ) -> anyhow::Result<ProjectBuildSettings> {
-    let application_runtime = value
-        .application_runtime
-        .map(|intent| {
-            let declaration: nrz_source_bundle::ApplicationRuntimeDeclaration =
-                serde_json::from_value(serde_json::to_value(intent)?)?;
-            declaration.validate().map_err(anyhow::Error::msg)?;
-            Ok::<_, anyhow::Error>(declaration)
+    let source_build_context: Option<nrz_source_bundle::SourceBuildContext> = value
+        .source_build_context
+        .map(|context| {
+            anyhow::ensure!(
+                context.schema_version
+                    == f64::from(nrz_source_bundle::SOURCE_BUILD_CONTEXT_SCHEMA_VERSION),
+                "unsupported source build context schemaVersion"
+            );
+            let mut wire = serde_json::to_value(context)?;
+            // The generated numeric literal is f64; the neutral schema version
+            // is an integer. Canonicalize this validated constant at the adapter.
+            wire["schemaVersion"] =
+                serde_json::json!(nrz_source_bundle::SOURCE_BUILD_CONTEXT_SCHEMA_VERSION);
+            serde_json::from_value(wire).map_err(anyhow::Error::from)
         })
         .transpose()?;
+    if let Some(context) = &source_build_context {
+        context.validate().map_err(anyhow::Error::msg)?;
+    }
     Ok(ProjectBuildSettings {
         node_version: Some(value.node_version.to_string()),
-        application_runtime: Some(application_runtime),
+        source_build_context,
         framework_preset: value.framework_preset,
         root_directory: value.root_directory,
         git_lfs_enabled: Some(value.git_lfs_enabled),

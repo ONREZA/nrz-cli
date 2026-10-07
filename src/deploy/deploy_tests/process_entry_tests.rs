@@ -31,12 +31,11 @@ fn explicit_bun_start_path_precedes_main_but_keeps_config_entry_authority() {
         fs::write(dir.path().join(file), "console.log('ok')").unwrap();
     }
     let mut detection = make_detection("other", None);
-    detection.metadata.application_runtime =
-        crate::detect::application_runtime::resolve_application_runtime(
-            &crate::detect::fs::LocalFs::new(dir.path()),
-            "other",
-        )
-        .unwrap();
+    crate::detect::application_runtime::resolve_and_bind_detection(
+        &crate::detect::fs::LocalFs::new(dir.path()),
+        &mut detection,
+    )
+    .unwrap();
     let (entry, _) = ensure_process_entry(dir.path(), dir.path(), None, &detection, true).unwrap();
     assert_eq!(entry.as_deref(), Some("server.ts"));
     let (entry, _) = ensure_process_entry(

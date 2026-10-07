@@ -61,9 +61,11 @@ static REGEX_REMOTE_IMAGE_SOURCE_AUTHORING_ID: std::sync::LazyLock<regex::Regex>
     std::sync::LazyLock::new(|| {
         regex::Regex::new("^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$").expect("invalid regex")
     });
-static REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_APPLICATION_RUNTIME_ENTRY: std::sync::LazyLock<
+static REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_SOURCE_BUILD_CONTEXT_APPLICATION_RUNTIME_OBJECT_ENTRY: std::sync::LazyLock<
     regex::Regex,
-> = std::sync::LazyLock::new(|| regex::Regex::new("^[^\\u0000]*$").expect("invalid regex"));
+> = std::sync::LazyLock::new(|| {
+    regex::Regex::new("^[^\\u0000]*$").expect("invalid regex")
+});
 static REGEX_SOURCE_PATH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new("\\.nrz-fn\\.(?:ts|tsx|js|jsx|mjs)$").expect("invalid regex")
 });
@@ -21613,30 +21615,114 @@ pub struct RunnerContext200ResponseDeployment {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum RunnerContext200ResponseSettingsApplicationRuntimeFamily {
-    #[serde(rename = "BUN")]
-    #[default]
-    Bun,
-    #[serde(rename = "NODE")]
-    Node,
-    #[serde(rename = "PYTHON")]
-    Python,
-    #[serde(rename = "EXECUTABLE")]
-    Executable,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily {
+    #[serde(
+        deserialize_with = "RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily::deserialize_const_family"
+    )]
+    #[serde(
+        serialize_with = "RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily::serialize_const_family"
+    )]
+    #[default("NODE".to_string())]
+    pub family: String,
 }
-impl core::fmt::Display for RunnerContext200ResponseSettingsApplicationRuntimeFamily {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Bun => write!(f, "BUN"),
-            Self::Node => write!(f, "NODE"),
-            Self::Python => write!(f, "PYTHON"),
-            Self::Executable => write!(f, "EXECUTABLE"),
+impl RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_family<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"NODE\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
         }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_family<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"NODE\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily2 {
+    #[serde(
+        deserialize_with = "RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily2::deserialize_const_family"
+    )]
+    #[serde(
+        serialize_with = "RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily2::serialize_const_family"
+    )]
+    #[default("BUN".to_string())]
+    pub family: String,
+}
+impl RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily2 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_family<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"BUN\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_family<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"BUN\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum RunnerContext200ResponseSettingsApplicationRuntimePythonVersion {
+pub enum RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObjectPythonVersion {
     #[serde(rename = "3.12")]
     #[default]
     T312,
@@ -21645,7 +21731,9 @@ pub enum RunnerContext200ResponseSettingsApplicationRuntimePythonVersion {
     #[serde(rename = "3.14")]
     T314,
 }
-impl core::fmt::Display for RunnerContext200ResponseSettingsApplicationRuntimePythonVersion {
+impl core::fmt::Display
+    for RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObjectPythonVersion
+{
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::T312 => write!(f, "3.12"),
@@ -21654,22 +21742,525 @@ impl core::fmt::Display for RunnerContext200ResponseSettingsApplicationRuntimePy
         }
     }
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObject {
+    #[serde(
+        deserialize_with = "RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObject::deserialize_const_family"
+    )]
+    #[serde(
+        serialize_with = "RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObject::serialize_const_family"
+    )]
+    #[default("PYTHON".to_string())]
+    pub family: String,
+    #[serde(rename = "pythonVersion")]
+    pub python_version:
+        RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObjectPythonVersion,
+}
+impl RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObject {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_family<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"PYTHON\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_family<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"PYTHON\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily3 {
+    #[serde(
+        deserialize_with = "RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily3::deserialize_const_family"
+    )]
+    #[serde(
+        serialize_with = "RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily3::serialize_const_family"
+    )]
+    #[default("NATIVE".to_string())]
+    pub family: String,
+}
+impl RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily3 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_family<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"NATIVE\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_family<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"NATIVE\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum RunnerContext200ResponseSettingsSourceBuildContextBuildToolchain {
+    #[default]
+    Family(RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily),
+    Family2(RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily2),
+    Object(RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObject),
+    Family3(RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily3),
+}
+impl RunnerContext200ResponseSettingsSourceBuildContextBuildToolchain {
+    pub fn family(family: String) -> Self {
+        Self::Family(
+            RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily {
+                family,
+                ..Default::default()
+            },
+        )
+    }
+    pub fn family2(family: String) -> Self {
+        Self::Family2(
+            RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily2 {
+                family,
+                ..Default::default()
+            },
+        )
+    }
+    pub fn object(
+        python_version: RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObjectPythonVersion,
+    ) -> Self {
+        Self::Object(
+            RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObject {
+                python_version,
+                ..Default::default()
+            },
+        )
+    }
+    pub fn family3(family: String) -> Self {
+        Self::Family3(
+            RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainFamily3 {
+                family,
+                ..Default::default()
+            },
+        )
+    }
+}
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 #[serde(deny_unknown_fields)]
-pub struct RunnerContext200ResponseSettingsApplicationRuntime {
-    pub family: RunnerContext200ResponseSettingsApplicationRuntimeFamily,
+pub struct RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject {
+    #[serde(
+        deserialize_with = "RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject::deserialize_const_family"
+    )]
+    #[serde(
+        serialize_with = "RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject::serialize_const_family"
+    )]
+    #[default("BUN".to_string())]
+    pub family: String,
     #[validate(length(max = 64u64))]
     pub args: Vec<String>,
     #[serde(rename = "pythonVersion")]
-    pub python_version: Option<RunnerContext200ResponseSettingsApplicationRuntimePythonVersion>,
+    pub python_version: Option<serde_json::Value>,
     #[validate(
         length(min = 1u64, max = 4_096u64),
-        regex(path = "REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_APPLICATION_RUNTIME_ENTRY")
+        regex(
+            path = "REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_SOURCE_BUILD_CONTEXT_APPLICATION_RUNTIME_OBJECT_ENTRY"
+        )
     )]
     pub entry: Option<String>,
+}
+impl RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_family<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"BUN\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_family<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"BUN\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject2 {
+    #[serde(
+        deserialize_with = "RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject2::deserialize_const_family"
+    )]
+    #[serde(
+        serialize_with = "RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject2::serialize_const_family"
+    )]
+    #[default("NODE".to_string())]
+    pub family: String,
+    #[validate(length(max = 64u64))]
+    pub args: Vec<String>,
+    #[serde(rename = "pythonVersion")]
+    pub python_version: Option<serde_json::Value>,
+    #[validate(
+        length(min = 1u64, max = 4_096u64),
+        regex(
+            path = "REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_SOURCE_BUILD_CONTEXT_APPLICATION_RUNTIME_OBJECT_ENTRY"
+        )
+    )]
+    pub entry: Option<String>,
+}
+impl RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject2 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_family<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"NODE\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_family<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"NODE\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject3 {
+    #[serde(
+        deserialize_with = "RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject3::deserialize_const_family"
+    )]
+    #[serde(
+        serialize_with = "RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject3::serialize_const_family"
+    )]
+    #[default("EXECUTABLE".to_string())]
+    pub family: String,
+    #[validate(length(max = 64u64))]
+    pub args: Vec<String>,
+    #[serde(rename = "pythonVersion")]
+    pub python_version: Option<serde_json::Value>,
+    #[validate(
+        length(min = 1u64, max = 4_096u64),
+        regex(
+            path = "REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_SOURCE_BUILD_CONTEXT_APPLICATION_RUNTIME_OBJECT_ENTRY"
+        )
+    )]
+    pub entry: Option<String>,
+}
+impl RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject3 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_family<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"EXECUTABLE\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_family<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"EXECUTABLE\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject4 {
+    #[serde(
+        deserialize_with = "RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject4::deserialize_const_family"
+    )]
+    #[serde(
+        serialize_with = "RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject4::serialize_const_family"
+    )]
+    #[default("PYTHON".to_string())]
+    pub family: String,
+    #[validate(length(max = 64u64))]
+    pub args: Vec<String>,
+    #[serde(rename = "pythonVersion")]
+    pub python_version:
+        RunnerContext200ResponseSettingsSourceBuildContextBuildToolchainObjectPythonVersion,
+    #[validate(
+        length(min = 1u64, max = 4_096u64),
+        regex(
+            path = "REGEX_RUNNER_CONTEXT200RESPONSE_SETTINGS_SOURCE_BUILD_CONTEXT_APPLICATION_RUNTIME_OBJECT_ENTRY"
+        )
+    )]
+    pub entry: Option<String>,
+}
+impl RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject4 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_family<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"PYTHON\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_family<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"PYTHON\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntime {
+    #[default]
+    Object(RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject),
+    Object2(RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject2),
+    Object3(RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject3),
+    Object4(RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject4),
+}
+impl RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntime {
+    pub fn object(args: Vec<String>) -> Self {
+        Self::Object(
+            RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject {
+                args,
+                ..Default::default()
+            },
+        )
+    }
+    pub fn object2(args: Vec<String>) -> Self {
+        Self::Object2(
+            RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject2 {
+                args,
+                ..Default::default()
+            },
+        )
+    }
+    pub fn object3(args: Vec<String>) -> Self {
+        Self::Object3(
+            RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntimeObject3 {
+                args,
+                ..Default::default()
+            },
+        )
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerContext200ResponseSettingsSourceBuildContext {
+    #[serde(rename = "schemaVersion")]
+    #[serde(
+        deserialize_with = "RunnerContext200ResponseSettingsSourceBuildContext::deserialize_const_schema_version"
+    )]
+    #[serde(
+        serialize_with = "RunnerContext200ResponseSettingsSourceBuildContext::serialize_const_schema_version"
+    )]
+    #[default(1f64)]
+    pub schema_version: f64,
+    #[serde(rename = "buildToolchain")]
+    pub build_toolchain: RunnerContext200ResponseSettingsSourceBuildContextBuildToolchain,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "applicationRuntime"
+    )]
+    #[serialize_always]
+    pub application_runtime:
+        Option<RunnerContext200ResponseSettingsSourceBuildContextApplicationRuntime>,
+}
+impl RunnerContext200ResponseSettingsSourceBuildContext {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_schema_version<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<f64, D::Error> {
+        let value = <f64 as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: f64 = serde_json::from_str::<f64>("1").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_schema_version<S: serde::Serializer>(
+        value: &f64,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: f64 = serde_json::from_str::<f64>("1").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -21690,11 +22281,10 @@ pub struct RunnerContext200ResponseSettings {
     pub node_version: Project200Response3NodeVersion,
     #[serde(
         deserialize_with = "Option::deserialize",
-        rename = "applicationRuntime"
+        rename = "sourceBuildContext"
     )]
     #[serialize_always]
-    #[validate(nested)]
-    pub application_runtime: Option<RunnerContext200ResponseSettingsApplicationRuntime>,
+    pub source_build_context: Option<RunnerContext200ResponseSettingsSourceBuildContext>,
     #[serde(deserialize_with = "Option::deserialize", rename = "installCommand")]
     #[serialize_always]
     pub install_command: Option<String>,
@@ -21737,7 +22327,7 @@ pub struct RunnerContext200Response {
     #[serde(rename = "protocolVersion")]
     #[serde(deserialize_with = "RunnerContext200Response::deserialize_const_protocol_version")]
     #[serde(serialize_with = "RunnerContext200Response::serialize_const_protocol_version")]
-    #[default("runner-context-v5".to_string())]
+    #[default("runner-context-v6".to_string())]
     pub protocol_version: String,
     #[validate(nested)]
     pub deployment: RunnerContext200ResponseDeployment,
@@ -21757,7 +22347,7 @@ impl RunnerContext200Response {
         deserializer: D,
     ) -> Result<String, D::Error> {
         let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let expected: String = serde_json::from_str::<String>("\"runner-context-v5\"")
+        let expected: String = serde_json::from_str::<String>("\"runner-context-v6\"")
             .map_err(serde::de::Error::custom)?;
         if value != expected {
             return Err(serde::de::Error::custom(
@@ -21779,7 +22369,7 @@ impl RunnerContext200Response {
         value: &String,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        let expected: String = serde_json::from_str::<String>("\"runner-context-v5\"")
+        let expected: String = serde_json::from_str::<String>("\"runner-context-v6\"")
             .map_err(serde::ser::Error::custom)?;
         if value != &expected {
             return Err(serde::ser::Error::custom(
@@ -21959,12 +22549,34 @@ impl LayerKindObject {
         serde::Serialize::serialize(value, serializer)
     }
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum LayerKindObject2RuntimeApplicationRuntimeFamily {
+    #[serde(rename = "BUN")]
+    #[default]
+    Bun,
+    #[serde(rename = "NODE")]
+    Node,
+    #[serde(rename = "PYTHON")]
+    Python,
+    #[serde(rename = "EXECUTABLE")]
+    Executable,
+}
+impl core::fmt::Display for LayerKindObject2RuntimeApplicationRuntimeFamily {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Bun => write!(f, "BUN"),
+            Self::Node => write!(f, "NODE"),
+            Self::Python => write!(f, "PYTHON"),
+            Self::Executable => write!(f, "EXECUTABLE"),
+        }
+    }
+}
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 #[serde(deny_unknown_fields)]
 pub struct LayerKindObject2RuntimeApplicationRuntime {
-    pub family: RunnerContext200ResponseSettingsApplicationRuntimeFamily,
+    pub family: LayerKindObject2RuntimeApplicationRuntimeFamily,
     #[validate(length(max = 64u64))]
     pub args: Vec<String>,
 }

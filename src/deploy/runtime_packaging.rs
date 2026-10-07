@@ -14,16 +14,34 @@ pub(super) fn resolve_runtime_artifact(
     detection: &crate::detect::types::DetectionResult,
     json: bool,
 ) -> anyhow::Result<RuntimeArtifact> {
-    if detection.metadata.runtime.runtime_type == RuntimeType::Python
+    let python_minor = detection
+        .metadata
+        .application_runtime()
+        .filter(|runtime| runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python)
+        .and_then(|runtime| runtime.python_version)
+        .or_else(|| {
+            manifest
+                .layers
+                .iter()
+                .filter(|layer| layer.target == build_manifest::LayerTarget::Compute)
+                .filter_map(|layer| layer.runtime.as_ref())
+                .filter(|runtime| {
+                    runtime.application_runtime.as_ref().is_some_and(|intent| {
+                        intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+                    })
+                })
+                .filter_map(|runtime| {
+                    runtime
+                        .build_runtime_version
+                        .as_deref()?
+                        .strip_prefix("python-")
+                        .and_then(nrz_source_bundle::PythonMinor::from_version)
+                })
+                .next()
+        });
+    if let Some(minor) = python_minor
         && manifest_has_compute_layer(&manifest)
     {
-        let minor = detection
-            .metadata
-            .runtime
-            .version
-            .as_deref()
-            .and_then(nrz_source_bundle::PythonMinor::from_version)
-            .context("unsupported selected Python minor")?;
         return resolve_python_runtime_artifact(
             project_dir,
             build_output_dir,
@@ -122,9 +140,9 @@ fn resolve_python_runtime_artifact(
         rewrite_manifest_for_node_project_runtime(manifest, &build_output_prefix)?
     };
     let dependency_root = project_dir.join(minor.site_packages_root());
-    if crate::detect::python::dependency_manifest(&crate::detect::fs::LocalFs::new(project_dir))
-        .is_some()
-        && !dependency_root.is_dir()
+    if crate::detect::python::requires_dependency_stage(&crate::detect::fs::LocalFs::new(
+        project_dir,
+    ))? && !dependency_root.is_dir()
     {
         return Err(output::coded_error(
             "MISSING_RUNTIME_DEPENDENCIES",
@@ -181,10 +199,37 @@ pub(super) fn is_node_project_runtime_candidate(
     manifest: &build_manifest::Manifest,
     detection: &crate::detect::types::DetectionResult,
 ) -> bool {
-    if !matches!(
-        detection.metadata.runtime.runtime_type,
-        RuntimeType::Node | RuntimeType::Bun
-    ) {
+    let primary_javascript = detection
+        .metadata
+        .application_runtime()
+        .is_some_and(|runtime| {
+            matches!(
+                runtime.family,
+                nrz_source_bundle::ApplicationRuntimeFamily::Node
+                    | nrz_source_bundle::ApplicationRuntimeFamily::Bun
+            )
+        });
+    let typed_javascript = manifest.layers.iter().any(|layer| {
+        layer.target == build_manifest::LayerTarget::Compute
+            && layer
+                .runtime
+                .as_ref()
+                .and_then(|runtime| runtime.application_runtime.as_ref())
+                .is_some_and(|intent| {
+                    matches!(
+                        intent.family,
+                        nrz_source_bundle::ApplicationRuntimeFamily::Node
+                            | nrz_source_bundle::ApplicationRuntimeFamily::Bun
+                    )
+                })
+    });
+    if !primary_javascript
+        && !typed_javascript
+        && !matches!(
+            detection.metadata.runtime.runtime_type,
+            RuntimeType::Node | RuntimeType::Bun
+        )
+    {
         return false;
     }
     if !manifest_has_compute_layer(manifest) {

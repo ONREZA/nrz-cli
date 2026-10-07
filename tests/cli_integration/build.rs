@@ -212,11 +212,29 @@ fn standalone_process_build_without_manifest_emits_one_json_summary() {
 }
 
 #[test]
-fn standalone_build_explicit_static_keeps_priority_over_declared_server() {
+fn standalone_build_static_separates_build_toolchain_from_process_launch() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(temp.path().join("onreza.toml"), "[build]\noutput_directory='.'\n[deploy]\ncompute='static'\nruntime='node'\nentry='server.js'\nargs=[]\n").unwrap();
     fs::write(temp.path().join("index.html"), "<h1>static export</h1>").unwrap();
     fs::write(temp.path().join("server.js"), "console.log('server')").unwrap();
+    let output = nrz()
+        .current_dir(temp.path())
+        .args(["build", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let result = stdout_json(&output);
+    assert_eq!(result["code"], "APPLICATION_RUNTIME_INVALID");
+
+    fs::write(
+        temp.path().join("onreza.toml"),
+        "[build]\ntoolchain='node'\noutput_directory='.'\n[deploy]\ncompute='static'\n",
+    )
+    .unwrap();
     let output = nrz()
         .current_dir(temp.path())
         .args(["build", "--json"])
@@ -320,7 +338,7 @@ fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
         let detected = stdout_json(&detected);
         assert_eq!(detected["metadata"]["runtime"]["version"], minor.version());
         assert_eq!(
-            detected["metadata"]["applicationRuntime"]["pythonVersion"],
+            detected["metadata"]["sourceBuildContext"]["applicationRuntime"]["pythonVersion"],
             minor.version()
         );
     }

@@ -16,7 +16,7 @@ fn detect_preserves_bun_start_runtime_before_build() {
     assert!(output.status.success());
     let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
-        result["metadata"]["applicationRuntime"],
+        result["metadata"]["sourceBuildContext"]["applicationRuntime"],
         serde_json::json!({"family":"BUN","entry":"src/server.ts","args":["--port","8080"]})
     );
 }
@@ -64,7 +64,7 @@ fn remote_runtime_declaration_is_independent_of_installer_and_lockfile() {
         );
         let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(
-            result["metadata"]["applicationRuntime"],
+            result["metadata"]["sourceBuildContext"]["applicationRuntime"],
             json!({"family":family,"entry":entry,"args":args})
         );
     }
@@ -112,7 +112,7 @@ fn full_runtime_declaration_replaces_unsupported_start_syntax() {
     );
     let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
-        result["metadata"]["applicationRuntime"],
+        result["metadata"]["sourceBuildContext"]["applicationRuntime"],
         json!({"family":"NODE","entry":"dist/server.js","args":["--port","8080"]})
     );
 }
@@ -464,7 +464,7 @@ fn configured_server_entry_is_a_generic_process_signal_without_runtime_family() 
     assert!(output.status.success());
     let result = stdout_json(&output);
     assert_eq!(result["suggestedCompute"], "PROCESS");
-    assert!(result["metadata"]["applicationRuntime"].is_null());
+    assert!(result["metadata"]["sourceBuildContext"]["applicationRuntime"].is_null());
     let temp = tempfile::tempdir().unwrap();
     fs::write(temp.path().join("onreza.toml"), config).unwrap();
     fs::write(temp.path().join("index.html"), "<h1>server content</h1>").unwrap();
@@ -477,7 +477,7 @@ fn configured_server_entry_is_a_generic_process_signal_without_runtime_family() 
     assert!(local.status.success());
     let result = stdout_json(&local);
     assert_eq!(result["suggestedCompute"], "PROCESS");
-    assert!(result["metadata"]["applicationRuntime"].is_null());
+    assert!(result["metadata"]["sourceBuildContext"]["applicationRuntime"].is_null());
 }
 
 #[test]

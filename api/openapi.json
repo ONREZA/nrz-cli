@@ -20756,7 +20756,7 @@
                       ]
                     },
                     "protocolVersion": {
-                      "const": "runner-context-v5",
+                      "const": "runner-context-v6",
                       "type": "string"
                     },
                     "deployment": {
@@ -20855,47 +20855,230 @@
                           ],
                           "type": "string"
                         },
-                        "applicationRuntime": {
+                        "sourceBuildContext": {
                           "anyOf": [
                             {
                               "type": "object",
                               "properties": {
-                                "family": {
-                                  "enum": [
-                                    "BUN",
-                                    "NODE",
-                                    "PYTHON",
-                                    "EXECUTABLE"
-                                  ],
-                                  "type": "string"
+                                "schemaVersion": {
+                                  "const": 1,
+                                  "type": "number"
                                 },
-                                "args": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string",
-                                    "maxLength": 4096,
-                                    "pattern": "^[^\\u0000]*$"
-                                  },
-                                  "maxItems": 64
+                                "buildToolchain": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "family": {
+                                          "const": "NODE",
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "family"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "family": {
+                                          "const": "BUN",
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "family"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "family": {
+                                          "const": "PYTHON",
+                                          "type": "string"
+                                        },
+                                        "pythonVersion": {
+                                          "enum": [
+                                            "3.12",
+                                            "3.13",
+                                            "3.14"
+                                          ],
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "family",
+                                        "pythonVersion"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "family": {
+                                          "const": "NATIVE",
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "family"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ]
                                 },
-                                "pythonVersion": {
-                                  "enum": [
-                                    "3.12",
-                                    "3.13",
-                                    "3.14"
-                                  ],
-                                  "type": "string"
-                                },
-                                "entry": {
-                                  "type": "string",
-                                  "maxLength": 4096,
-                                  "pattern": "^[^\\u0000]*$",
-                                  "minLength": 1
+                                "applicationRuntime": {
+                                  "anyOf": [
+                                    {
+                                      "oneOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "family": {
+                                              "const": "BUN",
+                                              "type": "string"
+                                            },
+                                            "args": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "pattern": "^[^\\u0000]*$"
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "pythonVersion": {
+                                              "not": {}
+                                            },
+                                            "entry": {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "pattern": "^[^\\u0000]*$",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "family",
+                                            "args"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "family": {
+                                              "const": "NODE",
+                                              "type": "string"
+                                            },
+                                            "args": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "pattern": "^[^\\u0000]*$"
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "pythonVersion": {
+                                              "not": {}
+                                            },
+                                            "entry": {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "pattern": "^[^\\u0000]*$",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "family",
+                                            "args"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "family": {
+                                              "const": "EXECUTABLE",
+                                              "type": "string"
+                                            },
+                                            "args": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "pattern": "^[^\\u0000]*$"
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "pythonVersion": {
+                                              "not": {}
+                                            },
+                                            "entry": {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "pattern": "^[^\\u0000]*$",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "family",
+                                            "args"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "family": {
+                                              "const": "PYTHON",
+                                              "type": "string"
+                                            },
+                                            "args": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "pattern": "^[^\\u0000]*$"
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "pythonVersion": {
+                                              "enum": [
+                                                "3.12",
+                                                "3.13",
+                                                "3.14"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "entry": {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "pattern": "^[^\\u0000]*$",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "family",
+                                            "args",
+                                            "pythonVersion"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 }
                               },
                               "required": [
-                                "family",
-                                "args"
+                                "schemaVersion",
+                                "buildToolchain",
+                                "applicationRuntime"
                               ],
                               "additionalProperties": false
                             },
@@ -20984,7 +21167,7 @@
                         "gitLfsEnabled",
                         "packageManager",
                         "nodeVersion",
-                        "applicationRuntime",
+                        "sourceBuildContext",
                         "installCommand",
                         "installCommandSource",
                         "buildCommand",

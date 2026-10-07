@@ -138,6 +138,11 @@ impl DeployPlan {
                     .and_then(nrz_source_bundle::PythonMinor::from_version)
                     .map(|minor| minor.exact_version().to_string()),
             },
+            source_build_context: detection
+                .metadata
+                .source_build_context
+                .clone()
+                .expect("resolved deploy context"),
             build: BuildPlanExplain {
                 command: self.build_command.clone(),
                 skipped: self.build_skipped,
@@ -229,6 +234,7 @@ pub(super) struct DeployPlanExplain {
     selected_app: Option<SelectedAppExplain>,
     framework: FrameworkExplain,
     build: BuildPlanExplain,
+    source_build_context: nrz_source_bundle::SourceBuildContext,
     compute: ComputeType,
     target: DeployTargetExplain,
     runtime_artifact: RuntimeArtifactExplain,
@@ -323,32 +329,26 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
 
     let mut detection =
         crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
-    let application_runtime =
-        crate::detect::application_runtime::resolve_application_runtime_with_project(
+    let source_build_context =
+        crate::detect::application_runtime::resolve_and_bind_source_build_context(
             &crate::detect::fs::LocalFs::new(project_dir),
-            &detection.framework,
-            &effective.config().deploy,
+            &mut detection,
+            effective.config(),
             effective.framework_override(),
+            request.explicit_compute,
         )
         .map_err(|error| {
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
         })?;
-    crate::detect::application_runtime::bind_application_runtime(
-        &crate::detect::fs::LocalFs::new(project_dir),
-        &mut detection,
-        application_runtime,
-        effective.deploy_entry(),
-        effective.framework_override(),
-    )
-    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
-    let build_runtime_version = super::validate_application_runtime_before_build(
-        detection.metadata.application_runtime.as_ref(),
-        &detection.metadata.runtime,
+    super::validate_application_runtime_before_build(
+        &source_build_context,
         effective,
         request.platform_runner,
+        !args.skip_build,
         request.execution_env,
     )
     .await?;
+    validate_python_dependency_context(project_dir, &source_build_context, false)?;
     if !args.skip_build && !args.skip_install {
         super::run_install_step(
             project_dir,
@@ -361,7 +361,12 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         .await?;
     }
 
-    let native_recipe = crate::detect::native::native_recipe(&detection.framework);
+    validate_python_dependency_context(project_dir, &source_build_context, true)?;
+
+    let native_recipe = (source_build_context.build_toolchain.family
+        == nrz_source_bundle::BuildToolchainFamily::Native)
+        .then(|| crate::detect::native::native_recipe(&detection.framework))
+        .flatten();
     let build_preparation = if native_recipe.is_some() {
         crate::frameworks::BuildPreparation::default()
     } else {
@@ -376,7 +381,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             output::status(json, "~", &patch.message, output::Phase::Deploy);
         }
     }
-    let build_env =
+    let mut build_env =
         super::merge_command_environment(request.execution_env, &build_preparation.env_pairs());
 
     let native_plan = if !args.skip_build
@@ -399,6 +404,22 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         super::resolve_build_command(args.build_command.as_deref(), project_dir, effective)
             .filter(|command| native_recipe.is_none() || !command.trim().is_empty())
     };
+    if !args.skip_build
+        && build_command
+            .as_ref()
+            .is_some_and(|command| !command.trim().is_empty())
+        && let Some(minor) = source_build_context.build_toolchain.resolved_python_minor()
+    {
+        let mode = if request.platform_runner {
+            super::python_toolchain::PythonInstallMode::PinnedPlatform
+        } else {
+            super::python_toolchain::PythonInstallMode::ManagedLocal
+        };
+        let python_env =
+            super::python_toolchain::build_environment(project_dir, mode, minor, &build_env)
+                .await?;
+        build_env = super::merge_command_environment(&build_env, &python_env);
+    }
     if let Some(plan) = &native_plan {
         super::run_native_build_step(
             plan,
@@ -417,14 +438,12 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         super::run_build_step(cmd, project_dir, json, &build_env, request.build_logs)?;
     }
 
-    if let Some(declaration) =
-        detection
-            .metadata
-            .application_runtime
-            .as_ref()
-            .filter(|declaration| {
-                declaration.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
-            })
+    if let Some(declaration) = detection
+        .metadata
+        .application_runtime()
+        .filter(|declaration| {
+            declaration.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+        })
     {
         let entry = declaration
             .entry
@@ -443,22 +462,17 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         })?;
     }
 
-    let application_runtime = detection.metadata.application_runtime;
     detection =
         crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
-    crate::detect::application_runtime::bind_application_runtime(
+    crate::detect::application_runtime::bind_source_build_context(
         &crate::detect::fs::LocalFs::new(project_dir),
         &mut detection,
-        application_runtime,
-        effective.deploy_entry(),
+        &source_build_context,
+        effective.config(),
         effective.framework_override(),
+        request.explicit_compute,
     )
     .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
-    if let Some(version) = &build_runtime_version
-        && detection.metadata.runtime.runtime_type != RuntimeType::Python
-    {
-        detection.metadata.runtime.version = Some(version.clone());
-    }
 
     output::status(
         json,
@@ -505,7 +519,14 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
                 )
             })
             .collect::<Vec<_>>();
-        if entries.is_empty() {
+        if entries.is_empty()
+            && !build_result.manifest.as_ref().is_some_and(|manifest| {
+                manifest
+                    .layers
+                    .iter()
+                    .any(|layer| layer.target == build_manifest::LayerTarget::Compute)
+            })
+        {
             entries.push((
                 build_result.output_dir.clone(),
                 effective.deploy_entry().or_else(|| {
@@ -626,22 +647,19 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
                     &build_artifact.detection.metadata.runtime,
                     request.platform_runner,
                     Some(&auto),
-                    build_artifact
-                        .detection
-                        .metadata
-                        .application_runtime
-                        .as_ref(),
+                    build_artifact.detection.metadata.application_runtime(),
                     effective.node_version(),
+                    effective.config().build.toolchain.is_none()
+                        && effective.config().build.python_version.is_none(),
                 )?;
                 super::apply_application_runtime_manifest(
                     &mut auto,
-                    build_artifact
-                        .detection
-                        .metadata
-                        .application_runtime
-                        .as_ref(),
+                    build_artifact.detection.metadata.application_runtime(),
                     target.as_deref(),
-                    &build_artifact.detection.framework,
+                    crate::detect::application_runtime::serving_framework(
+                        effective.config(),
+                        &build_artifact.detection.framework,
+                    ),
                 )?;
                 build_manifest::validate(&auto)
                     .map_err(|error| output::with_default_code(error, "INVALID_MANIFEST"))?;
@@ -869,4 +887,42 @@ fn artifact_root_scope(runtime_root: &Path, project_dir: &Path) -> ArtifactRootS
     } else {
         ArtifactRootScope::BuildOutput
     }
+}
+
+fn validate_python_dependency_context(
+    project_dir: &Path,
+    context: &nrz_source_bundle::SourceBuildContext,
+    staged: bool,
+) -> anyhow::Result<()> {
+    let Some(serving) = context
+        .application_runtime
+        .as_ref()
+        .filter(|runtime| runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python)
+    else {
+        return Ok(());
+    };
+    let build_minor = context.build_toolchain.resolved_python_minor();
+    if build_minor == serving.python_version {
+        return Ok(());
+    }
+    let fs = crate::detect::fs::LocalFs::new(project_dir);
+    let authored_dependencies = crate::detect::python::dependency_plan(&fs)?
+        .is_some_and(|plan| plan.install_project)
+        || !crate::detect::python::dependency_names(&fs)?.is_empty();
+    let staged_dependencies = staged
+        && nrz_source_bundle::PythonMinor::ALL
+            .into_iter()
+            .any(|minor| {
+                project_dir
+                    .join(minor.site_packages_root())
+                    .read_dir()
+                    .is_ok_and(|mut entries| entries.next().is_some())
+            });
+    if authored_dependencies || staged_dependencies {
+        return Err(output::coded_error(
+            "APPLICATION_RUNTIME_INVALID",
+            "Python runtime dependencies require matching build and serving Python minors; independent toolchains are supported for code-only output",
+        ));
+    }
+    Ok(())
 }

@@ -216,7 +216,7 @@ fn detection(fs: &dyn Fs, recipe: NativeRecipe, configured: bool) -> DetectionRe
         version: None,
         suggested_compute: compute,
         metadata: DetectionMetadata {
-            application_runtime: None,
+            source_build_context: None,
             uses_typescript: None,
             config_files,
             runtime: RuntimeInfo {

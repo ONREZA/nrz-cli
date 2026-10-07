@@ -121,6 +121,124 @@ pub(super) async fn resolve_for(mode: PythonInstallMode) -> anyhow::Result<PathB
     }
 }
 
+/// Select the actual compiler and make the installed build tools visible to
+/// authored commands. Serving dependencies keep their independent ABI witness.
+pub(super) async fn build_environment(
+    project_dir: &Path,
+    mode: PythonInstallMode,
+    minor: PythonMinor,
+    environment: &[(String, String)],
+) -> anyhow::Result<Vec<(String, String)>> {
+    let interpreter = match mode {
+        PythonInstallMode::PinnedPlatform => PathBuf::from(minor.platform_interpreter()),
+        PythonInstallMode::ManagedLocal => {
+            let uv = resolve_for(mode).await?;
+            for arguments in [
+                vec![
+                    "python",
+                    "install",
+                    "--no-bin",
+                    "--no-registry",
+                    "--no-config",
+                    minor.exact_version(),
+                ],
+                vec![
+                    "python",
+                    "find",
+                    "--no-project",
+                    "--no-config",
+                    "--managed-python",
+                    minor.exact_version(),
+                ],
+            ] {
+                let command = PythonInstallCommand {
+                    program: uv.clone(),
+                    arguments: arguments.into_iter().map(OsString::from).collect(),
+                    display: "select managed Python build compiler".into(),
+                };
+                let mut process: tokio::process::Command = command.process(&uv, environment).into();
+                let output = process
+                    .current_dir(project_dir)
+                    .kill_on_drop(true)
+                    .output()
+                    .await?;
+                if !output.status.success() {
+                    bail!(
+                        "cannot select pinned Python build compiler: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                if command
+                    .arguments
+                    .get(1)
+                    .is_some_and(|argument| argument == "find")
+                {
+                    let path = String::from_utf8(output.stdout)?.trim().to_string();
+                    return build_environment_for_interpreter(
+                        project_dir,
+                        minor,
+                        Path::new(&path),
+                        environment,
+                    )
+                    .await;
+                }
+            }
+            unreachable!("managed interpreter selection returns its path")
+        }
+    };
+    build_environment_for_interpreter(project_dir, minor, &interpreter, environment).await
+}
+
+async fn build_environment_for_interpreter(
+    project_dir: &Path,
+    minor: PythonMinor,
+    interpreter: &Path,
+    environment: &[(String, String)],
+) -> anyhow::Result<Vec<(String, String)>> {
+    let interpreter = interpreter
+        .canonicalize()
+        .context("selected Python compiler is unavailable")?;
+    let mut probe = tokio::process::Command::new(&interpreter);
+    let output = probe.args(["-I", "-c", "import sys; print('.'.join(map(str, sys.version_info[:3])) if sys.implementation.name == 'cpython' else '')"])
+        .kill_on_drop(true).output().await?;
+    if !output.status.success()
+        || String::from_utf8_lossy(&output.stdout).trim() != minor.exact_version()
+    {
+        bail!(
+            "Python build compiler does not match selected CPython {}",
+            minor.exact_version()
+        );
+    }
+    let dependency_root = project_dir.join(minor.site_packages_root());
+    let inherited_path = environment
+        .iter()
+        .rev()
+        .find(|(name, _)| name == "PATH")
+        .map(|(_, value)| OsString::from(value))
+        .or_else(|| std::env::var_os("PATH"))
+        .unwrap_or_default();
+    let paths = [
+        interpreter
+            .parent()
+            .context("Python compiler has no directory")?
+            .to_owned(),
+        dependency_root.join("bin"),
+    ]
+    .into_iter()
+    .chain(std::env::split_paths(&inherited_path));
+    Ok(vec![
+        (
+            "PATH".into(),
+            std::env::join_paths(paths)?.to_string_lossy().into_owned(),
+        ),
+        (
+            "PYTHONPATH".into(),
+            dependency_root.to_string_lossy().into_owned(),
+        ),
+        ("PYTHONHOME".into(), String::new()),
+    ])
+}
+
 const GENERATED_REQUIREMENTS: &str = ".onreza/python/build/requirements.txt";
 const PROJECT_WHEELS: &str = ".onreza/python/build/wheels";
 const PORTABLE_WHEEL_CHECK: &str = r#"from pathlib import Path

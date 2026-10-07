@@ -554,6 +554,7 @@ pub(crate) fn apply_application_runtime_manifest(
     build_runtime_version: Option<&str>,
     framework: &str,
 ) -> anyhow::Result<()> {
+    let sole_primary = manifest.layers.len() == 1;
     for layer in &mut manifest.layers {
         if layer.target != crate::build::manifest::LayerTarget::Compute {
             continue;
@@ -563,18 +564,41 @@ pub(crate) fn apply_application_runtime_manifest(
             .as_ref()
             .and_then(|runtime| runtime.application_runtime.as_ref())
         {
-            if declaration.is_some_and(|declaration| {
-                (declaration.family != intent.family
-                    || layer
-                        .runtime
-                        .as_ref()
-                        .and_then(|runtime| runtime.build_runtime_version.as_deref())
-                        .zip(build_runtime_version)
-                        .is_some_and(|(sibling, primary)| sibling != primary))
-                    && !(layer.directory == "."
-                        && declaration.entry.is_some()
-                        && declaration.entry.as_deref() == layer.entry.as_deref())
-            }) {
+            if declaration.is_none() && sole_primary {
+                intent
+                    .validate()
+                    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", error))?;
+                crate::detect::application_runtime::validate_framework(framework, intent.family)
+                    .map_err(|error| {
+                        output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
+                    })?;
+                let witness = layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.build_runtime_version.as_deref());
+                if witness.is_none()
+                    && build_runtime_version.is_none()
+                    && intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Node
+                {
+                    // `nrz build` preserves an authored Node primary until the
+                    // independently admitted Node version can freeze its target.
+                    continue;
+                }
+            }
+            if declaration.is_none() && (!sole_primary || build_runtime_version.is_none())
+                || declaration.is_some_and(|declaration| {
+                    (declaration.family != intent.family
+                        || layer
+                            .runtime
+                            .as_ref()
+                            .and_then(|runtime| runtime.build_runtime_version.as_deref())
+                            .zip(build_runtime_version)
+                            .is_some_and(|(sibling, primary)| sibling != primary))
+                        && !(layer.directory == "."
+                            && declaration.entry.is_some()
+                            && declaration.entry.as_deref() == layer.entry.as_deref())
+                })
+            {
                 let target = layer
                     .runtime
                     .as_ref()
@@ -746,8 +770,7 @@ pub(super) fn ensure_process_entry(
         )
     } else if let Some(entry) = detection
         .metadata
-        .application_runtime
-        .as_ref()
+        .application_runtime()
         .and_then(|runtime| runtime.entry.as_deref())
     {
         Some(crate::detect::resolve_application_entry(entry, output_dir, project_dir)

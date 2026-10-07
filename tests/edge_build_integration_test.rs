@@ -37,7 +37,7 @@ async fn edge_build_runner_context(
 ) -> Json<serde_json::Value> {
     state.record(Method::GET, &uri);
     Json(json!({
-        "protocolVersion": "runner-context-v5",
+        "protocolVersion": "runner-context-v6",
         "context": {
             "workspaceId": "00000000-0000-0000-0000-000000000001",
             "workspaceSlug": "edge",
@@ -58,8 +58,8 @@ async fn edge_build_runner_context(
             "url": null
         },
         "settings": {
-            "nodeVersion": "NODE_22",
-            "applicationRuntime": state.application_runtime,
+            "nodeVersion": "NODE_24",
+            "sourceBuildContext": {"schemaVersion":1,"buildToolchain":{"family":"NODE"},"applicationRuntime": state.application_runtime},
             "frameworkPreset": null,
             "rootDirectory": ".",
             "gitLfsEnabled": false,
@@ -180,6 +180,9 @@ fn changed_source_runtime_is_rejected_before_the_installer_executes() {
         .current_dir(project.path())
         .env("NRZ_API_URL", api_url)
         .env("NRZ_RUNNER", "PLATFORM")
+        .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
+        .env("ONREZA_BUILD_RUNTIME_VERSION", "node-24")
+        .env_remove("ONREZA_BUILD_NODE_MAJOR")
         .env("ONREZA_RUNTIME_OS", "linux")
         .env("ONREZA_RUNTIME_ARCH", "x86_64")
         .env("ONREZA_RUNTIME_LIBC", "glibc")
@@ -223,6 +226,9 @@ fn edge_build_publishes_local_handoff_without_legacy_source_mutations() {
         .current_dir(project.path())
         .env("NRZ_API_URL", api_url)
         .env("NRZ_RUNNER", "PLATFORM")
+        .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
+        .env("ONREZA_BUILD_RUNTIME_VERSION", "node-24")
+        .env_remove("ONREZA_BUILD_NODE_MAJOR")
         .env("ONREZA_RUNTIME_OS", "linux")
         .env("ONREZA_RUNTIME_ARCH", "x86_64")
         .env("ONREZA_RUNTIME_LIBC", "glibc")
@@ -328,7 +334,7 @@ fn build_generated_package_infers_process_without_changing_frozen_runtime() {
             .unwrap();
         }
         let target = if frozen_runtime.is_null() {
-            "node-22"
+            "node-24"
         } else {
             "bun-1.4.2"
         };
@@ -336,6 +342,9 @@ fn build_generated_package_infers_process_without_changing_frozen_runtime() {
             .current_dir(project.path())
             .env("NRZ_API_URL", api_url)
             .env("NRZ_RUNNER", "PLATFORM")
+            .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
+            .env("ONREZA_BUILD_RUNTIME_VERSION", "node-24")
+            .env_remove("ONREZA_BUILD_NODE_MAJOR")
             .env("ONREZA_RUNTIME_OS", "linux")
             .env("ONREZA_RUNTIME_ARCH", "x86_64")
             .env("ONREZA_RUNTIME_LIBC", "glibc")
@@ -396,7 +405,7 @@ fn build_generated_package_infers_process_without_changing_frozen_runtime() {
         assert_eq!(
             launch.profile.to_string(),
             if frozen_runtime.is_null() {
-                "NODE_22"
+                "NODE_24"
             } else {
                 "BUN"
             }
@@ -416,8 +425,6 @@ fn build_generated_package_infers_process_without_changing_frozen_runtime() {
 #[cfg(unix)]
 #[test]
 fn build_generated_elysia_rejects_node_and_keeps_explicit_static_before_source_handoff() {
-    use std::os::unix::fs::PermissionsExt;
-
     for (frozen_runtime, explicit_static) in [
         (
             json!({"family":"NODE","entry":"server.js","args":[]}),
@@ -434,24 +441,10 @@ fn build_generated_elysia_rejects_node_and_keeps_explicit_static_before_source_h
         );
         let project = tempfile::tempdir().unwrap();
         let output_dir = tempfile::tempdir().unwrap();
-        let probe_dir = tempfile::tempdir().unwrap();
-        let node = probe_dir.path().join("node");
-        // Satisfy only the pre-build version probe; detection and build use the real CLI.
-        fs::write(
-            &node,
-            "#!/bin/sh\n[ \"$1\" = --version ] || exit 1\nprintf 'v22.12.0\\n'\n",
-        )
-        .unwrap();
-        fs::set_permissions(&node, fs::Permissions::from_mode(0o755)).unwrap();
-        let path = std::env::join_paths(
-            std::iter::once(probe_dir.path().to_path_buf())
-                .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
-        )
-        .unwrap();
         fs::write(
             project.path().join("onreza.toml"),
             if explicit_static {
-                "[deploy]\ncompute='static'\nentry='server.js'\n"
+                "[deploy]\ncompute='static'\n"
             } else if frozen_runtime.is_null() {
                 "[deploy]\nentry='server.js'\n"
             } else {
@@ -476,13 +469,15 @@ fn build_generated_elysia_rejects_node_and_keeps_explicit_static_before_source_h
         fs::write(project.path().join("server.js"), "console.log('server')").unwrap();
         let output = nrz()
             .current_dir(project.path())
-            .env("PATH", path)
             .env("NRZ_API_URL", api_url)
             .env("NRZ_RUNNER", "PLATFORM")
+            .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
+            .env("ONREZA_BUILD_RUNTIME_VERSION", "node-24")
+            .env_remove("ONREZA_BUILD_NODE_MAJOR")
             .env("ONREZA_RUNTIME_OS", "linux")
             .env("ONREZA_RUNTIME_ARCH", "x86_64")
             .env("ONREZA_RUNTIME_LIBC", "glibc")
-            .env("ONREZA_RUNTIME_VERSION", "node-22")
+            .env("ONREZA_RUNTIME_VERSION", "node-24")
             .env("NRZ_EDGE_BUILD_HANDOFF", "V1")
             .env("NRZ_LOG_UPLOAD", "0")
             .env("ONREZA_OUTPUT_DIR", output_dir.path())

@@ -428,7 +428,12 @@ fn python_process_runtime_uses_project_root_with_versioned_dependencies() {
         "loads = lambda value: value",
     )
     .unwrap();
-    let detection = crate::detect::detect(dir.path());
+    let mut detection = crate::detect::detect(dir.path());
+    crate::detect::application_runtime::resolve_and_bind_detection(
+        &crate::detect::fs::LocalFs::new(dir.path()),
+        &mut detection,
+    )
+    .unwrap();
     let manifest = build_manifest::generate_compute_manifest("main.py");
 
     let artifact = resolve_runtime_artifact(
@@ -468,7 +473,7 @@ fn relocated_python_runtime_preserves_compute_file_ownership() {
         "version": 1,
         "layers": [
             {"name": "static", "target": "STATIC", "directory": "."},
-            {"name": "api", "target": "COMPUTE", "directory": "api", "entry": "main.py"}
+            {"name": "api", "target": "COMPUTE", "directory": "api", "entry": "main.py", "runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}}
         ],
         "routes": [
             {"pattern": "^/api/.*$", "layer": "api"},
@@ -554,7 +559,12 @@ fn python_process_runtime_rejects_missing_installed_dependencies() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("main.py"), "import orjson").unwrap();
     fs::write(dir.path().join("requirements.txt"), "orjson==3.11.3\n").unwrap();
-    let detection = crate::detect::detect(dir.path());
+    let mut detection = crate::detect::detect(dir.path());
+    crate::detect::application_runtime::resolve_and_bind_detection(
+        &crate::detect::fs::LocalFs::new(dir.path()),
+        &mut detection,
+    )
+    .unwrap();
     let manifest = build_manifest::generate_compute_manifest("main.py");
 
     let error = resolve_runtime_artifact(

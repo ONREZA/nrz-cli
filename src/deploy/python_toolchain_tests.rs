@@ -1028,3 +1028,218 @@ async fn python_qualification_export_uses_canonical_artifact_permissions() {
         0o644
     );
 }
+
+#[tokio::test]
+#[ignore = "installs pinned MkDocs and executes real STATIC builds on every qualified Python minor"]
+async fn real_mkdocs_static_builds_publish_without_process_runtime() {
+    use clap::Parser as _;
+    const CASE: &str = "ONREZA_MKDOCS_QUALIFICATION_MINOR";
+    let Ok(selected) = std::env::var(CASE) else {
+        for minor in nrz_source_bundle::PythonMinor::ALL {
+            let output = tokio::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "deploy::python_toolchain_tests::real_mkdocs_static_builds_publish_without_process_runtime", "--ignored", "--nocapture"])
+                .env(CASE, minor.version())
+                .env("ONREZA_BUILD_RUNTIME_FAMILY", "python")
+                .env("ONREZA_BUILD_RUNTIME_VERSION", minor.target())
+                .env("ONREZA_RUNTIME_VERSION", minor.target())
+                .env_remove("ONREZA_BUILD_NODE_MAJOR")
+                .output().await.unwrap();
+            assert!(
+                output.status.success(),
+                "CPython {}: {}\n{}",
+                minor.version(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        return;
+    };
+    let minor = nrz_source_bundle::PythonMinor::from_version(&selected).unwrap();
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("requirements.txt"), "mkdocs==1.6.1\n").unwrap();
+    std::fs::write(
+        project.path().join("mkdocs.yml"),
+        "site_name: Python STATIC qualification\n",
+    )
+    .unwrap();
+    std::fs::create_dir(project.path().join("docs")).unwrap();
+    std::fs::write(
+        project.path().join("docs/index.md"),
+        format!("# Built with CPython {}\n", minor.version()),
+    )
+    .unwrap();
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.toolchain = Some(nrz_source_bundle::BuildToolchainFamily::Python);
+    config.build.python_version = Some(minor);
+    config.build.command = Some(format!(
+        "python -c \"import sys; assert '.'.join(map(str, sys.version_info[:3])) == '{}'\" && mkdocs build --strict",
+        minor.exact_version()
+    ));
+    config.build.output_directory = Some("site".into());
+    config.deploy.compute = Some("static".into());
+    std::fs::write(
+        project.path().join("onreza.toml"),
+        toml::to_string(&config).unwrap(),
+    )
+    .unwrap();
+    let mut command =
+        crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
+            .unwrap();
+    let platform_runner = qualification_mode() == PythonInstallMode::PinnedPlatform;
+    if platform_runner {
+        let mut detection = crate::detect::detect_with_framework_override(project.path(), None);
+        let context = crate::detect::application_runtime::resolve_and_bind_source_build_context(
+            &crate::detect::fs::LocalFs::new(project.path()),
+            &mut detection,
+            &config,
+            None,
+            None,
+        )
+        .unwrap();
+        command
+            .effective
+            .apply_platform_runner_settings(&nrz::config::ProjectBuildSettings {
+                source_build_context: Some(context),
+                build_command: config.build.command.clone(),
+                build_command_source: Some(nrz::config::BuildSettingSource::User),
+                output_directory: config.build.output_directory.clone(),
+                output_directory_source: Some(nrz::config::BuildSettingSource::User),
+                ..Default::default()
+            });
+    }
+    let args = crate::cli::DeployArgs::try_parse_from([
+        "deploy",
+        project.path().to_str().unwrap(),
+        "--dry",
+    ])
+    .unwrap();
+    let plan = super::plan::build(super::plan::DeployPlanRequest {
+        args: &args,
+        command: &command,
+        explicit_compute: None,
+        build_logs: None,
+        execution_env: &[],
+        target_production: None,
+        platform_runner,
+    })
+    .await
+    .unwrap();
+    assert_eq!(plan.compute, crate::detect::types::ComputeType::Static);
+    assert!(!plan.has_compute_layer);
+    assert!(!plan.build_skipped);
+    assert!(
+        plan.artifact
+            .build
+            .detection
+            .metadata
+            .source_build_context
+            .as_ref()
+            .unwrap()
+            .application_runtime
+            .is_none()
+    );
+    assert!(!project.path().join(".onreza/python/launch.py").exists());
+    let source = plan
+        .materialize_source_bundle(
+            true,
+            crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+        )
+        .unwrap();
+    let logical: nrz_source_bundle::SourceLogicalManifest =
+        serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap()).unwrap();
+    assert!(
+        logical
+            .layers
+            .iter()
+            .all(|layer| layer.runtime_config.is_none())
+    );
+    assert!(logical.files.iter().all(|file| file.role != "dependency"));
+    let owner = uuid::Uuid::nil().to_string();
+    let input = nrz_source_bundle::SourceBundleVerificationInput {
+        owner_workspace_id: owner.clone(),
+        source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
+            &owner,
+            &source.logical_manifest_sha256,
+            &source.source_sha256,
+            None,
+        ),
+        source_sha256: source.source_sha256.clone(),
+        logical_manifest_sha256: source.logical_manifest_sha256.clone(),
+        budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical).unwrap(),
+    };
+    nrz_source_bundle::verify_source_bundle_bytes(
+        input,
+        std::fs::read(source.source_path()).unwrap().into(),
+    )
+    .await
+    .unwrap();
+    assert!(
+        std::fs::read_to_string(project.path().join("site/index.html"))
+            .unwrap()
+            .contains(&format!("Built with CPython {}", minor.version()))
+    );
+}
+
+#[tokio::test]
+async fn different_python_minors_preserve_code_only_and_reject_runtime_dependencies() {
+    use clap::Parser as _;
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("main.py"), "print('ready')\n").unwrap();
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.python_version = Some(nrz_source_bundle::PythonMinor::Python312);
+    config.build.output_directory = Some(".".into());
+    config.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python314);
+    std::fs::write(
+        project.path().join("onreza.toml"),
+        toml::to_string(&config).unwrap(),
+    )
+    .unwrap();
+    let command =
+        crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
+            .unwrap();
+    let args = crate::cli::DeployArgs::try_parse_from([
+        "deploy",
+        project.path().to_str().unwrap(),
+        "--dry",
+        "--skip-install",
+        "--skip-build",
+    ])
+    .unwrap();
+    for requirements in ["", "# no runtime dependencies\n", "packaging==26.3\n"] {
+        std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
+        let result = super::plan::build(super::plan::DeployPlanRequest {
+            args: &args,
+            command: &command,
+            explicit_compute: None,
+            build_logs: None,
+            execution_env: &[],
+            target_production: None,
+            platform_runner: false,
+        })
+        .await;
+        if requirements.starts_with("packaging") {
+            assert!(
+                result
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("matching build and serving Python minors")
+            );
+        } else {
+            let plan = result.unwrap();
+            let manifest = &plan.artifact.runtime.manifest;
+            assert_eq!(
+                manifest.layers[0]
+                    .runtime
+                    .as_ref()
+                    .unwrap()
+                    .build_runtime_version
+                    .as_deref(),
+                Some("python-3.14")
+            );
+            let source = plan.materialize_source_bundle(true, crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization).unwrap();
+            assert!(source.logical_manifest.files.iter().all(|file| file.role
+                != crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Dependency));
+        }
+    }
+}

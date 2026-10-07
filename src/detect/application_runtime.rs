@@ -1,7 +1,10 @@
 //! Resolve application intent before install/build; never execute package scripts.
 
 use anyhow::{Context, bail};
-use nrz_source_bundle::{ApplicationRuntimeDeclaration, ApplicationRuntimeFamily};
+use nrz_source_bundle::{
+    ApplicationRuntimeDeclaration, ApplicationRuntimeFamily, BuildToolchainDeclaration,
+    BuildToolchainFamily, SourceBuildContext,
+};
 use serde::Deserialize;
 
 use super::fs::Fs;
@@ -63,20 +66,20 @@ pub(crate) fn resolve_and_bind_detection(
     fs: &dyn Fs,
     detection: &mut super::types::DetectionResult,
 ) -> anyhow::Result<()> {
-    let config = read_runtime_config(fs)?;
-    let configured_entry = config.entry.clone();
-    let framework_override = config.framework_override.clone();
-    let framework = framework_override
-        .as_deref()
-        .unwrap_or(&detection.framework);
-    let declaration = resolve_runtime(fs, framework, config)?;
-    bind_application_runtime(
+    let config = fs
+        .read_file("onreza.toml")
+        .map(|text| toml::from_str::<crate::config::ProjectConfig>(&text))
+        .transpose()
+        .context("invalid source build context in onreza.toml")?
+        .unwrap_or_default();
+    resolve_and_bind_source_build_context(
         fs,
         detection,
-        declaration,
-        configured_entry.as_deref(),
-        framework_override.as_deref(),
-    )
+        &config,
+        config.project.framework.as_deref(),
+        None,
+    )?;
+    Ok(())
 }
 
 /// Bind frozen launch intent to fresh framework/build-output inference.
@@ -136,7 +139,17 @@ pub(crate) fn bind_application_runtime(
             _ => {}
         }
     }
-    detection.metadata.application_runtime = declaration;
+    let build_toolchain = detection
+        .metadata
+        .source_build_context
+        .as_ref()
+        .map(|context| context.build_toolchain.clone())
+        .unwrap_or_else(|| default_build_toolchain(detection, declaration.as_ref()));
+    detection.metadata.source_build_context = Some(SourceBuildContext {
+        schema_version: 1,
+        build_toolchain,
+        application_runtime: declaration,
+    });
     Ok(())
 }
 
@@ -424,5 +437,256 @@ fn direct_launcher_family(executor: &str) -> Option<ApplicationRuntimeFamily> {
         "bun" => Some(ApplicationRuntimeFamily::Bun),
         "node" => Some(ApplicationRuntimeFamily::Node),
         _ => None,
+    }
+}
+
+fn default_build_toolchain(
+    detection: &super::types::DetectionResult,
+    serving: Option<&ApplicationRuntimeDeclaration>,
+) -> BuildToolchainDeclaration {
+    use super::types::{PackageManagerType, RuntimeType};
+    let family = if serving
+        .is_some_and(|runtime| runtime.family == ApplicationRuntimeFamily::Python)
+        || detection.metadata.runtime.runtime_type == RuntimeType::Python
+    {
+        BuildToolchainFamily::Python
+    } else if matches!(
+        detection.metadata.runtime.runtime_type,
+        RuntimeType::Dart | RuntimeType::Go
+    ) || serving
+        .is_some_and(|runtime| runtime.family == ApplicationRuntimeFamily::Executable)
+    {
+        BuildToolchainFamily::Native
+    } else {
+        match detection
+            .metadata
+            .package_manager
+            .as_ref()
+            .map(|manager| manager.pm_type)
+        {
+            Some(PackageManagerType::Bun) => BuildToolchainFamily::Bun,
+            Some(PackageManagerType::Npm | PackageManagerType::Yarn | PackageManagerType::Pnpm) => {
+                BuildToolchainFamily::Node
+            }
+            _ if serving.is_some_and(|runtime| runtime.family == ApplicationRuntimeFamily::Bun)
+                || detection.metadata.runtime.runtime_type == RuntimeType::Bun =>
+            {
+                BuildToolchainFamily::Bun
+            }
+            _ => BuildToolchainFamily::Node,
+        }
+    };
+    BuildToolchainDeclaration {
+        family,
+        python_version: (family == BuildToolchainFamily::Python).then(|| {
+            serving
+                .and_then(|runtime| runtime.python_version)
+                .unwrap_or_default()
+        }),
+    }
+}
+
+pub fn resolve_build_toolchain(
+    detection: &super::types::DetectionResult,
+    config: &crate::config::ProjectConfig,
+) -> anyhow::Result<BuildToolchainDeclaration> {
+    let implied_serving = config.deploy.runtime.or_else(|| {
+        (config.deploy.module.is_some()
+            || config.deploy.application.is_some()
+            || config.deploy.server.is_some()
+            || config.deploy.python_version.is_some())
+        .then_some(ApplicationRuntimeFamily::Python)
+    });
+    let serving = implied_serving.map(|family| ApplicationRuntimeDeclaration {
+        family,
+        python_version: config.deploy.python_version,
+        entry: None,
+        args: vec![],
+    });
+    let mut build = default_build_toolchain(detection, serving.as_ref());
+    if let Some(family) = config.build.toolchain.or_else(|| {
+        config
+            .build
+            .python_version
+            .map(|_| BuildToolchainFamily::Python)
+    }) {
+        build.family = family;
+        build.python_version = (family == BuildToolchainFamily::Python).then(|| {
+            config
+                .build
+                .python_version
+                .or(config.deploy.python_version)
+                .unwrap_or_default()
+        });
+        if family != BuildToolchainFamily::Python && config.build.python_version.is_some() {
+            bail!("build.python_version requires the Python build toolchain");
+        }
+    }
+    build.validate().map_err(anyhow::Error::msg)?;
+    Ok(build)
+}
+
+pub(crate) fn resolve_and_bind_source_build_context(
+    fs: &dyn Fs,
+    detection: &mut super::types::DetectionResult,
+    config: &crate::config::ProjectConfig,
+    framework_override: Option<&str>,
+    explicit_compute: Option<super::types::ComputeType>,
+) -> anyhow::Result<SourceBuildContext> {
+    let build_toolchain = resolve_build_toolchain(detection, config)?;
+    let configured_compute = config
+        .deploy
+        .compute
+        .as_deref()
+        .map(|value| match value.to_ascii_lowercase().as_str() {
+            "static" => Ok(super::types::ComputeType::Static),
+            "process" => Ok(super::types::ComputeType::Process),
+            _ => Err(anyhow::anyhow!(
+                "invalid compute type; expected static or process"
+            )),
+        })
+        .transpose()?;
+    let process_fields = config.deploy.runtime.is_some()
+        || config.deploy.entry.is_some()
+        || config.deploy.args.is_some()
+        || config.deploy.module.is_some()
+        || config.deploy.application.is_some()
+        || config.deploy.server.is_some()
+        || config.deploy.python_version.is_some();
+    let selected_compute = explicit_compute.or(configured_compute);
+    let static_serving = selected_compute == Some(super::types::ComputeType::Static)
+        || selected_compute.is_none()
+            && !process_fields
+            && detection.suggested_compute == super::types::ComputeType::Static;
+    let serving_framework = serving_framework(config, &detection.framework).to_string();
+    let application_runtime = if static_serving {
+        if config.deploy.runtime.is_some()
+            || config.deploy.entry.is_some()
+            || config.deploy.args.is_some()
+            || config.deploy.module.is_some()
+            || config.deploy.application.is_some()
+            || config.deploy.server.is_some()
+            || config.deploy.python_version.is_some()
+        {
+            bail!(
+                "STATIC serving conflicts with explicit PROCESS launch fields; use build.toolchain and build.python_version for build-only selectors"
+            );
+        }
+        None
+    } else {
+        let mut deploy = config.deploy.clone();
+        if deploy.python_version.is_none()
+            && (deploy.runtime == Some(ApplicationRuntimeFamily::Python)
+                || deploy.runtime.is_none()
+                    && (super::python::is_python_framework(&detection.framework)
+                        || deploy.module.is_some()
+                        || deploy.application.is_some()
+                        || deploy.server.is_some()))
+        {
+            deploy.python_version = build_toolchain.resolved_python_minor();
+        }
+        resolve_application_runtime_with_project(
+            fs,
+            &serving_framework,
+            &deploy,
+            framework_override,
+        )?
+    };
+    let context = SourceBuildContext {
+        schema_version: 1,
+        build_toolchain,
+        application_runtime,
+    };
+    bind_source_build_context(
+        fs,
+        detection,
+        &context,
+        config,
+        framework_override,
+        static_serving.then_some(super::types::ComputeType::Static),
+    )?;
+    Ok(context)
+}
+
+/// Keep frozen source intent while refreshing build output inference. Generated
+/// package metadata cannot replace the pre-build serving or compiler selection.
+pub(crate) fn bind_source_build_context(
+    fs: &dyn Fs,
+    detection: &mut super::types::DetectionResult,
+    context: &SourceBuildContext,
+    config: &crate::config::ProjectConfig,
+    framework_override: Option<&str>,
+    explicit_compute: Option<super::types::ComputeType>,
+) -> anyhow::Result<()> {
+    context.validate().map_err(anyhow::Error::msg)?;
+    let build_framework = detection.framework.clone();
+    detection.framework = serving_framework(config, &build_framework).into();
+    bind_application_runtime(
+        fs,
+        detection,
+        context.application_runtime.clone(),
+        config.deploy.entry.as_deref(),
+        framework_override,
+    )?;
+    if config.build.toolchain.is_some() || config.build.python_version.is_some() {
+        detection.framework = build_framework;
+    }
+    if explicit_compute == Some(super::types::ComputeType::Static)
+        || config.deploy.compute.as_deref() == Some("static")
+    {
+        detection.suggested_compute = super::types::ComputeType::Static;
+    }
+    if let Some(minor) = context.build_toolchain.resolved_python_minor() {
+        let python = super::python::detect_configured_python(fs);
+        detection.metadata.package_manager = python.metadata.package_manager;
+        detection.metadata.build_info = python.metadata.build_info;
+        if context
+            .application_runtime
+            .as_ref()
+            .is_none_or(|runtime| runtime.family != ApplicationRuntimeFamily::Python)
+        {
+            detection.metadata.runtime.runtime_type = super::types::RuntimeType::Python;
+            detection.metadata.runtime.version = Some(minor.version().into());
+        }
+        if detection
+            .metadata
+            .package_manager
+            .as_ref()
+            .is_some_and(|manager| manager.pm_type == super::types::PackageManagerType::Pip)
+            && let Some(build) = detection.metadata.build_info.as_mut()
+            && let Some(manifest) = super::python::dependency_manifest(fs)
+        {
+            build.install_command = Some(super::python::install_command_for_minor(manifest, minor));
+        }
+    }
+    detection.metadata.source_build_context = Some(context.clone());
+    Ok(())
+}
+
+/// Generic language evidence describes a build recipe. Authored framework presets
+/// retain their launch contract; an authored converter can replace an inferred preset.
+pub(crate) fn serving_framework<'a>(
+    config: &crate::config::ProjectConfig,
+    detected: &'a str,
+) -> &'a str {
+    let converter = config
+        .build
+        .command
+        .as_ref()
+        .is_some_and(|command| !command.trim().is_empty())
+        && config.deploy.runtime.is_some();
+    let generic_declaration =
+        config.deploy.runtime.is_some() && matches!(detected, "python" | "go" | "dart");
+    let independent = config.build.toolchain.is_some()
+        || config.build.python_version.is_some()
+        || converter
+        || generic_declaration;
+    if independent
+        && config.project.framework.is_none()
+        && (matches!(detected, "python" | "go" | "dart") || converter)
+    {
+        "other"
+    } else {
+        detected
     }
 }
