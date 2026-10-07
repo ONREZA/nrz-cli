@@ -361,7 +361,10 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         && let Some(output) = effective
             .output_directory()
             .and_then(|setting| setting.value())
-        && Path::new(output) != Path::new(recipe.output_directory())
+        && Path::new(output)
+            .components()
+            .filter(|component| *component != std::path::Component::CurDir)
+            .ne(Path::new(recipe.output_directory()).components())
     {
         anyhow::bail!(
             "build.output_directory '{output}' differs from the default {} recipe output '{}'; use that output or set build.command for a custom output directory",

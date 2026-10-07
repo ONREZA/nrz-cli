@@ -55,6 +55,9 @@ Agent that supplies the explicit target and a Builder rootfs pinned to that CLI.
 ## Executable PROCESS artifacts
 
 Go and Dart artifacts use the qualified `native-linux-x86_64-glibc` target.
+Executable entries declaring `DT_NEEDED` require the qualified
+`/lib64/ld-linux-x86-64.so.2` interpreter. Static executables may omit
+`PT_INTERP`; shared dependency libraries do not require their own interpreter.
 The shared artifact validator resolves declared `DT_NEEDED` libraries from the
 artifact or the qualified Compute system baseline. Each `DT_VERNEED` version
 must be exported by the selected library; the validator reads loader dynamic

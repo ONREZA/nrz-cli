@@ -4,6 +4,9 @@ use super::python_toolchain::{
     ArchiveFormat, PythonInstallMode, artifact_for, install_command, install_commands,
 };
 
+#[path = "python_requirement_stage_tests.rs"]
+mod requirement_stage_tests;
+
 #[test]
 fn pins_uv_artifacts_for_every_cli_release_platform() {
     let cases = [
@@ -1377,11 +1380,13 @@ async fn different_python_minors_preserve_code_only_and_reject_runtime_dependenc
         "--skip-build",
     ])
     .unwrap();
-    for requirements in [
-        "",
-        "# no runtime dependencies\n",
-        "packaging==26.3\n",
-        "-r production.txt\n",
+    for (requirements, dependencies) in [
+        ("", false),
+        ("# no runtime dependencies\n", false),
+        ("packaging==26.3\n", true),
+        ("-r production.txt\n", true),
+        ("./wheels/acme-1.0-py3-none-any.whl\n", true),
+        ("../localproject\n", true),
     ] {
         std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
         let result = super::plan::build(super::plan::DeployPlanRequest {
@@ -1394,7 +1399,7 @@ async fn different_python_minors_preserve_code_only_and_reject_runtime_dependenc
             platform_runner: false,
         })
         .await;
-        if requirements.starts_with("packaging") || requirements.starts_with("-r") {
+        if dependencies {
             assert!(
                 result
                     .err()

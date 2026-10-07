@@ -4,6 +4,105 @@ use super::types::{ComputeType, PackageManagerType, RuntimeType};
 use super::{detect, detect_with_fs, resolve_entry_point};
 
 #[test]
+fn python_requirement_stage_evidence_does_not_depend_on_package_names() {
+    use super::python::{dependency_names, requires_dependency_stage};
+    let project = tempfile::tempdir().unwrap();
+    let input = LocalFs::new(project.path());
+    for (requirements, requires_stage) in [
+        ("", false),
+        (" \n# runtime dependencies are empty\n", false),
+        (
+            "--index-url https://packages.example/simple\n--no-index\n",
+            false,
+        ),
+        ("--find-links \\\n ./wheels\n-c constraints.txt\n", false),
+        ("packaging==26.3\n", true),
+        ("-r production.txt\n", true),
+        ("--requirement=production.txt\n", true),
+        ("-e ./localproject\n", true),
+        ("--editable=./localproject\n", true),
+        ("./wheels/acme-1.0-py3-none-any.whl\n", true),
+        ("../localproject\n", true),
+        ("/opt/localproject\n", true),
+        ("localproject/\n", true),
+        ("https://packages.example/acme.whl\n", true),
+        ("git+https://git.example/acme.git\n", true),
+    ] {
+        std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
+        assert_eq!(
+            requires_dependency_stage(&input).unwrap(),
+            requires_stage,
+            "{requirements:?}"
+        );
+    }
+    for requirement in [
+        "./fastapi/",
+        "fastapi/",
+        "fastapi.whl",
+        "https://packages.example/fastapi.whl",
+        "git+https://git.example/fastapi.git",
+    ] {
+        std::fs::write(project.path().join("requirements.txt"), requirement).unwrap();
+        assert!(
+            dependency_names(&input).unwrap().is_empty(),
+            "{requirement}"
+        );
+        assert_eq!(super::python::framework(&input).unwrap(), "python");
+    }
+    std::fs::write(
+        project.path().join("requirements.txt"),
+        "fastapi[standard]>=0.100\nFlask @ https://packages.example/flask.whl\n",
+    )
+    .unwrap();
+    assert_eq!(
+        dependency_names(&input)
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<_>>(),
+        ["fastapi", "flask"]
+    );
+    std::fs::remove_file(project.path().join("requirements.txt")).unwrap();
+    std::fs::write(
+        project.path().join("pyproject.toml"),
+        "[project]\nname='demo'\ndependencies=['acme.whl']\n",
+    )
+    .unwrap();
+    assert!(requires_dependency_stage(&input).unwrap());
+}
+
+#[test]
+fn inactive_requirements_do_not_create_a_locked_python_dependency_stage() {
+    use super::python::requires_dependency_stage;
+    let project = tempfile::tempdir().unwrap();
+    let input = LocalFs::new(project.path());
+    for (lock, manifest) in [
+        (
+            "uv.lock",
+            "[project]\nname='demo'\ndependencies=[]\n[tool.uv]\npackage=false\n",
+        ),
+        (
+            "poetry.lock",
+            "[tool.poetry]\npackage-mode=false\n[tool.poetry.dependencies]\npython='^3.14'\n",
+        ),
+    ] {
+        std::fs::write(project.path().join(lock), "").unwrap();
+        std::fs::write(project.path().join("pyproject.toml"), manifest).unwrap();
+        for requirements in [
+            "-r build-helper.txt\n",
+            "-e ./build-helper\n",
+            "./build-helper\n",
+        ] {
+            std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
+            assert!(
+                !requires_dependency_stage(&input).unwrap(),
+                "{lock}: {requirements}"
+            );
+        }
+        std::fs::remove_file(project.path().join(lock)).unwrap();
+    }
+}
+
+#[test]
 fn detects_requirements_project_as_python_process() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("main.py"), "print('ready')").unwrap();

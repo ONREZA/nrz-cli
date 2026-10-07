@@ -1,7 +1,7 @@
 use super::{
     NativeExecutableRequirements, qualified_system_path, qualified_versions, version_definitions,
 };
-use goblin::elf::{Elf, dynamic};
+use goblin::elf::{Elf, dynamic, program_header};
 use std::{collections::BTreeMap, path::PathBuf};
 
 #[test]
@@ -23,12 +23,14 @@ struct Artifact(PathBuf);
 
 impl Artifact {
     fn new() -> Self {
+        static NEXT_ARTIFACT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let sequence = NEXT_ARTIFACT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "nrz-native-versions-{}-{nonce}",
+            "nrz-native-versions-{}-{nonce}-{sequence}",
             std::process::id()
         ));
         std::fs::create_dir(&path).unwrap();
@@ -70,12 +72,29 @@ fn versioned_elf(
     bytes[32..40].copy_from_slice(&64_u64.to_le_bytes());
     bytes[52..54].copy_from_slice(&64_u16.to_le_bytes());
     bytes[54..56].copy_from_slice(&56_u16.to_le_bytes());
-    bytes[56..58].copy_from_slice(&2_u16.to_le_bytes());
+    bytes[56..58].copy_from_slice(
+        &(if executable && needed.is_some() {
+            3_u16
+        } else {
+            2_u16
+        })
+        .to_le_bytes(),
+    );
     bytes[64..68].copy_from_slice(&1_u32.to_le_bytes());
     bytes[68..72].copy_from_slice(&5_u32.to_le_bytes());
     bytes[80..88].copy_from_slice(&0x400000_u64.to_le_bytes());
     bytes[96..104].copy_from_slice(&4096_u64.to_le_bytes());
     bytes[104..112].copy_from_slice(&4096_u64.to_le_bytes());
+    if executable && needed.is_some() {
+        let interpreter = b"/lib64/ld-linux-x86-64.so.2\0";
+        bytes[176..180].copy_from_slice(&program_header::PT_INTERP.to_le_bytes());
+        bytes[180..184].copy_from_slice(&program_header::PF_R.to_le_bytes());
+        bytes[184..192].copy_from_slice(&2048_u64.to_le_bytes());
+        bytes[192..200].copy_from_slice(&0x400800_u64.to_le_bytes());
+        bytes[208..216].copy_from_slice(&(interpreter.len() as u64).to_le_bytes());
+        bytes[216..224].copy_from_slice(&(interpreter.len() as u64).to_le_bytes());
+        bytes[2048..2048 + interpreter.len()].copy_from_slice(interpreter);
+    }
     let mut tags: Vec<(u64, u64)> = vec![(dynamic::DT_STRTAB, 0x400300), (dynamic::DT_STRSZ, 512)];
     if let Some((library, version)) = needed {
         bytes[769..769 + library.len()].copy_from_slice(library.as_bytes());
@@ -265,6 +284,276 @@ fn bundled_library_transitive_version_needs_use_the_compute_baseline() {
 }
 
 #[test]
+fn dynamic_entry_requires_an_interpreter_while_shared_providers_do_not() {
+    let artifact = Artifact::new();
+    let entry = versioned_elf(Some(("libc.so.6", "GLIBC_2.2.5")), None, None, true);
+    let requirements = super::verify_native_executable(&entry).unwrap();
+    assert_eq!(
+        requirements.interpreter.as_deref(),
+        Some("/lib64/ld-linux-x86-64.so.2")
+    );
+    std::fs::write(artifact.0.join("server"), &entry).unwrap();
+    artifact.check().unwrap();
+
+    let mut stripped = entry.clone();
+    stripped[176..180].copy_from_slice(&program_header::PT_NULL.to_le_bytes());
+    let mut unterminated = entry.clone();
+    unterminated[2048 + b"/lib64/ld-linux-x86-64.so.2".len()] = b'X';
+    let mut range = entry.clone();
+    range[184..192].copy_from_slice(&(entry.len() as u64 + 1).to_le_bytes());
+    let mut duplicate = entry.clone();
+    duplicate[56..58].copy_from_slice(&4_u16.to_le_bytes());
+    duplicate[232..288].copy_from_slice(&entry[176..232]);
+    duplicate[240..248].copy_from_slice(&2304_u64.to_le_bytes());
+    let loader = b"/lib64/ld-linux-x86-64.so.2\0";
+    duplicate[2304..2304 + loader.len()].copy_from_slice(loader);
+    duplicate[2048] = b'x';
+    assert_eq!(
+        Elf::parse(&duplicate).unwrap().interpreter,
+        Some("/lib64/ld-linux-x86-64.so.2")
+    );
+    for (name, bytes) in [
+        ("stripped", stripped),
+        ("unterminated", unterminated),
+        ("range", range),
+        ("duplicate", duplicate),
+    ] {
+        std::fs::write(artifact.0.join("server"), &bytes).unwrap();
+        assert!(
+            super::verify_native_executable(&bytes)
+                .unwrap_err()
+                .to_string()
+                .contains("interpreter"),
+            "{name}"
+        );
+        assert!(
+            artifact
+                .check()
+                .unwrap_err()
+                .to_string()
+                .contains("interpreter"),
+            "{name}"
+        );
+    }
+
+    let provider = versioned_elf(Some(("libc.so.6", "GLIBC_2.2.5")), None, None, false);
+    let elf = Elf::parse(&provider).unwrap();
+    assert!(elf.interpreter.is_none());
+    super::inspect_elf(&elf, &provider, false).unwrap();
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+#[test]
+#[ignore = "requires C compiler/static libc or NRZ_NATIVE_ENTRY_FIXTURE_ROOT; executes trusted native entry fixtures"]
+fn real_native_entry_interpreter_qualification() {
+    let artifact = Artifact::new();
+    let root = std::env::var_os("NRZ_NATIVE_ENTRY_FIXTURE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| artifact.0.clone());
+    std::fs::create_dir_all(&root).unwrap();
+    if !root.join("dynamic-entry").is_file() {
+        build_native_entry_fixtures(&root);
+    }
+    for (name, dynamic) in [
+        ("dynamic-entry", true),
+        ("dynamic-exec", true),
+        ("static-entry", false),
+        ("static-pie-entry", false),
+    ] {
+        let path = root.join(name);
+        let bytes = std::fs::read(&path).unwrap();
+        let requirements = super::verify_native_executable(&bytes).unwrap();
+        if name == "static-pie-entry" {
+            assert_eq!(
+                Elf::parse(&bytes).unwrap().header.e_type,
+                goblin::elf::header::ET_DYN
+            );
+        }
+        assert_eq!(requirements.interpreter.is_some(), dynamic, "{name}");
+        assert_eq!(!requirements.libraries.is_empty(), dynamic, "{name}");
+        let (_, members) =
+            NativeExecutableRequirements::verify_artifact_closure(&root, &path, &root).unwrap();
+        if dynamic {
+            assert!(members.contains(&PathBuf::from("lib/libanswer.so")));
+        }
+        let output = std::process::Command::new(path)
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout,
+            if dynamic {
+                b"NATIVE_ENTRY_OK:42\n".as_slice()
+            } else {
+                b"NATIVE_STATIC_OK\n".as_slice()
+            }
+        );
+    }
+    let provider = std::fs::read(root.join("lib/libanswer.so")).unwrap();
+    let elf = Elf::parse(&provider).unwrap();
+    assert!(elf.interpreter.is_none());
+    assert!(elf.libraries.contains(&"libc.so.6"));
+    super::inspect_elf(&elf, &provider, false).unwrap();
+
+    // The first loader header is authoritative to Linux; goblin's optional
+    // interpreter value alone can hide duplicate or truncated loader metadata.
+    for (name, errno) in [
+        ("duplicate-entry", 2),
+        ("unterminated-entry", 8),
+        ("range-entry", 5),
+    ] {
+        let error = std::process::Command::new(root.join(name))
+            .current_dir(&root)
+            .output()
+            .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(errno), "{name}: {error}");
+    }
+    // Limit core size in this child before executing the deliberately stripped,
+    // trusted fixture. This does not change the parent/test runner's limits.
+    let stripped = std::process::Command::new("sh")
+        .args(["-c", "ulimit -c 0; exec \"$@\"", "nrz-elf-fixture"])
+        .arg(root.join("stripped-entry"))
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert!(!stripped.status.success());
+
+    let mut admitted = Vec::new();
+    for name in [
+        "stripped-entry",
+        "duplicate-entry",
+        "unterminated-entry",
+        "range-entry",
+    ] {
+        let path = root.join(name);
+        let bytes = std::fs::read(&path).unwrap();
+        if super::verify_native_executable(&bytes).is_ok() {
+            admitted.push(format!("byte guard: {name}"));
+        }
+        if NativeExecutableRequirements::verify_artifact_closure(&root, &path, &root).is_ok() {
+            admitted.push(format!("closure guard: {name}"));
+        }
+    }
+    assert!(
+        admitted.is_empty(),
+        "kernel-invalid native entries admitted: {admitted:?}"
+    );
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+fn build_native_entry_fixtures(root: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::create_dir_all(root.join("lib")).unwrap();
+    std::fs::write(
+        root.join("provider.c"),
+        "#include <stdlib.h>\nint answer(void) { return atoi(\"42\"); }\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("main.c"), "#include <stdio.h>\nextern int answer(void);\nint main(void) { printf(\"NATIVE_ENTRY_OK:%d\\n\", answer()); return 0; }\n").unwrap();
+    std::fs::write(
+        root.join("static.c"),
+        "#include <stdio.h>\nint main(void) { puts(\"NATIVE_STATIC_OK\"); return 0; }\n",
+    )
+    .unwrap();
+    let compiler = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
+    for arguments in [
+        vec![
+            "-shared",
+            "-fPIC",
+            "provider.c",
+            "-Wl,-soname,libanswer.so",
+            "-o",
+            "lib/libanswer.so",
+        ],
+        vec![
+            "-pie",
+            "main.c",
+            "-Llib",
+            "-lanswer",
+            "-Wl,-rpath,$ORIGIN/lib",
+            "-o",
+            "dynamic-entry",
+        ],
+        vec![
+            "-no-pie",
+            "main.c",
+            "-Llib",
+            "-lanswer",
+            "-Wl,-rpath,$ORIGIN/lib",
+            "-o",
+            "dynamic-exec",
+        ],
+        vec!["-static", "static.c", "-o", "static-entry"],
+        vec!["-static-pie", "static.c", "-o", "static-pie-entry"],
+    ] {
+        let result = std::process::Command::new(&compiler)
+            .args(&arguments)
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{arguments:?}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    let original = std::fs::read(root.join("dynamic-entry")).unwrap();
+    let elf = Elf::parse(&original).unwrap();
+    let header_offset =
+        |index: usize| elf.header.e_phoff as usize + index * elf.header.e_phentsize as usize;
+    let (index, interp) = elf
+        .program_headers
+        .iter()
+        .enumerate()
+        .find(|(_, segment)| segment.p_type == program_header::PT_INTERP)
+        .unwrap();
+    let interp_header = header_offset(index);
+    let start = interp.p_offset as usize;
+    let end = start + interp.p_filesz as usize;
+    let loader = &original[start..end];
+    assert_eq!(loader, b"/lib64/ld-linux-x86-64.so.2\0");
+    let spare = header_offset(
+        elf.program_headers
+            .iter()
+            .position(|segment| segment.p_type == program_header::PT_GNU_STACK)
+            .unwrap(),
+    );
+    let mut stripped = original.clone();
+    stripped[interp_header..interp_header + 4]
+        .copy_from_slice(&program_header::PT_NULL.to_le_bytes());
+    let mut unterminated = original.clone();
+    unterminated[end - 1] = b'X';
+    let mut duplicate = original.clone();
+    let missing = b"/__nrz_missing_loader__\0";
+    duplicate[start..end].fill(0);
+    duplicate[start..start + missing.len()].copy_from_slice(missing);
+    duplicate[spare..spare + 56].fill(0);
+    duplicate[spare..spare + 4].copy_from_slice(&program_header::PT_INTERP.to_le_bytes());
+    duplicate[spare + 4..spare + 8].copy_from_slice(&program_header::PF_R.to_le_bytes());
+    duplicate[spare + 8..spare + 16].copy_from_slice(&(original.len() as u64).to_le_bytes());
+    duplicate[spare + 32..spare + 40].copy_from_slice(&(loader.len() as u64).to_le_bytes());
+    duplicate.extend_from_slice(loader);
+    let mut range = original.clone();
+    range[interp_header + 8..interp_header + 16]
+        .copy_from_slice(&(original.len() as u64 + 4096).to_le_bytes());
+    for (name, bytes) in [
+        ("stripped-entry", stripped),
+        ("duplicate-entry", duplicate),
+        ("unterminated-entry", unterminated),
+        ("range-entry", range),
+    ] {
+        std::fs::write(root.join(name), bytes).unwrap();
+        std::fs::set_permissions(root.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+#[test]
 fn malformed_loader_version_metadata_fails_closed() {
     let artifact = Artifact::new();
     let valid = versioned_elf(Some(("libc.so.6", "GLIBC_2.2.5")), None, None, true);
@@ -288,12 +577,16 @@ fn malformed_loader_version_metadata_fails_closed() {
 fn ambiguous_version_table_mapping_and_malformed_provider_are_rejected() {
     let artifact = Artifact::new();
     let mut bytes = versioned_elf(Some(("libc.so.6", "GLIBC_2.2.5")), None, None, true);
-    bytes[56..58].copy_from_slice(&3_u16.to_le_bytes());
+    bytes[56..58].copy_from_slice(&4_u16.to_le_bytes());
     let segment = bytes[64..120].to_vec();
-    bytes[176..232].copy_from_slice(&segment);
+    bytes[232..288].copy_from_slice(&segment);
     std::fs::write(artifact.0.join("server"), bytes).unwrap();
     assert!(
-        artifact.check().is_err(),
+        artifact
+            .check()
+            .unwrap_err()
+            .to_string()
+            .contains("version metadata"),
         "two PT_LOAD mappings cannot select version bytes"
     );
 

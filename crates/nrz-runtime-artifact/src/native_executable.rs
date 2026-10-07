@@ -70,6 +70,9 @@ fn inspect_elf(
             "native shared library requires a file-backed loadable ELF segment"
         });
     }
+    if executable {
+        verify_entry_interpreter(elf, bytes)?;
+    }
     if elf
         .interpreter
         .is_some_and(|path| path != "/lib64/ld-linux-x86-64.so.2")
@@ -110,6 +113,39 @@ fn inspect_elf(
             .collect(),
         library_paths,
     })
+}
+
+fn verify_entry_interpreter(elf: &Elf<'_>, bytes: &[u8]) -> Result<(), RuntimeArtifactError> {
+    let mut segments = elf
+        .program_headers
+        .iter()
+        .filter(|segment| segment.p_type == program_header::PT_INTERP);
+    let Some(segment) = segments.next() else {
+        // Static ELF and self-relocating static PIE have no dynamic dependencies.
+        return if elf.libraries.is_empty() {
+            Ok(())
+        } else {
+            invariant("dynamic native entry requires the qualified Linux glibc interpreter")
+        };
+    };
+    // Linux uses the first PT_INTERP and requires a bounded, NUL-terminated
+    // file-backed path. Goblin keeps only an optional decoded interpreter and
+    // can conceal duplicate headers or a failed/truncated path read.
+    let payload = segment
+        .p_offset
+        .checked_add(segment.p_filesz)
+        .and_then(|end| Some(usize::try_from(segment.p_offset).ok()?..usize::try_from(end).ok()?))
+        .and_then(|range| bytes.get(range));
+    if segments.next().is_some()
+        || !(2..=4096).contains(&segment.p_filesz)
+        || payload.and_then(|bytes| bytes.last()) != Some(&0)
+        || elf.interpreter != Some("/lib64/ld-linux-x86-64.so.2")
+    {
+        return invariant(
+            "native entry requires one valid qualified Linux glibc interpreter segment",
+        );
+    }
+    Ok(())
 }
 
 impl NativeExecutableRequirements {

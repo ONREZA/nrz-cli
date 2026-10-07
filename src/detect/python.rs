@@ -135,23 +135,49 @@ pub fn dependency_plan(fs: &dyn Fs) -> anyhow::Result<Option<PythonDependencyPla
     }))
 }
 
-/// An empty declaration does not create runtime dependencies. Includes remain
-/// unresolved evidence until the installer materializes their selected graph.
+/// Installation evidence is broader than confidently named dependencies:
+/// local paths, archives and unnamed URLs also require a materialized stage.
 pub fn requires_dependency_stage(fs: &dyn Fs) -> anyhow::Result<bool> {
-    if dependency_plan(fs)?.is_some_and(|plan| plan.install_project)
-        || !dependency_names(fs)?.is_empty()
-    {
+    let plan = dependency_plan(fs)?;
+    if plan.as_ref().is_some_and(|plan| plan.install_project) {
         return Ok(true);
     }
-    Ok(fs.read_file("requirements.txt").is_some_and(|text| {
-        text.lines().any(|line| {
-            let line = line.trim_start();
-            line.starts_with("-r")
-                || line.starts_with("--requirement")
-                || line.starts_with("-e")
-                || line.starts_with("--editable")
-        })
-    }))
+    if plan
+        .as_ref()
+        .is_some_and(|plan| plan.kind == PythonDependencyKind::Requirements)
+    {
+        return Ok(fs.read_file("requirements.txt").is_some_and(|text| {
+            text.replace("\\\r\n", "")
+                .replace("\\\n", "")
+                .lines()
+                .any(|line| {
+                    let line = line.trim();
+                    !line.is_empty()
+                        && !line.starts_with('#')
+                        && (!line.starts_with('-')
+                            || line.starts_with("-r")
+                            || line.starts_with("--requirement")
+                            || line.starts_with("-e")
+                            || line.starts_with("--editable"))
+                })
+        }));
+    }
+    if plan.is_some_and(|plan| plan.manifest == "pyproject.toml")
+        && let Some(text) = fs.read_file("pyproject.toml")
+    {
+        let value: toml::Value = toml::from_str(&text).context("invalid pyproject.toml")?;
+        if let Some(dependencies) = value
+            .get("project")
+            .and_then(|project| project.get("dependencies"))
+            .and_then(toml::Value::as_array)
+        {
+            return Ok(dependencies
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .any(|requirement| !requirement.trim().is_empty()));
+        }
+    }
+    Ok(!dependency_names(fs)?.is_empty())
 }
 
 pub fn dependency_names(fs: &dyn Fs) -> anyhow::Result<BTreeSet<String>> {
@@ -218,7 +244,18 @@ fn requirement_name(requirement: &str) -> Option<String> {
             character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
         })
         .collect();
-    (!name.is_empty()).then(|| normalize_package_name(&name))
+    let remainder = &requirement[name.len()..];
+    let suffix = remainder.trim_start();
+    let lowercase = name.to_ascii_lowercase();
+    let archive = [".whl", ".zip", ".tar.gz", ".tar.bz2", ".tar.xz", ".tgz"]
+        .iter()
+        .any(|extension| lowercase.ends_with(extension));
+    (!name.is_empty()
+        && !archive
+        && (suffix.is_empty()
+            || suffix.starts_with(['[', '<', '>', '=', '!', '~', '@', ';'])
+            || remainder.starts_with(char::is_whitespace) && suffix.starts_with('#')))
+    .then(|| normalize_package_name(&name))
 }
 
 fn normalize_package_name(name: &str) -> String {
