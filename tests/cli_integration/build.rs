@@ -234,6 +234,7 @@ fn standalone_build_explicit_static_keeps_priority_over_declared_server() {
 
 #[test]
 fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
+    let config = tempfile::tempdir().unwrap();
     for minor in nrz_source_bundle::PythonMinor::ALL {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
@@ -251,7 +252,22 @@ fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
         fs::write(app.join("package.json"), r#"{"name":"api"}"#).unwrap();
         fs::write(app.join("main.py"), "print('ready')").unwrap();
         fs::write(app.join("onreza.toml"), "[build]\noutput_dirs=['.']\n").unwrap();
-        let explained = nrz()
+        let mut commands = [nrz(), nrz(), nrz()];
+        for command in &mut commands {
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("NRZ_") {
+                    command.env_remove(key);
+                }
+            }
+            command
+                .env("HOME", config.path())
+                .env("USERPROFILE", config.path())
+                .env("XDG_CONFIG_HOME", config.path())
+                .env("APPDATA", config.path())
+                .env("NRZ_API_URL", "http://127.0.0.1:9");
+        }
+        let [mut explain_command, mut plan_command, mut detect_command] = commands;
+        let explained = explain_command
             .current_dir(&temp)
             .args(["--json", "config", "explain", "--app", "api", "--local"])
             .output()
@@ -266,9 +282,11 @@ fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
             explained["effective"]["deployPythonVersion"]["value"],
             minor.version()
         );
-        let plan = nrz()
+        let plan = plan_command
             .current_dir(&temp)
             .args([
+                "--token",
+                "test-token",
                 "--json",
                 "deploy",
                 "--app",
@@ -293,7 +311,7 @@ fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
         );
         // Local detection reads the selected project's declaration directly.
         fs::write(app.join("onreza.toml"), &configuration).unwrap();
-        let detected = nrz()
+        let detected = detect_command
             .current_dir(&app)
             .args(["--json", "detect"])
             .output()
