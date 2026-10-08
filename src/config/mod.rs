@@ -4,6 +4,11 @@
 mod config_tests;
 #[cfg(test)]
 mod env_decl_tests;
+mod explain;
+#[cfg(test)]
+mod explain_tests;
+#[cfg(test)]
+mod serving_mode_tests;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -108,6 +113,12 @@ pub struct DevSection {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BuildSection {
+    #[serde(
+        deserialize_with = "deserialize_build_toolchain",
+        serialize_with = "serialize_build_toolchain"
+    )]
+    pub toolchain: Option<nrz_source_bundle::BuildToolchainFamily>,
+    pub python_version: Option<nrz_source_bundle::PythonMinor>,
     pub output_dirs: Option<Vec<String>>,
     pub command: Option<String>,
     pub install_command: Option<String>,
@@ -118,11 +129,19 @@ pub struct BuildSection {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DeploySection {
+    /// Selected supported CPython minor; absent selects the platform default.
+    pub python_version: Option<nrz_source_bundle::PythonMinor>,
     /// Application launcher, independent of install/build commands.
     #[serde(serialize_with = "serialize_runtime_family")]
     pub runtime: Option<nrz_source_bundle::ApplicationRuntimeFamily>,
     /// Arguments after the application entry (not interpreter flags).
     pub args: Option<Vec<String>>,
+    /// Python module run through an immutable deployment bootstrap.
+    pub module: Option<String>,
+    /// Python import string (module:callable) for the selected server.
+    pub application: Option<String>,
+    /// Production Python server profile: asgi/uvicorn or wsgi/gunicorn.
+    pub server: Option<String>,
     /// Compute type override: "static", "process".
     pub compute: Option<String>,
     /// Explicit entry point for PROCESS deployments (e.g. "server.ts").
@@ -135,6 +154,57 @@ pub struct DeploySection {
     pub app: Option<String>,
 }
 
+impl BuildSection {
+    /// Resolve authored compiler selectors without framework detection.
+    pub fn selected_toolchain_family(&self) -> Option<nrz_source_bundle::BuildToolchainFamily> {
+        self.toolchain.or_else(|| {
+            self.python_version
+                .map(|_| nrz_source_bundle::BuildToolchainFamily::Python)
+        })
+    }
+}
+
+impl DeploySection {
+    /// Explicit runtime wins; Python launch fields imply Python when absent.
+    /// Validation still rejects fields incompatible with that explicit runtime.
+    pub fn selected_runtime_family(&self) -> Option<nrz_source_bundle::ApplicationRuntimeFamily> {
+        self.runtime.or_else(|| {
+            (self.python_version.is_some()
+                || self.module.is_some()
+                || self.application.is_some()
+                || self.server.is_some())
+            .then_some(nrz_source_bundle::ApplicationRuntimeFamily::Python)
+        })
+    }
+}
+
+fn deserialize_build_toolchain<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<nrz_source_bundle::BuildToolchainFamily>, D::Error> {
+    let value: Option<String> = Option::deserialize(deserializer)?;
+    value
+        .map(|value| {
+            serde_json::from_value(serde_json::Value::String(value.to_ascii_uppercase()))
+                .map_err(serde::de::Error::custom)
+        })
+        .transpose()
+}
+
+fn serialize_build_toolchain<S: serde::Serializer>(
+    family: &Option<nrz_source_bundle::BuildToolchainFamily>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    family
+        .map(|family| {
+            serde_json::to_value(family)
+                .expect("build toolchain family serializes")
+                .as_str()
+                .expect("family is a string")
+                .to_ascii_lowercase()
+        })
+        .serialize(serializer)
+}
+
 fn serialize_runtime_family<S: serde::Serializer>(
     family: &Option<nrz_source_bundle::ApplicationRuntimeFamily>,
     serializer: S,
@@ -144,6 +214,8 @@ fn serialize_runtime_family<S: serde::Serializer>(
         .map(|family| match family {
             ApplicationRuntimeFamily::Bun => "bun",
             ApplicationRuntimeFamily::Node => "node",
+            ApplicationRuntimeFamily::Python => "python",
+            ApplicationRuntimeFamily::Executable => "executable",
         })
         .serialize(serializer)
 }
@@ -272,7 +344,67 @@ pub struct EnvSection {
 
 impl ProjectConfig {
     pub fn merge_child(&self, child: ProjectConfig) -> ProjectConfig {
-        let parent = self.clone();
+        let mut parent = self.clone();
+        let parent_runtime = parent.deploy.selected_runtime_family();
+        let child_runtime = child.deploy.selected_runtime_family();
+        let parent_static = parent
+            .deploy
+            .compute
+            .as_deref()
+            .is_some_and(|compute| compute.eq_ignore_ascii_case("static"));
+        let child_static = child
+            .deploy
+            .compute
+            .as_deref()
+            .is_some_and(|compute| compute.eq_ignore_ascii_case("static"));
+        let child_process = child
+            .deploy
+            .compute
+            .as_deref()
+            .is_some_and(|compute| compute.eq_ignore_ascii_case("process"));
+        let child_process_declaration = child_process
+            || child_runtime.is_some()
+            || child.deploy.entry.is_some()
+            || child.deploy.args.is_some();
+        if child_static
+            || parent_static && child_process_declaration
+            || child_runtime.is_some() && child_runtime != parent_runtime
+        {
+            // A new serving mode or runtime family owns a fresh launch namespace.
+            // Preserve authored child fields so invalid combinations still fail.
+            parent.deploy.runtime = None;
+            parent.deploy.entry = None;
+            parent.deploy.args = None;
+            parent.deploy.python_version = None;
+            parent.deploy.module = None;
+            parent.deploy.application = None;
+            parent.deploy.server = None;
+        }
+        if parent_static && child_process_declaration {
+            parent.deploy.compute = None;
+        }
+        if child_runtime
+            .is_none_or(|family| family == nrz_source_bundle::ApplicationRuntimeFamily::Python)
+        {
+            // An explicit child launch mode replaces competing parent defaults.
+            // Keep every authored child field so invalid combinations still fail.
+            if child.deploy.entry.is_some() || child.deploy.module.is_some() {
+                parent.deploy.application = None;
+                parent.deploy.server = None;
+            }
+            if child.deploy.entry.is_some()
+                || child.deploy.application.is_some()
+                || child.deploy.server.is_some()
+            {
+                parent.deploy.module = None;
+            }
+            if child.deploy.module.is_some()
+                || child.deploy.application.is_some()
+                || child.deploy.server.is_some()
+            {
+                parent.deploy.entry = None;
+            }
+        }
 
         let mut aliases = parent.dev.aliases;
         aliases.extend(child.dev.aliases);
@@ -295,6 +427,19 @@ impl ProjectConfig {
                 aliases,
             },
             build: BuildSection {
+                toolchain: child
+                    .build
+                    .selected_toolchain_family()
+                    .or(parent.build.toolchain),
+                python_version: if child
+                    .build
+                    .toolchain
+                    .is_some_and(|family| family != nrz_source_bundle::BuildToolchainFamily::Python)
+                {
+                    child.build.python_version
+                } else {
+                    child.build.python_version.or(parent.build.python_version)
+                },
                 output_dirs: child.build.output_dirs.or(parent.build.output_dirs),
                 command: child.build.command.or(parent.build.command),
                 install_command: child.build.install_command.or(parent.build.install_command),
@@ -304,8 +449,12 @@ impl ProjectConfig {
                     .or(parent.build.output_directory),
             },
             deploy: DeploySection {
+                python_version: child.deploy.python_version.or(parent.deploy.python_version),
                 runtime: child.deploy.runtime.or(parent.deploy.runtime),
                 args: child.deploy.args.or(parent.deploy.args),
+                module: child.deploy.module.or(parent.deploy.module),
+                application: child.deploy.application.or(parent.deploy.application),
+                server: child.deploy.server.or(parent.deploy.server),
                 compute: child.deploy.compute.or(parent.deploy.compute),
                 entry: child.deploy.entry.or(parent.deploy.entry),
                 health_check_path: child
@@ -480,12 +629,8 @@ impl IgnoredBuildBehavior {
 pub struct ProjectBuildSettings {
     #[serde(default)]
     pub node_version: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_runtime_presence",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub application_runtime: Option<Option<nrz_source_bundle::ApplicationRuntimeDeclaration>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_build_context: Option<nrz_source_bundle::SourceBuildContext>,
     pub framework_preset: Option<String>,
     pub root_directory: String,
     pub git_lfs_enabled: Option<bool>,
@@ -499,12 +644,6 @@ pub struct ProjectBuildSettings {
     pub ignored_build_behavior: Option<IgnoredBuildBehavior>,
     pub ignored_build_folder: Option<String>,
     pub ignored_build_command: Option<String>,
-}
-
-fn deserialize_runtime_presence<'de, D: Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Option<nrz_source_bundle::ApplicationRuntimeDeclaration>>, D::Error> {
-    Option::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -621,15 +760,18 @@ pub struct EffectiveConfigExplanation {
     pub build_command: EffectiveConfigValue,
     pub output_directory: EffectiveConfigValue,
     pub output_dirs: EffectiveConfigList,
+    pub build_toolchain: EffectiveConfigValue,
+    pub build_python_version: EffectiveConfigValue,
     pub deploy_compute: EffectiveConfigValue,
     pub deploy_entry: EffectiveConfigValue,
+    pub deploy_python_version: EffectiveConfigValue,
     pub deploy_app: EffectiveConfigValue,
 }
 
 #[derive(Debug, Clone)]
 pub struct EffectiveProjectConfig {
     node_version: Option<String>,
-    application_runtime: Option<Option<nrz_source_bundle::ApplicationRuntimeDeclaration>>,
+    source_build_context: Option<nrz_source_bundle::SourceBuildContext>,
     project_dir: PathBuf,
     config: ProjectConfig,
     project_id: Option<String>,
@@ -671,7 +813,7 @@ impl EffectiveProjectConfig {
 
         Self {
             node_version: None,
-            application_runtime: None,
+            source_build_context: None,
             project_dir,
             config,
             project_id,
@@ -763,8 +905,8 @@ impl EffectiveProjectConfig {
 
     pub fn apply_platform_runner_settings(&mut self, settings: &ProjectBuildSettings) {
         self.node_version.clone_from(&settings.node_version);
-        self.application_runtime
-            .clone_from(&settings.application_runtime);
+        self.source_build_context
+            .clone_from(&settings.source_build_context);
         self.framework_override =
             normalize_authoritative_framework(settings.framework_preset.as_deref())
                 .map(str::to_string);
@@ -803,10 +945,8 @@ impl EffectiveProjectConfig {
         Ok(())
     }
 
-    pub fn platform_application_runtime(
-        &self,
-    ) -> Option<&Option<nrz_source_bundle::ApplicationRuntimeDeclaration>> {
-        self.application_runtime.as_ref()
+    pub fn platform_source_build_context(&self) -> Option<&nrz_source_bundle::SourceBuildContext> {
+        self.source_build_context.as_ref()
     }
 
     pub fn config(&self) -> &ProjectConfig {
@@ -852,31 +992,6 @@ impl EffectiveProjectConfig {
     pub fn git_lfs_enabled(&self) -> bool {
         self.git_lfs_enabled.unwrap_or(false)
     }
-
-    pub fn explain(&self) -> EffectiveConfigExplanation {
-        EffectiveConfigExplanation {
-            project_dir: self.project_dir.display().to_string(),
-            project_id: explain_origin_value(self.project_id(), self.project_id_source, "absent"),
-            framework: explain_framework(
-                self.framework_override.as_deref(),
-                self.framework_override_source,
-            ),
-            install_command: explain_source_aware_setting(self.install_command.as_ref(), "auto"),
-            build_command: explain_source_aware_setting(self.build_command.as_ref(), "auto"),
-            output_directory: explain_source_aware_setting(self.output_directory.as_ref(), "auto"),
-            output_dirs: EffectiveConfigList {
-                values: self.output_dirs().into_iter().map(str::to_string).collect(),
-                source: if self.config.build.output_dirs.is_some() {
-                    "onreza.toml".to_string()
-                } else {
-                    "default".to_string()
-                },
-            },
-            deploy_compute: explain_config_option(self.deploy_compute(), "onreza.toml", "auto"),
-            deploy_entry: explain_config_option(self.deploy_entry(), "onreza.toml", "absent"),
-            deploy_app: explain_origin_value(self.deploy_app(), self.deploy_app_source, "absent"),
-        }
-    }
 }
 
 fn merge_project_string(child: Option<String>, parent: Option<String>) -> Option<String> {
@@ -887,77 +1002,6 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-}
-
-fn explain_config_option(
-    value: Option<&str>,
-    present_source: &str,
-    absent_source: &str,
-) -> EffectiveConfigValue {
-    EffectiveConfigValue {
-        value: value.map(str::to_string),
-        source: if value.is_some() {
-            present_source.to_string()
-        } else {
-            absent_source.to_string()
-        },
-    }
-}
-
-fn explain_framework(
-    value: Option<&str>,
-    source: Option<EffectiveSettingOrigin>,
-) -> EffectiveConfigValue {
-    explain_origin_value(value, source, "auto")
-}
-
-fn explain_origin_value(
-    value: Option<&str>,
-    source: Option<EffectiveSettingOrigin>,
-    absent_source: &str,
-) -> EffectiveConfigValue {
-    EffectiveConfigValue {
-        value: value.map(str::to_string),
-        source: source
-            .map(explain_effective_origin)
-            .unwrap_or_else(|| absent_source.to_string()),
-    }
-}
-
-fn explain_source_aware_setting(
-    setting: Option<&SourceAwareSetting>,
-    absent_source: &str,
-) -> EffectiveConfigValue {
-    let Some(setting) = setting else {
-        return EffectiveConfigValue {
-            value: None,
-            source: absent_source.to_string(),
-        };
-    };
-
-    EffectiveConfigValue {
-        value: setting.value().map(str::to_string),
-        source: explain_source_aware_origin(setting),
-    }
-}
-
-fn explain_source_aware_origin(setting: &SourceAwareSetting) -> String {
-    match setting.origin() {
-        EffectiveSettingOrigin::Cli => "cli".to_string(),
-        EffectiveSettingOrigin::LocalConfig => "onreza.toml".to_string(),
-        EffectiveSettingOrigin::ServerSettings => match setting.source {
-            Some(source) => format!("server:{}", source.as_str()),
-            None => "server".to_string(),
-        },
-    }
-}
-
-fn explain_effective_origin(source: EffectiveSettingOrigin) -> String {
-    match source {
-        EffectiveSettingOrigin::Cli => "cli".to_string(),
-        EffectiveSettingOrigin::LocalConfig => "onreza.toml".to_string(),
-        EffectiveSettingOrigin::ServerSettings => "server".to_string(),
-    }
 }
 
 pub fn normalize_authoritative_framework(framework: Option<&str>) -> Option<&str> {

@@ -21,3 +21,10 @@ allow = [
 
 [licenses.private]
 ignore = true
+
+# Scoped exception: the corresponding source notice accompanies every
+# release archive and npm package. Other MPL versions remain rejected.
+[[licenses.exceptions]]
+name = "version-ranges"
+version = "=0.1.3"
+allow = ["MPL-2.0"]

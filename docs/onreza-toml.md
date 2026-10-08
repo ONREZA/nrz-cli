@@ -30,6 +30,23 @@ workspace = "myteam"
 framework = "next"
 ```
 
+Hugo автоматически определяется по `hugo.toml`, `hugo.yaml` или `hugo.json`
+в корне либо в `config/_default`. Для проекта с `config.toml`, `config.yaml`
+или `config.json` в этих каталогах укажите `framework = "hugo"`: общее имя конфигурации
+само по себе не определяет генератор. Hugo STATIC может содержать только
+вложенные страницы без корневого `index.html`.
+
+В автоматической Go-сборке ищется один `main` package в корне или `cmd/*`,
+подходящий для Linux amd64, `CGO=0` и выбранного compiler. Учитываются суффиксы
+имён файлов и build constraints; Windows-only и cgo-only entry не выбираются.
+
+Автосборка Hugo требует неизменных dependency inputs: `go.mod`, `go.sum` и
+`hugo.direct.sum`, если они нужны вашим модулям. Если Hugo разрешает новые
+зависимости или обновляет эти файлы, публикация прерывается без изменения
+исходников. Сначала соберите сайт локально, проверьте и закоммитьте полученные
+файлы зависимостей. Go workspaces и источники модулей вне проекта требуют
+собственной `build.command`.
+
 ---
 
 ## [dev]
@@ -70,6 +87,8 @@ debug = "node --inspect src/index.js"
 
 | Поле | Тип | По умолчанию | Описание |
 |------|-----|-------------|---------|
+| `toolchain` | string | авто | Инструменты сборки: `"node"`, `"bun"`, `"python"` или `"native"`. Выбор не задаёт launcher приложения. |
+| `python_version` | string | serving minor или `"3.14"` | Minor Python для compiler/installer: `"3.12"`, `"3.13"`, `"3.14"`. Без `toolchain` подразумевает `"python"`. |
 | `install_command` | string | авто | Команда установки зависимостей перед build/deploy. Если не задана, определяется по package manager. Пустая строка означает явный skip. |
 | `command` | string | нет | Команда сборки, которая выполняется автоматически перед `nrz deploy` (если не передан `--skip-build`). Пример: `"npm run build"`. |
 | `output_directory` | string | авто | Единственная авторитетная директория build output. Если задана в `onreza.toml`, CLI не делает silent fallback в другие директории. Compatibility alias: `output_dir`. |
@@ -100,7 +119,13 @@ output_dirs = ["dist"]
 | Поле | Тип | По умолчанию | Описание |
 |------|-----|-------------|---------|
 | `compute` | string | авто | Принудительно задать compute type вместо авто-определения. Значения: `"static"`, `"process"`. Используйте только если авто-определение даёт неверный результат. |
-| `entry` | string | авто | Точка входа для `PROCESS`-деплоев (Node.js/Bun сервер). Должна быть относительным путём без `..`, не shell-командой. Пример: `"server.ts"`, `"dist/index.js"`. Compatibility alias: `entrypoint`. Если не задана, CLI определяет автоматически. |
+| `runtime` | string | авто | Launcher приложения: `"node"`, `"bun"`, `"python"` или `"executable"`. Язык сборки выбирается отдельно. |
+| `python_version` | string | Python build minor или `"3.14"` | Minor CPython для `PROCESS` launcher: `"3.12"`, `"3.13"` или `"3.14"`. |
+| `entry` | string | авто | Файл запуска `PROCESS`: JS/TS, Python script или готовый executable. Относительный путь без `..`, не shell-команда. Compatibility alias: `entrypoint`. |
+| `module` | string | нет | Python import module для запуска как `python -m`, например `"company.worker"`. |
+| `application` | string | нет | Python import reference, например `"api.main:app"` или `"api.main:create_app()"`. |
+| `server` | string | авто | Python server: `"asgi"` / `"uvicorn"` либо `"wsgi"` / `"gunicorn"`. Зависимость сервера должна быть объявлена в проекте. |
+| `args` | string[] | `[]` | Буквальные аргументы приложения после точки запуска. |
 | `app` | string | нет | Монорепо: какой workspace/пакет деплоить. Матчится по имени пакета из `package.json`, имени директории, или относительному пути. Эквивалент CLI флага `--app` / `--filter`. |
 
 Для `nrz deploy --app web` CLI сначала выбирает workspace из root config, затем
@@ -110,13 +135,33 @@ output_dirs = ["dist"]
 `nrz config explain --app web --json`. По умолчанию `config explain` также
 подтягивает server project settings для `project.id`, как `nrz deploy`; для
 локального-only просмотра используйте `nrz config explain --local`.
+Несовместимые build/serving selectors возвращают ошибку и в JSON, и в human
+режиме. Эта проверка выбора не требует готовой точки запуска или lock-файла.
+
+Для Python поля `entry`, `module` и `application` задают разные режимы запуска.
+Явный режим дочернего приложения заменяет конкурирующие настройки родителя.
+`server` наследуется в режиме application; явный `server` без `application`
+выбирает application inference вместо родительского script/module.
+Конфликтующие поля самого дочернего приложения отклоняются.
+
+Явный запуск имеет приоритет над автодетектом. Единственный console script
+из `pyproject.toml` запускается как callable, даже при наличии веб-фреймворка.
+Объявленные console scripts сохраняют выбор Python рядом с Go/Dart helper или
+JavaScript tooling; несколько scripts требуют явного выбора application.
+Если зависимости содержат условия, включения других requirements-файлов
+или формируются package backend (`setup.py` либо dynamic dependencies в
+`pyproject.toml`),
+задайте `application` и `server` явно: этих данных недостаточно для надёжного
+автоматического выбора ASGI/WSGI. Установщик обрабатывает authored dependencies.
+Для script/module укажите `entry`/`module`; для callable без ASGI/WSGI задайте
+`project.framework = "python"` и `deploy.application`.
 
 **Compute types:**
 
 | Тип | Когда использовать |
 |-----|--------------------|
 | `static` | Статические сайты без серверного кода (Vite, CRA, Astro static) |
-| `process` | Полноценный Node.js/Bun сервер (Next.js standalone, Hono, Elysia, кастомный сервер) |
+| `process` | Сервер на Node.js, Bun, CPython или готовый Linux executable |
 
 Матрица приоритетов `frameworkPreset`/`compute`/`outputDirectory` описана в
 [output-directory-contract.md](./output-directory-contract.md). Ключевое правило:
@@ -125,7 +170,7 @@ output_dirs = ["dist"]
 
 `compute = "process"` и `compute = "static"` выполняются без `.onreza/manifest.json`.
 
-**Приоритет entry point для PROCESS:**
+**Приоритет entry point для JS/TS PROCESS:**
 `[deploy] entry` > файл из прямого `scripts.start` с Bun/Node > авто-определение по фреймворку > `package.json "main"/"module"` > остальные script hints > `index.*` > heuristic scan по build output
 
 Приложение выбирает launcher до install/build: `[deploy] runtime = "bun"` или
@@ -153,7 +198,12 @@ script aliases в прямом Bun/Node start отвергаются до уст
 проверяет actual local Node major до install/build. Bun проверяется по pinned
 CLI toolchain. Platform runner проверяет frozen intent и trusted runtime target.
 `SOURCE_BUNDLE_V1` сохраняет family/args и `buildRuntimeVersion`; materializer и
-graph compiler отвергают несовпадающий target, в том числе без dependencies.
+graph compiler отвергают несовместимые family/target, в том числе без dependencies.
+Соседний слой может сохранять другой поддерживаемый target без дерева
+зависимостей; его зависимости требуют отдельного build policy.
+При заданном primary entry build manifest должен содержать COMPUTE-слой с этим
+полным путём (directory + entry). Независимый typed-слой и STATIC-слой не
+заменяют выбранный primary.
 Default direct publication без явного intent сохраняет существующий Bun launcher.
 
 Если entry не удалось определить однозначно:
@@ -308,3 +358,64 @@ CLI flag > env var (NRZ_*) > onreza.toml > hardcoded default
 | `.onreza/data/dev.db` | SQLite для локальной эмуляции |
 | `.onreza/data/kv.<env>.json` | Персистенция local KV store по environment namespace |
 | `.onreza/environment.json` | Личный выбор environment разработчика |
+
+Для STATIC Python-сборки настройте build toolchain без полей запуска `PROCESS`:
+
+```toml
+[build]
+toolchain = "python"
+python_version = "3.13"
+command = "mkdocs build"
+output_directory = "site"
+
+[deploy]
+compute = "static"
+```
+
+`deploy.runtime`, `entry`, `module`, `application`, `server`, `args` и
+`deploy.python_version` несовместимы с явно выбранным STATIC. Build toolchain и
+launcher замораживаются раздельно в `metadata.sourceBuildContext` при детекции.
+Для Git-деплоя задайте команду `mkdocs build` и output `site` в настройках
+проекта ONREZA: Builder использует immutable Project snapshot. Эти два поля
+из `onreza.toml` не импортируются автоматически и не переопределяют snapshot;
+локальный CLI использует их из файла.
+Python-команда сборки получает выбранный pinned interpreter, staged packages и
+console scripts. Различные build/serving Python minor допустимы для code-only
+output; runtime dependencies требуют совпадающих qualified minor.
+Выбор compiler не заменяет обнаруженные framework output и entry hints;
+явный `build.output_directory` сохраняет приоритет.
+Для приложения с активными для Linux x86_64 и выбранной версии CPython
+dependencies `--skip-install` требует файлов
+подготовленного дерева зависимостей, которые войдут в Python COMPUTE слой.
+Пустого каталога `site-packages` недостаточно. Известные PEP 508 markers,
+исключающие все зависимости для этого target, допускают пустое дерево;
+непрозрачные inputs и markers с неизвестными значениями сохраняют требование дерева.
+Для Poetry также учитываются буквальный `platform` и стабильные Python-версии
+с операторами `==`, `!=`, `<`, `<=`, `>` и `>=`. Poetry-диапазоны с `^`, `~`,
+wildcards, unions и другие неизвестные selectors сохраняют требование дерева;
+их полную семантику обрабатывает установщик.
+Автоматическая локальная установка использует target wheels без editable
+installations и source builds зависимостей. Для editable project dependency
+подготовьте wheel или используйте Git/Builder.
+
+Локальная Python-сборка с нативными dependencies требует Linux x86_64 и
+определённую glibc не ниже целевого manylinux ABI (сейчас 2.39). На macOS,
+Windows, non-x64 host, musl либо неизвестной libc используйте Git/Builder
+для нативных dependencies. Чистые Python packages доступны для локальной сборки.
+После локальной пользовательской install-команды нативные dependencies,
+сохранённые для Python COMPUTE, требуют Git/Builder независимо от ОС хоста:
+произвольная команда не подтверждает их target ABI. Это правило применяется
+и к дополнительным Python COMPUTE слоям; build-only STATIC packages исключаются.
+Нативные расширения самого Python-приложения собирайте через Git/Builder.
+После локальной пользовательской build-команды CLI проверяет публикуемые
+Python-файлы: нативный application output требует сборки в Builder.
+Установленные `.pth` paths и import hooks обрабатываются при сборке и запуске;
+повторный bootstrap в том же interpreter не запускает hooks второй раз. Публикация готового output через `--skip-build` не запускает
+host interpreter.
+`--skip-install`, `--skip-build` и пустая install-команда не отключают проверку
+платформы публикуемых Python COMPUTE файлов, включая подготовленный dependency
+stage и дополнительные Python-слои. Известные Mach-O, PE и несовместимые ELF
+отклоняются; совместимый Linux x86_64 prebuilt output остаётся допустимым.
+Эта проверка формата и архитектуры не доказывает полную ABI-совместимость или
+импортируемость packages. Relocatable `.o` и архивы `.a` могут оставаться assets;
+платформа членов архивов этой проверкой не подтверждается.

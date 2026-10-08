@@ -9,6 +9,8 @@ use crate::build::manifest::{LayerTarget, Manifest};
 pub(crate) mod native_dependencies;
 #[cfg(test)]
 mod native_dependencies_tests;
+#[cfg(test)]
+mod python_build_boundary_tests;
 pub(crate) mod source_bundle_v1;
 #[cfg(test)]
 mod source_bundle_v1_tests;
@@ -46,8 +48,6 @@ pub(crate) struct RuntimeArtifact {
     pub(crate) scan: RuntimeArtifactScan,
 }
 
-pub(crate) use crate::detect::python::PYTHON_SITE_PACKAGES_ROOT;
-
 pub(crate) const NODE_RUNTIME_METADATA_FILES: &[&str] = &[
     "package.json",
     "package-lock.json",
@@ -62,7 +62,7 @@ pub(crate) const NODE_RUNTIME_METADATA_FILES: &[&str] = &[
 pub(crate) enum RuntimeArtifactScan {
     All,
     NodeRuntimeRoot,
-    PythonRuntimeRoot,
+    PythonRuntimeRoot(nrz_source_bundle::PythonMinor),
     Relocated {
         base: Box<RuntimeArtifactScan>,
         ownership: RuntimeArtifactSourceOwnership,
@@ -77,6 +77,9 @@ pub(crate) enum RuntimeArtifactScan {
 pub(crate) struct RuntimeArtifactSourceOwnership {
     pub(crate) build_output_prefix: String,
     pub(crate) layers: Vec<crate::build::manifest::Layer>,
+    pub(crate) javascript_dependency_owner: Option<String>,
+    pub(crate) python_dependency_owner: Option<String>,
+    pub(crate) python_primary_declared: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,7 +129,7 @@ impl RuntimeArtifactFileBreakdown {
 impl RuntimeArtifactScan {
     pub(crate) fn explain(&self) -> serde_json::Value {
         match self {
-            Self::All | Self::NodeRuntimeRoot | Self::PythonRuntimeRoot => {
+            Self::All | Self::NodeRuntimeRoot | Self::PythonRuntimeRoot(_) => {
                 serde_json::json!({ "mode": "all" })
             }
             Self::Relocated { base, ownership } => {
@@ -173,15 +176,26 @@ impl RuntimeArtifactScan {
         )
     }
 
+    pub(crate) fn owns_as_python_dependency(&self, path: &str) -> bool {
+        self.file_category(path) == RuntimeArtifactFileCategory::PythonSitePackages
+    }
+
     pub(crate) fn source_layer_match<'a>(
         &'a self,
         manifest: &'a Manifest,
         path: &str,
     ) -> Option<&'a crate::build::manifest::Layer> {
-        if self.owns_as_dependency(path) {
-            return best_layer_match(&manifest.layers, path);
-        }
         if let Self::Relocated { ownership, .. } = self {
+            // The reserved installer tree belongs to the frozen primary, even
+            // when an authored sibling's broad root also covers that directory.
+            if self.file_category(path) == RuntimeArtifactFileCategory::PythonSitePackages
+                && ownership.python_primary_declared
+            {
+                return ownership
+                    .python_dependency_owner
+                    .as_deref()
+                    .and_then(|name| ownership.layers.iter().find(|layer| layer.name == name));
+            }
             let source_path = if ownership.build_output_prefix == "." {
                 Some(path)
             } else {
@@ -189,10 +203,57 @@ impl RuntimeArtifactScan {
                     .and_then(|path| path.strip_prefix('/'))
             };
             if let Some(source_path) = source_path {
-                return best_layer_match(&ownership.layers, source_path);
+                let owner = best_layer_match(&ownership.layers, source_path);
+                if self.file_category(path) == RuntimeArtifactFileCategory::PythonSitePackages {
+                    if let Some(owner) = owner {
+                        let root = normalize_layer_root(&owner.directory);
+                        let ambiguous = ownership
+                            .layers
+                            .iter()
+                            .filter(|layer| {
+                                let candidate_root = normalize_layer_root(&layer.directory);
+                                candidate_root.len() == root.len()
+                                    && path_in_root(source_path, &candidate_root)
+                            })
+                            .count()
+                            > 1;
+                        if !ambiguous {
+                            return Some(owner);
+                        }
+                    }
+                } else if owner.is_some() || !self.owns_as_dependency(path) {
+                    return owner;
+                }
+            }
+            if self.file_category(path) == RuntimeArtifactFileCategory::PythonSitePackages {
+                return ownership
+                    .python_dependency_owner
+                    .as_deref()
+                    .and_then(|name| ownership.layers.iter().find(|layer| layer.name == name));
+            }
+            if matches!(
+                self.file_category(path),
+                RuntimeArtifactFileCategory::NodeModules
+                    | RuntimeArtifactFileCategory::WorkspacePackage
+            ) && ownership.layers.iter().any(is_javascript_compute_layer)
+            {
+                return ownership
+                    .javascript_dependency_owner
+                    .as_deref()
+                    .and_then(|name| ownership.layers.iter().find(|layer| layer.name == name));
             }
         }
-        best_layer_match(&manifest.layers, path)
+        best_layer_match(&manifest.layers, path).or_else(|| {
+            if self.file_category(path) != RuntimeArtifactFileCategory::NodeModules {
+                return None;
+            }
+            let mut candidates = manifest
+                .layers
+                .iter()
+                .filter(|layer| is_javascript_compute_layer(layer));
+            let owner = candidates.next()?;
+            candidates.next().is_none().then_some(owner)
+        })
     }
 
     pub(crate) fn symlink_roots(&self) -> Option<&[String]> {
@@ -204,10 +265,14 @@ impl RuntimeArtifactScan {
     }
 
     pub(crate) fn is_python_runtime_root(&self) -> bool {
+        self.python_runtime_minor().is_some()
+    }
+
+    fn python_runtime_minor(&self) -> Option<nrz_source_bundle::PythonMinor> {
         match self {
-            Self::PythonRuntimeRoot => true,
-            Self::Relocated { base, .. } => base.is_python_runtime_root(),
-            _ => false,
+            Self::PythonRuntimeRoot(minor) => Some(*minor),
+            Self::Relocated { base, .. } => base.python_runtime_minor(),
+            _ => None,
         }
     }
 
@@ -215,7 +280,7 @@ impl RuntimeArtifactScan {
         let (roots, symlink_roots) = match self {
             Self::All => return RuntimeArtifactFileCategory::BuildOutput,
             Self::NodeRuntimeRoot => return node_runtime_root_file_category(path),
-            Self::PythonRuntimeRoot => return python_runtime_root_file_category(path),
+            Self::PythonRuntimeRoot(_) => return python_runtime_root_file_category(path),
             Self::Relocated { base, .. } => return base.file_category(path),
             Self::Selected {
                 roots,
@@ -247,6 +312,21 @@ impl RuntimeArtifactScan {
             RuntimeArtifactFileCategory::Other
         }
     }
+}
+
+pub(crate) fn is_javascript_compute_layer(layer: &crate::build::manifest::Layer) -> bool {
+    layer.target == LayerTarget::Compute
+        && layer
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.application_runtime.as_ref())
+            .is_some_and(|runtime| {
+                matches!(
+                    runtime.family,
+                    nrz_source_bundle::ApplicationRuntimeFamily::Node
+                        | nrz_source_bundle::ApplicationRuntimeFamily::Bun
+                )
+            })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -283,7 +363,7 @@ fn node_runtime_root_file_category(path: &str) -> RuntimeArtifactFileCategory {
 }
 
 fn python_runtime_root_file_category(path: &str) -> RuntimeArtifactFileCategory {
-    if runtime_path_is_covered(path, PYTHON_SITE_PACKAGES_ROOT) {
+    if nrz_source_bundle::PythonMinor::for_dependency_path(path).is_some() {
         RuntimeArtifactFileCategory::PythonSitePackages
     } else {
         RuntimeArtifactFileCategory::BuildOutput
@@ -490,7 +570,7 @@ fn classify_file_role(
     path: &str,
     prerender_paths: &HashSet<String>,
 ) -> (ArtifactFileRole, Option<String>, String) {
-    if is_platform_build_only_path(detection, path) {
+    if is_platform_build_only_path(manifest, detection, scan, path) {
         return (
             ArtifactFileRole::Platform,
             None,
@@ -663,16 +743,75 @@ fn manifest_is_static_root_only(manifest: &Manifest) -> bool {
 }
 
 fn is_platform_build_only_path(
+    manifest: &Manifest,
     detection: &crate::detect::types::DetectionResult,
+    scan: &RuntimeArtifactScan,
     path: &str,
 ) -> bool {
-    if detection.metadata.runtime.runtime_type == crate::detect::types::RuntimeType::Python
-        && runtime_path_is_covered(path, PYTHON_SITE_PACKAGES_ROOT)
-    {
+    let Some(relative) = platform_state_relative_path(scan, path) else {
         return false;
+    };
+    let primary = detection.metadata.application_runtime();
+    if let Some(layer) = scan.source_layer_match(manifest, path)
+        && layer.target == LayerTarget::Compute
+        && layer
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.application_runtime.as_ref())
+            .map(|intent| intent.family)
+            .or_else(|| primary.map(|runtime| runtime.family))
+            // DEPRECATED: standalone legacy callers freeze serving through the
+            // explicit Python scan; compiler inference does not attest serving.
+            .or_else(|| {
+                scan.python_runtime_minor()
+                    .map(|_| nrz_source_bundle::ApplicationRuntimeFamily::Python)
+            })
+            == Some(nrz_source_bundle::ApplicationRuntimeFamily::Python)
+    {
+        if let Some(minor) = nrz_source_bundle::PythonMinor::for_dependency_path(relative) {
+            return layer
+                .runtime
+                .as_ref()
+                .and_then(|runtime| runtime.build_runtime_version.as_deref())
+                .or_else(|| {
+                    primary
+                        .and_then(|runtime| runtime.python_version)
+                        .map(nrz_source_bundle::PythonMinor::target)
+                })
+                .or_else(|| {
+                    scan.python_runtime_minor()
+                        .map(nrz_source_bundle::PythonMinor::target)
+                })
+                != Some(minor.target());
+        }
+        if relative == crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY
+            && manifest.layers.iter().any(|published_layer| {
+                published_layer.name == layer.name
+                    && layer_entrypoint_path(published_layer).as_deref() == Some(path)
+            })
+        {
+            return false;
+        }
     }
+    true
+}
 
-    path == ".onreza" || path.starts_with(".onreza/")
+fn platform_state_relative_path<'a>(scan: &RuntimeArtifactScan, path: &'a str) -> Option<&'a str> {
+    if path == ".onreza" || path.starts_with(".onreza/") {
+        return Some(path);
+    }
+    match scan {
+        RuntimeArtifactScan::Relocated { base, .. } => platform_state_relative_path(base, path),
+        RuntimeArtifactScan::Selected { roots, .. } => roots
+            .iter()
+            .filter(|root| root.kind == RuntimeArtifactScanRootKind::Metadata)
+            .filter_map(|root| root.path.rsplit_once('/').map(|(parent, _)| parent))
+            .find_map(|parent| {
+                let relative = path.strip_prefix(parent)?.strip_prefix('/')?;
+                (relative == ".onreza" || relative.starts_with(".onreza/")).then_some(relative)
+            }),
+        _ => None,
+    }
 }
 
 fn is_static_root_metadata_path(

@@ -531,7 +531,7 @@ fn wire_functions_contract_accepts_generated_edge_rule_contributions() {
 fn pre_source_mutations_use_the_stable_execution_contract() {
     assert_eq!(
         crate::execution_context::RUNNER_CONTEXT_PROTOCOL,
-        "runner-context-v5"
+        "runner-context-v6"
     );
     let body =
         pre_source_failure_body(2, PreSourceFailureCode::MaterializationFailed, None).unwrap();

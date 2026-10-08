@@ -212,11 +212,29 @@ fn standalone_process_build_without_manifest_emits_one_json_summary() {
 }
 
 #[test]
-fn standalone_build_explicit_static_keeps_priority_over_declared_server() {
+fn standalone_build_static_separates_build_toolchain_from_process_launch() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(temp.path().join("onreza.toml"), "[build]\noutput_directory='.'\n[deploy]\ncompute='static'\nruntime='node'\nentry='server.js'\nargs=[]\n").unwrap();
     fs::write(temp.path().join("index.html"), "<h1>static export</h1>").unwrap();
     fs::write(temp.path().join("server.js"), "console.log('server')").unwrap();
+    let output = nrz()
+        .current_dir(temp.path())
+        .args(["build", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let result = stdout_json(&output);
+    assert_eq!(result["code"], "APPLICATION_RUNTIME_INVALID");
+
+    fs::write(
+        temp.path().join("onreza.toml"),
+        "[build]\ntoolchain='node'\noutput_directory='.'\n[deploy]\ncompute='static'\n",
+    )
+    .unwrap();
     let output = nrz()
         .current_dir(temp.path())
         .args(["build", "--json"])
@@ -230,4 +248,98 @@ fn standalone_build_explicit_static_keeps_priority_over_declared_server() {
     let result = stdout_json(&output);
     assert_eq!(result["layers"][0]["target"], "STATIC");
     assert_eq!(result["manifestSource"], "generated");
+}
+
+#[test]
+fn python_minor_is_observable_in_detection_config_and_inherited_dry_plan() {
+    let config = tempfile::tempdir().unwrap();
+    for minor in nrz_source_bundle::PythonMinor::ALL {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"root","workspaces":["apps/*"]}"#,
+        )
+        .unwrap();
+        let configuration = format!(
+            "[project]\nframework='python'\n[build]\noutput_dirs=['.']\n[deploy]\nruntime='python'\npython_version='{}'\n",
+            minor.version()
+        );
+        fs::write(temp.path().join("onreza.toml"), &configuration).unwrap();
+        let app = temp.path().join("apps/api");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(app.join("package.json"), r#"{"name":"api"}"#).unwrap();
+        fs::write(app.join("main.py"), "print('ready')").unwrap();
+        fs::write(app.join("onreza.toml"), "[build]\noutput_dirs=['.']\n").unwrap();
+        let mut commands = [nrz(), nrz(), nrz()];
+        for command in &mut commands {
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("NRZ_") {
+                    command.env_remove(key);
+                }
+            }
+            command
+                .env("HOME", config.path())
+                .env("USERPROFILE", config.path())
+                .env("XDG_CONFIG_HOME", config.path())
+                .env("APPDATA", config.path())
+                .env("NRZ_API_URL", "http://127.0.0.1:9");
+        }
+        let [mut explain_command, mut plan_command, mut detect_command] = commands;
+        let explained = explain_command
+            .current_dir(&temp)
+            .args(["--json", "config", "explain", "--app", "api", "--local"])
+            .output()
+            .unwrap();
+        assert!(
+            explained.status.success(),
+            "{}",
+            String::from_utf8_lossy(&explained.stdout)
+        );
+        let explained = stdout_json(&explained);
+        assert_eq!(
+            explained["effective"]["deployPythonVersion"]["value"],
+            minor.version()
+        );
+        let plan = plan_command
+            .current_dir(&temp)
+            .args([
+                "--token",
+                "test-token",
+                "--json",
+                "deploy",
+                "--app",
+                "api",
+                "--dry",
+                "--skip-build",
+                "--skip-install",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            plan.status.success(),
+            "stdout:{} stderr:{}",
+            String::from_utf8_lossy(&plan.stdout),
+            String::from_utf8_lossy(&plan.stderr)
+        );
+        let plan = stdout_json(&plan);
+        assert_eq!(plan["framework"]["runtimeVersion"], minor.version());
+        assert_eq!(
+            plan["framework"]["pythonPatchVersion"],
+            minor.exact_version()
+        );
+        // Local detection reads the selected project's declaration directly.
+        fs::write(app.join("onreza.toml"), &configuration).unwrap();
+        let detected = detect_command
+            .current_dir(&app)
+            .args(["--json", "detect"])
+            .output()
+            .unwrap();
+        assert!(detected.status.success());
+        let detected = stdout_json(&detected);
+        assert_eq!(detected["metadata"]["runtime"]["version"], minor.version());
+        assert_eq!(
+            detected["metadata"]["sourceBuildContext"]["applicationRuntime"]["pythonVersion"],
+            minor.version()
+        );
+    }
 }

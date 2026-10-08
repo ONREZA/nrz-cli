@@ -45,6 +45,41 @@ fn main() -> Result<()> {
             }
         }
     }
+    if import {
+        // Public toolchain projections share the canonical schema export owner.
+        // Standalone CLI builds consume committed copies without a platform checkout.
+        let public = schema_dir
+            .parent()
+            .context("schema export has no public parent")?;
+        for (name, destination) in [
+            (
+                "runtime-toolchains.json",
+                manifest.join("../nrz-source-bundle/assets/runtime-toolchains.json"),
+            ),
+            (
+                "native-toolchains.json",
+                manifest.join("../../assets/native-toolchains.json"),
+            ),
+        ] {
+            let source = public.join(name);
+            let bytes =
+                std::fs::read(&source).with_context(|| format!("read {}", source.display()))?;
+            if check {
+                anyhow::ensure!(
+                    std::fs::read(&destination)? == bytes,
+                    "public toolchain projection drift: {name}"
+                );
+            } else {
+                std::fs::create_dir_all(
+                    destination
+                        .parent()
+                        .context("toolchain projection has no directory")?,
+                )?;
+                std::fs::write(&destination, bytes)
+                    .with_context(|| format!("write {}", destination.display()))?;
+            }
+        }
+    }
     let dest = manifest.join("src/generated.rs");
     if check {
         anyhow::ensure!(

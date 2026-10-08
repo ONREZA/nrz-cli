@@ -77,6 +77,7 @@ mod health_output_tests;
 mod process_entry_tests;
 mod process_output_tests;
 mod publication_tests;
+mod runtime_dependency_tests;
 mod runtime_files_tests;
 mod scan_tests;
 mod workspace_artifact_tests;
@@ -120,7 +121,7 @@ fn make_detection(
         suggested_compute: crate::detect::types::ComputeType::Process,
         reason: String::new(),
         metadata: crate::detect::types::DetectionMetadata {
-            application_runtime: None,
+            source_build_context: None,
             uses_typescript: None,
             config_files: vec![],
             runtime: crate::detect::types::RuntimeInfo {

@@ -149,31 +149,23 @@ pub(crate) async fn run_with_effective_config(
     workspace_root: &Path,
 ) -> anyhow::Result<BuildResult> {
     let project_dir = effective.project_dir();
-    let pre_resolved_runtime =
-        detection.map(|detection| detection.metadata.application_runtime.clone());
-
     let mut detection = detection.cloned().unwrap_or_else(|| {
         crate::detect::detect_with_framework_override(project_dir, effective.framework_override())
     });
-    let application_runtime = match pre_resolved_runtime {
-        Some(runtime) => runtime,
-        None => crate::detect::application_runtime::resolve_application_runtime_with_config(
+    let source_build_context = match detection.metadata.source_build_context.clone() {
+        Some(context) => context,
+        None => crate::detect::application_runtime::resolve_and_bind_source_build_context(
             &crate::detect::fs::LocalFs::new(project_dir),
-            &detection.framework,
-            effective.config().deploy.runtime,
-            effective.config().deploy.entry.clone(),
-            effective.config().deploy.args.clone(),
+            &mut detection,
+            effective.config(),
+            effective.framework_override(),
+            None,
         )
         .map_err(|error| {
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
         })?,
     };
-    crate::detect::application_runtime::bind_application_runtime(
-        &mut detection,
-        application_runtime.clone(),
-        effective.deploy_entry(),
-    )
-    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
+    let application_runtime = source_build_context.application_runtime.as_ref();
     let detection = &detection;
     let fw_dirs = crate::frameworks::compute_aware_output_dirs(detection);
     let output_directory_hint = effective
@@ -306,24 +298,38 @@ pub(crate) async fn run_with_effective_config(
         (None, BuildManifestSource::Absent)
     };
 
-    if let Some(manifest) = &mut loaded_manifest
-        && manifest
+    if let Some(manifest) = &mut loaded_manifest {
+        let target = if manifest
             .layers
             .iter()
             .any(|layer| layer.target == manifest::LayerTarget::Compute)
-    {
-        let target = crate::deploy::canonical_build_runtime_target(
-            &detection.metadata.runtime,
-            effective.platform_application_runtime().is_some(),
-            Some(manifest),
-            application_runtime.as_ref(),
-            effective.node_version(),
-        )?;
+        {
+            crate::deploy::canonical_build_runtime_target(
+                &detection.metadata.runtime,
+                effective.platform_source_build_context().is_some(),
+                Some(manifest),
+                application_runtime,
+                effective.node_version(),
+                effective.config().build.toolchain.is_none()
+                    && effective.config().build.python_version.is_none(),
+            )?
+        } else {
+            None
+        };
+        let application_runtime = crate::deploy::application_runtime_in_output(
+            application_runtime,
+            project_dir,
+            &output_dir,
+            effective.deploy_entry().is_some(),
+        );
         crate::deploy::apply_application_runtime_manifest(
             manifest,
             application_runtime.as_ref(),
             target.as_deref(),
-            &detection.framework,
+            crate::detect::application_runtime::serving_framework(
+                effective.config(),
+                &detection.framework,
+            ),
         )?;
     }
     emit_build_output(

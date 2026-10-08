@@ -531,7 +531,11 @@
                       "YARN",
                       "PNPM",
                       "BUN",
-                      "PIP"
+                      "PIP",
+                      "UV",
+                      "POETRY",
+                      "PUB",
+                      "GO"
                     ],
                     "type": "string"
                   },
@@ -977,7 +981,11 @@
                         "YARN",
                         "PNPM",
                         "BUN",
-                        "PIP"
+                        "PIP",
+                        "UV",
+                        "POETRY",
+                        "PUB",
+                        "GO"
                       ],
                       "type": "string"
                     },
@@ -1672,7 +1680,11 @@
                       "YARN",
                       "PNPM",
                       "BUN",
-                      "PIP"
+                      "PIP",
+                      "UV",
+                      "POETRY",
+                      "PUB",
+                      "GO"
                     ],
                     "type": "string"
                   },
@@ -2313,7 +2325,11 @@
                       "YARN",
                       "PNPM",
                       "BUN",
-                      "PIP"
+                      "PIP",
+                      "UV",
+                      "POETRY",
+                      "PUB",
+                      "GO"
                     ],
                     "type": "string"
                   },
@@ -2563,6 +2579,15 @@
                               "EXPIRED"
                             ],
                             "type": "string"
+                          },
+                          "dnsConnected": {
+                            "type": "boolean"
+                          },
+                          "certificateAvailable": {
+                            "type": "boolean"
+                          },
+                          "httpsServingReady": {
+                            "type": "boolean"
                           },
                           "dnsValidatedAt": {
                             "anyOf": [
@@ -2842,6 +2867,9 @@
                           "domain",
                           "dnsStatus",
                           "tlsStatus",
+                          "dnsConnected",
+                          "certificateAvailable",
+                          "httpsServingReady",
                           "dnsValidatedAt",
                           "tlsIssuedAt",
                           "tlsExpiresAt",
@@ -6648,7 +6676,7 @@
                             "minimum": 0,
                             "maximum": 9007199254740991
                           },
-                          "liveHostnameCount": {
+                          "dnsConnectedHostnameCount": {
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
@@ -6667,7 +6695,7 @@
                           "nameserverConfigStatus",
                           "hostnameCount",
                           "projectCount",
-                          "liveHostnameCount"
+                          "dnsConnectedHostnameCount"
                         ]
                       }
                     }
@@ -7187,6 +7215,15 @@
                             ],
                             "type": "string"
                           },
+                          "dnsConnected": {
+                            "type": "boolean"
+                          },
+                          "certificateAvailable": {
+                            "type": "boolean"
+                          },
+                          "httpsServingReady": {
+                            "type": "boolean"
+                          },
                           "dnsError": {
                             "anyOf": [
                               {
@@ -7332,6 +7369,9 @@
                           "label",
                           "dnsStatus",
                           "tlsStatus",
+                          "dnsConnected",
+                          "certificateAvailable",
+                          "httpsServingReady",
                           "dnsError",
                           "dnsLastCheckedAt",
                           "ownershipVerificationToken",
@@ -16234,6 +16274,8 @@
                                           "NODE_22",
                                           "NODE_24",
                                           "NODE_26",
+                                          "CPYTHON_3_12",
+                                          "CPYTHON_3_13",
                                           "CPYTHON_3_14",
                                           "EXECUTABLE"
                                         ],
@@ -17553,6 +17595,8 @@
                                       "NODE_22",
                                       "NODE_24",
                                       "NODE_26",
+                                      "CPYTHON_3_12",
+                                      "CPYTHON_3_13",
                                       "CPYTHON_3_14",
                                       "EXECUTABLE"
                                     ],
@@ -18422,6 +18466,8 @@
                                       "NODE_22",
                                       "NODE_24",
                                       "NODE_26",
+                                      "CPYTHON_3_12",
+                                      "CPYTHON_3_13",
                                       "CPYTHON_3_14",
                                       "EXECUTABLE"
                                     ],
@@ -20710,7 +20756,7 @@
                       ]
                     },
                     "protocolVersion": {
-                      "const": "runner-context-v5",
+                      "const": "runner-context-v6",
                       "type": "string"
                     },
                     "deployment": {
@@ -20793,7 +20839,11 @@
                             "YARN",
                             "PNPM",
                             "BUN",
-                            "PIP"
+                            "PIP",
+                            "UV",
+                            "POETRY",
+                            "PUB",
+                            "GO"
                           ],
                           "type": "string"
                         },
@@ -20805,37 +20855,230 @@
                           ],
                           "type": "string"
                         },
-                        "applicationRuntime": {
+                        "sourceBuildContext": {
                           "anyOf": [
                             {
                               "type": "object",
                               "properties": {
-                                "family": {
-                                  "enum": [
-                                    "BUN",
-                                    "NODE"
-                                  ],
-                                  "type": "string"
+                                "schemaVersion": {
+                                  "const": 1,
+                                  "type": "number"
                                 },
-                                "entry": {
-                                  "type": "string",
-                                  "maxLength": 4096,
-                                  "pattern": "^[^\\u0000]*$",
-                                  "minLength": 1
+                                "buildToolchain": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "family": {
+                                          "const": "NODE",
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "family"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "family": {
+                                          "const": "BUN",
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "family"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "family": {
+                                          "const": "PYTHON",
+                                          "type": "string"
+                                        },
+                                        "pythonVersion": {
+                                          "enum": [
+                                            "3.12",
+                                            "3.13",
+                                            "3.14"
+                                          ],
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "family",
+                                        "pythonVersion"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "family": {
+                                          "const": "NATIVE",
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "family"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ]
                                 },
-                                "args": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string",
-                                    "maxLength": 4096,
-                                    "pattern": "^[^\\u0000]*$"
-                                  },
-                                  "maxItems": 64
+                                "applicationRuntime": {
+                                  "anyOf": [
+                                    {
+                                      "oneOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "family": {
+                                              "const": "BUN",
+                                              "type": "string"
+                                            },
+                                            "args": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "pattern": "^[^\\u0000]*$"
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "pythonVersion": {
+                                              "not": {}
+                                            },
+                                            "entry": {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "pattern": "^[^\\u0000]*$",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "family",
+                                            "args"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "family": {
+                                              "const": "NODE",
+                                              "type": "string"
+                                            },
+                                            "args": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "pattern": "^[^\\u0000]*$"
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "pythonVersion": {
+                                              "not": {}
+                                            },
+                                            "entry": {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "pattern": "^[^\\u0000]*$",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "family",
+                                            "args"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "family": {
+                                              "const": "EXECUTABLE",
+                                              "type": "string"
+                                            },
+                                            "args": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "pattern": "^[^\\u0000]*$"
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "pythonVersion": {
+                                              "not": {}
+                                            },
+                                            "entry": {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "pattern": "^[^\\u0000]*$",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "family",
+                                            "args"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "family": {
+                                              "const": "PYTHON",
+                                              "type": "string"
+                                            },
+                                            "args": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string",
+                                                "maxLength": 4096,
+                                                "pattern": "^[^\\u0000]*$"
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "pythonVersion": {
+                                              "enum": [
+                                                "3.12",
+                                                "3.13",
+                                                "3.14"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "entry": {
+                                              "type": "string",
+                                              "maxLength": 4096,
+                                              "pattern": "^[^\\u0000]*$",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "family",
+                                            "args",
+                                            "pythonVersion"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 }
                               },
                               "required": [
-                                "family",
-                                "args"
+                                "schemaVersion",
+                                "buildToolchain",
+                                "applicationRuntime"
                               ],
                               "additionalProperties": false
                             },
@@ -20924,7 +21167,7 @@
                         "gitLfsEnabled",
                         "packageManager",
                         "nodeVersion",
-                        "applicationRuntime",
+                        "sourceBuildContext",
                         "installCommand",
                         "installCommandSource",
                         "buildCommand",
@@ -22469,6 +22712,39 @@
                                 "runtime": {
                                   "type": "object",
                                   "properties": {
+                                    "applicationRuntime": {
+                                      "type": "object",
+                                      "properties": {
+                                        "family": {
+                                          "enum": [
+                                            "BUN",
+                                            "NODE",
+                                            "PYTHON",
+                                            "EXECUTABLE"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "args": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "maxLength": 4096,
+                                            "pattern": "^[^\\u0000]*$"
+                                          },
+                                          "maxItems": 64
+                                        }
+                                      },
+                                      "required": [
+                                        "family",
+                                        "args"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "buildRuntimeVersion": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128
+                                    },
                                     "timeoutMs": {
                                       "type": "integer",
                                       "minimum": -9007199254740991,
@@ -22547,11 +22823,16 @@
                             "headers": {
                               "type": "object",
                               "propertyNames": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "pattern": "^[!#$%&'*+\\-.^`|~0-9A-Za-z]+$"
                               },
                               "additionalProperties": {
-                                "type": "string"
-                              }
+                                "type": "string",
+                                "maxLength": 8192
+                              },
+                              "maxProperties": 128
                             },
                             "fallthrough": {
                               "type": "boolean"

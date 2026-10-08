@@ -372,67 +372,6 @@ fn merge_child_for_selected_app_replaces_parent_deploy_app() {
 }
 
 #[test]
-fn effective_config_explain_reports_sources() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut config = ProjectConfig::default();
-    config.project.id = Some("proj_123".to_string());
-    config.project.framework = Some("vite".to_string());
-    config.build.command = Some("pnpm build".to_string());
-    config.build.output_directory = Some("dist".to_string());
-
-    let effective = EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
-    let explanation = effective.explain();
-
-    assert_eq!(explanation.project_id.value.as_deref(), Some("proj_123"));
-    assert_eq!(explanation.project_id.source, "onreza.toml");
-    assert_eq!(explanation.framework.value.as_deref(), Some("vite"));
-    assert_eq!(explanation.framework.source, "onreza.toml");
-    assert_eq!(
-        explanation.build_command.value.as_deref(),
-        Some("pnpm build")
-    );
-    assert_eq!(explanation.build_command.source, "onreza.toml");
-    assert_eq!(explanation.output_directory.value.as_deref(), Some("dist"));
-    assert_eq!(explanation.output_directory.source, "onreza.toml");
-}
-
-#[test]
-fn effective_config_project_id_override_wins_over_config() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut config = ProjectConfig::default();
-    config.project.id = Some("proj_root".to_string());
-    let mut effective =
-        EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
-
-    effective
-        .apply_project_id_override(Some("proj_cli"))
-        .unwrap();
-    let explanation = effective.explain();
-
-    assert_eq!(effective.project_id(), Some("proj_cli"));
-    assert_eq!(explanation.project_id.value.as_deref(), Some("proj_cli"));
-    assert_eq!(explanation.project_id.source, "cli");
-}
-
-#[test]
-fn effective_config_deploy_app_override_reports_cli_source() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut config = ProjectConfig::default();
-    config.deploy.app = Some("api".to_string());
-    let mut effective =
-        EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
-
-    effective
-        .apply_deploy_app_cli_override(Some("web"))
-        .unwrap();
-    let explanation = effective.explain();
-
-    assert_eq!(effective.deploy_app(), Some("web"));
-    assert_eq!(explanation.deploy_app.value.as_deref(), Some("web"));
-    assert_eq!(explanation.deploy_app.source, "cli");
-}
-
-#[test]
 fn effective_config_preset_commands_keep_autodetect_open() {
     let dir = tempfile::tempdir().unwrap();
     let config = ProjectConfig::default();
@@ -1024,4 +963,401 @@ fn health_check_path_true_is_invalid() {
 
     let result = load(dir.path());
     assert!(result.is_err());
+}
+
+#[test]
+fn a_child_runtime_override_does_not_inherit_parent_python_fields() {
+    use nrz_source_bundle::{ApplicationRuntimeFamily as Family, PythonMinor};
+    let fs = crate::detect::fs::VirtualFs::from_json(
+        r#"{"tree":["server.js","server.dart"],"files":{}}"#,
+    )
+    .unwrap();
+    for module_launch in [true, false] {
+        let mut parent = ProjectConfig::default();
+        parent.deploy.runtime = Some(Family::Python);
+        parent.deploy.python_version = Some(PythonMinor::Python312);
+        if module_launch {
+            parent.deploy.module = Some("main".into());
+        } else {
+            parent.deploy.application = Some("main:app".into());
+            parent.deploy.server = Some("asgi".into());
+        }
+        for (family, entry) in [
+            (Family::Node, "server.js"),
+            (Family::Executable, "server.dart"),
+        ] {
+            let mut child = ProjectConfig::default();
+            child.deploy.runtime = Some(family);
+            child.deploy.entry = Some(entry.into());
+            child.deploy.args = Some(vec![]);
+            let merged = parent.merge_child(child.clone());
+            let declaration =
+                crate::detect::application_runtime::resolve_application_runtime_with_project(
+                    &fs,
+                    "other",
+                    &merged.deploy,
+                    None,
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(declaration.family, family);
+            for field in ["python_version", "module", "application", "server"] {
+                let mut conflicting = child.clone();
+                match field {
+                    "python_version" => {
+                        conflicting.deploy.python_version = Some(PythonMinor::Python313)
+                    }
+                    "module" => conflicting.deploy.module = Some("main".into()),
+                    "application" => conflicting.deploy.application = Some("main:app".into()),
+                    "server" => conflicting.deploy.server = Some("asgi".into()),
+                    _ => unreachable!(),
+                }
+                let explicit_conflict = parent.merge_child(conflicting);
+                assert!(
+                    crate::detect::application_runtime::resolve_application_runtime_with_project(
+                        &fs,
+                        "other",
+                        &explicit_conflict.deploy,
+                        None,
+                    )
+                    .is_err(),
+                    "{family:?} must reject explicit child {field}",
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_child_python_launch_mode_replaces_competing_parent_modes() {
+    let fs =
+        crate::detect::fs::VirtualFs::from_json(r#"{"tree":["parent.py","child.py"],"files":{}}"#)
+            .unwrap();
+    for parent_launch in [
+        "entry='parent.py'",
+        "module='parent_module'",
+        "application='parent_app:app'\nserver='asgi'",
+    ] {
+        let parent: ProjectConfig = toml::from_str(&format!(
+            "[build]\ncommand='parent-build'\n[deploy]\nruntime='python'\npython_version='3.12'\nargs=['literal argument']\n{parent_launch}\n"
+        )).unwrap();
+        for child_runtime in ["", "runtime='python'\n"] {
+            for (child_launch, expected_target) in [
+                ("entry='child.py'", "child.py"),
+                ("module='child_module'", "child_module"),
+                ("application='child_app:app'", "child_app:app"),
+            ] {
+                let child: ProjectConfig =
+                    toml::from_str(&format!("[deploy]\n{child_runtime}{child_launch}\n")).unwrap();
+                let merged = parent.merge_child(child);
+                let declaration =
+                    crate::detect::application_runtime::resolve_application_runtime_with_project(
+                        &fs,
+                        "other",
+                        &merged.deploy,
+                        None,
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    declaration.python_version,
+                    Some(nrz_source_bundle::PythonMinor::Python312)
+                );
+                assert_eq!(merged.build.command.as_deref(), Some("parent-build"));
+                if expected_target == "child.py" {
+                    assert_eq!(declaration.entry.as_deref(), Some("child.py"));
+                    assert_eq!(declaration.args, ["literal argument"]);
+                } else {
+                    let mode = if expected_target == "child_module" {
+                        "MODULE"
+                    } else if parent_launch.contains("server=") {
+                        "ASGI"
+                    } else {
+                        "CALLABLE"
+                    };
+                    assert_eq!(
+                        declaration.entry.as_deref(),
+                        Some(crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY)
+                    );
+                    assert_eq!(
+                        declaration.args,
+                        [mode, expected_target, "literal argument"]
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn conflicting_child_python_launch_fields_remain_invalid_after_merge() {
+    let fs =
+        crate::detect::fs::VirtualFs::from_json(r#"{"tree":["child.py"],"files":{}}"#).unwrap();
+    let parent: ProjectConfig =
+        toml::from_str("[deploy]\nruntime='python'\nmodule='parent_module'\n").unwrap();
+    for child_launch in [
+        "entry='child.py'\nmodule='child_module'",
+        "entry='child.py'\napplication='child_app:app'",
+        "module='child_module'\napplication='child_app:app'",
+        "entry='child.py'\nserver='asgi'",
+        "module='child_module'\nserver='asgi'",
+    ] {
+        let child: ProjectConfig = toml::from_str(&format!("[deploy]\n{child_launch}\n")).unwrap();
+        let merged = parent.merge_child(child);
+        assert!(
+            crate::detect::application_runtime::resolve_application_runtime_with_project(
+                &fs,
+                "other",
+                &merged.deploy,
+                None,
+            )
+            .is_err(),
+            "explicit child conflict must remain invalid: {child_launch}"
+        );
+    }
+}
+
+#[test]
+fn a_child_python_server_selects_the_application_mode() {
+    let fs =
+        crate::detect::fs::VirtualFs::from_json(r#"{"tree":["main.py","parent.py"],"files":{}}"#)
+            .unwrap();
+    for (parent_launch, expected_target) in [
+        ("entry='parent.py'", "main:app"),
+        ("module='parent_module'", "main:app"),
+        (
+            "application='parent_app:app'\nserver='asgi'",
+            "parent_app:app",
+        ),
+    ] {
+        let parent: ProjectConfig = toml::from_str(&format!(
+            "[deploy]\nruntime='python'\npython_version='3.12'\nargs=['literal argument']\n{parent_launch}\n"
+        )).unwrap();
+        let child: ProjectConfig = toml::from_str("[deploy]\nserver='wsgi'\n").unwrap();
+        let merged = parent.merge_child(child);
+        let declaration =
+            crate::detect::application_runtime::resolve_application_runtime_with_project(
+                &fs,
+                "other",
+                &merged.deploy,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            declaration.entry.as_deref(),
+            Some(crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY)
+        );
+        assert_eq!(
+            declaration.args,
+            ["WSGI", expected_target, "literal argument"]
+        );
+        assert_eq!(
+            declaration.python_version,
+            Some(nrz_source_bundle::PythonMinor::Python312)
+        );
+    }
+}
+
+#[test]
+fn child_build_toolchain_selection_has_its_own_python_minor_boundary() {
+    let parent:ProjectConfig=toml::from_str("[build]\ntoolchain='python'\npython_version='3.12'\n[deploy]\nruntime='python'\npython_version='3.14'\n").unwrap();
+    let child: ProjectConfig = toml::from_str("[build]\ntoolchain='node'\n").unwrap();
+    let merged = parent.merge_child(child);
+    assert_eq!(
+        merged.build.toolchain,
+        Some(nrz_source_bundle::BuildToolchainFamily::Node)
+    );
+    assert_eq!(merged.build.python_version, None);
+    assert_eq!(
+        merged.deploy.python_version,
+        Some(nrz_source_bundle::PythonMinor::Python314)
+    );
+    let child: ProjectConfig = toml::from_str("[build]\npython_version='3.13'\n").unwrap();
+    let merged = merged.merge_child(child);
+    assert_eq!(
+        merged.build.toolchain,
+        Some(nrz_source_bundle::BuildToolchainFamily::Python)
+    );
+    assert_eq!(
+        merged.build.python_version,
+        Some(nrz_source_bundle::PythonMinor::Python313)
+    );
+}
+
+#[test]
+fn child_runtime_families_own_their_entry_and_arguments() {
+    use nrz_source_bundle::ApplicationRuntimeFamily as Family;
+    let families = [
+        Family::Python,
+        Family::Node,
+        Family::Bun,
+        Family::Executable,
+    ];
+    for parent_family in families {
+        for child_family in families {
+            let mut parent = ProjectConfig::default();
+            parent.deploy.runtime = Some(parent_family);
+            parent.deploy.entry = Some("parent-entry".into());
+            parent.deploy.args = Some(vec!["parent argument".into()]);
+            if parent_family == Family::Python {
+                parent.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python312);
+            }
+            let mut child = ProjectConfig::default();
+            child.deploy.runtime = Some(child_family);
+            let merged = parent.merge_child(child.clone());
+            if parent_family == child_family {
+                assert_eq!(merged.deploy.entry, parent.deploy.entry);
+                assert_eq!(merged.deploy.args, parent.deploy.args);
+            } else {
+                assert_eq!(
+                    merged.deploy.entry, None,
+                    "{parent_family:?} -> {child_family:?}"
+                );
+                assert_eq!(
+                    merged.deploy.args, None,
+                    "{parent_family:?} -> {child_family:?}"
+                );
+            }
+            let script = if child_family == Family::Bun {
+                "bun child.js inferred-argument"
+            } else {
+                "node child.js inferred-argument"
+            };
+            let input = crate::detect::fs::VirtualFs::from_json(&serde_json::json!({
+                "files":{"main.py":"print(42)","go.mod":"module example.org/server", "main.go":"package main", "package.json":serde_json::json!({"scripts":{"start":script}}).to_string()}
+            }).to_string()).unwrap();
+            let framework = if child_family == Family::Executable {
+                "go"
+            } else {
+                "other"
+            };
+            let declaration =
+                crate::detect::application_runtime::resolve_application_runtime_with_project(
+                    &input,
+                    framework,
+                    &merged.deploy,
+                    None,
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(declaration.family, child_family);
+            if parent_family != child_family {
+                assert_ne!(declaration.entry.as_deref(), Some("parent-entry"));
+                assert!(!declaration.args.iter().any(|arg| arg == "parent argument"));
+                if matches!(child_family, Family::Node | Family::Bun) {
+                    assert_eq!(declaration.entry.as_deref(), Some("child.js"));
+                    assert_eq!(declaration.args, ["inferred-argument"]);
+                }
+            }
+            child.deploy.entry = Some("child-entry".into());
+            child.deploy.args = Some(vec!["child argument".into()]);
+            let merged = parent.merge_child(child);
+            assert_eq!(merged.deploy.entry.as_deref(), Some("child-entry"));
+            assert_eq!(merged.deploy.args, Some(vec!["child argument".into()]));
+        }
+    }
+}
+
+#[test]
+fn runtime_selection_distinguishes_implicit_python_from_an_unknown_parent_launch() {
+    use nrz_source_bundle::{ApplicationRuntimeFamily as Family, PythonMinor};
+    for implicit_python in [false, true] {
+        let mut parent = ProjectConfig::default();
+        parent.deploy.entry = Some("main.py".into());
+        parent.deploy.args = Some(vec!["literal argument".into()]);
+        if implicit_python {
+            parent.deploy.python_version = Some(PythonMinor::Python312);
+        }
+        for family in [
+            Family::Python,
+            Family::Node,
+            Family::Bun,
+            Family::Executable,
+        ] {
+            let mut child = ProjectConfig::default();
+            child.deploy.runtime = Some(family);
+            let merged = parent.merge_child(child);
+            if implicit_python && family == Family::Python {
+                assert_eq!(merged.deploy.entry, parent.deploy.entry);
+                assert_eq!(merged.deploy.args, parent.deploy.args);
+                assert_eq!(merged.deploy.python_version, parent.deploy.python_version);
+            } else {
+                assert_eq!(merged.deploy.entry, None);
+                assert_eq!(merged.deploy.args, None);
+                assert_eq!(merged.deploy.python_version, None);
+            }
+        }
+        let inherited = parent.merge_child(ProjectConfig::default());
+        assert_eq!(inherited.deploy.entry, parent.deploy.entry);
+        assert_eq!(inherited.deploy.args, parent.deploy.args);
+    }
+}
+
+#[test]
+fn implicit_child_python_selectors_replace_foreign_parent_launches() {
+    use nrz_source_bundle::ApplicationRuntimeFamily as Family;
+    let input =
+        crate::detect::fs::VirtualFs::from_json(r#"{"tree":["main.py"],"files":{}}"#).unwrap();
+    for parent_family in [
+        Family::Node,
+        Family::Bun,
+        Family::Executable,
+        Family::Python,
+    ] {
+        let mut parent = ProjectConfig::default();
+        parent.deploy.runtime = Some(parent_family);
+        parent.deploy.entry = Some("parent-entry".into());
+        parent.deploy.args = Some(vec!["parent argument".into()]);
+        for selector in [
+            "module='child_module'",
+            "application='child:app'",
+            "server='wsgi'",
+            "python_version='3.12'",
+        ] {
+            let child: ProjectConfig = toml::from_str(&format!("[deploy]\n{selector}")).unwrap();
+            let merged = parent.merge_child(child.clone());
+            let declaration =
+                crate::detect::application_runtime::resolve_application_runtime_with_project(
+                    &input,
+                    "other",
+                    &merged.deploy,
+                    None,
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(declaration.family, Family::Python);
+            if parent_family != Family::Python {
+                assert_ne!(declaration.entry.as_deref(), Some("parent-entry"));
+                assert!(!declaration.args.iter().any(|arg| arg == "parent argument"));
+            } else {
+                assert!(declaration.args.iter().any(|arg| arg == "parent argument"));
+            }
+            let mut invalid = child;
+            invalid.deploy.runtime = Some(Family::Node);
+            let conflicting = parent.merge_child(invalid);
+            assert!(
+                crate::detect::application_runtime::resolve_application_runtime_with_project(
+                    &input,
+                    "other",
+                    &conflicting.deploy,
+                    None
+                )
+                .is_err()
+            );
+        }
+        for field in ["module", "application", "server"] {
+            let invalid: ProjectConfig = toml::from_str(&format!("[deploy]\n{field}=''")).unwrap();
+            let merged = parent.merge_child(invalid);
+            assert!(
+                crate::detect::application_runtime::resolve_application_runtime_with_project(
+                    &input,
+                    "other",
+                    &merged.deploy,
+                    None
+                )
+                .is_err()
+            );
+        }
+    }
 }

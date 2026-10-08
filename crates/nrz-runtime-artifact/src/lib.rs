@@ -7,13 +7,21 @@ use thiserror::Error;
 
 mod execution_compatibility;
 mod launch;
+mod native_executable;
+mod native_platform;
+pub use native_platform::{has_native_payload_header, verify_linux_x86_64_native_platform};
+mod python_startup;
+pub use native_executable::{
+    NATIVE_EXECUTION_TARGET, NativeExecutableRequirements, verify_native_executable,
+};
+pub use python_startup::{PYTHON_SITE_PACKAGES_INITIALIZER, python_script_launch_arguments};
 mod source_graph;
 pub use execution_compatibility::{
     ExecutionRuntimeFamily, ExecutionRuntimeTarget, verify_execution_runtime_compatibility,
 };
 pub use launch::{
-    source_layer_launch, source_layer_launch_for_target, source_layer_runtime_config,
-    verify_runtime_launch,
+    python_minor_for_profile, source_layer_launch, source_layer_launch_for_target,
+    source_layer_runtime_config, verify_runtime_launch,
 };
 pub use nrz_contract::{
     RuntimeLaunchWire, RuntimeLayerWire, RuntimeProfile, RuntimeReadinessProtocol,
@@ -303,18 +311,7 @@ pub fn verify_runtime_artifact_graph(
         if let Some(launch) = &layer.launch {
             verify_runtime_launch(launch)?;
             if let Some(family) = &layer.runtime_config.runtime_family {
-                let family = family.to_string();
-                if (matches!(
-                    launch.profile,
-                    RuntimeProfile::Bun
-                        | RuntimeProfile::Node22
-                        | RuntimeProfile::Node24
-                        | RuntimeProfile::Node26
-                ) && family != "JAVASCRIPT")
-                    || (launch.profile == RuntimeProfile::Cpython314 && family != "PYTHON")
-                {
-                    return invariant("runtime profile conflicts with runtimeFamily");
-                }
+                launch::verify_runtime_launch_family(launch.profile, &family.to_string())?;
             }
         }
         if layer.dependency_materialization_ids.len() > MAX_LAYER_DEPENDENCIES {
@@ -364,6 +361,15 @@ pub fn verify_runtime_artifact_graph(
                     .iter()
                     .find(|value| value.materialization_id.as_str() == materialization_id)
                     .expect("known dependency");
+                if let Some(minor) = python_minor_for_profile(launch.profile)
+                    && (dependency.compatibility.runtime_family.as_str() != "python"
+                        || dependency.compatibility.runtime_version.as_str() != minor.target()
+                        || dependency.kind.to_string() != "PYTHON_SITE_PACKAGES")
+                {
+                    return invariant(
+                        "Python launch profile conflicts with dependency build minor",
+                    );
+                }
                 if expected.is_some_and(|version| {
                     dependency.compatibility.runtime_family.as_str() != "javascript"
                         || dependency.compatibility.runtime_version.as_str() != version

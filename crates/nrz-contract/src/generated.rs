@@ -3548,6 +3548,18 @@ pub mod manifest {
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
     pub struct OnrezaBuildOutputManifestLayersItemRuntime {
         #[serde(
+            rename = "applicationRuntime",
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub application_runtime:
+            ::std::option::Option<OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntime>,
+        #[serde(
+            rename = "buildRuntimeVersion",
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub build_runtime_version:
+            ::std::option::Option<OnrezaBuildOutputManifestLayersItemRuntimeBuildRuntimeVersion>,
+        #[serde(
             rename = "maxConcurrency",
             skip_serializing_if = "::std::option::Option::is_none"
         )]
@@ -3562,6 +3574,205 @@ pub mod manifest {
             skip_serializing_if = "::std::option::Option::is_none"
         )]
         pub timeout_ms: ::std::option::Option<::std::num::NonZeroU64>,
+    }
+    ///`OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntime`
+    #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+    #[serde(deny_unknown_fields)]
+    pub struct OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntime {
+        pub args:
+            ::std::vec::Vec<OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeArgsItem>,
+        pub family: OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeFamily,
+    }
+    ///`OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeArgsItem`
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeArgsItem(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref for OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeArgsItem {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeArgsItem>
+        for ::std::string::String
+    {
+        fn from(
+            value: OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeArgsItem,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeArgsItem {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 4096usize {
+                return Err("longer than 4096 characters".into());
+            }
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| ::regress::Regex::new("^[^\\u0000]*$").unwrap());
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[^\\u0000]*$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeArgsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeArgsItem
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeArgsItem
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeFamily`
+    #[derive(
+        ::serde::Deserialize,
+        ::serde::Serialize,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        Hash,
+        Ord,
+        PartialEq,
+        PartialOrd,
+    )]
+    pub enum OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeFamily {
+        #[serde(rename = "BUN")]
+        Bun,
+        #[serde(rename = "NODE")]
+        Node,
+        #[serde(rename = "PYTHON")]
+        Python,
+        #[serde(rename = "EXECUTABLE")]
+        Executable,
+    }
+    impl ::std::fmt::Display for OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeFamily {
+        fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+            match *self {
+                Self::Bun => f.write_str("BUN"),
+                Self::Node => f.write_str("NODE"),
+                Self::Python => f.write_str("PYTHON"),
+                Self::Executable => f.write_str("EXECUTABLE"),
+            }
+        }
+    }
+    impl ::std::str::FromStr for OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeFamily {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            match value {
+                "BUN" => Ok(Self::Bun),
+                "NODE" => Ok(Self::Node),
+                "PYTHON" => Ok(Self::Python),
+                "EXECUTABLE" => Ok(Self::Executable),
+                _ => Err("invalid value".into()),
+            }
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeFamily
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaBuildOutputManifestLayersItemRuntimeApplicationRuntimeFamily
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    ///`OnrezaBuildOutputManifestLayersItemRuntimeBuildRuntimeVersion`
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaBuildOutputManifestLayersItemRuntimeBuildRuntimeVersion(::std::string::String);
+    impl ::std::ops::Deref for OnrezaBuildOutputManifestLayersItemRuntimeBuildRuntimeVersion {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaBuildOutputManifestLayersItemRuntimeBuildRuntimeVersion>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaBuildOutputManifestLayersItemRuntimeBuildRuntimeVersion) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaBuildOutputManifestLayersItemRuntimeBuildRuntimeVersion {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 128usize {
+                return Err("longer than 128 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+        for OnrezaBuildOutputManifestLayersItemRuntimeBuildRuntimeVersion
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaBuildOutputManifestLayersItemRuntimeBuildRuntimeVersion
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+        for OnrezaBuildOutputManifestLayersItemRuntimeBuildRuntimeVersion
+    {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
     }
     ///`OnrezaBuildOutputManifestPrerender`
     #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -3805,7 +4016,10 @@ pub mod manifest {
             default,
             skip_serializing_if = ":: std :: collections :: HashMap::is_empty"
         )]
-        pub headers: ::std::collections::HashMap<::std::string::String, ::std::string::String>,
+        pub headers: ::std::collections::HashMap<
+            OnrezaBuildOutputManifestRoutesItemHeadersKey,
+            OnrezaBuildOutputManifestRoutesItemHeadersValue,
+        >,
         pub layer: OnrezaBuildOutputManifestRoutesItemLayer,
         #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
         pub methods: ::std::vec::Vec<OnrezaBuildOutputManifestRoutesItemMethodsItem>,
@@ -3936,6 +4150,122 @@ pub mod manifest {
     impl<'de> ::serde::Deserialize<'de>
         for OnrezaBuildOutputManifestRoutesItemFallthroughWhenItemValue
     {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaBuildOutputManifestRoutesItemHeadersKey`
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaBuildOutputManifestRoutesItemHeadersKey(::std::string::String);
+    impl ::std::ops::Deref for OnrezaBuildOutputManifestRoutesItemHeadersKey {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaBuildOutputManifestRoutesItemHeadersKey> for ::std::string::String {
+        fn from(value: OnrezaBuildOutputManifestRoutesItemHeadersKey) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaBuildOutputManifestRoutesItemHeadersKey {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 256usize {
+                return Err("longer than 256 characters".into());
+            }
+            if value.chars().count() < 1usize {
+                return Err("shorter than 1 characters".into());
+            }
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| {
+                    ::regress::Regex::new("^[!#$%&'*+\\-.^`|~0-9A-Za-z]+$").unwrap()
+                });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[!#$%&'*+\\-.^`|~0-9A-Za-z]+$\"".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaBuildOutputManifestRoutesItemHeadersKey {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaBuildOutputManifestRoutesItemHeadersKey
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for OnrezaBuildOutputManifestRoutesItemHeadersKey {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
+        }
+    }
+    ///`OnrezaBuildOutputManifestRoutesItemHeadersValue`
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaBuildOutputManifestRoutesItemHeadersValue(::std::string::String);
+    impl ::std::ops::Deref for OnrezaBuildOutputManifestRoutesItemHeadersValue {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<OnrezaBuildOutputManifestRoutesItemHeadersValue>
+        for ::std::string::String
+    {
+        fn from(value: OnrezaBuildOutputManifestRoutesItemHeadersValue) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr for OnrezaBuildOutputManifestRoutesItemHeadersValue {
+        type Err = self::error::ConversionError;
+        fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            if value.chars().count() > 8192usize {
+                return Err("longer than 8192 characters".into());
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str> for OnrezaBuildOutputManifestRoutesItemHeadersValue {
+        type Error = self::error::ConversionError;
+        fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+        for OnrezaBuildOutputManifestRoutesItemHeadersValue
+    {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de> for OnrezaBuildOutputManifestRoutesItemHeadersValue {
         fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
         where
             D: ::serde::Deserializer<'de>,
@@ -6868,6 +7198,10 @@ pub mod runtime_artifact_graph {
         Node24,
         #[serde(rename = "NODE_26")]
         Node26,
+        #[serde(rename = "CPYTHON_3_12")]
+        Cpython312,
+        #[serde(rename = "CPYTHON_3_13")]
+        Cpython313,
         #[serde(rename = "CPYTHON_3_14")]
         Cpython314,
         #[serde(rename = "EXECUTABLE")]
@@ -6882,6 +7216,8 @@ pub mod runtime_artifact_graph {
                 Self::Node22 => f.write_str("NODE_22"),
                 Self::Node24 => f.write_str("NODE_24"),
                 Self::Node26 => f.write_str("NODE_26"),
+                Self::Cpython312 => f.write_str("CPYTHON_3_12"),
+                Self::Cpython313 => f.write_str("CPYTHON_3_13"),
                 Self::Cpython314 => f.write_str("CPYTHON_3_14"),
                 Self::Executable => f.write_str("EXECUTABLE"),
             }
@@ -6897,6 +7233,8 @@ pub mod runtime_artifact_graph {
                 "NODE_22" => Ok(Self::Node22),
                 "NODE_24" => Ok(Self::Node24),
                 "NODE_26" => Ok(Self::Node26),
+                "CPYTHON_3_12" => Ok(Self::Cpython312),
+                "CPYTHON_3_13" => Ok(Self::Cpython313),
                 "CPYTHON_3_14" => Ok(Self::Cpython314),
                 "EXECUTABLE" => Ok(Self::Executable),
                 _ => Err("invalid value".into()),

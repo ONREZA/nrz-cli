@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 pub const MAX_DETECTION_MANIFEST_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DETECTION_TREE_ENTRIES: usize = 100_000;
-const MAX_DETECTION_CONTENT_FILES: usize = 256;
+pub(super) const MAX_DETECTION_CONTENT_FILES: usize = 256;
 const MAX_DETECTION_PATH_BYTES: usize = 1024;
 pub(super) const MAX_DETECTION_PATH_DEPTH: usize = 64;
 pub(super) const MAX_DETECTION_FILE_CONTENT_BYTES: usize = 512 * 1024;
@@ -21,6 +21,9 @@ const MAX_DETECTION_TOTAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 pub trait Fs {
     fn exists(&self, path: &str) -> bool;
     fn is_dir(&self, path: &str) -> bool;
+    fn is_file(&self, path: &str) -> bool {
+        self.exists(path) && !self.is_dir(path)
+    }
     fn read_file(&self, path: &str) -> Option<String>;
     fn read_file_prefix(&self, path: &str, max_bytes: usize) -> Option<String> {
         let content = self.read_file(path)?;
@@ -82,6 +85,11 @@ impl Fs for LocalFs {
     fn is_dir(&self, path: &str) -> bool {
         self.resolve_existing(path)
             .is_some_and(|path| path.is_dir())
+    }
+
+    fn is_file(&self, path: &str) -> bool {
+        self.resolve_existing(path)
+            .is_some_and(|path| path.is_file())
     }
 
     fn read_file(&self, path: &str) -> Option<String> {
@@ -209,6 +217,28 @@ impl VirtualFs {
         }
 
         Ok(Self { tree, dirs, files })
+    }
+
+    /// Exact content paths needed for this validated tree, within the manifest budget.
+    pub fn needed_content_files(&self) -> anyhow::Result<Vec<String>> {
+        let fixed: HashSet<&str> = DETECTION_CONTENT_FILES.iter().copied().collect();
+        let mut files = Vec::new();
+        for path in &self.tree {
+            if !self.dirs.contains(path)
+                && (fixed.contains(path.as_str())
+                    || super::native::is_go_detection_source_path(path))
+            {
+                if files.len() == MAX_DETECTION_CONTENT_FILES {
+                    anyhow::bail!(
+                        "detection manifest requires too many file contents (max {})",
+                        MAX_DETECTION_CONTENT_FILES
+                    );
+                }
+                files.push(path.clone());
+            }
+        }
+        files.sort();
+        Ok(files)
     }
 }
 
@@ -338,6 +368,17 @@ fn register_parent_dirs(path: &str, dirs: &mut HashSet<String>) {
 pub const DETECTION_CONTENT_FILES: &[&str] = &[
     "onreza.toml",
     "pyproject.toml",
+    "pubspec.yaml",
+    "go.mod",
+    "main.go",
+    "hugo.toml",
+    "hugo.yaml",
+    "hugo.json",
+    "config/_default/hugo.toml",
+    "config/_default/hugo.yaml",
+    "config/_default/hugo.json",
+    "index.html",
+    "yarn.lock",
     "requirements.txt",
     "setup.py",
     "main.py",

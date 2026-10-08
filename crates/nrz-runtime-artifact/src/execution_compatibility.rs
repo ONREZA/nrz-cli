@@ -39,7 +39,9 @@ pub fn verify_execution_runtime_compatibility(
         RuntimeProfile::Node22 | RuntimeProfile::Node24 | RuntimeProfile::Node26 => {
             ExecutionRuntimeFamily::Node
         }
-        RuntimeProfile::Cpython314 => ExecutionRuntimeFamily::Python,
+        RuntimeProfile::Cpython312 | RuntimeProfile::Cpython313 | RuntimeProfile::Cpython314 => {
+            ExecutionRuntimeFamily::Python
+        }
         RuntimeProfile::Executable => {
             return invariant("native execution cannot acquire an interpreter");
         }

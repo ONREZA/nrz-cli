@@ -50,6 +50,11 @@ directory and ignore traced support files named `server.js`.
 `frameworkPreset` selects the framework detector and compute heuristics. It does
 not make the preset `outputDirectory` authoritative unless the source is `USER`.
 
+Native default recipes (Go, Dart, Flutter Web and Hugo) have one fixed output
+path. A different `output_directory` is rejected before installation or build;
+provide an explicit `build.command` to produce a custom directory. `--skip-build`
+continues to publish the configured prebuilt output.
+
 ## Commands
 
 Command precedence is:

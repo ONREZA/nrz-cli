@@ -50,19 +50,13 @@ fn target(family: Family) -> ExecutionRuntimeTarget<'static> {
 }
 
 #[test]
-fn rejects_cross_family_dependencies_that_immutable_graph_verification_accepts() {
-    for (profile, kind, family, candidate) in [
-        ("BUN", "PYTHON_SITE_PACKAGES", "python", Family::Bun),
-        (
-            "CPYTHON_3_14",
-            "JAVASCRIPT_NODE_MODULES",
-            "javascript",
-            Family::Python,
-        ),
-    ] {
-        let graph = graph(&[("web", profile, kind, family)], "x86_64", "glibc");
-        assert!(verify_execution_runtime_compatibility(&graph, "web", target(candidate)).is_err());
-    }
+fn rejects_cross_family_bun_dependencies_that_immutable_graph_verification_accepts() {
+    let graph = graph(
+        &[("web", "BUN", "PYTHON_SITE_PACKAGES", "python")],
+        "x86_64",
+        "glibc",
+    );
+    assert!(verify_execution_runtime_compatibility(&graph, "web", target(Family::Bun)).is_err());
 }
 
 #[test]

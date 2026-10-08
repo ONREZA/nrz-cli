@@ -72,7 +72,7 @@ async fn explain(
     }
     let server_settings =
         apply_server_settings_if_needed(&mut effective, args.local, token, workspace).await?;
-    let explanation = effective.explain();
+    let explanation = effective.explain()?;
     let output = ConfigExplainOutput {
         root_dir: context.root_dir.display().to_string(),
         project_dir: context.project_dir.display().to_string(),
@@ -157,6 +157,11 @@ fn print_human_explanation(output: &ConfigExplainOutput) {
     print_value("Project ID", &output.effective.project_id);
     print_value("Framework", &output.effective.framework);
     print_value("Install command", &output.effective.install_command);
+    print_value("Build toolchain", &output.effective.build_toolchain);
+    print_value(
+        "Build Python version",
+        &output.effective.build_python_version,
+    );
     print_value("Build command", &output.effective.build_command);
     print_value("Output directory", &output.effective.output_directory);
     eprintln!(
@@ -166,6 +171,9 @@ fn print_human_explanation(output: &ConfigExplainOutput) {
     );
     print_value("Deploy compute", &output.effective.deploy_compute);
     print_value("Deploy entry", &output.effective.deploy_entry);
+    if output.effective.deploy_python_version.value.is_some() {
+        print_value("Python version", &output.effective.deploy_python_version);
+    }
     print_value("Deploy app", &output.effective.deploy_app);
 }
 

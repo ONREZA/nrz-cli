@@ -61,6 +61,31 @@
               "runtime": {
                 "type": "object",
                 "properties": {
+                  "applicationRuntime": {
+                    "type": "object",
+                    "properties": {
+                      "family": {
+                        "enum": ["BUN", "NODE", "PYTHON", "EXECUTABLE"],
+                        "type": "string"
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 4096,
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        "maxItems": 64
+                      }
+                    },
+                    "required": ["family", "args"],
+                    "additionalProperties": false
+                  },
+                  "buildRuntimeVersion": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
                   "timeoutMs": {
                     "type": "integer",
                     "minimum": -9007199254740991,
@@ -126,11 +151,16 @@
           "headers": {
             "type": "object",
             "propertyNames": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[!#$%&'*+\\-.^`|~0-9A-Za-z]+$"
             },
             "additionalProperties": {
-              "type": "string"
-            }
+              "type": "string",
+              "maxLength": 8192
+            },
+            "maxProperties": 128
           },
           "fallthrough": {
             "type": "boolean"

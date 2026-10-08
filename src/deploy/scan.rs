@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "scan_python_tests.rs"]
+mod python_tests;
+
 // ── Output scan ──────────────────────────────────────────────
 
 /// Read buffer for streaming SHA-256. Sized to match a single page-cache
@@ -20,7 +24,14 @@ pub(crate) fn scan_dir(dir: &Path) -> anyhow::Result<Vec<FileEntry>> {
     let canonical_base = std::fs::canonicalize(dir)
         .with_context(|| format!("failed to canonicalize {}", dir.display()))?;
     let mut symlink_targets = Vec::new();
-    scan_dir_recursive(dir, dir, &canonical_base, &mut files, &mut symlink_targets)?;
+    scan_dir_recursive(
+        dir,
+        dir,
+        dir,
+        &canonical_base,
+        &mut files,
+        &mut symlink_targets,
+    )?;
     files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }
@@ -30,15 +41,127 @@ pub(super) fn scan_runtime_artifact(
     scan: &RuntimeArtifactScan,
 ) -> anyhow::Result<Vec<FileEntry>> {
     match scan {
-        RuntimeArtifactScan::All
-        | RuntimeArtifactScan::NodeRuntimeRoot
-        | RuntimeArtifactScan::PythonRuntimeRoot => scan_dir(root_dir),
-        RuntimeArtifactScan::Relocated { base, .. } => scan_runtime_artifact(root_dir, base),
+        RuntimeArtifactScan::All | RuntimeArtifactScan::NodeRuntimeRoot => scan_dir(root_dir),
+        RuntimeArtifactScan::PythonRuntimeRoot(minor) => scan_python_root(root_dir, *minor, None),
+        RuntimeArtifactScan::Relocated { base, ownership } => match base.as_ref() {
+            RuntimeArtifactScan::PythonRuntimeRoot(minor) => scan_python_root(
+                root_dir,
+                *minor,
+                Some(Path::new(&ownership.build_output_prefix)),
+            ),
+            _ => scan_runtime_artifact(root_dir, base),
+        },
         RuntimeArtifactScan::Selected {
             roots,
             symlink_roots,
         } => scan_selected_runtime_roots(root_dir, roots, symlink_roots),
     }
+}
+
+fn scan_python_root(
+    root: &Path,
+    minor: nrz_source_bundle::PythonMinor,
+    build_output: Option<&Path>,
+) -> anyhow::Result<Vec<FileEntry>> {
+    struct Pruning<'a> {
+        project_package: bool,
+        minor: nrz_source_bundle::PythonMinor,
+        build_output: Option<&'a Path>,
+    }
+
+    fn visit(
+        base: &Path,
+        current: &Path,
+        canonical: &Path,
+        files: &mut Vec<FileEntry>,
+        pruning: &Pruning<'_>,
+        inherited_project_build_only: bool,
+    ) -> anyhow::Result<()> {
+        for entry in std::fs::read_dir(current)? {
+            let entry = entry?;
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let ft = entry.file_type()?;
+            let relative = path.strip_prefix(base)?;
+            let staged_dependency = relative.starts_with(pruning.minor.site_packages_root());
+            if is_python_installer_staging_path(base, &path) {
+                continue;
+            }
+            // A previous build may leave another minor's incompatible wheel tree.
+            if relative.parent() == Some(Path::new(".onreza/python"))
+                && nrz_source_bundle::PythonMinor::from_version(&name)
+                    .is_some_and(|other| other != pruning.minor)
+            {
+                continue;
+            }
+            let backend_output = pruning.project_package
+                && (relative == Path::new("build/lib")
+                    || relative == Path::new("build/bdist")
+                    || relative.parent() == Some(Path::new("build"))
+                        && (name.starts_with("bdist.") || ft.is_dir() && name.starts_with("lib.")));
+            let project_build_only = !staged_dependency
+                && (inherited_project_build_only
+                    || name.ends_with(".egg-info")
+                    || backend_output
+                    || matches!(
+                        name.as_ref(),
+                        ".venv"
+                            | "venv"
+                            | "__pycache__"
+                            | ".pytest_cache"
+                            | ".mypy_cache"
+                            | ".ruff_cache"
+                            | ".tox"
+                            | ".nox"
+                            | "node_modules"
+                    )
+                    || (ft.is_dir() && path.join("pyvenv.cfg").is_file()));
+            // The planner's selected output is authoritative, including when a
+            // packaging backend uses the same directory name. Traverse its
+            // ancestors, but keep their unrelated cache children excluded.
+            let selected_output = pruning.build_output.is_some_and(|output| {
+                relative.starts_with(output) || ft.is_dir() && output.starts_with(relative)
+            });
+            let project_dotenv =
+                !staged_dependency && (name == ".env" || name.starts_with(".env."));
+            if project_build_only && !selected_output
+                || project_dotenv
+                || is_vcs_internal_path(base, &path)
+            {
+                continue;
+            }
+            if ft.is_dir() {
+                visit(base, &path, canonical, files, pruning, project_build_only)?;
+            } else {
+                scan_runtime_path_with_type(
+                    base,
+                    base,
+                    &path,
+                    ft,
+                    canonical,
+                    files,
+                    &mut Vec::new(),
+                )?;
+            }
+        }
+        Ok(())
+    }
+    let canonical = std::fs::canonicalize(root)?;
+    let mut files = Vec::new();
+    let project_package =
+        crate::detect::python::dependency_plan(&crate::detect::fs::LocalFs::new(root))?
+            .is_some_and(|plan| plan.install_project);
+    let pruning = Pruning {
+        project_package,
+        minor,
+        // A project-root output retains the established local-cache exclusions.
+        // Only a distinct selected subtree overrides project filename heuristics.
+        build_output: build_output.filter(|path| *path != Path::new(".")),
+    };
+    visit(root, root, &canonical, &mut files, &pruning, false)?;
+    files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    Ok(files)
 }
 
 pub(super) fn scan_selected_runtime_roots(
@@ -65,9 +188,22 @@ pub(super) fn scan_selected_runtime_roots(
         if !path.exists() {
             continue;
         }
+        // Selected output can be project-relative beneath a workspace archive
+        // root. Installer state belongs to that output root, while file paths
+        // and symlink containment remain relative to the full archive root.
+        let installer_root = if roots.iter().any(|candidate| {
+            candidate.kind == crate::artifact::RuntimeArtifactScanRootKind::BuildOutput
+                && normalize_runtime_artifact_path(&candidate.path)
+                    .is_ok_and(|candidate| candidate == root)
+        }) {
+            path.as_path()
+        } else {
+            root_dir
+        };
         let mut symlink_targets = Vec::new();
         scan_runtime_path(
             root_dir,
+            installer_root,
             &path,
             &canonical_base,
             &mut files,
@@ -253,6 +389,7 @@ pub(super) fn warn_large_deploy_files(json: bool, files: &[FileEntry]) {
 
 pub(super) fn scan_dir_recursive(
     base: &Path,
+    installer_root: &Path,
     current: &Path,
     canonical_base: &Path,
     files: &mut Vec<FileEntry>,
@@ -269,7 +406,15 @@ pub(super) fn scan_dir_recursive(
             .file_type()
             .with_context(|| format!("failed to stat {}", path.display()))?;
 
-        scan_runtime_path_with_type(base, &path, ft, canonical_base, files, symlink_targets)?;
+        scan_runtime_path_with_type(
+            base,
+            installer_root,
+            &path,
+            ft,
+            canonical_base,
+            files,
+            symlink_targets,
+        )?;
     }
 
     Ok(())
@@ -277,6 +422,7 @@ pub(super) fn scan_dir_recursive(
 
 pub(super) fn scan_runtime_path(
     base: &Path,
+    installer_root: &Path,
     path: &Path,
     canonical_base: &Path,
     files: &mut Vec<FileEntry>,
@@ -285,18 +431,27 @@ pub(super) fn scan_runtime_path(
     let ft = std::fs::symlink_metadata(path)
         .with_context(|| format!("failed to stat {}", path.display()))?
         .file_type();
-    scan_runtime_path_with_type(base, path, ft, canonical_base, files, symlink_targets)
+    scan_runtime_path_with_type(
+        base,
+        installer_root,
+        path,
+        ft,
+        canonical_base,
+        files,
+        symlink_targets,
+    )
 }
 
 pub(super) fn scan_runtime_path_with_type(
     base: &Path,
+    installer_root: &Path,
     path: &Path,
     ft: std::fs::FileType,
     canonical_base: &Path,
     files: &mut Vec<FileEntry>,
     symlink_targets: &mut Vec<String>,
 ) -> anyhow::Result<()> {
-    if is_vcs_internal_path(base, path) {
+    if is_vcs_internal_path(base, path) || is_python_installer_staging_path(installer_root, path) {
         return Ok(());
     }
 
@@ -319,7 +474,14 @@ pub(super) fn scan_runtime_path_with_type(
     }
 
     if ft.is_dir() {
-        scan_dir_recursive(base, path, canonical_base, files, symlink_targets)?;
+        scan_dir_recursive(
+            base,
+            installer_root,
+            path,
+            canonical_base,
+            files,
+            symlink_targets,
+        )?;
     } else if ft.is_file() {
         let rel = path
             .strip_prefix(base)
@@ -337,6 +499,11 @@ pub(super) fn scan_runtime_path_with_type(
     }
 
     Ok(())
+}
+
+fn is_python_installer_staging_path(base: &Path, path: &Path) -> bool {
+    path.strip_prefix(base)
+        .is_ok_and(|relative| relative.starts_with(".onreza/python/build"))
 }
 
 pub(super) fn is_vcs_internal_path(base: &Path, path: &Path) -> bool {

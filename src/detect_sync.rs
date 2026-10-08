@@ -46,5 +46,9 @@ pub(crate) fn detection_package_manager_to_platform(
         PackageManagerType::Pnpm => ProjectRequestBodyPackageManager::Pnpm,
         PackageManagerType::Bun => ProjectRequestBodyPackageManager::Bun,
         PackageManagerType::Pip => ProjectRequestBodyPackageManager::Pip,
+        PackageManagerType::Uv => ProjectRequestBodyPackageManager::Uv,
+        PackageManagerType::Poetry => ProjectRequestBodyPackageManager::Poetry,
+        PackageManagerType::Pub => ProjectRequestBodyPackageManager::Pub,
+        PackageManagerType::Go => ProjectRequestBodyPackageManager::Go,
     }
 }

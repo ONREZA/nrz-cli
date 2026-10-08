@@ -11,6 +11,8 @@ pub enum RuntimeType {
     Bun,
     Deno,
     Python,
+    Dart,
+    Go,
     Static,
 }
 
@@ -35,6 +37,10 @@ pub enum PackageManagerType {
     Pnpm,
     Bun,
     Pip,
+    Uv,
+    Poetry,
+    Pub,
+    Go,
 }
 
 impl PackageManagerType {
@@ -45,6 +51,10 @@ impl PackageManagerType {
             Self::Pnpm => "pnpm",
             Self::Bun => "bun",
             Self::Pip => "pip",
+            Self::Uv => "uv",
+            Self::Poetry => "poetry",
+            Self::Pub => "pub",
+            Self::Go => "go",
         }
     }
 }
@@ -223,7 +233,7 @@ pub struct RuntimeInfo {
 #[serde(rename_all = "camelCase")]
 pub struct DetectionMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub application_runtime: Option<nrz_source_bundle::ApplicationRuntimeDeclaration>,
+    pub source_build_context: Option<nrz_source_bundle::SourceBuildContext>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uses_typescript: Option<bool>,
 
@@ -269,4 +279,12 @@ pub struct DetectionResult {
     pub suggested_compute: ComputeType,
     pub metadata: DetectionMetadata,
     pub reason: String,
+}
+
+impl DetectionMetadata {
+    pub fn application_runtime(&self) -> Option<&nrz_source_bundle::ApplicationRuntimeDeclaration> {
+        self.source_build_context
+            .as_ref()
+            .and_then(|context| context.application_runtime.as_ref())
+    }
 }

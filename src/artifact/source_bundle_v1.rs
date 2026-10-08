@@ -175,6 +175,8 @@ pub(crate) struct SourceLogicalManifestRoute {
     pub(crate) methods: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) fallthrough_when: Option<Vec<crate::build::manifest::RouteFallthroughCondition>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) headers: Option<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -233,9 +235,86 @@ pub(crate) fn build_source_bundle_plan_with_scan(
     dependency_packaging: RuntimeDependencyPackaging,
     readiness: Option<RuntimeReadinessContract<'_>>,
 ) -> anyhow::Result<SourceBundlePlan> {
-    let entries = source_entries(output_dir, files, scan)?;
-    let logical_manifest =
+    let mut entries = source_entries(output_dir, files, scan)?;
+    let mut native_closures = Vec::new();
+    for layer in manifest
+        .layers
+        .iter()
+        .filter(|layer| layer.target == LayerTarget::Compute)
+    {
+        let native = layer
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.application_runtime.as_ref())
+            .is_some_and(|intent| {
+                intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Executable
+            });
+        if !native {
+            continue;
+        }
+        let entry = layer
+            .entry
+            .as_deref()
+            .context("native layer requires an entrypoint")?;
+        let path = join_entrypoint(&normalize_layer_root(&layer.directory)?, entry)?;
+        let file = entries
+            .iter_mut()
+            .find(|file| file.path == path)
+            .context("native entry is absent from the deployment artifact")?;
+        let SourceBundleEntryKind::File { full_path } = &file.kind else {
+            bail!("native entry must be a regular artifact file");
+        };
+        let (_, closure) =
+            nrz_runtime_artifact::NativeExecutableRequirements::verify_artifact_closure(
+                output_dir,
+                full_path,
+                &output_dir.join(normalize_layer_root(&layer.directory)?),
+            )?;
+        native_closures.push((&layer.name, closure));
+        // Artifact execution permission belongs to the declared native entry,
+        // including publication from hosts without POSIX executable bits.
+        file.executable = true;
+    }
+    let mut logical_manifest =
         build_logical_manifest(manifest, &entries, scan, dependency_packaging, readiness)?;
+    let mut native_owners = HashMap::new();
+    for (layer, closure) in native_closures {
+        for path in closure {
+            let path = path
+                .to_str()
+                .context("native library path must be UTF-8")?
+                .replace('\\', "/");
+            if let Some(previous) = native_owners.insert(path.clone(), layer)
+                && previous != layer
+            {
+                bail!(
+                    "native library closure member '{path}' is claimed by multiple compute layers '{previous}' and '{layer}'"
+                );
+            }
+        }
+    }
+    for (path, layer) in native_owners {
+        let file = logical_manifest.files.iter_mut().find(|file| file.path == path)
+            .with_context(|| format!("native library closure member '{path}' is not archived by its owning compute layer '{layer}'"))?;
+        // SDK-verified closure membership can supply custody only for an
+        // archived file without a matching source layer. The generic static
+        // fallback is not authored custody; explicit layers, prerender files
+        // and dependency materializations retain their existing ownership.
+        if scan.source_layer_match(manifest, &path).is_none()
+            && !scan.owns_as_dependency(&path)
+            && file.role == SourceLogicalManifestFileRole::Static
+        {
+            file.role = SourceLogicalManifestFileRole::Compute;
+            file.layer_name = Some(layer.clone());
+        }
+        if file.layer_name.as_deref() != Some(layer.as_str())
+            || file.role != SourceLogicalManifestFileRole::Compute
+        {
+            bail!(
+                "native library closure member '{path}' is not archived by its owning compute layer '{layer}'"
+            );
+        }
+    }
     ensure_manifest_covers_entries(&logical_manifest, &entries)?;
     let logical_manifest_json = canonical_logical_manifest_json(&logical_manifest)?;
     let logical_manifest_sha256 = sha256_hex(logical_manifest_json.as_bytes());
@@ -625,6 +704,12 @@ fn build_logical_manifest(
             priority: route.priority,
             methods: route.methods.clone(),
             fallthrough_when: route.fallthrough_when.clone(),
+            headers: route.headers.as_ref().map(|headers| {
+                headers
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect()
+            }),
         })
         .collect();
 
@@ -774,6 +859,12 @@ fn runtime_config_value(
         }
         if let Some(intent) = &runtime.application_runtime {
             object.insert("applicationRuntime".into(), serde_json::json!(intent));
+            if intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Executable {
+                object.insert("isBinaryEntry".into(), serde_json::json!(true));
+            }
+            if intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Python {
+                object.insert("runtimeFamily".into(), serde_json::json!("PYTHON"));
+            }
         }
         if let Some(value) = runtime.timeout_ms {
             object.insert("timeoutMs".to_string(), serde_json::json!(value));
@@ -785,7 +876,14 @@ fn runtime_config_value(
             object.insert("maxConcurrency".to_string(), serde_json::json!(value));
         }
     }
-    if layer.target == LayerTarget::Compute && scan.is_python_runtime_root() {
+    if layer.target == LayerTarget::Compute
+        && scan.is_python_runtime_root()
+        && layer
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.application_runtime.as_ref())
+            .is_none()
+    {
         object.insert("runtimeFamily".to_string(), serde_json::json!("PYTHON"));
     }
     if layer.target == LayerTarget::Compute

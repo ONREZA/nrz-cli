@@ -17,6 +17,14 @@ use crate::cli::{BuildArgs, DeployArgs};
 use crate::detect::types::{ComputeType, RuntimeType};
 use crate::output;
 
+#[cfg(test)]
+#[path = "plan_python_scan_tests.rs"]
+mod python_scan_tests;
+
+#[cfg(test)]
+#[path = "plan_native_output_tests.rs"]
+mod native_output_tests;
+
 pub(super) struct DeployPlanRequest<'a> {
     pub(super) args: &'a DeployArgs,
     pub(super) command: &'a crate::context::CommandContext,
@@ -25,6 +33,36 @@ pub(super) struct DeployPlanRequest<'a> {
     pub(super) execution_env: &'a [(String, String)],
     pub(super) target_production: Option<bool>,
     pub(super) platform_runner: bool,
+}
+
+/// A typed recipe owns only its generated output, never the project or a symlink target.
+pub(super) fn clear_native_build_output(
+    project_dir: &Path,
+    output_directory: &str,
+) -> anyhow::Result<()> {
+    if output_directory.contains(['\\', ':'])
+        || output_directory
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        anyhow::bail!("native build output must be a canonical relative directory");
+    }
+    let mut output = project_dir.canonicalize()?;
+    for component in Path::new(output_directory).components() {
+        let std::path::Component::Normal(component) = component else {
+            anyhow::bail!("native build output must stay inside the project directory");
+        };
+        output.push(component);
+        let metadata = match std::fs::symlink_metadata(&output) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error).context("cannot inspect native build output"),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            anyhow::bail!("native build output must not contain symlinks or source files");
+        }
+    }
+    std::fs::remove_dir_all(&output).context("cannot remove stale native build output")
 }
 
 pub(super) async fn scan_runtime_artifact_for_plan(
@@ -98,7 +136,21 @@ impl DeployPlan {
                 config_files: detection.metadata.config_files.clone(),
                 structure: detection.metadata.structure.clone(),
                 runtime: format!("{:?}", detection.metadata.runtime.runtime_type).to_lowercase(),
+                runtime_version: detection.metadata.runtime.version.clone(),
+                python_patch_version: detection
+                    .metadata
+                    .runtime
+                    .version
+                    .as_deref()
+                    .filter(|_| detection.metadata.runtime.runtime_type == RuntimeType::Python)
+                    .and_then(nrz_source_bundle::PythonMinor::from_version)
+                    .map(|minor| minor.exact_version().to_string()),
             },
+            source_build_context: detection
+                .metadata
+                .source_build_context
+                .clone()
+                .expect("resolved deploy context"),
             build: BuildPlanExplain {
                 command: self.build_command.clone(),
                 skipped: self.build_skipped,
@@ -190,6 +242,7 @@ pub(super) struct DeployPlanExplain {
     selected_app: Option<SelectedAppExplain>,
     framework: FrameworkExplain,
     build: BuildPlanExplain,
+    source_build_context: nrz_source_bundle::SourceBuildContext,
     compute: ComputeType,
     target: DeployTargetExplain,
     runtime_artifact: RuntimeArtifactExplain,
@@ -222,6 +275,10 @@ struct FrameworkExplain {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     structure: Vec<String>,
     runtime: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    python_patch_version: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -280,32 +337,51 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
 
     let mut detection =
         crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
-    let application_runtime =
-        crate::detect::application_runtime::resolve_application_runtime_with_config(
+    let source_build_context =
+        crate::detect::application_runtime::resolve_and_bind_source_build_context(
             &crate::detect::fs::LocalFs::new(project_dir),
-            &detection.framework,
-            effective.config().deploy.runtime,
-            effective.config().deploy.entry.clone(),
-            effective.config().deploy.args.clone(),
+            &mut detection,
+            effective.config(),
+            effective.framework_override(),
+            request.explicit_compute,
         )
         .map_err(|error| {
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
         })?;
-    crate::detect::application_runtime::bind_application_runtime(
-        &mut detection,
-        application_runtime,
-        effective.deploy_entry(),
-    )
-    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
-    let build_runtime_version = super::validate_application_runtime_before_build(
-        detection.metadata.application_runtime.as_ref(),
-        &detection.metadata.runtime,
+    let native_recipe = (source_build_context.build_toolchain.family
+        == nrz_source_bundle::BuildToolchainFamily::Native)
+        .then(|| crate::detect::native::native_recipe(&detection.framework))
+        .flatten();
+    if !args.skip_build
+        && let Some(recipe) = native_recipe
+        && super::native_build::default_command(
+            args.build_command.as_deref(),
+            effective.build_command(),
+        )
+        && let Some(output) = effective
+            .output_directory()
+            .and_then(|setting| setting.value())
+        && Path::new(output)
+            .components()
+            .filter(|component| *component != std::path::Component::CurDir)
+            .ne(Path::new(recipe.output_directory()).components())
+    {
+        anyhow::bail!(
+            "build.output_directory '{output}' differs from the default {} recipe output '{}'; use that output or set build.command for a custom output directory",
+            detection.framework,
+            recipe.output_directory(),
+        );
+    }
+    super::validate_application_runtime_before_build(
+        &source_build_context,
         effective,
         request.platform_runner,
+        !args.skip_build,
         request.execution_env,
     )
     .await?;
-    if !args.skip_build && !args.skip_install {
+    validate_python_dependency_context(project_dir, &source_build_context, false)?;
+    let authored_install_executed = if !args.skip_build && !args.skip_install {
         super::run_install_step(
             project_dir,
             json,
@@ -314,10 +390,18 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             request.build_logs,
             request.platform_runner,
         )
-        .await?;
-    }
+        .await?
+    } else {
+        false
+    };
 
-    let build_preparation = crate::frameworks::prepare_build(project_dir)?;
+    validate_python_dependency_context(project_dir, &source_build_context, true)?;
+
+    let build_preparation = if native_recipe.is_some() {
+        crate::frameworks::BuildPreparation::default()
+    } else {
+        crate::frameworks::prepare_build(project_dir)?
+    };
     for warning in &build_preparation.warnings {
         output::warn(json, warning, output::Phase::Deploy);
         warnings.push(warning.clone());
@@ -327,32 +411,101 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             output::status(json, "~", &patch.message, output::Phase::Deploy);
         }
     }
-    let build_env =
+    let mut build_env =
         super::merge_command_environment(request.execution_env, &build_preparation.env_pairs());
 
-    let build_command =
-        super::resolve_build_command(args.build_command.as_deref(), project_dir, effective);
+    let native_plan = if !args.skip_build
+        && let Some(recipe) = native_recipe
+        && super::native_build::default_command(
+            args.build_command.as_deref(),
+            effective.build_command(),
+        ) {
+        Some(super::native_build::recipe_commands(
+            project_dir,
+            recipe,
+            request.platform_runner,
+        )?)
+    } else {
+        None
+    };
+    let build_command = if let Some(plan) = &native_plan {
+        Some(plan.build.display())
+    } else {
+        super::resolve_build_command(args.build_command.as_deref(), project_dir, effective)
+            .filter(|command| native_recipe.is_none() || !command.trim().is_empty())
+    };
     if !args.skip_build
+        && build_command
+            .as_ref()
+            .is_some_and(|command| !command.trim().is_empty())
+        && let Some(minor) = source_build_context.build_toolchain.resolved_python_minor()
+    {
+        let mode = if request.platform_runner {
+            super::python_toolchain::PythonInstallMode::PinnedPlatform
+        } else {
+            super::python_toolchain::PythonInstallMode::ManagedLocal
+        };
+        let python_env =
+            super::python_toolchain::build_environment(project_dir, mode, minor, &build_env)
+                .await?;
+        build_env = super::merge_command_environment(&build_env, &python_env);
+    }
+    let mut build_executed = false;
+    if let Some(plan) = &native_plan {
+        super::run_native_build_step(
+            plan,
+            native_recipe.unwrap(),
+            project_dir,
+            json,
+            &build_env,
+            request.build_logs,
+            request.platform_runner,
+        )
+        .await?;
+        build_executed = true;
+    } else if !args.skip_build
         && let Some(cmd) = build_command.as_deref()
     {
         crate::frameworks::clear_before_build(project_dir)?;
         super::run_build_step(cmd, project_dir, json, &build_env, request.build_logs)?;
+        build_executed = true;
     }
 
-    let application_runtime = detection.metadata.application_runtime;
+    if let Some(declaration) = detection
+        .metadata
+        .application_runtime()
+        .filter(|declaration| {
+            declaration.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+        })
+    {
+        let entry = declaration
+            .entry
+            .clone()
+            .context("Python launch entry is absent")?;
+        super::python_launch::materialize_python_entry(
+            project_dir,
+            &crate::detect::python_launch::PythonLaunch {
+                entry,
+                args: declaration.args.clone(),
+            },
+            declaration.python_version.unwrap_or_default(),
+        )
+        .map_err(|error| {
+            output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
+        })?;
+    }
+
     detection =
         crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
-    crate::detect::application_runtime::bind_application_runtime(
+    crate::detect::application_runtime::bind_source_build_context(
+        &crate::detect::fs::LocalFs::new(project_dir),
         &mut detection,
-        application_runtime,
-        effective.deploy_entry(),
+        &source_build_context,
+        effective.config(),
+        effective.framework_override(),
+        request.explicit_compute,
     )
     .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
-    if let Some(version) = &build_runtime_version
-        && detection.metadata.runtime.runtime_type != RuntimeType::Python
-    {
-        detection.metadata.runtime.version = Some(version.clone());
-    }
 
     output::status(
         json,
@@ -375,6 +528,74 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     .map_err(|error| {
         contextualize_missing_build_output(error, build_command.as_deref(), args.skip_build)
     })?;
+
+    if let Some(recipe) = native_recipe {
+        let mut entries = build_result
+            .manifest
+            .as_ref()
+            .into_iter()
+            .flat_map(|manifest| &manifest.layers)
+            .filter(|layer| layer.target == build_manifest::LayerTarget::Compute)
+            .filter(|layer| {
+                layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.application_runtime.as_ref())
+                    .is_none_or(|runtime| {
+                        runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Executable
+                    })
+            })
+            .map(|layer| {
+                Ok((
+                    build_result.output_dir.join(&layer.directory),
+                    layer
+                        .entry
+                        .as_deref()
+                        .map(|entry| super::join_runtime_artifact_paths(&layer.directory, entry))
+                        .transpose()?,
+                ))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        if entries.is_empty()
+            && !build_result.manifest.as_ref().is_some_and(|manifest| {
+                manifest
+                    .layers
+                    .iter()
+                    .any(|layer| layer.target == build_manifest::LayerTarget::Compute)
+            })
+        {
+            entries.push((
+                build_result.output_dir.clone(),
+                effective
+                    .deploy_entry()
+                    .or_else(|| {
+                        detection
+                            .metadata
+                            .build_info
+                            .as_ref()
+                            .and_then(|info| info.entry_point.as_deref())
+                    })
+                    .map(str::to_owned),
+            ));
+        }
+        for (launch_cwd, entry) in entries {
+            let evidence = super::native_build::validate_output(
+                &build_result.output_dir,
+                &launch_cwd,
+                recipe,
+                entry.as_deref(),
+            )
+            .map_err(|error| output::coded_error("NATIVE_OUTPUT_INVALID", format!("{error:#}")))?;
+            tracing::debug!(
+                entry = evidence.entry.as_deref(),
+                target = evidence.target,
+                interpreter = evidence.interpreter.as_deref(),
+                library_count = evidence.libraries.len(),
+                library_path_count = evidence.library_paths.len(),
+                "native build output validated"
+            );
+        }
+    }
 
     let mut deployment_manifest_source = build_result.manifest_source;
     let mut build_artifact = BuildArtifact {
@@ -444,14 +665,26 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         .context("failed to serialize manifest")?;
 
     if compute == ComputeType::Process && !has_build_manifest {
-        super::validate_process_output(
-            &build_artifact.output_dir,
-            project_dir,
-            &build_artifact.detection,
-        )
-        .map_err(|e| output::with_default_code(e, "MISSING_PROCESS_ENTRY"))?;
+        let process_entry_root = if effective.deploy_entry().is_none()
+            && build_artifact
+                .detection
+                .metadata
+                .application_runtime()
+                .is_some_and(|runtime| {
+                    runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+                        && runtime.entry.as_deref()
+                            == Some(crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY)
+                }) {
+            // The generated Python bootstrap and its imports/dependencies are
+            // project-owned even when the build emits a separate output tree.
+            project_dir
+        } else {
+            &build_artifact.output_dir
+        };
+        super::validate_process_output(process_entry_root, project_dir, &build_artifact.detection)
+            .map_err(|e| output::with_default_code(e, "MISSING_PROCESS_ENTRY"))?;
         let (entry, warning) = super::ensure_process_entry(
-            &build_artifact.output_dir,
+            process_entry_root,
             project_dir,
             effective.deploy_entry(),
             &build_artifact.detection,
@@ -469,26 +702,29 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
                     &build_artifact.detection.metadata.runtime,
                     request.platform_runner,
                     Some(&auto),
-                    build_artifact
-                        .detection
-                        .metadata
-                        .application_runtime
-                        .as_ref(),
+                    build_artifact.detection.metadata.application_runtime(),
                     effective.node_version(),
+                    effective.config().build.toolchain.is_none()
+                        && effective.config().build.python_version.is_none(),
                 )?;
+                let application_runtime = super::application_runtime_in_output(
+                    build_artifact.detection.metadata.application_runtime(),
+                    project_dir,
+                    process_entry_root,
+                    effective.deploy_entry().is_some(),
+                );
                 super::apply_application_runtime_manifest(
                     &mut auto,
-                    build_artifact
-                        .detection
-                        .metadata
-                        .application_runtime
-                        .as_ref(),
+                    application_runtime.as_ref(),
                     target.as_deref(),
-                    &build_artifact.detection.framework,
+                    crate::detect::application_runtime::serving_framework(
+                        effective.config(),
+                        &build_artifact.detection.framework,
+                    ),
                 )?;
                 build_manifest::validate(&auto)
                     .map_err(|error| output::with_default_code(error, "INVALID_MANIFEST"))?;
-                build_manifest::verify_files(&build_artifact.output_dir, &auto)
+                build_manifest::verify_files(process_entry_root, &auto)
                     .map_err(|error| output::with_default_code(error, "MISSING_BUILD_OUTPUT"))?;
                 output::status(
                     json,
@@ -522,14 +758,18 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     let manifest_for_planning: build_manifest::Manifest =
         serde_json::from_value(manifest_raw.clone())
             .context("failed to parse resolved deployment manifest")?;
-    let runtime_artifact = super::resolve_runtime_artifact(
+    let mut runtime_artifact = super::resolve_runtime_artifact_with_manifest_source(
         &command.root_dir,
         project_dir,
         build_artifact.output_dir.clone(),
         manifest_for_planning,
         &build_artifact.detection,
         json,
+        deployment_manifest_source,
     )?;
+    if native_recipe == Some(crate::detect::native::NativeRecipe::FlutterWeb) {
+        super::native_build::apply_flutter_static_cache_policy(&mut runtime_artifact.manifest);
+    }
     let manifest_raw = super::conform_manifest_to_wire_contract(
         serde_json::to_value(&runtime_artifact.manifest)
             .context("failed to serialize runtime artifact manifest")?,
@@ -580,7 +820,34 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         &runtime_artifact.scan,
         json,
     );
+    super::validate_retained_python_runtime_dependencies(
+        project_dir,
+        &runtime_artifact,
+        &artifact_files,
+        &build_artifact.detection,
+    )?;
+    super::python_toolchain::validate_retained_python_native_platform(
+        &runtime_artifact,
+        &artifact_files,
+    )?;
     let files = artifact_files.deployable_entries();
+    if authored_install_executed {
+        super::python_toolchain::validate_authored_python_dependency_output(
+            &runtime_artifact,
+            &artifact_files,
+            if request.platform_runner {
+                super::python_toolchain::PythonInstallMode::PinnedPlatform
+            } else {
+                super::python_toolchain::PythonInstallMode::ManagedLocal
+            },
+        )?;
+    }
+    if build_executed && !request.platform_runner {
+        super::python_toolchain::validate_local_python_build_output(
+            &runtime_artifact,
+            &artifact_files,
+        )?;
+    }
     if files.is_empty() {
         return Err(output::coded_error(
             "INVALID_BUILD_OUTPUT",
@@ -709,4 +976,41 @@ fn artifact_root_scope(runtime_root: &Path, project_dir: &Path) -> ArtifactRootS
     } else {
         ArtifactRootScope::BuildOutput
     }
+}
+
+fn validate_python_dependency_context(
+    project_dir: &Path,
+    context: &nrz_source_bundle::SourceBuildContext,
+    staged: bool,
+) -> anyhow::Result<()> {
+    let Some(serving) = context
+        .application_runtime
+        .as_ref()
+        .filter(|runtime| runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python)
+    else {
+        return Ok(());
+    };
+    let build_minor = context.build_toolchain.resolved_python_minor();
+    if build_minor == serving.python_version {
+        return Ok(());
+    }
+    let fs = crate::detect::fs::LocalFs::new(project_dir);
+    let authored_dependencies = crate::detect::python::requires_dependency_stage_for_target(
+        &fs,
+        serving.python_version.unwrap_or_default(),
+    )?;
+    let staged_dependencies = staged
+        && serving.python_version.is_some_and(|minor| {
+            project_dir
+                .join(minor.site_packages_root())
+                .read_dir()
+                .is_ok_and(|mut entries| entries.next().is_some())
+        });
+    if authored_dependencies || staged_dependencies {
+        return Err(output::coded_error(
+            "APPLICATION_RUNTIME_INVALID",
+            "Python runtime dependencies require matching build and serving Python minors; independent toolchains are supported for code-only output",
+        ));
+    }
+    Ok(())
 }

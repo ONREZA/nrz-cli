@@ -22,7 +22,7 @@ pub(crate) async fn fetch(
         .context("failed to fetch project settings")?;
     Ok(ProjectBuildSettings {
         node_version: Some(project.node_version.to_string()),
-        application_runtime: None,
+        source_build_context: None,
         framework_preset: project.framework_preset,
         root_directory: project.root_directory,
         git_lfs_enabled: Some(project.git_lfs_enabled),

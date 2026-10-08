@@ -9,6 +9,61 @@ fn write_detection_file(root: &Path, rel: &str, content: &str) {
     std::fs::write(path, content).unwrap();
 }
 
+#[test]
+fn javascript_start_rejects_shell_comment_and_tilde_expansion() {
+    use application_runtime::resolve_application_runtime_with_project;
+    use nrz_source_bundle::ApplicationRuntimeFamily;
+    let project = tempfile::tempdir().unwrap();
+    let fs = fs::LocalFs::new(project.path());
+    for start in [
+        "node main.js # comment",
+        "node main.js ~",
+        "bun run main.js ~/data",
+    ] {
+        std::fs::write(
+            project.path().join("package.json"),
+            serde_json::json!({"scripts":{"start":start}}).to_string(),
+        )
+        .unwrap();
+        let error =
+            resolve_application_runtime_with_project(&fs, "other", &Default::default(), None)
+                .expect_err("shell expansion must not become a literal frozen argument");
+        assert!(error.to_string().contains("shell syntax"), "{error}");
+        let deploy = crate::config::DeploySection {
+            runtime: Some(if start.starts_with("bun") {
+                ApplicationRuntimeFamily::Bun
+            } else {
+                ApplicationRuntimeFamily::Node
+            }),
+            entry: Some("main.js".into()),
+            args: Some(vec!["#".into(), "~".into()]),
+            ..Default::default()
+        };
+        let declaration = resolve_application_runtime_with_project(&fs, "other", &deploy, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(declaration.args, ["#", "~"]);
+    }
+}
+
+#[test]
+fn javascript_start_preserves_non_shell_whitespace_in_literal_arguments() {
+    for argument in ["a\u{00a0}b", "a\u{2003}b", "a\u{000b}b", "a\u{00a0}#b"] {
+        let fs = fs::VirtualFs::from_json(&serde_json::json!({"files": {
+            "package.json": serde_json::json!({"scripts": {"start": format!("node\t main.js  {argument}")}}).to_string()
+        }}).to_string()).unwrap();
+        let launch = application_runtime::resolve_application_runtime_with_project(
+            &fs,
+            "other",
+            &Default::default(),
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(launch.args, [argument], "{argument:?}");
+    }
+}
+
 // ── infer_compute_type ──────────────────────────────────────
 
 #[test]
@@ -2187,6 +2242,34 @@ fn resolve_entry_point_from_project_start_script_when_output_is_nested() {
 
     let result = resolve_entry_point("other", &output_dir, project.path());
     assert_eq!(result, Some("server.js".into()));
+}
+
+#[test]
+fn project_relative_entry_precedes_output_relative_collision() {
+    let project = tempfile::tempdir().unwrap();
+    let output = project.path().join("dist");
+    std::fs::create_dir_all(output.join("dist")).unwrap();
+    std::fs::write(output.join("server.js"), "console.log('authored')").unwrap();
+    std::fs::write(output.join("dist/server.js"), "console.log('other root')").unwrap();
+
+    for package in [
+        r#"{"scripts":{"start":"node dist/server.js"}}"#,
+        r#"{"main":"dist/server.js"}"#,
+        r#"{"module":"dist/server.js"}"#,
+    ] {
+        std::fs::write(project.path().join("package.json"), package).unwrap();
+        let entry = resolve_entry_point("other", &output, project.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(output.join(entry)).unwrap(),
+            "console.log('authored')"
+        );
+    }
+
+    let entry = resolve_application_entry("dist/server.js", &output, project.path()).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(output.join(entry)).unwrap(),
+        "console.log('authored')"
+    );
 }
 
 #[test]

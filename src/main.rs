@@ -46,7 +46,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use cli::{Cli, Command};
-use nrz::config::ProjectConfig;
+use nrz::config::{self, ProjectConfig};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]

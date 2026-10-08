@@ -548,21 +548,190 @@ pub(super) fn is_windows_drive_absolute(path: &str) -> bool {
         && (bytes[2] == b'/' || bytes[2] == b'\\')
 }
 
+/// Resolve an inferred source entry using the same output mapping as PROCESS
+/// generation. Authored deploy entries are already output-relative.
+pub(crate) fn application_runtime_in_output(
+    declaration: Option<&nrz_source_bundle::ApplicationRuntimeDeclaration>,
+    project_dir: &Path,
+    output_dir: &Path,
+    configured_output_entry: bool,
+) -> Option<nrz_source_bundle::ApplicationRuntimeDeclaration> {
+    declaration.cloned().map(|mut declaration| {
+        if !configured_output_entry
+            && let Some(entry) = declaration.entry.as_deref()
+            && let Some(entry) =
+                crate::detect::resolve_application_entry(entry, output_dir, project_dir)
+        {
+            declaration.entry = Some(entry);
+        }
+        declaration
+    })
+}
+
 pub(crate) fn apply_application_runtime_manifest(
     manifest: &mut crate::build::manifest::Manifest,
     declaration: Option<&nrz_source_bundle::ApplicationRuntimeDeclaration>,
     build_runtime_version: Option<&str>,
     framework: &str,
 ) -> anyhow::Result<()> {
+    let sole_compute = compute_layer_count(manifest) == 1;
+    // The selected primary must exist before independent sibling owners can
+    // be retained or untyped JS siblings can inherit its defaults.
+    if let Some(declaration) = declaration
+        && declaration.entry.is_none()
+        && !manifest.layers.iter().any(|layer| {
+            if layer.target != crate::build::manifest::LayerTarget::Compute || layer.entry.is_none()
+            {
+                return false;
+            }
+            let runtime = layer.runtime.as_ref();
+            let Some(intent) = runtime.and_then(|runtime| runtime.application_runtime.as_ref())
+            else {
+                // Untyped owners retain the existing selected-runtime defaults.
+                return true;
+            };
+            // Runtime-only config leaves the authored owner's literal argv open;
+            // an explicit nonempty argv remains part of the selected launch.
+            intent.family == declaration.family
+                && (declaration.args.is_empty() || intent.args == declaration.args)
+                && match runtime.and_then(|runtime| runtime.build_runtime_version.as_deref()) {
+                    Some(target) => {
+                        declaration.validate_target(Some(target)).is_ok()
+                            && build_runtime_version.is_none_or(|primary| primary == target)
+                    }
+                    None => sole_compute,
+                }
+        })
+    {
+        return Err(output::coded_error(
+            "APPLICATION_RUNTIME_INVALID",
+            "build manifest lacks a compatible COMPUTE primary for the selected application runtime; include that primary alongside independent runtime layers",
+        ));
+    }
+    if let Some(declaration) = declaration
+        && let Some(entry) = declaration.entry.as_deref()
+    {
+        let entry = normalize_runtime_artifact_path(entry)
+            .map_err(|error| output::with_default_code(error, "APPLICATION_RUNTIME_INVALID"))?;
+        let matches_entry = |layer: &crate::build::manifest::Layer| {
+            layer.entry.as_deref().is_some_and(|layer_entry| {
+                join_runtime_artifact_paths(&layer.directory, layer_entry)
+                    .is_ok_and(|layer_entry| layer_entry == entry)
+            })
+        };
+        let primary_present = manifest
+            .layers
+            .iter()
+            .filter(|layer| layer.target == crate::build::manifest::LayerTarget::Compute)
+            .any(&matches_entry);
+        if !primary_present {
+            return Err(output::coded_error(
+                "APPLICATION_RUNTIME_INVALID",
+                "build manifest lacks a COMPUTE layer for the frozen application entry; include the selected primary alongside independent runtime layers",
+            ));
+        }
+        for layer in &manifest.layers {
+            if layer.target == crate::build::manifest::LayerTarget::Compute
+                && layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.application_runtime.as_ref())
+                    .is_none()
+                && !matches_entry(layer)
+                && !(primary_present
+                    && matches!(
+                        declaration.family,
+                        nrz_source_bundle::ApplicationRuntimeFamily::Node
+                            | nrz_source_bundle::ApplicationRuntimeFamily::Bun
+                    ))
+            {
+                return Err(output::coded_error(
+                    "APPLICATION_RUNTIME_INVALID",
+                    "untyped COMPUTE manifest entry differs from the frozen application entry; select the declared entry or give an independent layer its own runtime and frozen target",
+                ));
+            }
+        }
+    }
     for layer in &mut manifest.layers {
         if layer.target != crate::build::manifest::LayerTarget::Compute {
             continue;
         }
+        // A typed frozen owner remains independent when no primary serving
+        // target was selected, regardless of physical STATIC output membership.
+        let sole_primary = sole_compute
+            && (build_runtime_version.is_some()
+                || layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.build_runtime_version.as_ref())
+                    .is_none());
+        let identified_primary = if let (Some(declared_entry), Some(layer_entry)) = (
+            declaration.and_then(|declaration| declaration.entry.as_deref()),
+            layer.entry.as_deref(),
+        ) {
+            join_runtime_artifact_paths(&layer.directory, layer_entry)
+                .map_err(|error| output::with_default_code(error, "APPLICATION_RUNTIME_INVALID"))?
+                == normalize_runtime_artifact_path(declared_entry).map_err(|error| {
+                    output::with_default_code(error, "APPLICATION_RUNTIME_INVALID")
+                })?
+        } else {
+            false
+        };
         if let Some(intent) = layer
             .runtime
             .as_ref()
             .and_then(|runtime| runtime.application_runtime.as_ref())
         {
+            if declaration.is_none() && sole_primary {
+                intent
+                    .validate()
+                    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", error))?;
+                crate::detect::application_runtime::validate_framework(framework, intent.family)
+                    .map_err(|error| {
+                        output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
+                    })?;
+                let witness = layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.build_runtime_version.as_deref());
+                if witness.is_none()
+                    && build_runtime_version.is_none()
+                    && intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Node
+                {
+                    // `nrz build` preserves an authored Node primary until the
+                    // independently admitted Node version can freeze its target.
+                    continue;
+                }
+            }
+            if declaration.is_none() && (!sole_primary || build_runtime_version.is_none())
+                || declaration.is_some_and(|declaration| {
+                    !identified_primary
+                        && (declaration.entry.is_some()
+                            || !sole_compute
+                            || declaration.intent() != *intent
+                            || layer
+                                .runtime
+                                .as_ref()
+                                .and_then(|runtime| runtime.build_runtime_version.as_deref())
+                                .zip(build_runtime_version)
+                                .is_some_and(|(sibling, primary)| sibling != primary))
+                })
+            {
+                let target = layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.build_runtime_version.as_deref())
+                    .ok_or_else(|| {
+                        output::coded_error(
+                            "APPLICATION_RUNTIME_INVALID",
+                            "a sibling runtime requires its own frozen build target",
+                        )
+                    })?;
+                intent
+                    .validate_target(Some(target))
+                    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", error))?;
+                continue;
+            }
             if declaration.is_some_and(|declaration| declaration.intent() != *intent) {
                 return Err(output::coded_error(
                     "APPLICATION_RUNTIME_INVALID",
@@ -693,6 +862,8 @@ pub(super) fn looks_like_shell_command_entry(entry: &str) -> bool {
                 | "npx"
                 | "python"
                 | "python3"
+                | "python3.12"
+                | "python3.13"
                 | "python3.14"
         )
 }
@@ -717,8 +888,7 @@ pub(super) fn ensure_process_entry(
         )
     } else if let Some(entry) = detection
         .metadata
-        .application_runtime
-        .as_ref()
+        .application_runtime()
         .and_then(|runtime| runtime.entry.as_deref())
     {
         Some(crate::detect::resolve_application_entry(entry, output_dir, project_dir)
@@ -979,3 +1149,7 @@ pub(super) fn should_skip_misplaced_entrypoint_dir(path: &Path) -> bool {
         Some("node_modules" | ".git" | ".cache" | ".next" | "target")
     )
 }
+
+#[cfg(test)]
+#[path = "runtime_artifact_tests.rs"]
+mod tests;

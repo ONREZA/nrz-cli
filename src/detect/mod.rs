@@ -4,21 +4,29 @@
 pub mod application_runtime;
 pub mod fs;
 pub mod monorepo;
+pub mod native;
 pub mod package_json;
 pub mod package_manager;
 pub mod presets;
 pub mod python;
+pub(crate) mod python_launch;
 pub mod ssr;
 pub mod static_html;
 pub mod types;
 pub mod vite_config;
 
 #[cfg(test)]
+mod build_context_output_tests;
+#[cfg(test)]
 mod fs_tests;
 #[cfg(test)]
 mod mod_tests;
 #[cfg(test)]
 mod monorepo_tests;
+#[cfg(test)]
+mod native_precedence_tests;
+#[cfg(test)]
+mod native_tests;
 #[cfg(test)]
 mod package_json_tests;
 #[cfg(test)]
@@ -65,7 +73,22 @@ pub fn detect_with_framework_override(
 ///
 /// Used by `nrz detect --stdin` with a `VirtualFs` manifest.
 pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
-    if let Some(result) = python::detect_python(fs) {
+    // Qualified web generators own the app; generic Go/Dart entry discovery
+    // can instead describe an auxiliary command in a JavaScript/Python app.
+    let native = match native::detect_native(fs) {
+        Some(result)
+            if matches!(
+                native::native_recipe(&result.framework),
+                Some(native::NativeRecipe::FlutterWeb | native::NativeRecipe::HugoStatic)
+            ) =>
+        {
+            return result;
+        }
+        result => result,
+    };
+    if let Some(result) = python::detect_python(fs)
+        && (native.is_none() || result.framework != "python" || python::has_application_entry(fs))
+    {
         return result;
     }
     let pkg = PackageJson::load_from_fs(fs);
@@ -75,6 +98,14 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
 
     // 2. Try to detect framework from declarative detector rules.
     if let Some(result) = detect_from_framework_rules(fs, pkg.as_ref(), &pm_info) {
+        return result;
+    }
+
+    if let Some(result) = native
+        && !pkg
+            .as_ref()
+            .is_some_and(|pkg| has_javascript_application_signal(fs, pkg))
+    {
         return result;
     }
 
@@ -92,7 +123,7 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
     let preset = presets::get_default_preset();
     let suggested_compute = infer_unknown_compute_type(fs, pkg.as_ref());
     let reason = if suggested_compute == ComputeType::Process {
-        "No known framework detected, but runtime entry signals found (scripts/main/module)"
+        "No known framework detected, but runtime entry signals found (scripts/main/module/root entry)"
             .to_string()
     } else {
         "No known framework detected".to_string()
@@ -104,7 +135,7 @@ pub fn detect_with_fs(fs: &dyn Fs) -> DetectionResult {
         version: None,
         suggested_compute,
         metadata: DetectionMetadata {
-            application_runtime: None,
+            source_build_context: None,
             uses_typescript: detect_typescript(fs),
             config_files: Vec::new(),
             runtime: RuntimeInfo {
@@ -138,7 +169,7 @@ fn static_html_detection(
         version: None,
         suggested_compute: ComputeType::Static,
         metadata: DetectionMetadata {
-            application_runtime: None,
+            source_build_context: None,
             uses_typescript: None,
             config_files: Vec::new(),
             runtime: RuntimeInfo {
@@ -182,7 +213,14 @@ fn detect_with_fs_and_framework_override(
     framework_override: Option<&str>,
 ) -> DetectionResult {
     let detected = detect_with_fs(fs);
-    let Some(slug) = normalize_framework_slug(framework_override) else {
+    let Some(slug) = accepted_framework_override(framework_override) else {
+        if let Some(slug) = normalize_framework_slug(framework_override) {
+            tracing::warn!(
+                framework_override = %slug,
+                detected = %detected.framework,
+                "configured framework preset is unknown to this CLI; using autodetection"
+            );
+        }
         return detected;
     };
 
@@ -190,18 +228,14 @@ fn detect_with_fs_and_framework_override(
         return detected;
     }
 
-    if slug == "python" {
-        return python::detect_configured_python(fs);
+    if python::is_python_framework(&slug) {
+        return python::detect_configured_python_framework(fs, &slug);
+    }
+    if let Some(result) = native::detect_configured_native(fs, &slug) {
+        return result;
     }
 
-    let Some(preset) = preset_for_slug(&slug) else {
-        tracing::warn!(
-            framework_override = %slug,
-            detected = %detected.framework,
-            "configured framework preset is unknown to this CLI; using autodetection"
-        );
-        return detected;
-    };
+    let preset = preset_for_slug(&slug).expect("accepted non-language framework has a preset");
 
     detection_from_configured_preset(fs, preset, &detected)
 }
@@ -218,6 +252,14 @@ fn normalize_framework_slug(framework_override: Option<&str>) -> Option<String> 
         other => other.to_string(),
     };
     Some(normalized)
+}
+
+fn accepted_framework_override(framework_override: Option<&str>) -> Option<String> {
+    normalize_framework_slug(framework_override).filter(|slug| {
+        python::is_python_framework(slug)
+            || native::native_recipe(slug).is_some()
+            || preset_for_slug(slug).is_some()
+    })
 }
 
 fn preset_for_slug(slug: &str) -> Option<&'static FrameworkPreset> {
@@ -262,7 +304,7 @@ fn detection_from_configured_preset(
         version,
         suggested_compute,
         metadata: DetectionMetadata {
-            application_runtime: None,
+            source_build_context: None,
             uses_typescript: detect_typescript(fs),
             config_files: detect_config_files(fs, preset.slug),
             runtime: RuntimeInfo {
@@ -475,7 +517,7 @@ fn detection_from_rule_match(
         version: matched.version,
         suggested_compute,
         metadata: DetectionMetadata {
-            application_runtime: None,
+            source_build_context: None,
             uses_typescript: detect_typescript(fs),
             config_files,
             runtime: RuntimeInfo {
@@ -742,6 +784,7 @@ fn infer_compute_type(
 /// We avoid framework hardcoding and use generic runtime signals:
 /// - runtime-like scripts (`start`, `serve`, `prod`, ...)
 /// - resolvable `main`/`module` path in package.json
+/// - the same common root entry names accepted by PROCESS entry resolution
 fn infer_unknown_compute_type(fs: &dyn Fs, pkg: Option<&PackageJson>) -> ComputeType {
     let Some(pkg) = pkg else {
         return ComputeType::Static;
@@ -758,6 +801,7 @@ fn has_unknown_runtime_signal(fs: &dyn Fs, pkg: &PackageJson) -> bool {
     has_runtime_script(pkg)
         || has_resolvable_entry(fs, pkg.main.as_deref())
         || has_resolvable_entry(fs, pkg.module.as_deref())
+        || has_root_javascript_entry(fs)
 }
 
 fn has_runtime_script(pkg: &PackageJson) -> bool {
@@ -766,17 +810,38 @@ fn has_runtime_script(pkg: &PackageJson) -> bool {
         .any(|(name, _)| is_runtime_script_name(name))
 }
 
+fn has_javascript_application_signal(fs: &dyn Fs, pkg: &PackageJson) -> bool {
+    let javascript_entry = |entry: Option<&str>| {
+        resolve_package_entry(fs, entry).is_some_and(|path| is_runnable_file(&path))
+    };
+    javascript_entry(pkg.main.as_deref())
+        || javascript_entry(pkg.module.as_deref())
+        || has_root_javascript_entry(fs)
+        || pkg.scripts.iter().any(|(name, script)| {
+            is_runtime_script_name(name)
+                && (script
+                    .split_whitespace()
+                    .next()
+                    .and_then(application_runtime::direct_launcher_family)
+                    .is_some()
+                    || extract_script_path_tokens(script)
+                        .iter()
+                        .any(|entry| javascript_entry(Some(entry))))
+        })
+}
+
 /// Check if a package.json main/module field points to an existing file.
 fn has_resolvable_entry(fs: &dyn Fs, raw: Option<&str>) -> bool {
-    let Some(raw) = raw else { return false };
-    let Some(rel) = sanitize_relative_path(raw) else {
-        return false;
-    };
+    resolve_package_entry(fs, raw).is_some()
+}
+
+fn resolve_package_entry(fs: &dyn Fs, raw: Option<&str>) -> Option<PathBuf> {
+    let rel = sanitize_relative_path(raw?)?;
     let rel_str = stringify_path(&rel);
 
     // Direct match
     if fs.exists(&rel_str) && !fs.is_dir(&rel_str) {
-        return true;
+        return Some(rel);
     }
 
     // Try with extensions
@@ -784,7 +849,7 @@ fn has_resolvable_entry(fs: &dyn Fs, raw: Option<&str>) -> bool {
         for ext in RUNNABLE_EXTENSIONS {
             let candidate = format!("{rel_str}.{ext}");
             if fs.exists(&candidate) && !fs.is_dir(&candidate) {
-                return true;
+                return Some(PathBuf::from(candidate));
             }
         }
     }
@@ -793,11 +858,11 @@ fn has_resolvable_entry(fs: &dyn Fs, raw: Option<&str>) -> bool {
     for ext in RUNNABLE_EXTENSIONS {
         let candidate = format!("{rel_str}/index.{ext}");
         if fs.exists(&candidate) {
-            return true;
+            return Some(PathBuf::from(candidate));
         }
     }
 
-    false
+    None
 }
 
 // ── Public convenience wrappers (for init/deploy) ────────────
@@ -1035,10 +1100,9 @@ fn map_candidate_to_output(
     output_dir: &Path,
     package_dir: &Path,
 ) -> Option<PathBuf> {
-    if output_dir.join(candidate).is_file() {
-        return Some(candidate.to_path_buf());
-    }
-
+    // Package fields and direct start paths belong to the package root. Map
+    // that path into the artifact before trying an output-relative fallback.
+    // Otherwise `dist/server.js` can select `dist/dist/server.js` by accident.
     if package_dir != output_dir {
         if let Ok(output_rel_to_package) = output_dir.strip_prefix(package_dir)
             && !output_rel_to_package.as_os_str().is_empty()
@@ -1057,6 +1121,10 @@ fn map_candidate_to_output(
         {
             return Some(stripped.to_path_buf());
         }
+    }
+
+    if output_dir.join(candidate).is_file() {
+        return Some(candidate.to_path_buf());
     }
 
     None
@@ -1230,10 +1298,10 @@ fn resolve_from_scripts(
     None
 }
 
-fn resolve_bun_default_index(output_dir: &Path) -> Option<ResolvedEntryPoint> {
+fn resolve_bun_default_index(fs: &dyn Fs) -> Option<ResolvedEntryPoint> {
     for ext in RUNNABLE_EXTENSIONS {
         let candidate = format!("index.{ext}");
-        if output_dir.join(&candidate).is_file() {
+        if fs.is_file(&candidate) {
             return Some(ResolvedEntryPoint {
                 path: candidate,
                 source: EntryPointSource::BunIndexDefault,
@@ -1243,12 +1311,19 @@ fn resolve_bun_default_index(output_dir: &Path) -> Option<ResolvedEntryPoint> {
     None
 }
 
-fn resolve_root_patterns(output_dir: &Path) -> EntryPointResolution {
+fn has_root_javascript_entry(fs: &dyn Fs) -> bool {
+    matches!(
+        resolve_root_patterns(fs),
+        EntryPointResolution::Found(_) | EntryPointResolution::Ambiguous(_)
+    )
+}
+
+fn resolve_root_patterns(fs: &dyn Fs) -> EntryPointResolution {
     let mut candidates = Vec::new();
     for base in ROOT_ENTRY_BASENAMES {
         for ext in RUNNABLE_EXTENSIONS {
             let candidate = format!("{base}.{ext}");
-            if output_dir.join(&candidate).is_file() {
+            if fs.is_file(&candidate) {
                 candidates.push(candidate);
             }
         }
@@ -1596,13 +1671,14 @@ pub fn resolve_entry_point_detailed(
     }
 
     // 5. Common root entry names (includes index.*; fail fast on ambiguity)
-    match resolve_root_patterns(output_dir) {
+    let output_fs = LocalFs::new(output_dir);
+    match resolve_root_patterns(&output_fs) {
         EntryPointResolution::NotFound => {}
         other => return other,
     }
 
     // 6. Bun default index.* in output root (defensive fallback)
-    if let Some(resolved) = resolve_bun_default_index(output_dir) {
+    if let Some(resolved) = resolve_bun_default_index(&output_fs) {
         return EntryPointResolution::Found(resolved);
     }
 

@@ -12,15 +12,14 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
-use crate::detect::python::{
-    PYTHON_INTERPRETER, PYTHON_RUNTIME_VERSION, PYTHON_SITE_PACKAGES_ROOT,
-};
+use nrz_source_bundle::{PythonMinor, python_toolchain_versions};
 
-const UV_VERSION: &str = "0.10.0";
+const QUALIFIED_UV_VERSION: &str = "0.12.23";
 const UV_RELEASE_ORIGIN: &str = "https://github.com";
 const MAX_UV_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_UV_BINARY_BYTES: u64 = 96 * 1024 * 1024;
 const PLATFORM_PYTHON_TARGET: &str = "x86_64-manylinux_2_39";
+const NATIVE_PAYLOAD_EXTENSIONS: &[&str] = &[".so", ".pyd", ".dll", ".dylib", ".a", ".o"];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum PythonInstallMode {
@@ -33,6 +32,49 @@ pub(super) struct PythonInstallCommand {
     pub(super) program: PathBuf,
     pub(super) arguments: Vec<OsString>,
     pub(super) display: String,
+    pub(super) portable_wheel_directory: Option<PathBuf>,
+}
+
+impl PythonInstallCommand {
+    pub(super) fn process(
+        &self,
+        uv: &Path,
+        environment: &[(String, String)],
+    ) -> std::process::Command {
+        let program = if self.program.as_os_str().is_empty() {
+            uv
+        } else {
+            self.program.as_path()
+        };
+        let mut command = std::process::Command::new(program);
+        command
+            .args(&self.arguments)
+            .envs(environment.iter().map(|(key, value)| (key, value)));
+        // The authored manifest/lock and selected interpreter own this recipe.
+        // Index credentials remain available; ambient overrides cannot replace
+        // locked requirements, omit their closure, or disable authored hashes.
+        for key in [
+            "PYTHONPATH",
+            "PYTHONHOME",
+            "UV_PROJECT",
+            "UV_WORKING_DIR",
+            "UV_CONFIG_FILE",
+            "UV_NO_CONFIG",
+            "UV_FROZEN",
+            "UV_OVERRIDE",
+            "UV_EXCLUDE",
+            "UV_NO_VERIFY_HASHES",
+            "UV_NO_DEPS",
+            "UV_PYTHON",
+            "UV_PYTHON_VERSION",
+            "UV_MANAGED_PYTHON",
+            "UV_NO_MANAGED_PYTHON",
+            "UV_PYTHON_PREFERENCE",
+        ] {
+            command.env_remove(key);
+        }
+        command
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -57,7 +99,7 @@ pub(super) async fn resolve() -> anyhow::Result<PathBuf> {
         .join("nrz")
         .join("python-tools")
         .join("uv")
-        .join(UV_VERSION)
+        .join(&python_toolchain_versions().uv)
         .join(artifact.target)
         .join(artifact.binary_name);
 
@@ -74,125 +116,908 @@ pub(super) async fn resolve() -> anyhow::Result<PathBuf> {
     Ok(cached_path)
 }
 
+pub(super) async fn resolve_for(mode: PythonInstallMode) -> anyhow::Result<PathBuf> {
+    match mode {
+        PythonInstallMode::ManagedLocal => resolve().await,
+        PythonInstallMode::PinnedPlatform => Ok(PathBuf::from("/usr/local/bin/uv")),
+    }
+}
+
+/// Select the actual compiler and make the installed build tools visible to
+/// authored commands. Serving dependencies keep their independent ABI witness.
+pub(super) async fn build_environment(
+    project_dir: &Path,
+    mode: PythonInstallMode,
+    minor: PythonMinor,
+    environment: &[(String, String)],
+) -> anyhow::Result<Vec<(String, String)>> {
+    build_environment_for_host(
+        project_dir,
+        mode,
+        minor,
+        environment,
+        (std::env::consts::OS, std::env::consts::ARCH),
+        if mode == PythonInstallMode::ManagedLocal {
+            host_glibc_version()
+        } else {
+            None
+        },
+    )
+    .await
+}
+
+async fn build_environment_for_host(
+    project_dir: &Path,
+    mode: PythonInstallMode,
+    minor: PythonMinor,
+    environment: &[(String, String)],
+    host: (&str, &str),
+    glibc_version: Option<(u32, u32)>,
+) -> anyhow::Result<Vec<(String, String)>> {
+    validate_local_build_dependency_host_with_glibc(project_dir, mode, minor, host, glibc_version)?;
+    let interpreter = match mode {
+        PythonInstallMode::PinnedPlatform => PathBuf::from(minor.platform_interpreter()),
+        PythonInstallMode::ManagedLocal => {
+            let uv = resolve_for(mode).await?;
+            for arguments in [
+                vec![
+                    "python",
+                    "install",
+                    "--no-bin",
+                    "--no-registry",
+                    "--no-config",
+                    minor.exact_version(),
+                ],
+                vec![
+                    "python",
+                    "find",
+                    "--no-project",
+                    "--no-config",
+                    "--managed-python",
+                    minor.exact_version(),
+                ],
+            ] {
+                let command = PythonInstallCommand {
+                    program: uv.clone(),
+                    arguments: arguments.into_iter().map(OsString::from).collect(),
+                    display: "select managed Python build compiler".into(),
+                    portable_wheel_directory: None,
+                };
+                let mut process: tokio::process::Command = command.process(&uv, environment).into();
+                let output = process
+                    .current_dir(project_dir)
+                    .kill_on_drop(true)
+                    .output()
+                    .await?;
+                if !output.status.success() {
+                    bail!(
+                        "cannot select pinned Python build compiler: {}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+                if command
+                    .arguments
+                    .get(1)
+                    .is_some_and(|argument| argument == "find")
+                {
+                    let path = String::from_utf8(output.stdout)?.trim().to_string();
+                    return build_environment_for_interpreter(
+                        project_dir,
+                        minor,
+                        Path::new(&path),
+                        environment,
+                    )
+                    .await;
+                }
+            }
+            unreachable!("managed interpreter selection returns its path")
+        }
+    };
+    build_environment_for_interpreter(project_dir, minor, &interpreter, environment).await
+}
+
+#[cfg(test)]
+fn validate_local_build_dependency_host(
+    project_dir: &Path,
+    mode: PythonInstallMode,
+    minor: PythonMinor,
+    host: (&str, &str),
+) -> anyhow::Result<()> {
+    validate_local_build_dependency_host_with_glibc(
+        project_dir,
+        mode,
+        minor,
+        host,
+        host_glibc_version(),
+    )
+}
+
+fn validate_local_build_dependency_host_with_glibc(
+    project_dir: &Path,
+    mode: PythonInstallMode,
+    minor: PythonMinor,
+    host: (&str, &str),
+    glibc_version: Option<(u32, u32)>,
+) -> anyhow::Result<()> {
+    let glibc_floor = python_target_glibc_floor();
+    if mode == PythonInstallMode::PinnedPlatform
+        || host == ("linux", "x86_64")
+            && glibc_version.is_some_and(|version| version >= glibc_floor)
+    {
+        return Ok(());
+    }
+    let root = project_dir.join(minor.site_packages_root());
+    let payload = find_native_python_payload(&root).map_err(|error| crate::output::coded_error(
+        "PYTHON_PLATFORM_UNSUPPORTED",
+        format!("Cannot inspect Linux-target Python dependency stage for host {}/{}: {error:#}. Use ONREZA Cloud Builder for qualified Linux builds.", host.0, host.1),
+    ))?;
+    if let Some(payload) = payload {
+        return Err(crate::output::coded_error(
+            "PYTHON_PLATFORM_UNSUPPORTED",
+            format!(
+                "Linux-target Python dependency stage contains native payload '{}'; host {}/{} with {} cannot use target {PLATFORM_PYTHON_TARGET} for local build commands. Native local builds require Linux x86_64 and verified glibc {}.{} or newer (getconf GNU_LIBC_VERSION). Use ONREZA Cloud Builder for qualified Linux builds, or deploy a prebuilt artifact with --skip-build.",
+                payload.strip_prefix(project_dir)?.display(),
+                host.0,
+                host.1,
+                glibc_version.map_or_else(
+                    || "musl or unverified libc".to_string(),
+                    |(major, minor)| format!("glibc {major}.{minor}")
+                ),
+                glibc_floor.0,
+                glibc_floor.1,
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn python_target_glibc_floor() -> (u32, u32) {
+    let version = PLATFORM_PYTHON_TARGET
+        .rsplit_once("manylinux_")
+        .expect("qualified Python target must identify manylinux ABI")
+        .1;
+    let (major, minor) = version
+        .split_once('_')
+        .expect("qualified manylinux ABI must identify glibc major and minor");
+    (
+        major
+            .parse()
+            .expect("qualified glibc major must be numeric"),
+        minor
+            .parse()
+            .expect("qualified glibc minor must be numeric"),
+    )
+}
+
+fn parse_host_glibc_version(output: &str) -> Option<(u32, u32)> {
+    let version = output.trim().strip_prefix("glibc ")?;
+    let (major, minor) = version.split_once('.')?;
+    if !major.bytes().all(|byte| byte.is_ascii_digit())
+        || !minor.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+fn host_glibc_version() -> Option<(u32, u32)> {
+    if std::env::consts::OS != "linux" {
+        return None;
+    }
+    // The released CLI is musl-linked; its own libc is not host ABI evidence.
+    // Probe the host utility without a shell or any target-stage Python imports.
+    let output = std::process::Command::new("getconf")
+        .arg("GNU_LIBC_VERSION")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_host_glibc_version(std::str::from_utf8(&output.stdout).ok()?)
+}
+
+fn find_native_python_payload(root: &Path) -> anyhow::Result<Option<PathBuf>> {
+    fn visit(
+        path: &Path,
+        visited: &mut std::collections::HashSet<PathBuf>,
+    ) -> anyhow::Result<Option<PathBuf>> {
+        let metadata = std::fs::metadata(path)?;
+        if metadata.is_dir() {
+            if !visited.insert(path.canonicalize()?) {
+                return Ok(None);
+            }
+            for entry in std::fs::read_dir(path)? {
+                if let Some(payload) = visit(&entry?.path(), visited)? {
+                    return Ok(Some(payload));
+                }
+            }
+        } else if metadata.is_file() && is_native_python_payload_file(path)? {
+            return Ok(Some(path.to_owned()));
+        }
+        Ok(None)
+    }
+    match std::fs::symlink_metadata(root) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+        Ok(_) => visit(root, &mut std::collections::HashSet::new()),
+    }
+}
+
+fn has_native_python_extension(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    NATIVE_PAYLOAD_EXTENSIONS
+        .iter()
+        .any(|extension| name.ends_with(extension))
+}
+
+fn is_native_python_payload_file(path: &Path) -> anyhow::Result<bool> {
+    if has_native_python_extension(&path.to_string_lossy()) {
+        return Ok(true);
+    }
+    let mut file = std::fs::File::open(path)?;
+    Ok(nrz_runtime_artifact::has_native_payload_header(&mut file)?)
+}
+
+/// Validate target platform facts for every retained Python serving file,
+/// independently of installer/build execution and declared dependency evidence.
+pub(super) fn validate_retained_python_native_platform(
+    artifact: &crate::artifact::RuntimeArtifact,
+    files: &crate::artifact::ArtifactFileCollection,
+) -> anyhow::Result<()> {
+    for file in &files.files {
+        if !is_python_compute_file(artifact, file) {
+            continue;
+        }
+        let path = artifact.root_dir.join(&file.path);
+        if !std::fs::metadata(&path)?.is_file() {
+            continue;
+        }
+        let mut payload = std::fs::File::open(&path)?;
+        nrz_runtime_artifact::verify_linux_x86_64_native_platform(&mut payload).map_err(|error| {
+            crate::output::coded_error(
+                "PYTHON_PLATFORM_UNSUPPORTED",
+                format!(
+                    "Retained Python native payload '{}' is incompatible with the managed Linux x86_64 runtime: {error}. Provide target-compatible prebuilt files or use ONREZA Cloud Builder for qualified Linux builds.",
+                    file.path,
+                ),
+            )
+        })?;
+    }
+    Ok(())
+}
+
+/// The scan and classification already own custody, pruning and symlink bounds.
+/// Managed dependency wheels have their separate Linux target qualification.
+pub(super) fn validate_local_python_build_output(
+    artifact: &crate::artifact::RuntimeArtifact,
+    files: &crate::artifact::ArtifactFileCollection,
+) -> anyhow::Result<()> {
+    for file in &files.files {
+        if !is_python_compute_file(artifact, file)
+            || artifact.scan.owns_as_python_dependency(&file.path)
+        {
+            continue;
+        }
+        let path = artifact.root_dir.join(&file.path);
+        if std::fs::metadata(&path)?.is_file() && is_native_python_payload_file(&path)? {
+            return Err(crate::output::coded_error(
+                "PYTHON_PLATFORM_UNSUPPORTED",
+                format!(
+                    "Local Python application build contains native payload '{}'; use ONREZA Cloud Builder for qualified Linux builds, or deploy an explicitly qualified prebuilt artifact with --skip-build.",
+                    file.path,
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Authored installers do not supply the managed recipe's target-wheel evidence.
+/// Validate only retained dependency files owned by a frozen Python COMPUTE layer.
+pub(super) fn validate_authored_python_dependency_output(
+    artifact: &crate::artifact::RuntimeArtifact,
+    files: &crate::artifact::ArtifactFileCollection,
+    mode: PythonInstallMode,
+) -> anyhow::Result<()> {
+    if mode == PythonInstallMode::PinnedPlatform {
+        return Ok(());
+    }
+    for file in &files.files {
+        if !artifact.scan.owns_as_python_dependency(&file.path)
+            || !is_python_compute_file(artifact, file)
+        {
+            continue;
+        }
+        let path = artifact.root_dir.join(&file.path);
+        if std::fs::metadata(&path)?.is_file() && is_native_python_payload_file(&path)? {
+            return Err(crate::output::coded_error(
+                "PYTHON_PLATFORM_UNSUPPORTED",
+                format!(
+                    "Authored Python install produced native payload '{}'; use ONREZA Cloud Builder for qualified Linux installs, or remove build.install_command to use the managed target-qualified dependency installer.",
+                    file.path,
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_python_compute_file(
+    artifact: &crate::artifact::RuntimeArtifact,
+    file: &crate::artifact::ArtifactFile,
+) -> bool {
+    file.role == crate::artifact::ArtifactFileRole::Compute
+        && artifact.manifest.layers.iter().any(|layer| {
+            layer.target == crate::build::manifest::LayerTarget::Compute
+                && file.layer.as_deref() == Some(layer.name.as_str())
+                && layer
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.application_runtime.as_ref())
+                    .is_some_and(|runtime| {
+                        runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+                    })
+        })
+}
+
+async fn build_environment_for_interpreter(
+    project_dir: &Path,
+    minor: PythonMinor,
+    interpreter: &Path,
+    environment: &[(String, String)],
+) -> anyhow::Result<Vec<(String, String)>> {
+    let interpreter = interpreter
+        .canonicalize()
+        .context("selected Python compiler is unavailable")?;
+    let mut probe = tokio::process::Command::new(&interpreter);
+    let output = probe.args(["-I", "-c", "import sys; print('.'.join(map(str, sys.version_info[:3])) if sys.implementation.name == 'cpython' else '')"])
+        .kill_on_drop(true).output().await?;
+    if !output.status.success()
+        || String::from_utf8_lossy(&output.stdout).trim() != minor.exact_version()
+    {
+        bail!(
+            "Python build compiler does not match selected CPython {}",
+            minor.exact_version()
+        );
+    }
+    let dependency_root = project_dir.join(minor.site_packages_root());
+    let startup = materialize_python_build_startup(project_dir, &dependency_root)?;
+    let inherited_path = environment
+        .iter()
+        .rev()
+        .find(|(name, _)| name == "PATH")
+        .map(|(_, value)| OsString::from(value))
+        .or_else(|| std::env::var_os("PATH"))
+        .unwrap_or_default();
+    let paths = [
+        interpreter
+            .parent()
+            .context("Python compiler has no directory")?
+            .to_owned(),
+        dependency_root.join("bin"),
+    ]
+    .into_iter()
+    .chain(std::env::split_paths(&inherited_path));
+    Ok(vec![
+        (
+            "PATH".into(),
+            std::env::join_paths(paths)?.to_string_lossy().into_owned(),
+        ),
+        (
+            "PYTHONPATH".into(),
+            std::env::join_paths([startup, dependency_root])?
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        ("PYTHONHOME".into(), String::new()),
+    ])
+}
+
+/// `PYTHONPATH` alone does not initialize wheel .pth files. Keep this standard
+/// startup hook in the build-only namespace, which is excluded from artifacts.
+fn materialize_python_build_startup(
+    project_dir: &Path,
+    dependency_root: &Path,
+) -> anyhow::Result<PathBuf> {
+    let directory = project_dir.join(".onreza/python/build/startup");
+    ensure_python_directory(project_dir, &directory)?;
+    let initialize = format!(
+        "onreza_add_site_packages({}, ({}, {}))",
+        serde_json::to_string(&dependency_root.to_string_lossy())?,
+        serde_json::to_string(&project_dir.to_string_lossy())?,
+        serde_json::to_string(&project_dir.join("src").to_string_lossy())?
+    );
+    let source = format!(
+        "{}\n{initialize}\n{}\n{}",
+        nrz_runtime_artifact::PYTHON_SITE_PACKAGES_INITIALIZER,
+        "import importlib.machinery, importlib.util, pathlib, sys",
+        r#"_startup_root = pathlib.Path(__file__).resolve().parent
+_spec = importlib.machinery.PathFinder.find_spec("sitecustomize", [path for path in sys.path if pathlib.Path(path or ".").resolve() != _startup_root])
+if _spec is not None and _spec.loader is not None:
+    _module = importlib.util.module_from_spec(_spec)
+    sys.modules["sitecustomize"] = _module
+    _spec.loader.exec_module(_module)
+"#
+    );
+    let mut temporary = tempfile::NamedTempFile::new_in(&directory)?;
+    std::io::Write::write_all(&mut temporary, source.as_bytes())?;
+    temporary
+        .persist(directory.join("sitecustomize.py"))
+        .map_err(|error| error.error)?;
+    Ok(directory)
+}
+
+const GENERATED_REQUIREMENTS: &str = ".onreza/python/build/requirements.txt";
+const PROJECT_WHEELS: &str = ".onreza/python/build/wheels";
+/// Inspect actual wheel members before local project installation. Wheel tags
+/// alone cannot qualify native package data for the managed Linux target.
+pub(super) fn qualify_portable_application_wheels(
+    project_dir: &Path,
+    wheel_directory: &Path,
+) -> anyhow::Result<()> {
+    let directory = project_dir.join(wheel_directory);
+    ensure_python_output_path(project_dir, &directory)?;
+    let entries = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            bail!("Python application build produced no wheel")
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let mut wheels = entries
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    wheels.retain(|path| path.extension().is_some_and(|extension| extension == "whl"));
+    wheels.sort();
+    if wheels.is_empty() {
+        bail!("Python application build produced no wheel");
+    }
+    for wheel in wheels {
+        ensure_python_output_path(project_dir, &wheel)?;
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&wheel)?)?;
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index)?;
+            if entry.is_dir() {
+                continue;
+            }
+            let name = entry.name().to_owned();
+            if has_native_python_extension(&name)
+                || nrz_runtime_artifact::has_native_payload_header(&mut entry)?
+            {
+                bail!(
+                    "local Python application wheel contains native payload {name}; use ONREZA Cloud Builder for qualified Linux builds or an explicitly qualified custom artifact"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Both paths use the pinned installer; Builder selects its frozen interpreter.
 pub(super) fn install_command(
     manifest: &str,
     mode: PythonInstallMode,
     host_os: &str,
     host_arch: &str,
+    minor: PythonMinor,
 ) -> anyhow::Result<PythonInstallCommand> {
-    match mode {
-        PythonInstallMode::PinnedPlatform => Ok(PythonInstallCommand {
-            program: PathBuf::from(PYTHON_INTERPRETER),
-            arguments: platform_pip_arguments(manifest),
-            display: format!(
-                "pinned {PYTHON_INTERPRETER} / pip: install {} into {PYTHON_SITE_PACKAGES_ROOT}",
-                platform_install_source(manifest)
-            ),
-        }),
-        PythonInstallMode::ManagedLocal => Ok(PythonInstallCommand {
-            program: PathBuf::new(),
-            arguments: managed_uv_arguments(manifest, host_os, host_arch)?,
-            display: format!(
-                "managed uv {UV_VERSION} / CPython {PYTHON_RUNTIME_VERSION}: install {} into {PYTHON_SITE_PACKAGES_ROOT}",
-                manifest
-            ),
-        }),
-    }
-}
-
-fn managed_uv_arguments(
-    manifest: &str,
-    host_os: &str,
-    host_arch: &str,
-) -> anyhow::Result<Vec<OsString>> {
-    if manifest == "setup.py" {
+    if manifest == "setup.py" && mode == PythonInstallMode::ManagedLocal {
         bail!(
-            "setup.py cannot be safely materialized for the Linux x86_64 runtime from {host_os}/{host_arch}; use requirements.txt or pyproject.toml, or deploy through ONREZA Cloud Builder"
+            "setup.py source builds cannot be qualified for Linux x86_64 from {host_os}/{host_arch}; deploy through ONREZA Cloud Builder"
         );
     }
-    let mut arguments = vec![
-        OsString::from("pip"),
-        OsString::from("install"),
-        OsString::from("--python"),
-        OsString::from(PYTHON_RUNTIME_VERSION),
-        OsString::from("--managed-python"),
-        OsString::from("--link-mode"),
-        OsString::from("copy"),
-        OsString::from("--target"),
-        OsString::from(PYTHON_SITE_PACKAGES_ROOT),
-        OsString::from("--python-platform"),
-        OsString::from(PLATFORM_PYTHON_TARGET),
-        OsString::from("--only-binary"),
-        OsString::from(":all:"),
-    ];
-    match manifest {
-        "requirements.txt" | "pyproject.toml" => {
-            arguments.push(OsString::from("--requirements"));
-            arguments.push(OsString::from(manifest));
-        }
-        _ => bail!("unsupported Python dependency manifest: {manifest}"),
+    let mut arguments = pip_arguments(mode, minor);
+    if manifest == "setup.py" {
+        arguments.push(OsString::from("."));
+    } else {
+        arguments.extend([OsString::from("--requirements"), OsString::from(manifest)]);
     }
-    Ok(arguments)
+    Ok(uv_command(minor, arguments, format!("install {manifest}")))
 }
 
-fn platform_pip_arguments(manifest: &str) -> Vec<OsString> {
-    let mut arguments = vec![
-        OsString::from("-m"),
-        OsString::from("pip"),
-        OsString::from("install"),
-        OsString::from("--disable-pip-version-check"),
-        OsString::from("--no-compile"),
-        OsString::from("--target"),
-        OsString::from(PYTHON_SITE_PACKAGES_ROOT),
-    ];
-    if manifest == "requirements.txt" {
-        arguments.push(OsString::from("--requirement"));
-        arguments.push(OsString::from(manifest));
-    } else {
-        arguments.push(OsString::from("."));
+/// Validation/export/build/install are separate bounded operations so log phases
+/// and failures retain their real boundary. No command edits authored manifests.
+pub(super) fn install_commands(
+    project_dir: &Path,
+    mode: PythonInstallMode,
+    host_os: &str,
+    host_arch: &str,
+    minor: PythonMinor,
+) -> anyhow::Result<Vec<PythonInstallCommand>> {
+    use crate::detect::python::{PythonDependencyKind, dependency_plan};
+    let Some(plan) = dependency_plan(&crate::detect::fs::LocalFs::new(project_dir))? else {
+        return Ok(Vec::new());
+    };
+    let generated = project_dir.join(".onreza/python/build");
+    ensure_python_directory(project_dir, &generated)?;
+    if matches!(
+        plan.kind,
+        PythonDependencyKind::Uv | PythonDependencyKind::Poetry
+    ) {
+        ensure_python_output_path(project_dir, &project_dir.join(GENERATED_REQUIREMENTS))?;
+    }
+    let setup_package =
+        plan.kind == PythonDependencyKind::Requirements && project_dir.join("setup.py").is_file();
+    if plan.install_project && !setup_package {
+        ensure_python_output_path(project_dir, &project_dir.join(PROJECT_WHEELS))?;
+    }
+    let mut commands = Vec::new();
+    let exact_version = minor.exact_version();
+    if mode == PythonInstallMode::PinnedPlatform {
+        commands.push(PythonInstallCommand {
+            program: PathBuf::from(minor.platform_interpreter()),
+            arguments: ["-I", "-c", "import sys; expected = sys.argv[1]; actual = '.'.join(map(str, sys.version_info[:3])); sys.exit(0 if actual == expected and sys.implementation.name == 'cpython' else 'frozen CPython differs from selected exact patch: ' + actual)", exact_version].map(OsString::from).to_vec(),
+            display: format!("verify frozen CPython {exact_version}"),
+            portable_wheel_directory: None,
+        });
+    }
+    for (constraint, poetry_syntax) in [
+        (plan.requires_python.as_deref(), false),
+        (plan.poetry_requires_python.as_deref(), true),
+    ] {
+        let Some(constraint) = constraint else {
+            continue;
+        };
+        let (package, script) = if poetry_syntax {
+            (
+                format!("poetry=={}", python_toolchain_versions().poetry),
+                "from poetry.core.constraints.version import parse_constraint, Version; import sys; version = sys.argv[2]; supported = parse_constraint(sys.argv[1]).allows(Version.parse(version)); sys.exit(0 if supported else 'requires-python excludes selected CPython ' + version)",
+            )
+        } else {
+            (
+                format!("packaging=={}", python_toolchain_versions().packaging),
+                "from packaging.specifiers import SpecifierSet; import sys; version = sys.argv[2]; supported = SpecifierSet(sys.argv[1]).contains(version); sys.exit(0 if supported else 'requires-python excludes selected CPython ' + version)",
+            )
+        };
+        let mut validation = python_tool_command(
+            mode,
+            minor,
+            &package,
+            script,
+            constraint,
+            "validate requires-python",
+        );
+        validation.arguments.push(OsString::from(&exact_version));
+        commands.push(validation);
+    }
+    let requirements = match plan.kind {
+        PythonDependencyKind::Uv => {
+            let mut arguments = vec![OsString::from("export")];
+            arguments.extend(python_arguments(mode, minor));
+            arguments.extend(
+                [
+                    "--locked",
+                    "--no-dev",
+                    "--no-default-groups",
+                    "--no-editable",
+                    "--no-emit-project",
+                    "--format",
+                    "requirements-txt",
+                    "--output-file",
+                    GENERATED_REQUIREMENTS,
+                ]
+                .map(OsString::from),
+            );
+            commands.push(uv_command(
+                minor,
+                arguments,
+                "validate and export uv.lock".into(),
+            ));
+            GENERATED_REQUIREMENTS
+        }
+        PythonDependencyKind::Poetry => {
+            commands.push(poetry_command(
+                mode,
+                minor,
+                &["check", "--lock"],
+                "validate poetry.lock",
+            ));
+            commands.push(poetry_command(
+                mode,
+                minor,
+                &[
+                    "export",
+                    "--only",
+                    "main",
+                    "--format",
+                    "requirements.txt",
+                    "--output",
+                    GENERATED_REQUIREMENTS,
+                ],
+                "export poetry.lock",
+            ));
+            GENERATED_REQUIREMENTS
+        }
+        PythonDependencyKind::Requirements => "requirements.txt",
+        PythonDependencyKind::Project => "pyproject.toml",
+        PythonDependencyKind::Setup => {
+            commands.push(install_command(
+                "setup.py", mode, host_os, host_arch, minor,
+            )?);
+            return Ok(commands);
+        }
+    };
+    let mut install = pip_arguments(mode, minor);
+    // Exported lock sets own the entire dependency solution, including direct URLs.
+    if matches!(
+        plan.kind,
+        PythonDependencyKind::Uv | PythonDependencyKind::Poetry
+    ) {
+        install.push(OsString::from("--no-deps"));
+    }
+    install.extend([
+        OsString::from("--requirements"),
+        OsString::from(requirements),
+    ]);
+    commands.push(uv_command(
+        minor,
+        install,
+        "install Python runtime dependencies".into(),
+    ));
+    if plan.install_project {
+        if setup_package {
+            let mut project = install_command("setup.py", mode, host_os, host_arch, minor)?;
+            project.arguments.push(OsString::from("--no-deps"));
+            project.display = format!(
+                "pinned uv {} / CPython {}: install Python application without resolving dependencies",
+                python_toolchain_versions().uv,
+                minor.version()
+            );
+            commands.push(project);
+            return Ok(commands);
+        }
+        let name = plan.project_name.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("installable Python project must declare its package name")
+        })?;
+        if !name.starts_with(|character: char| character.is_ascii_alphanumeric())
+            || !name.bytes().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, b'-' | b'_' | b'.')
+            })
+        {
+            bail!("Python project name is not a valid distribution name");
+        }
+        let mut build = vec![OsString::from("build"), OsString::from("--wheel")];
+        build.extend(python_arguments(mode, minor));
+        build.extend(
+            [
+                "--out-dir",
+                PROJECT_WHEELS,
+                "--clear",
+                "--no-create-gitignore",
+            ]
+            .map(OsString::from),
+        );
+        commands.push(uv_command(
+            minor,
+            build,
+            "build Python application wheel".into(),
+        ));
+        let mut install = pip_arguments(mode, minor);
+        install.extend(
+            [
+                "--no-deps",
+                "--no-index",
+                "--find-links",
+                PROJECT_WHEELS,
+                name,
+            ]
+            .map(OsString::from),
+        );
+        let mut install = uv_command(minor, install, "install Python application wheel".into());
+        if mode == PythonInstallMode::ManagedLocal {
+            install.portable_wheel_directory = Some(PathBuf::from(PROJECT_WHEELS));
+        }
+        commands.push(install);
+    }
+    Ok(commands)
+}
+
+fn ensure_python_output_path(project_dir: &Path, output: &Path) -> anyhow::Result<()> {
+    let root = project_dir.canonicalize()?;
+    let mut ancestor = output;
+    loop {
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(_) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                ancestor = ancestor.parent().context("invalid Python output path")?;
+            }
+            Err(error) => return Err(error).context("cannot inspect Python output path"),
+        }
+    }
+    let canonical = ancestor.canonicalize()?;
+    if !canonical.starts_with(&root) {
+        bail!("Python output path escapes the project root");
+    }
+    if canonical != root.join(ancestor.strip_prefix(project_dir)?) {
+        bail!("generated Python output paths must not contain symlinks");
+    }
+    Ok(())
+}
+
+pub(super) fn ensure_python_directory(project_dir: &Path, directory: &Path) -> anyhow::Result<()> {
+    ensure_python_output_path(project_dir, directory)?;
+    crate::init::add_to_gitignore(project_dir);
+    std::fs::create_dir_all(directory).context("cannot create Python output directory")?;
+    ensure_python_output_path(project_dir, directory)
+}
+
+pub(super) fn python_arguments(mode: PythonInstallMode, minor: PythonMinor) -> Vec<OsString> {
+    match mode {
+        PythonInstallMode::ManagedLocal => ["--python", minor.exact_version(), "--managed-python"]
+            .map(OsString::from)
+            .to_vec(),
+        PythonInstallMode::PinnedPlatform => [
+            "--python",
+            minor.platform_interpreter(),
+            "--no-managed-python",
+            "--no-python-downloads",
+        ]
+        .map(OsString::from)
+        .to_vec(),
+    }
+}
+
+fn pip_arguments(mode: PythonInstallMode, minor: PythonMinor) -> Vec<OsString> {
+    let mut arguments = vec![OsString::from("pip"), OsString::from("install")];
+    arguments.extend(python_arguments(mode, minor));
+    arguments.extend(
+        [
+            "--link-mode",
+            "copy",
+            "--target",
+            minor.site_packages_root(),
+        ]
+        .map(OsString::from),
+    );
+    if mode == PythonInstallMode::ManagedLocal {
+        arguments.extend(
+            [
+                "--python-platform",
+                PLATFORM_PYTHON_TARGET,
+                "--only-binary",
+                ":all:",
+                "--no-editable",
+            ]
+            .map(OsString::from),
+        );
     }
     arguments
 }
 
-fn platform_install_source(manifest: &str) -> &str {
-    if manifest == "requirements.txt" {
-        manifest
+fn python_tool_command(
+    mode: PythonInstallMode,
+    minor: PythonMinor,
+    package: &str,
+    script: &str,
+    argument: &str,
+    operation: &str,
+) -> PythonInstallCommand {
+    if mode == PythonInstallMode::PinnedPlatform {
+        PythonInstallCommand {
+            program: PathBuf::from("/opt/onreza/poetry/bin/python"),
+            arguments: ["-I", "-c", script, argument].map(OsString::from).to_vec(),
+            display: format!("frozen Python validator: {operation}"),
+            portable_wheel_directory: None,
+        }
     } else {
-        "."
+        let mut arguments = tool_arguments(mode, minor, package, package.starts_with("poetry=="));
+        arguments.extend(["python", "-I", "-c", script, argument].map(OsString::from));
+        uv_command(minor, arguments, operation.into())
+    }
+}
+
+fn poetry_command(
+    mode: PythonInstallMode,
+    minor: PythonMinor,
+    arguments: &[&str],
+    operation: &str,
+) -> PythonInstallCommand {
+    if mode == PythonInstallMode::PinnedPlatform {
+        PythonInstallCommand {
+            program: PathBuf::from("/opt/onreza/poetry/bin/poetry"),
+            arguments: arguments.iter().map(OsString::from).collect(),
+            portable_wheel_directory: None,
+            display: format!(
+                "frozen Poetry {} / export {}: {operation}",
+                python_toolchain_versions().poetry,
+                python_toolchain_versions().poetry_export
+            ),
+        }
+    } else {
+        let mut command = tool_arguments(
+            mode,
+            minor,
+            &format!("poetry=={}", python_toolchain_versions().poetry),
+            true,
+        );
+        command.push(OsString::from("poetry"));
+        command.extend(arguments.iter().map(OsString::from));
+        uv_command(minor, command, operation.into())
+    }
+}
+
+fn tool_arguments(
+    mode: PythonInstallMode,
+    minor: PythonMinor,
+    package: &str,
+    poetry_export: bool,
+) -> Vec<OsString> {
+    let mut arguments = [
+        "tool",
+        "run",
+        "--isolated",
+        "--no-env-file",
+        "--from",
+        package,
+    ]
+    .map(OsString::from)
+    .to_vec();
+    arguments.extend(python_arguments(mode, minor));
+    if poetry_export {
+        arguments.extend([
+            OsString::from("--with"),
+            OsString::from(format!(
+                "poetry-plugin-export=={}",
+                python_toolchain_versions().poetry_export
+            )),
+        ]);
+    }
+    arguments
+}
+
+fn uv_command(
+    minor: PythonMinor,
+    arguments: Vec<OsString>,
+    operation: String,
+) -> PythonInstallCommand {
+    PythonInstallCommand {
+        program: PathBuf::new(),
+        arguments,
+        portable_wheel_directory: None,
+        display: format!(
+            "pinned uv {} / CPython {}: {operation}",
+            python_toolchain_versions().uv,
+            minor.version()
+        ),
     }
 }
 
 pub(super) fn artifact_for(os: &str, arch: &str) -> anyhow::Result<UvArtifact> {
+    if python_toolchain_versions().uv != QUALIFIED_UV_VERSION {
+        bail!(
+            "selected uv engine has no qualified CLI archive hashes; refresh the pinned release artifacts before building"
+        );
+    }
     match (os, arch) {
         ("linux", "x86_64") => Ok(UvArtifact {
             target: "x86_64-unknown-linux-musl",
             archive_name: "uv-x86_64-unknown-linux-musl.tar.gz",
-            archive_sha256: "312d37f31b6f2c3bfc65668ba0efea9f1f9eaf7bc3209fe1a109e5cf861b95fa",
-            binary_sha256: "907b1c5d2c1bba4111c6c2e22eeabb210eb962c4c15f5093e05cf7aec5c61b87",
+            archive_sha256: "1cff8783850e794470aadb73f54b749542a511fc57b0ce6468b64bd3852e0ade",
+            binary_sha256: "ff3eba23dad69edbf72f5dc5e95c865a20091bd26514032f55909282f2b55bdd",
             binary_name: "uv",
             format: ArchiveFormat::TarGz,
         }),
         ("macos", "x86_64") => Ok(UvArtifact {
             target: "x86_64-apple-darwin",
             archive_name: "uv-x86_64-apple-darwin.tar.gz",
-            archive_sha256: "664aed584c276f8d79cdc3b7685cd48f5d64657bd6840b06b4b2b0db731b9c99",
-            binary_sha256: "4b02e5ff34bd77ce38f333bcc5f01d009e75ae93d9402cd9688871229bbb46b6",
+            archive_sha256: "960da44cb4b73685206ddd250b19e0a117fa41095710c1038f081f5cb613efb4",
+            binary_sha256: "566a27247ff63f72260ed10c241fe4cf815b6c1b9439e17bdc808cf2d1c0d80f",
             binary_name: "uv",
             format: ArchiveFormat::TarGz,
         }),
         ("macos", "aarch64") => Ok(UvArtifact {
             target: "aarch64-apple-darwin",
             archive_name: "uv-aarch64-apple-darwin.tar.gz",
-            archive_sha256: "82d4b99dc6ea686695b5ee142ceba03dd3e3eda2b414e94215ab7bce94972fbb",
-            binary_sha256: "03d95102c0a52872ba6404c51613b732a366279e7c4d6472a59f66b1005b8295",
+            archive_sha256: "50487ae565ccd96e499056b4674d438f4c53170202617b4c759defe0c6a1b544",
+            binary_sha256: "2f7be1879e3337eef20875c0f80ef033337305d0405efc5d72642d6292f66b3b",
             binary_name: "uv",
             format: ArchiveFormat::TarGz,
         }),
         ("windows", "x86_64") => Ok(UvArtifact {
             target: "x86_64-pc-windows-msvc",
             archive_name: "uv-x86_64-pc-windows-msvc.zip",
-            archive_sha256: "4037b444541f695cd2eb93188a9346de3e334af562381411deade0a31c7bf898",
-            binary_sha256: "5e559e322ad2f2e25e7d9c3cb51e3891ab0676a7e7b59ea250a021e4cb2f6e31",
+            archive_sha256: "75d05de6762778c31ee183398de7dd15093fad0ed90b1f236d8205ea5ec00c90",
+            binary_sha256: "70742ae9bd9f64f984fd69126662cfda5c03558bcb40075b2263833e4075f744",
             binary_name: "uv.exe",
             format: ArchiveFormat::Zip,
         }),
@@ -202,7 +1027,8 @@ pub(super) fn artifact_for(os: &str, arch: &str) -> anyhow::Result<UvArtifact> {
 
 async fn download_archive(artifact: UvArtifact) -> anyhow::Result<Vec<u8>> {
     let url = format!(
-        "{UV_RELEASE_ORIGIN}/astral-sh/uv/releases/download/{UV_VERSION}/{}",
+        "{UV_RELEASE_ORIGIN}/astral-sh/uv/releases/download/{}/{}",
+        python_toolchain_versions().uv,
         artifact.archive_name
     );
     let client = reqwest::Client::builder()
@@ -217,7 +1043,12 @@ async fn download_archive(artifact: UvArtifact) -> anyhow::Result<Vec<u8>> {
         .header("User-Agent", "nrz-cli")
         .send()
         .await
-        .with_context(|| format!("failed to download managed uv {UV_VERSION}"))?
+        .with_context(|| {
+            format!(
+                "failed to download managed uv {}",
+                python_toolchain_versions().uv
+            )
+        })?
         .error_for_status()
         .with_context(|| format!("uv release server rejected {url}"))?;
     if response
@@ -404,3 +1235,19 @@ fn sha256_hex(bytes: &[u8]) -> String {
             encoded
         })
 }
+
+#[cfg(test)]
+#[path = "python_host_tests.rs"]
+mod host_tests;
+
+#[cfg(test)]
+#[path = "python_output_tests.rs"]
+mod output_tests;
+
+#[cfg(test)]
+#[path = "python_install_tests.rs"]
+mod install_tests;
+
+#[cfg(test)]
+#[path = "python_editable_tests.rs"]
+mod editable_tests;

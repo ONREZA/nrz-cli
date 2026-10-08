@@ -33,12 +33,189 @@ fn compute_manifest() -> crate::build::manifest::Manifest {
     .unwrap()
 }
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+#[test]
+#[ignore = "requires a C compiler; verifies generic typed-native publication custody"]
+fn native_source_bundle_requires_archived_libraries_owned_by_its_compute_layer() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("lib")).unwrap();
+    fs::write(dir.path().join("foo.c"), "int foo(void) { return 42; }").unwrap();
+    fs::write(
+        dir.path().join("main.c"),
+        "int foo(void); int main(void) { return foo() == 42 ? 0 : 1; }",
+    )
+    .unwrap();
+    for args in [
+        vec![
+            "-shared",
+            "-fPIC",
+            "foo.c",
+            "-Wl,-soname,libfoo.so",
+            "-o",
+            "lib/libfoo.so",
+        ],
+        vec![
+            "main.c",
+            "-Llib",
+            "-lfoo",
+            "-Wl,-rpath,$ORIGIN/lib",
+            "-o",
+            "server",
+        ],
+    ] {
+        let result = std::process::Command::new("cc")
+            .args(args)
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    let mut manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({"version":1,"layers":[{"name":"native","target":"COMPUTE","directory":".","entry":"server","runtime":{"applicationRuntime":{"family":"EXECUTABLE","args":[]},"buildRuntimeVersion":"native-linux-x86_64-glibc"}}],"routes":[]})).unwrap();
+    let files = scan_dir(dir.path()).unwrap();
+    build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+    let excluded = files
+        .iter()
+        .filter(|file| file.path != "lib/libfoo.so")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        build_source_bundle_plan(dir.path(), &manifest, &excluded).is_err(),
+        "filesystem-present but unarchived library was accepted"
+    );
+    manifest.layers.insert(
+        0,
+        serde_json::from_value(
+            serde_json::json!({"name":"foreign","target":"STATIC","directory":"lib"}),
+        )
+        .unwrap(),
+    );
+    assert!(
+        build_source_bundle_plan(dir.path(), &manifest, &files).is_err(),
+        "foreign layer library ownership was accepted"
+    );
+
+    // A verified closure may live beside the launch cwd within the artifact.
+    manifest.layers.remove(0);
+    manifest.layers[0].directory = "bin".into();
+    fs::create_dir(dir.path().join("bin")).unwrap();
+    let compiled = std::process::Command::new("cc")
+        .args([
+            "main.c",
+            "-Llib",
+            "-lfoo",
+            "-Wl,-rpath,$ORIGIN/../lib",
+            "-o",
+            "bin/server",
+        ])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let files = scan_dir(dir.path()).unwrap();
+    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
+    let library = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "lib/libfoo.so")
+        .unwrap();
+    assert_eq!(library.layer_name.as_deref(), Some("native"));
+    assert_eq!(library.role, SourceLogicalManifestFileRole::Compute);
+    fs::create_dir(dir.path().join("public")).unwrap();
+    fs::write(dir.path().join("public/index.html"), "PUBLIC_ASSET").unwrap();
+    let files = scan_dir(dir.path()).unwrap();
+    let mut public: crate::build::manifest::Manifest =
+        serde_json::from_value(serde_json::to_value(&manifest).unwrap()).unwrap();
+    public.layers.insert(
+        0,
+        serde_json::from_value(serde_json::json!({
+            "name":"public", "target":"STATIC", "directory":"public"
+        }))
+        .unwrap(),
+    );
+    let public_plan = build_source_bundle_plan(dir.path(), &public, &files).unwrap();
+    for (path, role, owner) in [
+        (
+            "lib/libfoo.so",
+            SourceLogicalManifestFileRole::Compute,
+            "native",
+        ),
+        (
+            "public/index.html",
+            SourceLogicalManifestFileRole::Static,
+            "public",
+        ),
+    ] {
+        let file = public_plan
+            .logical_manifest
+            .files
+            .iter()
+            .find(|file| file.path == path)
+            .unwrap();
+        assert_eq!(file.role, role);
+        assert_eq!(file.layer_name.as_deref(), Some(owner));
+    }
+    let excluded = files
+        .iter()
+        .filter(|file| file.path != "lib/libfoo.so")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        build_source_bundle_plan(dir.path(), &manifest, &excluded).is_err(),
+        "unarchived sibling library was accepted"
+    );
+    for target in ["STATIC", "COMPUTE"] {
+        let mut foreign: crate::build::manifest::Manifest =
+            serde_json::from_value(serde_json::to_value(&manifest).unwrap()).unwrap();
+        foreign.layers.insert(
+            0,
+            serde_json::from_value(serde_json::json!({
+                "name":"foreign", "target":target, "directory":"lib", "entry":"main.js"
+            }))
+            .unwrap(),
+        );
+        assert!(
+            build_source_bundle_plan(dir.path(), &foreign, &files).is_err(),
+            "foreign {target} sibling ownership was stolen"
+        );
+    }
+    fs::create_dir(dir.path().join("worker")).unwrap();
+    fs::copy(
+        dir.path().join("bin/server"),
+        dir.path().join("worker/server"),
+    )
+    .unwrap();
+    let mut sibling = manifest.layers[0].clone();
+    sibling.name = "worker".into();
+    sibling.directory = "worker".into();
+    manifest.layers.push(sibling);
+    let files = scan_dir(dir.path()).unwrap();
+    for reverse in [false, true] {
+        if reverse {
+            manifest.layers.reverse();
+        }
+        assert!(
+            build_source_bundle_plan(dir.path(), &manifest, &files).is_err(),
+            "ambiguous native sibling closure was accepted"
+        );
+    }
+}
+
 #[test]
 fn source_bundle_retains_prebuild_launcher_args_and_version_witness() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("server.js"), "console.log('ok')").unwrap();
     let mut manifest = compute_manifest();
     let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
+        python_version: None,
         family: nrz_source_bundle::ApplicationRuntimeFamily::Bun,
         entry: Some("server.js".into()),
         args: vec!["--port".into(), "8080".into()],
@@ -181,15 +358,20 @@ async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
             "routes": []
         }))
         .unwrap();
-    let detection = crate::detect::detect_with_framework_override(dir.path(), None);
+    let mut detection = crate::detect::detect_with_framework_override(dir.path(), None);
+    crate::detect::application_runtime::resolve_and_bind_detection(
+        &crate::detect::fs::LocalFs::new(dir.path()),
+        &mut detection,
+    )
+    .unwrap();
     let effective = nrz::config::EffectiveProjectConfig::from_project_config(
         dir.path().to_owned(),
         nrz::config::ProjectConfig::default(),
     );
     let target = crate::deploy::validate_application_runtime_before_build(
-        detection.metadata.application_runtime.as_ref(),
-        &detection.metadata.runtime,
+        detection.metadata.source_build_context.as_ref().unwrap(),
         &effective,
+        false,
         false,
         &[],
     )
@@ -197,7 +379,7 @@ async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
     .unwrap();
     crate::deploy::apply_application_runtime_manifest(
         &mut manifest,
-        detection.metadata.application_runtime.as_ref(),
+        detection.metadata.application_runtime(),
         target.as_deref(),
         &detection.framework,
     )
@@ -208,7 +390,7 @@ async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
         dir.path(),
         &manifest,
         &files,
-        &RuntimeArtifactScan::PythonRuntimeRoot,
+        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
         RuntimeDependencyPackaging::TrustedMaterialization,
         None,
     )
@@ -230,7 +412,9 @@ async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
     assert_eq!(dependency.role, SourceLogicalManifestFileRole::Dependency);
     assert_eq!(
         plan.logical_manifest.layers[0].runtime_config,
-        Some(serde_json::json!({"runtimeFamily": "PYTHON", "buildRuntimeVersion": "python-3.14"}))
+        Some(
+            serde_json::json!({"runtimeFamily": "PYTHON", "buildRuntimeVersion": "python-3.14", "applicationRuntime":{"family":"PYTHON","args":[]}})
+        )
     );
 }
 
@@ -270,7 +454,7 @@ async fn python_bundle_without_dependencies_freezes_provided_build_manifest_targ
         dir.path(),
         &manifest,
         &scan_dir(dir.path()).unwrap(),
-        &RuntimeArtifactScan::PythonRuntimeRoot,
+        &RuntimeArtifactScan::PythonRuntimeRoot(nrz_source_bundle::PythonMinor::default()),
         RuntimeDependencyPackaging::TrustedMaterialization,
         None,
     )
@@ -305,6 +489,234 @@ async fn python_bundle_without_dependencies_freezes_provided_build_manifest_targ
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn mixed_python_node_and_native_bundle_preserves_per_layer_runtime_authority() {
+    use nrz_source_bundle::{
+        ApplicationRuntimeDeclaration, ApplicationRuntimeFamily as Family, PythonMinor,
+    };
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("main.py"), b"print('python')").unwrap();
+    fs::write(dir.path().join("server.js"), b"console.log('node')").unwrap();
+    fs::copy("/bin/true", dir.path().join("native-server")).unwrap();
+    for primary_python in [true, false] {
+        let mut manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
+            "version":1,"routes":[],"layers":[
+                {"name":"python","target":"COMPUTE","directory":".","entry":"main.py",
+                 "runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}},
+                {"name":"node","target":"COMPUTE","directory":".","entry":"server.js",
+                 "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
+                {"name":"native","target":"COMPUTE","directory":".","entry":"native-server",
+                 "runtime":{"applicationRuntime":{"family":"EXECUTABLE","args":[]},"buildRuntimeVersion":"native-linux-x86_64-glibc"}}
+            ]
+        })).unwrap();
+        let (family, entry, target, scan) = if primary_python {
+            (
+                Family::Python,
+                "main.py",
+                "python-3.12",
+                RuntimeArtifactScan::PythonRuntimeRoot(PythonMinor::Python312),
+            )
+        } else {
+            (
+                Family::Node,
+                "server.js",
+                "node-24",
+                RuntimeArtifactScan::NodeRuntimeRoot,
+            )
+        };
+        let declaration = ApplicationRuntimeDeclaration {
+            family,
+            entry: Some(entry.into()),
+            args: vec![],
+            python_version: primary_python.then_some(PythonMinor::Python312),
+        };
+        crate::deploy::apply_application_runtime_manifest(
+            &mut manifest,
+            Some(&declaration),
+            Some(target),
+            "other",
+        )
+        .unwrap();
+        let plan = build_source_bundle_plan_with_scan(
+            dir.path(),
+            &manifest,
+            &scan_dir(dir.path()).unwrap(),
+            &scan,
+            RuntimeDependencyPackaging::TrustedMaterialization,
+            None,
+        )
+        .unwrap();
+        let logical: nrz_source_bundle::SourceLogicalManifest =
+            serde_json::from_value(serde_json::to_value(&plan.logical_manifest).unwrap()).unwrap();
+        let owner = uuid::Uuid::nil().to_string();
+        let input = nrz_source_bundle::SourceBundleVerificationInput {
+            owner_workspace_id: owner.clone(),
+            source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
+                &owner,
+                &plan.logical_manifest_sha256,
+                &plan.source_sha256,
+                None,
+            ),
+            source_sha256: plan.source_sha256.clone(),
+            logical_manifest_sha256: plan.logical_manifest_sha256.clone(),
+            budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical)
+                .unwrap(),
+        };
+        let verified = nrz_source_bundle::verify_source_bundle_bytes(
+            input,
+            fs::read(plan.source_path()).unwrap().into(),
+        )
+        .await
+        .unwrap();
+        let logical: nrz_source_bundle::SourceLogicalManifest =
+            serde_json::from_value(verified.logical_manifest).unwrap();
+        let targets = std::collections::HashMap::from([
+            ("python".into(), "python-3.12".into()),
+            ("node".into(), "node-24".into()),
+            ("native".into(), "native-linux-x86_64-glibc".into()),
+        ]);
+        let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph_for_layer_targets(
+            &plan.logical_manifest_sha256,
+            &plan.source_sha256,
+            plan.source_size_bytes,
+            &logical,
+            &[],
+            &targets,
+        )
+        .unwrap();
+        nrz_runtime_artifact::verify_source_runtime_graph_dependencies(&logical, &graph).unwrap();
+        for (name, profile) in [
+            ("python", "CPYTHON_3_12"),
+            ("node", "NODE_24"),
+            ("native", "EXECUTABLE"),
+        ] {
+            let layer = graph
+                .wire()
+                .runtime_layers
+                .iter()
+                .find(|layer| layer.layer_name.as_str() == name)
+                .unwrap();
+            assert_eq!(layer.launch.as_ref().unwrap().profile.to_string(), profile);
+        }
+    }
+}
+
+#[tokio::test]
+async fn admitted_node_build_preserves_code_only_sibling_target() {
+    let directory = tempdir().unwrap();
+    fs::create_dir_all(directory.path().join(".onreza")).unwrap();
+    fs::create_dir_all(directory.path().join("secondary")).unwrap();
+    fs::write(directory.path().join("server.js"), "console.log('primary')").unwrap();
+    fs::write(
+        directory.path().join("secondary/server.js"),
+        "console.log('secondary')",
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("package.json"),
+        r#"{"scripts":{"start":"node server.js"}}"#,
+    )
+    .unwrap();
+    let manifest = serde_json::json!({
+        "version":1,
+        "routes":[{"pattern":"^/.*$","layer":"primary","priority":0},
+                  {"pattern":"^/secondary/.*$","layer":"secondary","priority":1}],
+        "layers":[
+            {"name":"primary","target":"COMPUTE","directory":".","entry":"server.js",
+             "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
+            {"name":"secondary","target":"COMPUTE","directory":"secondary","entry":"server.js",
+             "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}}
+        ]
+    });
+    fs::write(
+        directory.path().join(".onreza/manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.output_dirs = Some(vec![".".into()]);
+    let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
+        directory.path().to_owned(),
+        config,
+    );
+    effective.bind_admitted_node_version("NODE_24").unwrap();
+    let built = crate::build::run_with_effective_config(
+        crate::cli::BuildArgs {
+            dir: directory.path().to_string_lossy().into_owned(),
+            skip_validation: false,
+        },
+        true,
+        &effective,
+        None,
+        false,
+        directory.path(),
+    )
+    .await
+    .unwrap()
+    .manifest
+    .unwrap();
+    let plan = build_source_bundle_plan_with_scan(
+        directory.path(),
+        &built,
+        &scan_dir(directory.path()).unwrap(),
+        &RuntimeArtifactScan::NodeRuntimeRoot,
+        RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap();
+    let secondary = plan
+        .logical_manifest
+        .layers
+        .iter()
+        .find(|layer| layer.name == "secondary")
+        .unwrap();
+    assert_eq!(
+        secondary.runtime_config.as_ref().unwrap()["buildRuntimeVersion"],
+        "node-22"
+    );
+    assert!(
+        plan.logical_manifest
+            .files
+            .iter()
+            .all(|file| file.role != SourceLogicalManifestFileRole::Dependency)
+    );
+    let primary = plan
+        .logical_manifest
+        .layers
+        .iter()
+        .find(|layer| layer.name == "primary")
+        .unwrap();
+    assert_eq!(
+        primary.runtime_config.as_ref().unwrap()["buildRuntimeVersion"],
+        "node-24"
+    );
+    let logical: nrz_source_bundle::SourceLogicalManifest =
+        serde_json::from_value(serde_json::to_value(&plan.logical_manifest).unwrap()).unwrap();
+    let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph_for_layer_targets(
+        &plan.logical_manifest_sha256,
+        &plan.source_sha256,
+        plan.source_size_bytes,
+        &logical,
+        &[],
+        &std::collections::HashMap::from([
+            ("primary".into(), "node-24".into()),
+            ("secondary".into(), "node-22".into()),
+        ]),
+    )
+    .unwrap();
+    nrz_runtime_artifact::verify_source_runtime_graph_dependencies(&logical, &graph).unwrap();
+    for (name, profile) in [("primary", "NODE_24"), ("secondary", "NODE_22")] {
+        let layer = graph
+            .wire()
+            .runtime_layers
+            .iter()
+            .find(|layer| layer.layer_name.as_str() == name)
+            .unwrap();
+        assert_eq!(layer.launch.as_ref().unwrap().profile.to_string(), profile);
+    }
+}
+
 #[tokio::test]
 async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitted_selection() {
     let directory = tempdir().unwrap();
@@ -312,7 +724,7 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
     fs::write(directory.path().join("server.js"), b"console.log('hello')").unwrap();
     fs::create_dir(directory.path().join(".onreza")).unwrap();
     let detection = crate::detect::detect_with_framework_override(directory.path(), None);
-    assert!(detection.metadata.application_runtime.is_none());
+    assert!(detection.metadata.application_runtime().is_none());
     assert_eq!(
         detection.metadata.runtime.runtime_type,
         crate::detect::types::RuntimeType::Static
@@ -354,10 +766,6 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
                 directory.path(),
             )
             .await;
-            if admitted && witness == Some("node-22") {
-                assert!(result.is_err());
-                continue;
-            }
             let built = result.unwrap().manifest.unwrap();
             let plan = build_source_bundle_plan_with_scan(
                 directory.path(),
@@ -373,7 +781,7 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
                 .as_ref()
                 .unwrap();
             assert_eq!(config["applicationRuntime"]["family"], "NODE");
-            if admitted {
+            if admitted && witness.is_none() {
                 assert_eq!(config["buildRuntimeVersion"], "node-24");
             } else {
                 assert_eq!(
@@ -439,10 +847,58 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
     }
 }
 
+#[test]
+fn sibling_target_exemption_rejects_invalid_targets_and_primary_override() {
+    let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
+        family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
+        entry: Some("server.js".into()),
+        args: vec![],
+        python_version: None,
+    };
+    for (directory, target) in [
+        ("secondary", "node-21"),
+        ("secondary", "node-invalid"),
+        ("secondary", "bun-1.4.2"),
+        (".", "node-22"),
+    ] {
+        let mut manifest = compute_manifest();
+        manifest.layers[0].directory = directory.into();
+        manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
+            application_runtime: Some(declaration.intent()),
+            build_runtime_version: Some(target.into()),
+            ..Default::default()
+        });
+        let error = crate::deploy::apply_application_runtime_manifest(
+            &mut manifest,
+            Some(&declaration),
+            Some("node-24"),
+            "other",
+        )
+        .unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<crate::output::CodedError>()
+                .unwrap()
+                .code
+                .as_str(),
+            "APPLICATION_RUNTIME_INVALID"
+        );
+        assert_eq!(
+            manifest.layers[0]
+                .runtime
+                .as_ref()
+                .unwrap()
+                .build_runtime_version
+                .as_deref(),
+            Some(target)
+        );
+    }
+}
+
 #[tokio::test]
 async fn managed_build_declarations_preserve_frozen_targets_and_static_publication() {
     const CASE: &str = "ONREZA_PYTHON_PRODUCER_SELECTION_TEST";
-    let Ok(selected) = std::env::var(CASE) else {
+    let Ok(_selected) = std::env::var(CASE) else {
         for selected in [
             "python-3.14",
             "python-3.13",
@@ -454,6 +910,9 @@ async fn managed_build_declarations_preserve_frozen_targets_and_static_publicati
             child.args(["--exact", "artifact::source_bundle_v1_tests::managed_build_declarations_preserve_frozen_targets_and_static_publication"]);
             child.env(CASE, selected);
             child.env("PATH", "/nonexistent");
+            child.env("ONREZA_BUILD_RUNTIME_VERSION", "python-3.14");
+            child.env("ONREZA_BUILD_RUNTIME_FAMILY", "python");
+            child.env_remove("ONREZA_BUILD_NODE_MAJOR");
             if selected == "MISSING" {
                 child.env_remove("ONREZA_RUNTIME_VERSION");
             } else {
@@ -470,121 +929,175 @@ async fn managed_build_declarations_preserve_frozen_targets_and_static_publicati
     };
     let directory = tempdir().unwrap();
     fs::write(directory.path().join("main.py"), b"print('hello')").unwrap();
-    let detection = crate::detect::detect_with_framework_override(directory.path(), None);
+    let mut detection = crate::detect::detect_with_framework_override(directory.path(), None);
+    crate::detect::application_runtime::resolve_and_bind_detection(
+        &crate::detect::fs::LocalFs::new(directory.path()),
+        &mut detection,
+    )
+    .unwrap();
+    let context = detection.metadata.source_build_context.clone().unwrap();
+    let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
+        directory.path().to_owned(),
+        nrz::config::ProjectConfig::default(),
+    );
+    effective.apply_platform_runner_settings(&nrz::config::ProjectBuildSettings {
+        source_build_context: Some(context.clone()),
+        ..Default::default()
+    });
+    let result = crate::deploy::validate_application_runtime_before_build(
+        &context,
+        &effective,
+        true,
+        false,
+        &[],
+    )
+    .await;
+    assert_eq!(result.unwrap().as_deref(), Some("python-3.14"));
+    // The serving target remains Node even when compiler and dependency ABI are Python.
+    let node_context = nrz_source_bundle::SourceBuildContext {
+        application_runtime: Some(nrz_source_bundle::ApplicationRuntimeDeclaration {
+            family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
+            python_version: None,
+            entry: Some("server.js".into()),
+            args: vec![],
+        }),
+        ..context.clone()
+    };
+    effective.apply_platform_runner_settings(&nrz::config::ProjectBuildSettings {
+        source_build_context: Some(node_context.clone()),
+        node_version: Some("NODE_24".into()),
+        ..Default::default()
+    });
+    assert_eq!(
+        crate::deploy::validate_application_runtime_before_build(
+            &node_context,
+            &effective,
+            true,
+            false,
+            &[]
+        )
+        .await
+        .unwrap()
+        .as_deref(),
+        Some("node-24")
+    );
+    let mut node_manifest = crate::build::manifest::generate_compute_manifest("server.js");
+    crate::deploy::apply_application_runtime_manifest(
+        &mut node_manifest,
+        node_context.application_runtime.as_ref(),
+        Some("node-24"),
+        "other",
+    )
+    .unwrap();
+    assert_eq!(
+        node_manifest.layers[0]
+            .runtime
+            .as_ref()
+            .unwrap()
+            .build_runtime_version
+            .as_deref(),
+        Some("node-24")
+    );
+
+    // A Python compiler does not supply the serving ABI of typed code-only siblings.
+    fs::write(directory.path().join("index.html"), b"<html></html>").unwrap();
+    fs::write(directory.path().join("server.js"), b"console.log('hello')").unwrap();
     let mut config = nrz::config::ProjectConfig::default();
     config.build.output_dirs = Some(vec![".".into()]);
+    config.build.toolchain = Some(nrz_source_bundle::BuildToolchainFamily::Python);
+    config.deploy.compute = Some("static".into());
+    let mut static_detection =
+        crate::detect::detect_with_framework_override(directory.path(), None);
+    let static_context = crate::detect::application_runtime::resolve_and_bind_source_build_context(
+        &crate::detect::fs::LocalFs::new(directory.path()),
+        &mut static_detection,
+        &config,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(static_context.application_runtime.is_none());
     let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
         directory.path().to_owned(),
         config,
     );
     effective.apply_platform_runner_settings(&nrz::config::ProjectBuildSettings {
-        application_runtime: Some(None),
+        source_build_context: Some(static_context.clone()),
         ..Default::default()
     });
-    let result = crate::deploy::validate_application_runtime_before_build(
-        None,
-        &detection.metadata.runtime,
-        &effective,
-        true,
-        &[],
-    )
-    .await;
-    if selected == "python-3.14" {
-        assert_eq!(result.unwrap().as_deref(), Some("python-3.14"));
-    } else {
-        assert!(result.is_err());
-    }
-    // Implicit JavaScript keeps the Builder selection without inventing a
-    // launcher declaration; static-only publication does not need a runtime.
-    fs::write(directory.path().join("index.html"), b"<html></html>").unwrap();
-    fs::remove_file(directory.path().join("main.py")).unwrap();
-    fs::write(directory.path().join("server.js"), b"console.log('hello')").unwrap();
-    let javascript = crate::detect::detect_with_framework_override(directory.path(), None);
-    assert_eq!(
-        javascript.metadata.runtime.runtime_type,
-        crate::detect::types::RuntimeType::Static
+    assert!(
+        crate::deploy::validate_application_runtime_before_build(
+            &static_context,
+            &effective,
+            true,
+            false,
+            &[]
+        )
+        .await
+        .unwrap()
+        .is_none()
     );
     fs::create_dir(directory.path().join(".onreza")).unwrap();
-    let manifest_path = directory.path().join(".onreza/manifest.json");
-    for (managed, family) in [
-        (true, None),
+    for (family, target) in [
+        (nrz_source_bundle::ApplicationRuntimeFamily::Node, "node-24"),
         (
-            true,
-            Some(nrz_source_bundle::ApplicationRuntimeFamily::Node),
+            nrz_source_bundle::ApplicationRuntimeFamily::Bun,
+            "bun-1.4.2",
         ),
-        (true, Some(nrz_source_bundle::ApplicationRuntimeFamily::Bun)),
-        (false, None),
     ] {
-        let mut manifest = if managed {
-            crate::build::manifest::generate_compute_manifest("server.js")
-        } else {
-            crate::build::manifest::generate_static_manifest()
-        };
-        if managed {
-            manifest.layers[0].runtime =
-                family.map(|family| crate::build::manifest::RuntimeConfig {
-                    application_runtime: Some(nrz_source_bundle::ApplicationRuntimeIntent {
-                        family,
-                        args: vec![],
-                    }),
-                    ..Default::default()
-                });
-        }
-        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
-        let result = crate::build::run_with_effective_config(
+        let mut manifest = crate::build::manifest::generate_compute_manifest("server.js");
+        manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
+            application_runtime: Some(nrz_source_bundle::ApplicationRuntimeIntent {
+                family,
+                args: vec![],
+            }),
+            build_runtime_version: Some(target.into()),
+            ..Default::default()
+        });
+        fs::write(
+            directory.path().join(".onreza/manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let built = crate::build::run_with_effective_config(
             crate::cli::BuildArgs {
                 dir: directory.path().to_string_lossy().into_owned(),
                 skip_validation: false,
             },
             true,
             &effective,
-            Some(&javascript),
+            Some(&static_detection),
             false,
             directory.path(),
         )
-        .await;
-        let permitted = match family {
-            Some(nrz_source_bundle::ApplicationRuntimeFamily::Node) => selected == "node-24",
-            Some(nrz_source_bundle::ApplicationRuntimeFamily::Bun) => selected == "bun-1.4.2",
-            None => matches!(selected.as_str(), "bun-1.4.2" | "node-24"),
-        };
-        if managed && !permitted {
-            assert!(result.is_err());
-            continue;
-        }
-        let manifest = result.unwrap().manifest.unwrap();
-        if managed {
-            let runtime = manifest.layers[0].runtime.as_ref().unwrap();
-            assert_eq!(
-                runtime.build_runtime_version.as_deref(),
-                Some(selected.as_str())
-            );
-            assert_eq!(
-                runtime
-                    .application_runtime
-                    .as_ref()
-                    .map(|intent| intent.family),
-                family
-            );
-            let source = build_source_bundle_plan_with_scan(
-                directory.path(),
-                &manifest,
-                &scan_dir(directory.path()).unwrap(),
-                &RuntimeArtifactScan::NodeRuntimeRoot,
-                RuntimeDependencyPackaging::TrustedMaterialization,
-                None,
-            )
-            .unwrap();
-            assert_eq!(
-                source.logical_manifest.layers[0]
-                    .runtime_config
-                    .as_ref()
-                    .unwrap()["buildRuntimeVersion"],
-                selected
-            );
-        } else {
-            assert!(manifest.layers[0].runtime.is_none());
-        }
+        .await
+        .unwrap();
+        let manifest = built.manifest.unwrap();
+        assert_eq!(
+            manifest.layers[0]
+                .runtime
+                .as_ref()
+                .unwrap()
+                .build_runtime_version
+                .as_deref(),
+            Some(target)
+        );
+        let source = build_source_bundle_plan_with_scan(
+            directory.path(),
+            &manifest,
+            &scan_dir(directory.path()).unwrap(),
+            &RuntimeArtifactScan::NodeRuntimeRoot,
+            RuntimeDependencyPackaging::TrustedMaterialization,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            source.logical_manifest.layers[0]
+                .runtime_config
+                .as_ref()
+                .unwrap()["buildRuntimeVersion"],
+            target
+        );
     }
 }
 
@@ -964,6 +1477,7 @@ fn canonical_logical_manifest_json_matches_source_bundle_v1_golden() {
             priority: Some(10),
             methods: Some(vec!["GET".into(), "POST".into()]),
             fallthrough_when: None,
+            headers: None,
         }],
         entrypoints: vec!["api/handler.js".into()],
     };
@@ -1359,4 +1873,94 @@ fn compute_framework_checks_selected_and_authored_runtime_without_fabricating_in
     )
     .unwrap();
     assert!(manifest.layers[0].runtime.is_none());
+}
+
+#[tokio::test]
+async fn frozen_compiler_probes_static_and_different_serving_families() {
+    const CASE: &str = "ONREZA_COMPILER_PROBE_TEST";
+    let output = std::process::Command::new("node")
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let version = String::from_utf8(output.stdout).unwrap();
+    let actual = version
+        .trim()
+        .strip_prefix('v')
+        .unwrap()
+        .split('.')
+        .next()
+        .unwrap();
+    assert!(matches!(actual, "22" | "24" | "26"));
+    let wrong = if actual == "22" { "24" } else { "22" };
+    let Ok(selected) = std::env::var(CASE) else {
+        for (family, major) in [("node", actual), ("node", wrong), ("bun", wrong)] {
+            let result = tokio::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "artifact::source_bundle_v1_tests::frozen_compiler_probes_static_and_different_serving_families", "--nocapture"])
+                .env(CASE, format!("{family}:{major}"))
+                .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
+                .env("ONREZA_BUILD_RUNTIME_VERSION", if family == "bun" {"bun-1.4.2".into()} else {format!("node-{major}")})
+                .env("ONREZA_BUILD_NODE_MAJOR", major)
+                .output().await.unwrap();
+            assert!(
+                result.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        return;
+    };
+    let (family, major) = selected.split_once(':').unwrap();
+    let directory = tempdir().unwrap();
+    let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
+        directory.path().to_owned(),
+        nrz::config::ProjectConfig::default(),
+    );
+    for serving in [
+        None,
+        Some(nrz_source_bundle::ApplicationRuntimeDeclaration {
+            family: nrz_source_bundle::ApplicationRuntimeFamily::Bun,
+            python_version: None,
+            entry: Some("server.js".into()),
+            args: vec![],
+        }),
+    ] {
+        let context = nrz_source_bundle::SourceBuildContext {
+            schema_version: 1,
+            build_toolchain: nrz_source_bundle::BuildToolchainDeclaration {
+                family: if family == "bun" {
+                    nrz_source_bundle::BuildToolchainFamily::Bun
+                } else {
+                    nrz_source_bundle::BuildToolchainFamily::Node
+                },
+                python_version: None,
+            },
+            application_runtime: serving,
+        };
+        effective.apply_platform_runner_settings(&nrz::config::ProjectBuildSettings {
+            node_version: Some(format!("NODE_{major}")),
+            source_build_context: Some(context.clone()),
+            ..Default::default()
+        });
+        let result = crate::deploy::validate_application_runtime_before_build(
+            &context,
+            &effective,
+            true,
+            false,
+            &[],
+        )
+        .await;
+        if major == actual {
+            assert!(result.is_ok(), "{result:?}");
+        } else {
+            assert!(
+                result
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("does not match selected node-")
+            );
+        }
+    }
 }

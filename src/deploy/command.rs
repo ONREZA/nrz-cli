@@ -14,6 +14,24 @@ pub(super) fn resolve_build_command(
     if let Some(setting) = effective.build_command() {
         return setting.value().map(str::to_string);
     }
+    if uses_python_recipe(project_dir, effective) {
+        // Python own-package building belongs to its installer, not incidental
+        // package.json scripts. Authored commands above retain authority.
+        return None;
+    }
+    if uses_native_recipe(project_dir, effective)
+        && crate::detect::native::native_recipe(
+            &crate::detect::detect_with_framework_override(
+                project_dir,
+                effective.framework_override(),
+            )
+            .framework,
+        )
+        .is_some()
+    {
+        // Native defaults execute through their typed recipe, never package.json tooling.
+        return None;
+    }
     // Only auto-detect if package.json has a "build" script
     let pkg = crate::detect::package_json::PackageJson::load(project_dir)?;
     if !pkg.scripts.contains_key("build") {
@@ -380,6 +398,7 @@ fn build_log_phase(phase: output::Phase) -> BuildLogPhase {
     }
 }
 
+/// Return true only when a nonempty authored install command completed.
 pub(super) async fn run_install_step(
     project_dir: &Path,
     json: bool,
@@ -387,15 +406,79 @@ pub(super) async fn run_install_step(
     execution_env: &[(String, String)],
     build_logs: Option<&BuildLogEmitter>,
     platform_runner: bool,
-) -> anyhow::Result<()> {
-    let is_python =
-        crate::detect::detect_with_framework_override(project_dir, effective.framework_override())
-            .metadata
-            .runtime
-            .runtime_type
-            == crate::detect::types::RuntimeType::Python;
-    if is_python {
-        let target = project_dir.join(crate::artifact::PYTHON_SITE_PACKAGES_ROOT);
+) -> anyhow::Result<bool> {
+    let detection =
+        crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
+    if uses_native_recipe(project_dir, effective)
+        && let Some(recipe) = crate::detect::native::native_recipe(&detection.framework)
+        && super::native_build::default_command(None, effective.install_command())
+    {
+        let Some(mut command) = super::native_build::install_command(project_dir, recipe)? else {
+            return Ok(false);
+        };
+        super::native_build::validate_compiler_before_execution(
+            recipe,
+            platform_runner,
+            execution_env,
+        )
+        .await?;
+        super::native_build::select_platform_program(&mut command, platform_runner);
+        let lock = std::fs::read(project_dir.join("pubspec.lock"))?;
+        let display = command.display();
+        output::status(
+            json,
+            ">",
+            format!("Installing dependencies: {display}"),
+            output::Phase::Deploy,
+        );
+        if let Some(build_logs) = build_logs {
+            build_logs.info(
+                BuildLogPhase::Install,
+                &format!("Installing dependencies: {display}"),
+            );
+        }
+        let result = run_program_streaming(
+            Path::new(&command.program),
+            &command
+                .arguments
+                .iter()
+                .map(std::ffi::OsString::from)
+                .collect::<Vec<_>>(),
+            &display,
+            StreamingCommandContext {
+                project_dir,
+                json,
+                phase: output::Phase::Install,
+                child_stream: "debug",
+                extra_env: execution_env,
+                build_logs,
+            },
+        );
+        if std::fs::read(project_dir.join("pubspec.lock"))? != lock {
+            bail!(
+                "Pub install modified pubspec.lock; review and commit the lockfile before deploying"
+            );
+        }
+        result?;
+        if recipe == crate::detect::native::NativeRecipe::DartServer
+            && !platform_runner
+            && std::env::consts::OS != "linux"
+        {
+            super::native_build::ensure_no_native_hooks(project_dir)?;
+        }
+        output::success(json, "Dependencies installed", output::Phase::Deploy);
+        return Ok(false);
+    }
+    let build_toolchain = selected_build_toolchain(project_dir, effective)?;
+    let python_recipe = build_toolchain.family == nrz_source_bundle::BuildToolchainFamily::Python;
+    let python_recipe = python_recipe && authored_install_setting(effective).is_none();
+    let python_minor = build_toolchain.resolved_python_minor().unwrap_or_default();
+    if python_recipe {
+        let target = project_dir.join(python_minor.site_packages_root());
+        super::python_toolchain::ensure_python_directory(
+            project_dir,
+            target.parent().context("invalid Python dependency path")?,
+        )?;
         match std::fs::remove_dir_all(&target) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -409,22 +492,18 @@ pub(super) async fn run_install_step(
             }
         }
     }
-    if is_python {
-        let Some(manifest) = crate::detect::python::dependency_manifest(
-            &crate::detect::fs::LocalFs::new(project_dir),
-        ) else {
-            return Ok(());
-        };
+    if python_recipe {
         let mode = if platform_runner {
             super::python_toolchain::PythonInstallMode::PinnedPlatform
         } else {
             super::python_toolchain::PythonInstallMode::ManagedLocal
         };
-        let mut install = super::python_toolchain::install_command(
-            manifest,
+        let installs = super::python_toolchain::install_commands(
+            project_dir,
             mode,
             std::env::consts::OS,
             std::env::consts::ARCH,
+            python_minor,
         )
         .map_err(|error| {
             output::coded_error(
@@ -432,49 +511,65 @@ pub(super) async fn run_install_step(
                 format!("cannot prepare Python dependencies: {error:#}"),
             )
         })?;
-        if mode == super::python_toolchain::PythonInstallMode::ManagedLocal {
-            install.program = super::python_toolchain::resolve().await.map_err(|error| {
+        if installs.is_empty() {
+            return Ok(false);
+        }
+        let uv = super::python_toolchain::resolve_for(mode)
+            .await
+            .map_err(|error| {
                 output::coded_error(
                     "PYTHON_TOOLCHAIN_UNAVAILABLE",
                     format!("failed to prepare managed Python toolchain: {error:#}"),
                 )
             })?;
-        }
-        let display = install.display;
-        output::status(
-            json,
-            ">",
-            format!("Installing dependencies: {display}"),
-            output::Phase::Deploy,
-        );
-        if let Some(build_logs) = build_logs {
-            build_logs.info(
-                BuildLogPhase::Install,
-                &format!("Installing dependencies: {display}"),
-            );
-        }
-        run_program_streaming(
-            &install.program,
-            &install.arguments,
-            &display,
-            StreamingCommandContext {
-                project_dir,
+        for install in installs {
+            if let Some(directory) = &install.portable_wheel_directory {
+                super::python_toolchain::qualify_portable_application_wheels(
+                    project_dir,
+                    directory,
+                )
+                .map_err(|error| {
+                    output::coded_error(
+                        "PYTHON_PLATFORM_UNSUPPORTED",
+                        format!("cannot qualify Python application wheel: {error:#}"),
+                    )
+                })?;
+            }
+            let display = &install.display;
+            output::status(
                 json,
-                phase: output::Phase::Install,
-                child_stream: "debug",
-                extra_env: execution_env,
-                build_logs,
-            },
-        )?;
+                ">",
+                format!("Installing dependencies: {display}"),
+                output::Phase::Deploy,
+            );
+            if let Some(build_logs) = build_logs {
+                build_logs.info(
+                    BuildLogPhase::Install,
+                    &format!("Installing dependencies: {display}"),
+                );
+            }
+            run_process_streaming(
+                install.process(&uv, execution_env),
+                display,
+                StreamingCommandContext {
+                    project_dir,
+                    json,
+                    phase: output::Phase::Install,
+                    child_stream: "debug",
+                    extra_env: &[],
+                    build_logs,
+                },
+            )?;
+        }
         output::success(json, "Dependencies installed", output::Phase::Deploy);
         if let Some(build_logs) = build_logs {
             build_logs.info(BuildLogPhase::Install, "Dependencies installed");
         }
-        return Ok(());
+        return Ok(false);
     }
 
     let Some(cmd) = resolve_install_command(project_dir, effective) else {
-        return Ok(());
+        return Ok(false);
     };
     if is_recursive_deploy_command(&cmd) {
         return Err(output::coded_error(
@@ -518,7 +613,7 @@ pub(super) async fn run_install_step(
     if let Some(build_logs) = build_logs {
         build_logs.info(BuildLogPhase::Install, "Dependencies installed");
     }
-    Ok(())
+    Ok(authored_install_setting(effective).is_some())
 }
 
 pub(super) fn merge_command_environment(
@@ -538,25 +633,69 @@ pub(super) fn remove_private_cli_environment(command: &mut std::process::Command
     }
 }
 
+fn selected_build_toolchain(
+    project_dir: &Path,
+    effective: &EffectiveProjectConfig,
+) -> anyhow::Result<nrz_source_bundle::BuildToolchainDeclaration> {
+    if let Some(context) = effective.platform_source_build_context() {
+        return Ok(context.build_toolchain.clone());
+    }
+    let detection =
+        crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
+    crate::detect::application_runtime::resolve_build_toolchain(&detection, effective.config())
+}
+
+fn uses_python_recipe(project_dir: &Path, effective: &EffectiveProjectConfig) -> bool {
+    selected_build_toolchain(project_dir, effective)
+        .is_ok_and(|build| build.family == nrz_source_bundle::BuildToolchainFamily::Python)
+}
+
+fn uses_native_recipe(project_dir: &Path, effective: &EffectiveProjectConfig) -> bool {
+    selected_build_toolchain(project_dir, effective)
+        .is_ok_and(|build| build.family == nrz_source_bundle::BuildToolchainFamily::Native)
+}
+
+fn authored_install_setting(
+    effective: &EffectiveProjectConfig,
+) -> Option<&nrz::config::SourceAwareSetting> {
+    effective.install_command().filter(|setting| {
+        setting.source_or_preset().is_user_explicit()
+            || setting.source.is_none() && setting.value().is_some()
+    })
+}
+
 pub(super) fn resolve_install_command(
     project_dir: &Path,
     effective: &EffectiveProjectConfig,
 ) -> Option<String> {
-    if crate::detect::detect_with_framework_override(project_dir, effective.framework_override())
-        .metadata
-        .runtime
-        .runtime_type
-        == crate::detect::types::RuntimeType::Python
-    {
-        let fs = crate::detect::fs::LocalFs::new(project_dir);
-        return crate::detect::python::dependency_manifest(&fs)
-            .map(crate::detect::python::install_command);
+    if let Some(setting) = authored_install_setting(effective) {
+        return setting.value().map(str::to_string);
     }
-    // Priority for shell-driven runtimes: effective config command > auto-detect
-    // from package manager. Python dependencies are always owned by the
-    // manifest/materializer boundary above and never by a retained shell command.
+    if uses_python_recipe(project_dir, effective) {
+        let fs = crate::detect::fs::LocalFs::new(project_dir);
+        let minor = selected_build_toolchain(project_dir, effective)
+            .ok()?
+            .resolved_python_minor()?;
+        return crate::detect::python::dependency_manifest(&fs)
+            .map(|manifest| crate::detect::python::install_command_for_minor(manifest, minor));
+    }
+    // Python defaults execute through the manifest recipe above; authored
+    // commands retain authority. Shell-driven runtimes use the frozen command
+    // before falling back to local package-manager detection.
     if let Some(setting) = effective.install_command() {
         return setting.value().map(str::to_string);
+    }
+    if uses_native_recipe(project_dir, effective)
+        && crate::detect::native::native_recipe(
+            &crate::detect::detect_with_framework_override(
+                project_dir,
+                effective.framework_override(),
+            )
+            .framework,
+        )
+        .is_some()
+    {
+        return None;
     }
     if !project_dir.join("package.json").exists() {
         return None;
@@ -579,6 +718,94 @@ pub(super) fn prepare_install_command(
     _json: bool,
 ) -> (String, Vec<(String, String)>) {
     (cmd.to_string(), Vec::new())
+}
+
+pub(super) async fn run_native_build_step(
+    plan: &super::native_build::NativeBuildPlan,
+    recipe: crate::detect::native::NativeRecipe,
+    project_dir: &Path,
+    json: bool,
+    execution_env: &[(String, String)],
+    build_logs: Option<&BuildLogEmitter>,
+    platform_runner: bool,
+) -> anyhow::Result<()> {
+    use crate::detect::native::NativeRecipe;
+    let environment = merge_command_environment(execution_env, &plan.environment);
+    super::native_build::validate_compiler_before_execution(recipe, platform_runner, &environment)
+        .await?;
+    if matches!(recipe, NativeRecipe::DartServer | NativeRecipe::FlutterWeb)
+        && !project_dir.join(".dart_tool/package_config.json").is_file()
+    {
+        bail!(
+            "Pub dependencies are not materialized; run the locked install step or remove --skip-install"
+        );
+    }
+    if recipe == NativeRecipe::DartServer && !platform_runner && std::env::consts::OS != "linux" {
+        super::native_build::ensure_no_native_hooks(project_dir)?;
+    }
+    let mut command = plan.build.clone();
+    let go_inputs = if recipe == NativeRecipe::GoServer {
+        Some(super::native_build::GoModuleInputs::freeze(
+            project_dir,
+            &mut command,
+        )?)
+    } else {
+        None
+    };
+    let pub_lock = matches!(recipe, NativeRecipe::DartServer | NativeRecipe::FlutterWeb)
+        .then(|| std::fs::read(project_dir.join("pubspec.lock")))
+        .transpose()?;
+    super::plan::clear_native_build_output(project_dir, &plan.output_directory)?;
+    let hugo_inputs = if recipe == NativeRecipe::HugoStatic {
+        Some(super::native_build::HugoModuleInputs::freeze(
+            project_dir,
+            &mut command,
+        )?)
+    } else {
+        None
+    };
+    super::native_build::select_platform_program(&mut command, platform_runner);
+    let display = command.display();
+    output::status(
+        json,
+        ">",
+        format!("Building: {display}"),
+        output::Phase::Deploy,
+    );
+    if let Some(build_logs) = build_logs {
+        build_logs.info(BuildLogPhase::Build, &format!("Building: {display}"));
+    }
+    let result = run_program_streaming(
+        Path::new(&command.program),
+        &command
+            .arguments
+            .iter()
+            .map(std::ffi::OsString::from)
+            .collect::<Vec<_>>(),
+        &display,
+        StreamingCommandContext {
+            project_dir,
+            json,
+            phase: output::Phase::Build,
+            child_stream: "user",
+            extra_env: &environment,
+            build_logs,
+        },
+    );
+    if let Some(inputs) = go_inputs {
+        inputs.verify()?;
+    }
+    if let Some(inputs) = hugo_inputs {
+        inputs.verify()?;
+    }
+    if let Some(lock) = pub_lock
+        && std::fs::read(project_dir.join("pubspec.lock"))? != lock
+    {
+        bail!(
+            "native build modified pubspec.lock; review and commit the lockfile before deploying"
+        );
+    }
+    result
 }
 
 pub(super) fn run_build_step(

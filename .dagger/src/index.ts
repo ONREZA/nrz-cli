@@ -109,18 +109,53 @@ export class NrzCli {
       .withExec(["sh", "-ceu", "cd .dagger && bun run typecheck && bun test scripts"])
       .sync();
 
+    const mise = Bun.TOML.parse(await source.file("mise.toml").contents()) as {
+      tools?: Record<string, unknown>;
+    };
+    const cargoDenyVersion = mise.tools?.["aqua:EmbarkStudios/cargo-deny"];
+    if (typeof cargoDenyVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(cargoDenyVersion)) {
+      throw new Error("mise.toml must pin an exact cargo-deny version");
+    }
+    const cargoDeny = dag.container().from(ALPINE_IMAGE)
+      .withExec(["apk", "add", "--no-cache", "curl"])
+      .withEnvVariable("CARGO_DENY_VERSION", cargoDenyVersion)
+      .withExec([
+        "sh", "-ceu",
+        [
+          'arch="$(uname -m)"',
+          'case "$arch" in x86_64|aarch64) ;; *) echo "unsupported cargo-deny architecture: $arch" >&2; exit 1;; esac',
+          'archive="cargo-deny-$CARGO_DENY_VERSION-$arch-unknown-linux-musl.tar.gz"',
+          'url="https://github.com/EmbarkStudios/cargo-deny/releases/download/$CARGO_DENY_VERSION/$archive"',
+          "mkdir -p /tmp/cargo-deny /out",
+          "cd /tmp/cargo-deny",
+          'curl -fsSL "$url" -o "$archive"',
+          'curl -fsSL "$url.sha256" -o "$archive.sha256"',
+          'printf "%s  %s\\n" "$(cat "$archive.sha256")" "$archive" | sha256sum -c -',
+          'tar -xzf "$archive" --strip-components=1 -C /out',
+          "chmod 0755 /out/cargo-deny",
+          'test "$(/out/cargo-deny --version)" = "cargo-deny $CARGO_DENY_VERSION"',
+        ].join("\n"),
+      ])
+      .file("/out/cargo-deny");
+    const toolchains = JSON.parse(
+      await source.file("crates/nrz-source-bundle/assets/runtime-toolchains.json").contents(),
+    );
+    const nodeMajors: unknown = toolchains.node?.supported;
+    // Platform handoff fixtures freeze Node 24.
+    const nodeMajor = 24;
+    if (!Array.isArray(nodeMajors) || !nodeMajors.includes(nodeMajor)) {
+      throw new Error(`Runtime toolchain catalog does not qualify CI Node ${nodeMajor}`);
+    }
     let ctr = rustContainer(source)
-      .withFile("/usr/local/bin/bun", dag.container().from(BUN_IMAGE).file("/usr/local/bin/bun"));
-    ctr = ctr.withExec([
-      "sh",
-      "-ceu",
-      [
-        "apt-get update",
-        "apt-get install -y --no-install-recommends nodejs npm",
-        "rm -rf /var/lib/apt/lists/*",
-      ].join("\n"),
-    ]);
+      .withFile("/usr/local/bin/cargo-deny", cargoDeny)
+      .withFile("/usr/local/bin/bun", dag.container().from(BUN_IMAGE).file("/usr/local/bin/bun"))
+      .withMountedDirectory(
+        "/opt/node",
+        dag.container().from(`node:${nodeMajor}-bookworm`).directory("/usr/local"),
+      )
+      .withEnvVariable("PATH", "/opt/node/bin:$PATH", { expand: true });
     ctr = ctr.withExec(["rustup", "component", "add", "rustfmt", "clippy"]);
+    ctr = ctr.withExec(["cargo", "deny", "check", "licenses"]);
     ctr = ctr.withExec(["cargo", "test", "--locked", "--workspace", "--features", "nrz-contract/codegen"]);
     ctr = ctr.withExec(["cargo", "fmt", "--all", "--check"]);
     ctr = ctr.withExec(["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--features", "nrz-contract/codegen", "--no-deps", "--", "-D", "warnings"]);
@@ -223,7 +258,7 @@ export class NrzCli {
    * Package a native nrz binary into the release archive contract.
    */
   @func()
-  packagePlatform(binary: File, platform: string): File {
+  packagePlatform(binary: File, platform: string, notices: File, license: File): File {
     requirePlatform(platform);
     const executable = binName(platform);
     const mode = platform === "win32-x64" ? "0644" : "0755";
@@ -231,6 +266,8 @@ export class NrzCli {
       .container()
       .from(ALPINE_IMAGE)
       .withMountedFile(`/input/${executable}`, binary)
+      .withMountedFile("/input/THIRD_PARTY_NOTICES", notices)
+      .withMountedFile("/input/LICENSE", license)
       .withExec([
         "sh",
         "-ceu",
@@ -239,6 +276,10 @@ export class NrzCli {
           `mkdir -p /out/archive/${platform}`,
           `cp /input/${executable} /out/archive/${platform}/${executable}`,
           `chmod ${mode} /out/archive/${platform}/${executable}`,
+          `cp /input/THIRD_PARTY_NOTICES /out/archive/${platform}/THIRD_PARTY_NOTICES`,
+          `chmod 0644 /out/archive/${platform}/THIRD_PARTY_NOTICES`,
+          `cp /input/LICENSE /out/archive/${platform}/LICENSE`,
+          `chmod 0644 /out/archive/${platform}/LICENSE`,
           `find /out/archive/${platform} -exec touch -h -d @0 {} +`,
           `tar --numeric-owner -cf - -C /out/archive ${platform} | gzip -c > /out/${releaseAssetName(platform)}`,
         ].join("\n"),
@@ -250,11 +291,13 @@ export class NrzCli {
    * Package all native build artifacts downloaded from GitHub Actions.
    */
   @func()
-  packageReleaseArtifacts(binaries: Directory): Directory {
+  packageReleaseArtifacts(binaries: Directory, notices: File, license: File): Directory {
     return dag
       .container()
       .from(ALPINE_IMAGE)
       .withDirectory("/input", binaries)
+      .withMountedFile("/input/THIRD_PARTY_NOTICES", notices)
+      .withMountedFile("/input/LICENSE", license)
       .withExec([
         "sh",
         "-ceu",
@@ -269,6 +312,10 @@ export class NrzCli {
           "  mkdir -p \"/out/archive/$platform\"",
           "  cp \"$src\" \"/out/archive/$platform/$binary\"",
           "  chmod \"$mode\" \"/out/archive/$platform/$binary\"",
+          '  cp /input/THIRD_PARTY_NOTICES "/out/archive/$platform/THIRD_PARTY_NOTICES"',
+          '  chmod 0644 "/out/archive/$platform/THIRD_PARTY_NOTICES"',
+          '  cp /input/LICENSE "/out/archive/$platform/LICENSE"',
+          '  chmod 0644 "/out/archive/$platform/LICENSE"',
           "  find \"/out/archive/$platform\" -exec touch -h -d @0 {} +",
           "  tar --numeric-owner -cf - -C /out/archive \"$platform\" | gzip -c > \"/out/nrz-$platform.tar.gz\"",
           "done",

@@ -201,6 +201,104 @@ fn preflight_accepts_application_ownership_before_dependencies_are_materialized(
 }
 
 #[test]
+fn preflight_preserves_typed_serving_targets_for_python_native_and_mixed_layers() {
+    let mut failures = Vec::new();
+    for target in [
+        "python-3.12",
+        "python-3.13",
+        "python-3.14",
+        "native-linux-x86_64-glibc",
+    ] {
+        let python = target.starts_with("python-");
+        let mut source = manifest("server");
+        source.layers[0].runtime_config = Some(json!({
+            "applicationRuntime":{"family":if python { "PYTHON" } else { "EXECUTABLE" },"args":["literal argument"]},
+            "buildRuntimeVersion":target,
+            "isBinaryEntry":!python
+        }));
+        if python {
+            source.layers[0].runtime_config.as_mut().unwrap()["runtimeFamily"] = json!("PYTHON");
+        }
+        assert!(
+            nrz_runtime_artifact::source_layer_launch_for_target(
+                source.layers[0].runtime_config.as_ref(),
+                Some("bun-1.4.2"),
+            )
+            .is_err(),
+            "source witness cannot admit a different final target"
+        );
+        for mixed in [false, true] {
+            if mixed {
+                let mut node = source.layers[0].clone();
+                node.name = "node".into();
+                node.root_path = Some("node".into());
+                node.entrypoint = Some("node/main.js".into());
+                node.runtime_config = Some(json!({
+                    "applicationRuntime":{"family":"NODE","args":[]},
+                    "buildRuntimeVersion":"node-24"
+                }));
+                source.layers.push(node);
+                let mut file = source.files[0].clone();
+                file.path = "node/main.js".into();
+                file.layer_name = Some("node".into());
+                source.files.push(file);
+            }
+            if let Err(error) = validate_source_bundle_application_graph(
+                &"a".repeat(64),
+                &"b".repeat(64),
+                1024,
+                &source,
+            ) {
+                failures.push(format!("{target} mixed={mixed}: {error}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn preflight_validates_typed_targets_without_attesting_the_final_admitted_target() {
+    let mut source = manifest("server");
+    source.layers[0].runtime_config = Some(json!({"buildRuntimeVersion":"node-22"}));
+    validate_source_bundle_application_graph(&"a".repeat(64), &"b".repeat(64), 1024, &source)
+        .unwrap();
+    // Unresolved Node keeps its target-independent ownership preflight; final
+    // materialization still rejects it until a trusted target is supplied.
+    source.layers[0].runtime_config = Some(json!({
+        "applicationRuntime":{"family":"NODE","args":[]}
+    }));
+    validate_source_bundle_application_graph(&"a".repeat(64), &"b".repeat(64), 1024, &source)
+        .unwrap();
+    assert!(
+        nrz_runtime_artifact::source_layer_launch_for_target(
+            source.layers[0].runtime_config.as_ref(),
+            None,
+        )
+        .is_err()
+    );
+    for (family, target) in [
+        ("PYTHON", "python-3.11"),
+        ("EXECUTABLE", "node-24"),
+        ("NODE", "python-3.12"),
+    ] {
+        source.layers[0].runtime_config = Some(json!({
+            "applicationRuntime":{"family":family,"args":[]},
+            "buildRuntimeVersion":target
+        }));
+        assert!(
+            validate_source_bundle_application_graph(
+                &"a".repeat(64),
+                &"b".repeat(64),
+                1024,
+                &source,
+            )
+            .is_err(),
+            "preflight accepted incompatible {family}/{target}"
+        );
+    }
+}
+
+#[test]
 fn preflight_rejects_dependency_files_owned_by_an_unknown_compute_layer() {
     let error = validate_source_bundle_application_graph(
         &"a".repeat(64),
