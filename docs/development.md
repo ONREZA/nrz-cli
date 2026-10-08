@@ -2,14 +2,15 @@
 
 ## CLI and framework adapters
 
-Clone this public repository and install the pinned tools with `mise install`.
+Clone this public repository and install the pinned tools with `proto install`,
+then run `proto run moon -- setup` for Rust components and pinned Cargo binaries.
 The CLI, detection, framework adapters, generated SDK and shared Rust libraries
 build from this checkout. Ordinary development and fixture tests run locally without an ONREZA account.
 
 ```sh
 cargo run -- detect --dir /path/to/project --json
 cargo test --locked --workspace
-mise run check
+proto run moon -- run workspace:check
 ```
 
 Detection lives under `src/detect`, build orchestration under `src/build`, and
@@ -19,6 +20,50 @@ assert its detection/build output when introducing a framework. Keep framework
 behavior in these public modules; server-side publication consumes their typed
 artifacts.
 
+## Toolchain and quality gates
+
+`.prototools` pins Proto-managed runtimes and tools. `.moon/toolchains.yml` pins
+Cargo binaries, including cargo-deny, Cocogitto and cargo-mutants. Moon owns the
+task graph in `moon.yml`; local hooks and CI use the same tasks. Dagger reads
+Rust/Bun image versions from `.prototools` and cargo-deny from the Moon toolchain,
+so container checks use the same pins as local development.
+
+Moon caches static checks by their declared inputs. Tests, duplicate detection
+and mutation testing always run: their results must not be reused from the task
+cache. Cargo build dependencies and Proto downloads remain cached. Local cache,
+`node_modules` and mutation reports are ignored by Git and Dagger source uploads.
+
+```sh
+proto run moon -- run workspace:hooks
+proto run moon -- run workspace:check
+proto run moon -- run workspace:cpd
+proto run moon -- run workspace:mutants
+```
+
+The duplicate gate uses jscpd with a minimum of eight lines and 80 tokens.
+Existing duplication has a reviewed baseline; every new clone fails the gate.
+Refactor new duplication instead of refreshing the baseline to make a check pass.
+Use `workspace:cpd-baseline` only for an explicit, reviewed baseline update.
+
+cargo-mutants mutates handwritten production Rust; generated models retain their
+drift checks. It runs the baseline tests before mutations and fails on surviving
+or timed-out mutants. The full workspace run is expensive (roughly 9,700 mutations)
+and is intended for manual runs. The full GitHub workflow has a six-hour timeout;
+it may need several shards to finish on this workspace. For example:
+
+```sh
+proto run moon -- run workspace:mutants -- --shard 1/16
+```
+
+Run every shard from `1/16` to `16/16` to check the full workspace. Pull request CI checks mutations
+in changed lines using `--in-diff`; it does not replace the full test suite or
+claim a clean result for unchanged code. Inspect reports in `.cache/mutants.out` when a
+mutation gate fails.
+
+A diff containing only tests, generated code or no mutatable Rust produces no
+mutations; cargo-mutants may skip its baseline in that case. The ordinary
+`workspace:check` gate still runs the required test suite.
+
 ## Generated contracts
 
 The complete inputs needed by the CLI are included in this repository:
@@ -26,10 +71,10 @@ The complete inputs needed by the CLI are included in this repository:
 Use them to regenerate or test the SDK and artifact models:
 
 ```sh
-mise run api:generate
-mise run api:check
-mise run contracts:generate
-mise run contracts:check
+proto run moon -- run workspace:api-generate
+proto run moon -- run workspace:api-check
+proto run moon -- run workspace:contracts-generate
+proto run moon -- run workspace:contracts-check
 cargo test --locked -p nrz-api -p nrz-contract
 ```
 

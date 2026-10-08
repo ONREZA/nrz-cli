@@ -14,8 +14,8 @@ The selected OpenAPI and operation inventory are committed here. Regenerate and
 verify them from this checkout:
 
 ```sh
-mise run api:generate
-mise run api:check
+proto run moon -- run workspace:api-generate
+proto run moon -- run workspace:api-check
 cargo test --locked -p nrz-api
 ```
 

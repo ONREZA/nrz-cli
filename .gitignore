@@ -1,6 +1,11 @@
 /target
 /node_modules
 /.cache
+/.moon/cache
+/.proto/tools
+/.jscpd
+/mutants.out
+/mutants.out.old
 
 # Generated files
 RELEASE_NOTES.md

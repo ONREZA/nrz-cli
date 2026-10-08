@@ -153,13 +153,16 @@ See [the contributor guide](docs/development.md) for local development of
 detection, framework adapters, generated contracts and Functions inspection.
 
 ```bash
-mise install                   # install pinned local tools
-mise run hooks                 # install git hooks (lefthook)
-mise run fmt                   # format Rust code
-mise run clippy                # strict lint
-mise run test                  # all tests
-mise run check                 # standard local quality gate
-cargo build --release          # release build
+proto install                                  # install pinned tools
+proto run moon -- setup                         # install Rust components and Cargo tools
+proto run moon -- run workspace:hooks            # install git hooks (lefthook)
+proto run moon -- run workspace:fmt              # format Rust code
+proto run moon -- run workspace:clippy           # strict lint
+proto run moon -- run workspace:test             # all tests
+proto run moon -- run workspace:check            # standard local quality gate
+proto run moon -- run workspace:cpd              # reject new duplicate code
+proto run moon -- run workspace:mutants          # full mutation test (long-running)
+cargo build --release                          # release build
 bun .dagger/scripts/capture-git-metadata.ts
 dagger call release-metadata --source=. --git-metadata=.nrz-release/git.json --channel=beta --bump=minor
 ```

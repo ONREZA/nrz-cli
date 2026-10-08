@@ -23,8 +23,8 @@ The versioned schemas used by these crates are included in
 `nrz-contract/schemas`. Generate and validate the Rust models locally:
 
 ```sh
-mise run contracts:generate
-mise run contracts:check
+proto run moon -- run workspace:contracts-generate
+proto run moon -- run workspace:contracts-check
 cargo test --locked --workspace --features nrz-contract/codegen
 ```
 

@@ -1,0 +1,21 @@
+# Mutate handwritten production code; generated contracts have drift checks.
+exclude_globs = [
+  "api/client/src/generated/**",
+  "crates/nrz-contract/src/generated.rs",
+  "**/*_tests.rs",
+  "**/*_tests/**",
+  "**/tests/**",
+]
+
+# Shared crates are exercised through CLI and other workspace consumers too.
+test_workspace = true
+features = ["nrz-contract/codegen"]
+additional_cargo_args = ["--locked"]
+
+# The ordinary target directory can be tens of GB; use isolated builds.
+copy_target = false
+gitignore = true
+output = ".cache"
+timeout_multiplier = 3.0
+build_timeout_multiplier = 3.0
+minimum_test_timeout = 60.0

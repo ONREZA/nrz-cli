@@ -11,6 +11,9 @@
     "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
-    "prepare": "lefthook install || echo 'Install lefthook with mise: mise install && mise run hooks'"
+    "prepare": "lefthook install || echo 'Install hooks: proto run moon -- run workspace:hooks'"
+  },
+  "devDependencies": {
+    "jscpd": "5.4.0"
   }
 }

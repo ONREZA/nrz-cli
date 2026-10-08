@@ -4,7 +4,7 @@
 commit-msg:
   commands:
     cocogitto:
-      run: cog verify --file {1}
+      run: proto run moon -- run workspace:commits-verify -- {1}
       fail_text: |
         Commit message does not follow Conventional Commits format.
 
@@ -14,17 +14,11 @@ commit-msg:
 pre-commit:
   parallel: false
   commands:
-    fmt:
-      run: cargo fmt -- {staged_files}
-      glob: "**/*.rs"
-      stage_fixed: true
-    clippy:
-      run: cargo clippy -- -D warnings
-      glob: "**/*.rs"
+    check:
+      run: proto run moon -- run workspace:verify-commit
 
 pre-push:
   parallel: false
   commands:
-    test:
-      run: cargo test
-      glob: "*.rs"
+    check:
+      run: proto run moon -- run workspace:check

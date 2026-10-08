@@ -6,8 +6,6 @@ import {
   releaseAssetName,
 } from "../scripts/release-assets";
 
-const RUST_IMAGE = "rust:1.98-bookworm";
-const BUN_IMAGE = "oven/bun:1.4.2-debian";
 const ALPINE_IMAGE = "alpine:3.20";
 const PLATFORMS = new Set<string>(RELEASE_PLATFORMS);
 const CHANNELS = new Set(["stable", "beta"]);
@@ -28,10 +26,19 @@ function binName(platform: ReleasePlatform): string {
   return platform === "win32-x64" ? "nrz.exe" : "nrz";
 }
 
-function rustContainer(source: Directory) {
+async function toolVersion(source: Directory, tool: "rust" | "bun"): Promise<string> {
+  const pins = Bun.TOML.parse(await source.file(".prototools").contents()) as Record<string, unknown>;
+  const version = pins[tool];
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`.prototools must pin an exact ${tool} version`);
+  }
+  return version;
+}
+
+async function rustContainer(source: Directory) {
   return dag
     .container()
-    .from(RUST_IMAGE)
+    .from(`rust:${await toolVersion(source, "rust")}-bookworm`)
     .withMountedCache("/usr/local/cargo/registry", dag.cacheVolume("nrz-cargo-registry"))
     .withMountedCache("/usr/local/cargo/git", dag.cacheVolume("nrz-cargo-git"))
     .withMountedCache("/work/target", dag.cacheVolume("nrz-cargo-target"))
@@ -42,12 +49,15 @@ function rustContainer(source: Directory) {
     .withEnvVariable("CARGO_TERM_COLOR", "always");
 }
 
-function bunContainer(source: Directory) {
-  return dag.container().from(BUN_IMAGE).withDirectory("/work", source).withWorkdir("/work");
+async function bunContainer(source: Directory) {
+  return dag.container()
+    .from(`oven/bun:${await toolVersion(source, "bun")}-debian`)
+    .withDirectory("/work", source)
+    .withWorkdir("/work");
 }
 
-function bunDevContainer(source: Directory) {
-  return bunContainer(source)
+async function bunDevContainer(source: Directory) {
+  return (await bunContainer(source))
     .withExec(["sh", "-ceu", "apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*"])
     .withMountedCache("/root/.bun/install/cache", dag.cacheVolume("nrz-bun-install-cache"))
     .withExec(["sh", "-ceu", "cd .dagger && bun install --frozen-lockfile"]);
@@ -64,14 +74,15 @@ export class NrzCli {
   async contracts(
     @argument({
       ignore: [
-        ".cache", "target", "**/target", "node_modules", "**/node_modules",
+        ".cache", ".moon/cache", ".jscpd", "mutants.out", "mutants.out.old",
+        "target", "**/target", "node_modules", "**/node_modules",
         "dist", "dist-archive", ".dagger/sdk", ".nrz-release", ".env", ".env.*",
       ],
     })
     source: Directory,
   ): Promise<string> {
-    await rustContainer(source)
-      .withFile("/usr/local/bin/bun", dag.container().from(BUN_IMAGE).file("/usr/local/bin/bun"))
+    await (await rustContainer(source))
+      .withFile("/usr/local/bin/bun", (await bunContainer(source)).file("/usr/local/bin/bun"))
       .withMountedCache("/work/.cache/tools/oas3-gen", dag.cacheVolume("nrz-oas3-generator"))
       .withExec(["rustup", "component", "add", "rustfmt"])
       .withExec(["bun", "test", "scripts"])
@@ -82,13 +93,17 @@ export class NrzCli {
   }
 
   /**
-   * Run the Rust CI checks used by the GitHub CI workflow.
+   * Run the containerized Rust and contract checks. GitHub quality gates use Moon.
    */
   @func()
   async ci(
     @argument({
       ignore: [
         ".cache",
+        ".moon/cache",
+        ".jscpd",
+        "mutants.out",
+        "mutants.out.old",
         "target",
         "**/target",
         "node_modules",
@@ -105,16 +120,16 @@ export class NrzCli {
     source: Directory,
   ): Promise<string> {
     await this.contracts(source);
-    await bunDevContainer(source)
+    await (await bunDevContainer(source))
       .withExec(["sh", "-ceu", "cd .dagger && bun run typecheck && bun test scripts"])
       .sync();
 
-    const mise = Bun.TOML.parse(await source.file("mise.toml").contents()) as {
-      tools?: Record<string, unknown>;
+    const moonToolchains = Bun.YAML.parse(await source.file(".moon/toolchains.yml").contents()) as {
+      rust?: { bins?: string[] };
     };
-    const cargoDenyVersion = mise.tools?.["aqua:EmbarkStudios/cargo-deny"];
+    const cargoDenyVersion = moonToolchains.rust?.bins?.find((entry) => entry.startsWith("cargo-deny@"))?.match(/^cargo-deny@(\d+\.\d+\.\d+)$/)?.[1];
     if (typeof cargoDenyVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(cargoDenyVersion)) {
-      throw new Error("mise.toml must pin an exact cargo-deny version");
+      throw new Error(".moon/toolchains.yml must pin an exact cargo-deny version in rust.bins");
     }
     const cargoDeny = dag.container().from(ALPINE_IMAGE)
       .withExec(["apk", "add", "--no-cache", "curl"])
@@ -146,9 +161,9 @@ export class NrzCli {
     if (!Array.isArray(nodeMajors) || !nodeMajors.includes(nodeMajor)) {
       throw new Error(`Runtime toolchain catalog does not qualify CI Node ${nodeMajor}`);
     }
-    let ctr = rustContainer(source)
+    let ctr = (await rustContainer(source))
       .withFile("/usr/local/bin/cargo-deny", cargoDeny)
-      .withFile("/usr/local/bin/bun", dag.container().from(BUN_IMAGE).file("/usr/local/bin/bun"))
+      .withFile("/usr/local/bin/bun", (await bunContainer(source)).file("/usr/local/bin/bun"))
       .withMountedDirectory(
         "/opt/node",
         dag.container().from(`node:${nodeMajor}-bookworm`).directory("/usr/local"),
@@ -171,6 +186,10 @@ export class NrzCli {
     @argument({
       ignore: [
         ".cache",
+        ".moon/cache",
+        ".jscpd",
+        "mutants.out",
+        "mutants.out.old",
         "target",
         "**/target",
         "node_modules",
@@ -196,7 +215,7 @@ export class NrzCli {
   ): Promise<string> {
     requireChannel(channel);
     const releaseSource = sourceWithReleaseGitMetadata(source, gitMetadata);
-    return bunContainer(releaseSource)
+    return (await bunContainer(releaseSource))
       .withEnvVariable("NRZ_RELEASE_CHANNEL", channel)
       .withEnvVariable("NRZ_RELEASE_VERSION", version)
       .withEnvVariable("NRZ_RELEASE_BUMP", bump)
@@ -212,6 +231,10 @@ export class NrzCli {
     @argument({
       ignore: [
         ".cache",
+        ".moon/cache",
+        ".jscpd",
+        "mutants.out",
+        "mutants.out.old",
         "target",
         "**/target",
         "node_modules",
@@ -237,14 +260,14 @@ export class NrzCli {
   ): Promise<Directory> {
     requireChannel(channel);
     const releaseSource = sourceWithReleaseGitMetadata(source, gitMetadata);
-    const releaseDir = bunContainer(releaseSource)
+    const releaseDir = (await bunContainer(releaseSource))
       .withEnvVariable("NRZ_RELEASE_CHANNEL", channel)
       .withEnvVariable("NRZ_RELEASE_VERSION", version)
       .withEnvVariable("NRZ_RELEASE_BUMP", bump)
       .withExec(["bun", ".dagger/scripts/release-plan.ts", "--write"])
       .directory("/work");
 
-    return rustContainer(releaseDir)
+    return (await rustContainer(releaseDir))
       .withExec(["cargo", "metadata", "--locked", "--format-version", "1"])
       .directory("/work")
       .withoutDirectory(".git")
@@ -329,10 +352,14 @@ export class NrzCli {
    * Create a complete npm package directory for the already prepared release.
    */
   @func()
-  npmPackage(
+  async npmPackage(
     @argument({
       ignore: [
         ".cache",
+        ".moon/cache",
+        ".jscpd",
+        "mutants.out",
+        "mutants.out.old",
         "target",
         "**/target",
         "node_modules",
@@ -352,9 +379,9 @@ export class NrzCli {
     version: string,
     tag: string,
     channel = "stable",
-  ): Directory {
+  ): Promise<Directory> {
     requireChannel(channel);
-    return bunContainer(source)
+    return (await bunContainer(source))
       .withDirectory("/dist", artifacts)
       .withEnvVariable("NRZ_RELEASE_VERSION", version)
       .withEnvVariable("NRZ_RELEASE_TAG", tag)
@@ -371,6 +398,10 @@ export class NrzCli {
     @argument({
       ignore: [
         ".cache",
+        ".moon/cache",
+        ".jscpd",
+        "mutants.out",
+        "mutants.out.old",
         "target",
         "**/target",
         "node_modules",
@@ -392,7 +423,7 @@ export class NrzCli {
     repository = "ONREZA/nrz-cli",
   ): Promise<string> {
     requireChannel(channel);
-    return bunContainer(source)
+    return (await bunContainer(source))
       .withDirectory("/dist", artifacts)
       .withSecretVariable("GITHUB_TOKEN", githubToken)
       .withEnvVariable("GITHUB_REPOSITORY", repository)

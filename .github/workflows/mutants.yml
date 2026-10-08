@@ -1,0 +1,57 @@
+name: Mutation tests
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutants-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: '2'
+  RUST_TEST_THREADS: '4'
+
+jobs:
+  mutants:
+    name: Mutation gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+          # Mutate the tested PR head so --in-diff refers to exact source lines.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: moonrepo/setup-toolchain@v0.6.4
+        with:
+          auto-install: true
+          auto-setup: true
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          cache-on-failure: true
+      - name: Build the PR diff
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: git diff "$BASE_SHA...$HEAD_SHA" -- '*.rs' > /tmp/mutants.diff
+      - name: Test mutations in changed lines
+        if: github.event_name == 'pull_request'
+        run: proto run moon -- run workspace:mutants-diff -- /tmp/mutants.diff
+      - name: Test all workspace mutations
+        if: github.event_name == 'workflow_dispatch'
+        run: proto run moon -- run workspace:mutants
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: mutation-report
+          path: .cache/mutants.out/
+          include-hidden-files: true
+          if-no-files-found: ignore

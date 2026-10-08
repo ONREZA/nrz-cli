@@ -1,0 +1,171 @@
+$schema: ".moon/cache/schemas/project.json"
+
+language: "rust"
+layer: "application"
+
+env:
+  CARGO_TERM_COLOR: "always"
+
+fileGroups:
+  rust:
+    - ".prototools"
+    - "*.toml"
+    - ".*.toml"
+    - "rust-toolchain*"
+    - "Cargo.toml"
+    - "Cargo.lock"
+    - ".cargo/**/*"
+    - "src/**/*"
+    - "tests/**/*"
+    - "crates/**/*"
+    - "api/client/**/*"
+    - "assets/**/*"
+    - "!**/target/**/*"
+    - "!**/node_modules/**/*"
+  api:
+    - ".prototools"
+    - "api/**/*"
+    - "scripts/**/*"
+    - "package.json"
+    - "bun.lock"
+    - "Cargo.lock"
+    - "$NRZ_OPENAPI_GENERATOR_SOURCE"
+  dagger:
+    - ".dagger/**/*"
+    - "!.dagger/node_modules/**/*"
+    - "!.dagger/sdk/**/*"
+    - "dagger.json"
+    - ".prototools"
+    - ".moon/toolchains.yml"
+
+taskOptions:
+  cache: true
+  outputStyle: "buffer-only-failure"
+
+tasks:
+  hooks:
+    command: proto run lefthook -- install
+    toolchains: [system]
+    inputs: []
+    options: {cache: false, runInCI: false}
+  fmt:
+    command: cargo fmt --all
+    inputs: ["@group(rust)"]
+    options: {cache: false, runInCI: false, mutex: cargo-workspace}
+  fmt-check:
+    command: cargo fmt --all --check
+    inputs: ["@group(rust)"]
+  clippy:
+    command: cargo clippy --locked --workspace --all-targets --features nrz-contract/codegen --no-deps -- -D warnings
+    inputs: ["@group(rust)", "$RUSTFLAGS", "$RUSTC_WRAPPER"]
+    options: {mutex: cargo-workspace}
+  test:
+    command: proto exec bun node -- cargo test --locked --workspace --features nrz-contract/codegen
+    inputs: ["@group(rust)"]
+    options: {cache: false, mutex: cargo-workspace}
+  scripts-test:
+    command: bun test scripts
+    toolchains: [bun, javascript]
+    inputs: ["scripts/**/*", "api/operations.json", "package.json", "bun.lock"]
+    options: {cache: false}
+  api-generate:
+    command: bun scripts/generate-api.ts
+    toolchains: [bun, javascript, rust]
+    inputs: ["@group(api)"]
+    options: {cache: false, runInCI: false, mutex: api-generator}
+  api-check:
+    command: bun scripts/generate-api.ts --check
+    toolchains: [bun, javascript, rust]
+    inputs: ["@group(api)"]
+    # A local generator override can change without its path changing.
+    options: {cache: false, mutex: api-generator}
+  contracts-generate:
+    command: cargo run --locked -p nrz-contract --features codegen --bin gen-contract --
+    inputs: ["@group(rust)"]
+    options: {cache: false, runInCI: false, mutex: cargo-workspace}
+  contracts-check:
+    command: cargo run --locked -p nrz-contract --features codegen --bin gen-contract -- --check
+    inputs: ["@group(rust)"]
+    options: {mutex: cargo-workspace}
+  dagger-install:
+    command: bun install --cwd .dagger --frozen-lockfile
+    toolchains: [bun, javascript]
+    inputs: [".dagger/package.json", ".dagger/bun.lock"]
+    options: {cache: false}
+  dagger-scripts:
+    script: cd .dagger && bun run typecheck && bun test scripts
+    toolchains: [bun, javascript]
+    deps: [dagger-install]
+    inputs: ["@group(dagger)"]
+    options: {cache: false}
+  dagger-ci:
+    command: proto run dagger -- call ci --source=.
+    toolchains: [system]
+    inputs: []
+    options: {cache: false, runInCI: false}
+  release-metadata:
+    script: bun .dagger/scripts/capture-git-metadata.ts && proto run dagger -- call release-metadata --source=. --git-metadata=.nrz-release/git.json --channel=stable --bump=auto
+    toolchains: [bun, javascript]
+    inputs: []
+    options: {cache: false, runInCI: false}
+  commits-check:
+    command: cog check --from-latest-tag --ignore-merge-commits
+    inputs: []
+    options: {cache: false}
+  commits-verify:
+    command: cog verify --file
+    inputs: []
+    options: {cache: false, runInCI: false}
+  actionlint:
+    command: proto run actionlint
+    toolchains: [system]
+    inputs: [".github/**/*", ".prototools"]
+  licenses-check:
+    command: cargo deny check licenses
+    inputs: [".prototools", "Cargo.toml", "Cargo.lock", "crates/**/Cargo.toml", "api/client/Cargo.toml", "deny.toml"]
+    options: {cacheLifetime: "1h"}
+  cpd:
+    command: bun node_modules/jscpd/run-jscpd.js --config .jscpd.json --fail-on-new-clones 0
+    toolchains: [bun, javascript]
+    inputs: []
+    options: {cache: false}
+  cpd-baseline:
+    command: bun node_modules/jscpd/run-jscpd.js --config .jscpd.json --update-baseline
+    toolchains: [bun, javascript]
+    inputs: []
+    options: {cache: false, runInCI: false}
+  mutants:
+    command: proto exec bun node -- cargo mutants --workspace --baseline run --jobs 2
+    env:
+      CARGO_TARGET_DIR: null
+    inputs: ["@group(rust)"]
+    options: {cache: false, mutex: cargo-workspace}
+  mutants-diff:
+    command: proto exec bun node -- cargo mutants --workspace --baseline run --jobs 2 --in-diff
+    env:
+      CARGO_TARGET_DIR: null
+    inputs: ["@group(rust)"]
+    options: {cache: false, mutex: cargo-workspace}
+  verify-commit:
+    command: "true"
+    toolchains: [system]
+    inputs: []
+    deps: [fmt-check, clippy, cpd]
+    options: {cache: false, runDepsInParallel: false}
+  check:
+    command: "true"
+    toolchains: [system]
+    inputs: []
+    deps:
+      - scripts-test
+      - api-check
+      - contracts-check
+      - fmt-check
+      - clippy
+      - test
+      - dagger-scripts
+      - actionlint
+      - licenses-check
+      - commits-check
+      - cpd
+    options: {cache: false, runDepsInParallel: false}

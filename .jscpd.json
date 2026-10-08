@@ -1,0 +1,44 @@
+{
+  "path": ["."],
+  "format": [
+    "rust",
+    "typescript",
+    "javascript",
+    "bash",
+    "powershell",
+    "python",
+    "go",
+    "c",
+    "dart",
+    "sql"
+  ],
+  "formatsExts": {
+    "typescript": ["ts", "mts", "cts"],
+    "javascript": ["js", "mjs", "cjs"],
+    "bash": ["sh", "bash"]
+  },
+  "ignore": [
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/target/**",
+    "**/.cache/**",
+    ".dagger/sdk/**",
+    "api/client/src/generated/**",
+    "crates/nrz-contract/src/generated.rs"
+  ],
+  "minLines": 8,
+  "minTokens": 80,
+  "maxSize": "1gb",
+  "mode": "mild",
+  "reporters": ["console", "json"],
+  "output": ".jscpd",
+  "absolute": false,
+  "blame": false,
+  "skipLocal": false,
+  "ignoreCase": false,
+  "noTips": true,
+  "baseline": ".jscpd-baseline.json",
+  "noGitignore": false,
+  "followSymlinks": false,
+  "failOnEmpty": true
+}

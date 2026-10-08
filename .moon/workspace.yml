@@ -1,0 +1,21 @@
+$schema: "./cache/schemas/workspace.json"
+
+projects:
+  sources:
+    workspace: "."
+
+versionConstraint: ">=2.5.5 <3.0.0"
+
+experiments:
+  casOutputsCache: true
+
+cache:
+  cas:
+    maxSize: "5gb"
+  sharedWorktreeCache: true
+
+pipeline:
+  logRunningCommand: true
+
+vcs:
+  defaultBranch: "main"

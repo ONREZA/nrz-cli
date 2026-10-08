@@ -1,0 +1,24 @@
+$schema: "./cache/schemas/toolchains.json"
+
+proto:
+  version: "0.62.3"
+
+bun:
+  versionFromPrototools: true
+  installArgs: ["--frozen-lockfile"]
+
+javascript:
+  packageManager: "bun"
+  inferTasksFromScripts: false
+  syncPackageManagerField: false
+  syncProjectWorkspaceDependencies: false
+
+rust:
+  versionFromPrototools: true
+  syncToolchainConfig: false
+  binstallVersion: "1.22.0"
+  components: ["rustfmt", "clippy"]
+  bins:
+    - "cargo-deny@0.20.2"
+    - "cocogitto@7.0.0"
+    - "cargo-mutants@27.1.0"

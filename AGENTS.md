@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 `nrz` is a Rust CLI. Entrypoints are `src/main.rs` (binary) and `src/lib.rs` (shared exports). Core domains are split under `src/`: `cli/`, `deploy/`, `build/`, `detect/`, `dev/`, `emulator/`, `auth/`, `config/`, `init/`, and `upgrade/`.
 
-Integration tests are in `tests/` (for example `tests/cli_integration_test.rs`). Unit tests are colocated as dedicated `*_tests.rs` files (for example `src/build/manifest_tests.rs`). Operational docs live in `docs/`; root config includes `mise.toml`, `lefthook.yml`, and `cog.toml`. The `onreza.toml` JSON Schema is generated in the platform repo and served at `https://docs.onreza.ru/schemas/onreza-project-v1.schema.json` (`nrz init` wires it via `#:schema`).
+Integration tests are in `tests/` (for example `tests/cli_integration_test.rs`). Unit tests are colocated as dedicated `*_tests.rs` files (for example `src/build/manifest_tests.rs`). Operational docs live in `docs/`; root config includes `.prototools`, `.moon/`, `moon.yml`, `lefthook.yml`, and `cog.toml`. The `onreza.toml` JSON Schema is generated in the platform repo and served at `https://docs.onreza.ru/schemas/onreza-project-v1.schema.json` (`nrz init` wires it via `#:schema`).
 
 ## LLM-First CLI Contract
 Every command must support machine and human modes:
@@ -23,10 +23,13 @@ Every command must support machine and human modes:
 - `cargo test --test cli_integration_test`: run one integration suite.
 - `cargo fmt`: format code.
 - `cargo clippy -- -D warnings`: fail on lints/warnings.
-- `mise install`: install pinned local tools.
-- `mise run hooks`: install Lefthook hooks.
-- `mise run check`: run the standard local quality gate.
-- `mise run release:metadata`: local release plan dry run.
+- `proto install`: install pinned local tools.
+- `proto run moon -- setup`: install Rust components and pinned Cargo tools.
+- `proto run moon -- run workspace:hooks`: install Lefthook hooks.
+- `proto run moon -- run workspace:check`: run the standard local quality gate.
+- `proto run moon -- run workspace:cpd`: reject new duplicate blocks against the reviewed baseline.
+- `proto run moon -- run workspace:mutants`: run the full workspace mutation gate.
+- `proto run moon -- run workspace:release-metadata`: local release plan dry run.
 
 ## Coding Style & Testing Guidelines
 Use Rust 2024 + `rustfmt` defaults (4-space indentation, stable formatting). Naming: files/modules/functions `snake_case`, types `PascalCase`.
@@ -43,4 +46,4 @@ Conventional Commits are enforced by Lefthook + Cocogitto. Format: `type(scope):
 
 Release version/package metadata and GitHub publishing are Dagger-owned. Do not use `cog bump` as the nrz release path unless that ownership boundary is explicitly changed.
 
-Before opening a PR, run `mise run check`. Include a concise problem/solution summary, linked issue (if any), and CLI output snippets for user-visible changes.
+Before opening a PR, run `proto run moon -- run workspace:check`. Include a concise problem/solution summary, linked issue (if any), and CLI output snippets for user-visible changes.

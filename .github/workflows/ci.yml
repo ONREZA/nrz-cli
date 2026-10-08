@@ -8,20 +8,51 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: '2'
+  RUST_TEST_THREADS: '4'
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # Run tests on every push/PR
   test:
-    name: Test
+    name: Quality
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
 
-      - name: Install Dagger CLI
-        run: sh .github/scripts/install-dagger.sh
+      - uses: moonrepo/setup-toolchain@v0.6.4
+        with:
+          auto-install: true
+          auto-setup: true
 
-      - name: Run Dagger CI
-        run: dagger call ci --source=.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          cache-on-failure: true
+      - uses: actions/cache@v6.1.0
+        with:
+          path: |
+            .moon/cache
+            .cache/tools/oas3-gen
+          key: quality-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.prototools', '.moon/*.yml', 'moon.yml', 'Cargo.lock', 'bun.lock', 'api/generator.lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            quality-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.prototools', '.moon/*.yml', 'moon.yml', 'Cargo.lock', 'bun.lock', 'api/generator.lock.json') }}-
+
+      - name: Run quality gate
+        run: proto run moon -- run workspace:check
+
+      - name: Upload duplicate report
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: duplicate-report
+          path: .jscpd/
+          include-hidden-files: true
+          if-no-files-found: ignore
 
   # Check commit messages on PR
   conventional-commits:

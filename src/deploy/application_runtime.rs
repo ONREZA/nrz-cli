@@ -14,10 +14,9 @@ fn selected_platform_target() -> anyhow::Result<String> {
 }
 
 fn pinned_bun_build_target() -> anyhow::Result<String> {
-    let toolchain: toml::Value = toml::from_str(include_str!("../../mise.toml"))?;
+    let toolchain: toml::Value = toml::from_str(include_str!("../../.prototools"))?;
     let version = toolchain
-        .get("tools")
-        .and_then(|tools| tools.get("bun"))
+        .get("bun")
         .and_then(toml::Value::as_str)
         .context("CLI toolchain has no pinned Bun version")?;
     Ok(format!("bun-{version}"))
