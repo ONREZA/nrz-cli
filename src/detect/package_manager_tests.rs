@@ -193,6 +193,59 @@ fn python_entry_and_requirements_use_pip() {
 }
 
 #[test]
+fn javascript_package_manager_keeps_its_owner_beside_python_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("main.py"), "print('ready')\n").unwrap();
+    std::fs::write(dir.path().join("requirements.txt"), "").unwrap();
+    for (package, expected) in [
+        (
+            r#"{"scripts":{"build":"vite build"}}"#,
+            PackageManagerType::Npm,
+        ),
+        (
+            r#"{"packageManager":"pnpm@9.0.0"}"#,
+            PackageManagerType::Pnpm,
+        ),
+        (r#"{"packageManager":"bun@1.4.2"}"#, PackageManagerType::Bun),
+    ] {
+        std::fs::write(dir.path().join("package.json"), package).unwrap();
+        let pkg = PackageJson::load(dir.path()).unwrap();
+        let pm = detect_package_manager(&LocalFs::new(dir.path()), Some(&pkg)).unwrap();
+        assert_eq!(pm.pm_type, expected);
+        assert_eq!(
+            super::detect_package_manager_name(dir.path()),
+            expected.as_str()
+        );
+        let mut config = crate::config::ProjectConfig::default();
+        config.build.toolchain = Some(nrz_source_bundle::BuildToolchainFamily::Node);
+        config.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Python);
+        let mut detection = super::detect(dir.path());
+        let context = super::application_runtime::resolve_and_bind_source_build_context(
+            &LocalFs::new(dir.path()),
+            &mut detection,
+            &config,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            context.build_toolchain.family,
+            nrz_source_bundle::BuildToolchainFamily::Node
+        );
+        assert_eq!(
+            context.application_runtime.unwrap().family,
+            nrz_source_bundle::ApplicationRuntimeFamily::Python
+        );
+    }
+    assert_eq!(
+        detect_package_manager(&LocalFs::new(dir.path()), None)
+            .unwrap()
+            .pm_type,
+        PackageManagerType::Pip
+    );
+}
+
+#[test]
 fn package_manager_field_takes_priority_over_lockfile() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(

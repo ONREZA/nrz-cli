@@ -4,6 +4,92 @@ use super::types::{ComputeType, PackageManagerType, RuntimeType};
 use super::{detect, detect_with_fs, resolve_entry_point};
 
 #[test]
+fn unreadable_python_manifests_require_a_stage_and_an_explicit_launch() {
+    use super::fs::Fs;
+    use super::python::{
+        framework_evidence_complete, requires_dependency_stage,
+        requires_dependency_stage_for_target,
+    };
+    for manifest in ["requirements.txt", "pyproject.toml"] {
+        let remote =
+            VirtualFs::from_json(&serde_json::json!({"tree":[manifest],"files":{}}).to_string())
+                .unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let oversized = format!(
+            "#{}\n{}",
+            "x".repeat(super::fs::MAX_DETECTION_FILE_CONTENT_BYTES),
+            if manifest == "requirements.txt" {
+                "fastapi\nuvicorn\n"
+            } else {
+                "[project]\nname='demo'\ndependencies=['fastapi','uvicorn']\n"
+            }
+        );
+        std::fs::write(project.path().join(manifest), oversized).unwrap();
+        let local = LocalFs::new(project.path());
+        for fs in [&remote as &dyn Fs, &local] {
+            assert!(fs.exists(manifest));
+            assert!(fs.read_file(manifest).is_none());
+            assert!(requires_dependency_stage(fs).unwrap(), "{manifest}");
+            assert!(!framework_evidence_complete(fs).unwrap(), "{manifest}");
+            for minor in nrz_source_bundle::PythonMinor::ALL {
+                assert!(
+                    requires_dependency_stage_for_target(fs, minor).unwrap(),
+                    "{manifest} {minor:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn python_framework_override_launch_matches_detection_normalization_and_fallback() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("main.py"), "app = None\n").unwrap();
+    std::fs::write(
+        project.path().join("requirements.txt"),
+        "fastapi\nuvicorn\n",
+    )
+    .unwrap();
+    let fs = LocalFs::new(project.path());
+    let mut mismatches = Vec::new();
+    for authored in ["fastapi", "FastAPI", " fastapi ", "future-python-framework"] {
+        let mut config = crate::config::ProjectConfig::default();
+        config.project.framework = Some(authored.into());
+        let mut detection = super::detect_with_framework_override(project.path(), Some(authored));
+        assert_eq!(detection.framework, "fastapi");
+        let context = super::application_runtime::resolve_and_bind_source_build_context(
+            &fs,
+            &mut detection,
+            &config,
+            Some(authored),
+            None,
+        )
+        .unwrap();
+        let launch = context.application_runtime.unwrap();
+        if launch.entry.as_deref() != Some(".onreza/python/launch.py")
+            || launch.args != ["ASGI", "main:app"]
+        {
+            mismatches.push((authored, launch));
+        }
+    }
+    assert!(mismatches.is_empty(), "{mismatches:?}");
+    let mut config = crate::config::ProjectConfig::default();
+    config.project.framework = Some("Python".into());
+    let mut detection = super::detect_with_framework_override(project.path(), Some("Python"));
+    let context = super::application_runtime::resolve_and_bind_source_build_context(
+        &fs,
+        &mut detection,
+        &config,
+        Some("Python"),
+        None,
+    )
+    .unwrap();
+    let launch = context.application_runtime.unwrap();
+    assert_eq!(launch.entry.as_deref(), Some("main.py"));
+    assert!(launch.args.is_empty());
+}
+
+#[test]
 fn python_requirement_stage_evidence_does_not_depend_on_package_names() {
     use super::python::{dependency_names, requires_dependency_stage};
     let project = tempfile::tempdir().unwrap();

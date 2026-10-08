@@ -1,6 +1,6 @@
 use super::native_build::{
     GoModuleInputs, apply_flutter_static_cache_policy, compiler_version, default_command,
-    ensure_no_native_hooks, recipe_commands, validate_output,
+    ensure_no_native_hooks, install_command, recipe_commands, validate_output,
 };
 use crate::detect::native::{NATIVE_RUNTIME_TARGET, NativeRecipe};
 
@@ -629,7 +629,10 @@ fn real_flutter_web_build_is_static_and_keeps_the_pub_lock() {
     let lock = std::fs::read(project.path().join("pubspec.lock")).unwrap();
     let flutter = std::env::var("NRZ_FLUTTER_BIN").unwrap_or_else(|_| "flutter".into());
     let plan = recipe_commands(project.path(), NativeRecipe::FlutterWeb, false).unwrap();
-    for command in [plan.install.as_ref().unwrap(), &plan.build] {
+    let install = install_command(project.path(), NativeRecipe::FlutterWeb)
+        .unwrap()
+        .unwrap();
+    for command in [&install, &plan.build] {
         let result = std::process::Command::new(&flutter)
             .args(&command.arguments)
             .current_dir(project.path())
@@ -972,6 +975,7 @@ async fn real_go_executable_reads_artifact_assets_and_literal_argv() {
     let go = std::env::var("NRZ_GO_BIN").unwrap_or_else(|_| plan.build.program.clone());
     let compiled = std::process::Command::new(go)
         .args(&plan.build.arguments)
+        .env("GO111MODULE", "off")
         .envs(plan.environment.iter().cloned())
         .current_dir(project.path())
         .output()
@@ -1036,7 +1040,10 @@ async fn real_dart_bundle_reads_artifact_assets_and_literal_argv() {
             .unwrap()
     );
     let plan = recipe_commands(project.path(), NativeRecipe::DartServer, false).unwrap();
-    for command in [plan.install.as_ref().unwrap(), &plan.build] {
+    let install = install_command(project.path(), NativeRecipe::DartServer)
+        .unwrap()
+        .unwrap();
+    for command in [&install, &plan.build] {
         let result = std::process::Command::new(&dart)
             .args(&command.arguments)
             .current_dir(project.path())

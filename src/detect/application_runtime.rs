@@ -277,7 +277,12 @@ fn resolve_runtime(
     if config.runtime.is_some()
         && script
             .and_then(|script| {
-                direct_launcher_family(script.split_whitespace().next().unwrap_or(""))
+                direct_launcher_family(
+                    script
+                        .split([' ', '\t'])
+                        .find(|word| !word.is_empty())
+                        .unwrap_or(""),
+                )
             })
             .is_some_and(|family| Some(family) != config.runtime)
     {
@@ -375,7 +380,7 @@ pub fn normalize_application_entry(entry: &str) -> anyhow::Result<String> {
 }
 
 fn direct_start(script: &str) -> anyhow::Result<Option<ApplicationRuntimeDeclaration>> {
-    let mut words = script.split_whitespace();
+    let mut words = script.split([' ', '\t']).filter(|word| !word.is_empty());
     let Some(executor) = words.next() else {
         return Ok(None);
     };
@@ -390,28 +395,30 @@ fn direct_start(script: &str) -> anyhow::Result<Option<ApplicationRuntimeDeclara
             return Ok(None);
         }
     };
-    if script.chars().any(|character| {
-        matches!(
-            character,
-            '\'' | '"'
-                | '`'
-                | '$'
-                | '|'
-                | '&'
-                | ';'
-                | '<'
-                | '>'
-                | '('
-                | ')'
-                | '\n'
-                | '\r'
-                | '*'
-                | '?'
-                | '['
-                | ']'
-                | '\\'
-        )
-    }) {
+    if words.clone().any(|word| word.starts_with(['#', '~']))
+        || script.chars().any(|character| {
+            matches!(
+                character,
+                '\'' | '"'
+                    | '`'
+                    | '$'
+                    | '|'
+                    | '&'
+                    | ';'
+                    | '<'
+                    | '>'
+                    | '('
+                    | ')'
+                    | '\n'
+                    | '\r'
+                    | '*'
+                    | '?'
+                    | '['
+                    | ']'
+                    | '\\'
+            )
+        })
+    {
         bail!(
             "unsupported scripts.start shell syntax; declare [deploy] runtime, entry and args explicitly"
         );

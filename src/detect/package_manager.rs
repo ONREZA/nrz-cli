@@ -17,7 +17,8 @@ pub fn detect_package_manager(
     fs: &dyn Fs,
     pkg: Option<&PackageJson>,
 ) -> Option<PackageManagerInfo> {
-    if super::python::has_entry(fs)
+    if pkg.is_none()
+        && super::python::has_entry(fs)
         && let Some(lockfile) = super::python::dependency_manifest(fs)
     {
         return Some(PackageManagerInfo {

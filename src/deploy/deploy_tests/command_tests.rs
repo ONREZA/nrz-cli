@@ -800,6 +800,7 @@ async fn python_install_step_user_absence_preserves_prepared_dependencies() {
 #[test]
 fn declared_python_defaults_ignore_javascript_build_tooling() {
     let dir = tempdir().unwrap();
+    fs::write(dir.path().join("main.py"), "print('ready')\n").unwrap();
     fs::write(
         dir.path().join("package.json"),
         r#"{"devDependencies":{"vite":"7.0.0"},"scripts":{"build":"vite build"}}"#,
@@ -821,6 +822,25 @@ fn declared_python_defaults_ignore_javascript_build_tooling() {
         resolve_build_command(Some("npm run assets"), dir.path(), &effective).as_deref(),
         Some("npm run assets")
     );
+    let mut node_config = config.clone();
+    node_config.build.toolchain = Some(nrz_source_bundle::BuildToolchainFamily::Node);
+    let node_effective = effective_config(dir.path(), node_config.clone());
+    assert_eq!(
+        resolve_install_command(dir.path(), &node_effective).as_deref(),
+        Some("npm install")
+    );
+    assert_eq!(
+        resolve_build_command(None, dir.path(), &node_effective).as_deref(),
+        Some("npm run build")
+    );
+    let mut frozen = effective_config(dir.path(), node_config);
+    frozen.apply_platform_runner_settings(&nrz::config::ProjectBuildSettings {
+        install_command_source: Some(nrz::config::BuildSettingSource::Preset),
+        build_command_source: Some(nrz::config::BuildSettingSource::Preset),
+        ..Default::default()
+    });
+    assert_eq!(resolve_install_command(dir.path(), &frozen), None);
+    assert_eq!(resolve_build_command(None, dir.path(), &frozen), None);
     config.build.command = Some("npm run configured-assets".into());
     let effective = effective_config(dir.path(), config);
     assert_eq!(

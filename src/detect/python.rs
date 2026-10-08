@@ -188,7 +188,7 @@ fn requires_dependency_stage_with_environment(
         .as_ref()
         .is_some_and(|plan| plan.kind == PythonDependencyKind::Requirements)
     {
-        return Ok(fs.read_file("requirements.txt").is_some_and(|text| {
+        return Ok(fs.read_file("requirements.txt").is_none_or(|text| {
             unfold_requirements(&text).lines().any(|line| {
                 let line = line.trim();
                 !line.is_empty()
@@ -529,7 +529,7 @@ pub(crate) fn framework_evidence_complete(fs: &dyn Fs) -> anyhow::Result<bool> {
                 .is_some_and(|name| is_python_framework(&name) && name != "python")
     };
     match dependency_manifest(fs) {
-        Some("requirements.txt") => Ok(fs.read_file("requirements.txt").is_none_or(|text| {
+        Some("requirements.txt") => Ok(fs.read_file("requirements.txt").is_some_and(|text| {
             !unfold_requirements(&text).lines().any(|line| {
                 let line = line.trim();
                 line.starts_with("-r")
@@ -540,7 +540,7 @@ pub(crate) fn framework_evidence_complete(fs: &dyn Fs) -> anyhow::Result<bool> {
         Some("setup.py") => Ok(false),
         Some("pyproject.toml") => {
             let Some(text) = fs.read_file("pyproject.toml") else {
-                return Ok(true);
+                return Ok(false);
             };
             let value: toml::Value = toml::from_str(&text)?;
             let project = value.get("project");

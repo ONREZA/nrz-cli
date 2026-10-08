@@ -213,7 +213,14 @@ fn detect_with_fs_and_framework_override(
     framework_override: Option<&str>,
 ) -> DetectionResult {
     let detected = detect_with_fs(fs);
-    let Some(slug) = normalize_framework_slug(framework_override) else {
+    let Some(slug) = accepted_framework_override(framework_override) else {
+        if let Some(slug) = normalize_framework_slug(framework_override) {
+            tracing::warn!(
+                framework_override = %slug,
+                detected = %detected.framework,
+                "configured framework preset is unknown to this CLI; using autodetection"
+            );
+        }
         return detected;
     };
 
@@ -228,14 +235,7 @@ fn detect_with_fs_and_framework_override(
         return result;
     }
 
-    let Some(preset) = preset_for_slug(&slug) else {
-        tracing::warn!(
-            framework_override = %slug,
-            detected = %detected.framework,
-            "configured framework preset is unknown to this CLI; using autodetection"
-        );
-        return detected;
-    };
+    let preset = preset_for_slug(&slug).expect("accepted non-language framework has a preset");
 
     detection_from_configured_preset(fs, preset, &detected)
 }
@@ -252,6 +252,14 @@ fn normalize_framework_slug(framework_override: Option<&str>) -> Option<String> 
         other => other.to_string(),
     };
     Some(normalized)
+}
+
+fn accepted_framework_override(framework_override: Option<&str>) -> Option<String> {
+    normalize_framework_slug(framework_override).filter(|slug| {
+        python::is_python_framework(slug)
+            || native::native_recipe(slug).is_some()
+            || preset_for_slug(slug).is_some()
+    })
 }
 
 fn preset_for_slug(slug: &str) -> Option<&'static FrameworkPreset> {

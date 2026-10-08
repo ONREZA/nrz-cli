@@ -32,7 +32,6 @@ impl NativeCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeBuildPlan {
-    pub install: Option<NativeCommand>,
     pub build: NativeCommand,
     pub environment: Vec<(String, String)>,
     pub output_directory: String,
@@ -436,7 +435,7 @@ pub(crate) fn recipe_commands(
 ) -> anyhow::Result<NativeBuildPlan> {
     let fs = LocalFs::new(project_dir);
     let mut environment = Vec::new();
-    let (install, build, executable_entry) = match recipe {
+    let (build, executable_entry) = match recipe {
         NativeRecipe::FlutterWeb => {
             require_pub_inputs(&fs)?;
             if !fs.exists("web/index.html") {
@@ -445,10 +444,6 @@ pub(crate) fn recipe_commands(
                 );
             }
             (
-                Some(NativeCommand::new(
-                    "flutter",
-                    &["pub", "get", "--enforce-lockfile"],
-                )),
                 NativeCommand::new("flutter", &["build", "web", "--release", "--no-pub"]),
                 None,
             )
@@ -476,10 +471,6 @@ pub(crate) fn recipe_commands(
                 .context("invalid Dart entry")?
                 .to_string();
             (
-                Some(NativeCommand::new(
-                    "dart",
-                    &["pub", "get", "--enforce-lockfile"],
-                )),
                 NativeCommand::new(
                     "dart",
                     &[
@@ -508,6 +499,7 @@ pub(crate) fn recipe_commands(
                 ("GOARCH".into(), "amd64".into()),
                 ("GOAMD64".into(), "v1".into()),
                 ("CGO_ENABLED".into(), "0".into()),
+                ("GO111MODULE".into(), "on".into()),
                 ("GOTOOLCHAIN".into(), "local".into()),
                 ("GOWORK".into(), "off".into()),
                 ("GOENV".into(), "off".into()),
@@ -515,7 +507,6 @@ pub(crate) fn recipe_commands(
                 ("GOEXPERIMENT".into(), String::new()),
             ]);
             (
-                None,
                 NativeCommand::new(
                     "go",
                     &[
@@ -539,7 +530,6 @@ pub(crate) fn recipe_commands(
                 ("GOENV".into(), "off".into()),
             ]);
             (
-                None,
                 NativeCommand::new(
                     "hugo",
                     &[
@@ -555,7 +545,6 @@ pub(crate) fn recipe_commands(
         }
     };
     Ok(NativeBuildPlan {
-        install,
         build,
         environment,
         output_directory: recipe.output_directory().into(),

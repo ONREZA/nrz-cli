@@ -82,7 +82,8 @@ pub(crate) fn resolve_launch_for_framework(
             request.args,
         )?));
     }
-    let detected = match framework_override {
+    let framework_override = super::accepted_framework_override(framework_override);
+    let detected = match framework_override.as_deref() {
         Some(framework) => framework,
         None if request.server.is_some()
             && !fs.exists("manage.py")
