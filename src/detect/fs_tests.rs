@@ -1,6 +1,148 @@
 use super::fs::*;
 
 #[test]
+fn virtual_fs_normalized_paths_match_local_detection_inputs() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir(project.path().join("src")).unwrap();
+    std::fs::write(project.path().join("package.json"), "{}").unwrap();
+    std::fs::write(project.path().join("src/server.js"), "server").unwrap();
+    let local = LocalFs::new(project.path());
+
+    for (package_path, server_path, directory_path) in [
+        ("package.json", "src/server.js", "src/"),
+        (".\\package.json", ".\\src\\server.js", "src\\"),
+        ("././package.json", "src/./server.js", "./src/"),
+        ("package.json", "src//server.js", "src//"),
+    ] {
+        let input = serde_json::json!({
+            "tree": [package_path, directory_path, server_path],
+            "files": {package_path: "{}", server_path: "server"}
+        });
+        let virtual_fs = VirtualFs::from_json(&input.to_string()).unwrap();
+        assert_eq!(
+            virtual_fs.needed_content_files().unwrap(),
+            ["package.json", "src/server.js"],
+            "{input}"
+        );
+        for path in [
+            "package.json",
+            package_path,
+            "src/server.js",
+            server_path,
+            "src",
+            directory_path,
+        ] {
+            assert_eq!(
+                virtual_fs.exists(path),
+                local.exists(path),
+                "{path}: {input}"
+            );
+            assert_eq!(
+                virtual_fs.is_dir(path),
+                local.is_dir(path),
+                "{path}: {input}"
+            );
+            assert_eq!(
+                virtual_fs.is_file(path),
+                local.is_file(path),
+                "{path}: {input}"
+            );
+            assert_eq!(
+                virtual_fs.read_file(path),
+                local.read_file(path),
+                "{path}: {input}"
+            );
+            assert_eq!(
+                virtual_fs.list_dir(path),
+                local.list_dir(path),
+                "{path}: {input}"
+            );
+        }
+    }
+}
+
+#[test]
+fn virtual_fs_directory_queries_match_local_filesystem() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("package.json"), "{}").unwrap();
+    let local = LocalFs::new(project.path());
+    let virtual_fs = VirtualFs::from_json(r#"{"files":{"package.json":"{}"}}"#).unwrap();
+    for path in [
+        "package.json/",
+        "package.json\\",
+        "package.json/.",
+        "package.json\\.",
+        ".",
+        "./",
+    ] {
+        assert_eq!(virtual_fs.exists(path), local.exists(path), "{path}");
+        assert_eq!(virtual_fs.is_dir(path), local.is_dir(path), "{path}");
+        assert_eq!(virtual_fs.read_file(path), local.read_file(path), "{path}");
+    }
+}
+
+#[test]
+fn virtual_fs_rejects_colliding_file_content_aliases() {
+    for alias in ["./package.json", ".\\package.json", "././package.json"] {
+        let input = serde_json::json!({"files": {"package.json": "first", alias: "second"}});
+        assert!(VirtualFs::from_json(&input.to_string()).is_err(), "{input}");
+    }
+    let input =
+        serde_json::json!({"files": {"src/server.js": "first", "src//server.js": "second"}});
+    assert!(VirtualFs::from_json(&input.to_string()).is_err(), "{input}");
+}
+
+#[test]
+fn virtual_fs_rejects_file_contents_at_directory_paths() {
+    for input in [
+        serde_json::json!({"files": {"": "root"}}),
+        serde_json::json!({"files": {".": "root"}}),
+        serde_json::json!({"files": {"src/": "directory"}}),
+        serde_json::json!({"files": {"src\\": "directory"}}),
+        serde_json::json!({"files": {"src/.": "directory"}}),
+        serde_json::json!({"files": {"src\\.": "directory"}}),
+        serde_json::json!({"tree": ["src/"], "files": {"src": "file"}}),
+        serde_json::json!({"tree": ["src/."], "files": {"src": "file"}}),
+        serde_json::json!({"tree": ["src\\"], "files": {"src": "file"}}),
+        serde_json::json!({"tree": ["src/child.js"], "files": {"src": "file"}}),
+        serde_json::json!({"files": {"src": "file", "src/child.js": "child"}}),
+    ] {
+        assert!(VirtualFs::from_json(&input.to_string()).is_err(), "{input}");
+    }
+}
+
+#[test]
+fn detection_filesystems_keep_nonrelative_paths_inaccessible() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("package.json"), "{}").unwrap();
+    let local = LocalFs::new(project.path());
+    let virtual_fs = VirtualFs::from_json(r#"{"files":{"package.json":"{}"}}"#).unwrap();
+    for path in [
+        "/",
+        "//",
+        "../package.json",
+        "src/../package.json",
+        "/package.json",
+        "//package.json",
+        "C:/package.json",
+        "C:\\package.json",
+        "./C:/package.json",
+        ".\\C:\\package.json",
+        "././/C:/package.json",
+        "\\\\server\\package.json",
+    ] {
+        let input = serde_json::json!({"tree": [path]});
+        assert!(VirtualFs::from_json(&input.to_string()).is_err(), "{path}");
+        for fs in [&local as &dyn Fs, &virtual_fs as &dyn Fs] {
+            assert!(!fs.exists(path), "{path}");
+            assert!(!fs.is_dir(path), "{path}");
+            assert!(fs.read_file(path).is_none(), "{path}");
+            assert!(fs.list_dir(path).is_empty(), "{path}");
+        }
+    }
+}
+
+#[test]
 fn virtual_fs_exists() {
     let json = r#"{"tree":["package.json","src/","src/app/"],"files":{"package.json":"{}"}}"#;
     let vfs = VirtualFs::from_json(json).unwrap();

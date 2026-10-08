@@ -55,22 +55,10 @@ impl LocalFs {
 
     fn resolve_existing(&self, path: &str) -> Option<PathBuf> {
         let normalized = path.replace('\\', "/");
-        let relative = Path::new(&normalized);
-        let bytes = normalized.as_bytes();
-        if bytes.get(1) == Some(&b':')
-            || normalized.starts_with("//")
-            || relative.components().any(|component| {
-                matches!(
-                    component,
-                    std::path::Component::ParentDir
-                        | std::path::Component::RootDir
-                        | std::path::Component::Prefix(_)
-                )
-            })
-        {
+        if !is_source_relative_path(&normalized) {
             return None;
         }
-        let canonical = self.root.join(relative).canonicalize().ok()?;
+        let canonical = self.root.join(&normalized).canonicalize().ok()?;
         canonical
             .starts_with(&self.canonical_root)
             .then_some(canonical)
@@ -198,9 +186,8 @@ impl VirtualFs {
         dirs.insert(String::new());
 
         for entry in manifest.tree {
-            validate_virtual_path(&entry)?;
-            let normalized = normalize_path(&entry);
-            if entry.ends_with('/') {
+            let normalized = validate_virtual_path(&entry)?;
+            if is_directory_path(&entry) {
                 dirs.insert(normalized.clone());
             }
             tree.insert(normalized.clone());
@@ -209,11 +196,20 @@ impl VirtualFs {
 
         let mut files = HashMap::new();
         for (path, content) in manifest.files {
-            validate_virtual_path(&path)?;
-            let normalized = normalize_path(&path);
-            files.insert(normalized.clone(), content);
+            let normalized = validate_virtual_path(&path)?;
+            if is_directory_path(&path) {
+                anyhow::bail!("detection manifest file content path is a directory: {path}");
+            }
+            if files.insert(normalized.clone(), content).is_some() {
+                anyhow::bail!("detection manifest file content paths collide: {normalized}");
+            }
             tree.insert(normalized.clone());
             register_parent_dirs(&normalized, &mut dirs);
+        }
+        for path in files.keys() {
+            if dirs.contains(path) {
+                anyhow::bail!("detection manifest file content path is a directory: {path}");
+            }
         }
 
         Ok(Self { tree, dirs, files })
@@ -242,30 +238,16 @@ impl VirtualFs {
     }
 }
 
-fn validate_virtual_path(path: &str) -> anyhow::Result<()> {
+fn validate_virtual_path(path: &str) -> anyhow::Result<String> {
     if path.len() > MAX_DETECTION_PATH_BYTES {
         anyhow::bail!(
             "detection manifest path exceeds {} bytes",
             MAX_DETECTION_PATH_BYTES
         );
     }
-    let normalized = path.replace('\\', "/");
-    let relative = Path::new(&normalized);
-    let bytes = normalized.as_bytes();
-    if normalized.contains('\0')
-        || bytes.get(1) == Some(&b':')
-        || normalized.starts_with("//")
-        || relative.components().any(|component| {
-            matches!(
-                component,
-                std::path::Component::ParentDir
-                    | std::path::Component::RootDir
-                    | std::path::Component::Prefix(_)
-            )
-        })
-    {
-        anyhow::bail!("detection manifest path must be relative and must not contain '..'");
-    }
+    let normalized = normalize_path(path).ok_or_else(|| {
+        anyhow::anyhow!("detection manifest path must be relative and must not contain '..'")
+    })?;
     let depth = normalized
         .split('/')
         .filter(|segment| !segment.is_empty() && *segment != ".")
@@ -276,27 +258,33 @@ fn validate_virtual_path(path: &str) -> anyhow::Result<()> {
             MAX_DETECTION_PATH_DEPTH
         );
     }
-    Ok(())
+    Ok(normalized)
 }
 
 impl Fs for VirtualFs {
     fn exists(&self, path: &str) -> bool {
-        let normalized = normalize_path(path);
-        self.tree.contains(&normalized) || self.dirs.contains(&normalized)
+        normalize_path(path).is_some_and(|normalized| {
+            self.dirs.contains(&normalized)
+                || (!is_directory_path(path) && self.tree.contains(&normalized))
+        })
     }
 
     fn is_dir(&self, path: &str) -> bool {
-        let normalized = normalize_path(path);
-        self.dirs.contains(&normalized)
+        normalize_path(path).is_some_and(|path| self.dirs.contains(&path))
     }
 
     fn read_file(&self, path: &str) -> Option<String> {
-        let normalized = normalize_path(path);
+        if is_directory_path(path) {
+            return None;
+        }
+        let normalized = normalize_path(path)?;
         self.files.get(&normalized).cloned()
     }
 
     fn list_dir(&self, path: &str) -> Vec<String> {
-        let normalized = normalize_path(path);
+        let Some(normalized) = normalize_path(path) else {
+            return Vec::new();
+        };
         let prefix = if normalized.is_empty() {
             String::new()
         } else {
@@ -346,11 +334,36 @@ struct VirtualFsManifest {
     files: HashMap<String, String>,
 }
 
-fn normalize_path(path: &str) -> String {
-    path.trim_start_matches("./")
-        .trim_end_matches('/')
-        .replace('\\', "/")
-        .to_string()
+fn is_directory_path(path: &str) -> bool {
+    path.ends_with(['/', '\\']) || path == "." || path.ends_with("/.") || path.ends_with("\\.")
+}
+
+fn is_source_relative_path(path: &str) -> bool {
+    !path.contains('\0')
+        && path
+            .split('/')
+            .find(|segment| !segment.is_empty() && *segment != ".")
+            .and_then(|segment| segment.as_bytes().get(1))
+            != Some(&b':')
+        && !Path::new(path).components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+}
+
+fn normalize_path(path: &str) -> Option<String> {
+    let normalized = path.replace('\\', "/");
+    is_source_relative_path(&normalized).then(|| {
+        normalized
+            .split('/')
+            .filter(|segment| !segment.is_empty() && *segment != ".")
+            .collect::<Vec<_>>()
+            .join("/")
+    })
 }
 
 fn register_parent_dirs(path: &str, dirs: &mut HashSet<String>) {
@@ -363,140 +376,151 @@ fn register_parent_dirs(path: &str, dirs: &mut HashSet<String>) {
     }
 }
 
-/// Files whose content the server should send in the manifest
-/// for accurate remote detection.
-pub const DETECTION_CONTENT_FILES: &[&str] = &[
-    "onreza.toml",
-    "pyproject.toml",
-    "pubspec.yaml",
-    "go.mod",
-    "main.go",
-    "hugo.toml",
-    "hugo.yaml",
-    "hugo.json",
-    "config/_default/hugo.toml",
-    "config/_default/hugo.yaml",
-    "config/_default/hugo.json",
-    "index.html",
-    "yarn.lock",
-    "requirements.txt",
-    "setup.py",
-    "main.py",
-    "app.py",
-    "server.py",
-    "src/main.py",
-    "src/app.py",
-    "src/server.py",
-    "package.json",
-    "pnpm-workspace.yaml",
-    "turbo.json",
-    "nx.json",
-    "next.config.js",
-    "next.config.mjs",
-    "next.config.ts",
-    "next.config.mts",
-    "nuxt.config.ts",
-    "nuxt.config.js",
-    "svelte.config.js",
-    "svelte.config.ts",
-    "astro.config.mjs",
-    "astro.config.ts",
-    "astro.config.js",
-    "remix.config.js",
-    "react-router.config.ts",
-    "react-router.config.js",
-    "vite.config.ts",
-    "vite.config.mts",
-    "vite.config.js",
-    "vite.config.mjs",
-    "app.config.ts",
-    "app.config.js",
-    "app.json",
-    "tsconfig.json",
-    "tsconfig.app.json",
-    "gatsby-config.js",
-    "gatsby-config.ts",
-    "angular.json",
-    "docusaurus.config.js",
-    "docusaurus.config.ts",
-    ".vitepress/config.ts",
-    ".vitepress/config.js",
-    "keystone.ts",
-    "keystone.js",
-    "redwood.toml",
-    "adonisrc.ts",
-    "adonisrc.js",
-    "nitro.config.ts",
-    "nitro.config.js",
-    "config/server.ts",
-    "config/server.js",
-    "server.js",
-    "server.mjs",
-    "server.cjs",
-    "server.ts",
-    "server.mts",
-    "server.cts",
-    "app.js",
-    "app.mjs",
-    "app.cjs",
-    "app.ts",
-    "app.mts",
-    "app.cts",
-    "index.js",
-    "index.mjs",
-    "index.cjs",
-    "index.ts",
-    "index.mts",
-    "index.cts",
-    "main.js",
-    "main.mjs",
-    "main.cjs",
-    "main.ts",
-    "main.mts",
-    "main.cts",
-    "src/server.js",
-    "src/server.mjs",
-    "src/server.cjs",
-    "src/server.ts",
-    "src/server.mts",
-    "src/server.cts",
-    "src/app.js",
-    "src/app.mjs",
-    "src/app.cjs",
-    "src/app.ts",
-    "src/app.mts",
-    "src/app.cts",
-    "src/index.js",
-    "src/index.mjs",
-    "src/index.cjs",
-    "src/index.ts",
-    "src/index.mts",
-    "src/index.cts",
-    "src/main.js",
-    "src/main.mjs",
-    "src/main.cjs",
-    "src/main.ts",
-    "src/main.mts",
-    "src/main.cts",
-    "dist/server.js",
-    "dist/server.mjs",
-    "dist/server.cjs",
-    "dist/index.js",
-    "dist/index.mjs",
-    "dist/index.cjs",
-    "dist/main.js",
-    "dist/main.mjs",
-    "dist/main.cjs",
-    "dist/src/main.js",
-    "dist/src/main.mjs",
-    "dist/src/main.cjs",
-    "build/server.js",
-    "build/server.mjs",
-    "build/server.cjs",
-    "build/index.js",
-    "build/index.mjs",
-    "build/index.cjs",
-    "build/main.js",
-    "build/main.mjs",
-    "build/main.cjs",
-];
+// Keep remote content admission and framework entry detection on the same path list.
+macro_rules! detection_content_files {
+    (other: [$($other:literal),* $(,)?], server_entries: [$($entry:literal),* $(,)?] $(,)?) => {
+        /// Files whose content the server should send for accurate remote detection.
+        pub const DETECTION_CONTENT_FILES: &[&str] = &[$($other,)* $($entry,)*];
+        pub(super) const SERVER_ENTRY_FILES: &[&str] = &[$($entry,)*];
+    };
+}
+
+detection_content_files! {
+    other: [
+        "onreza.toml",
+        "pyproject.toml",
+        "pubspec.yaml",
+        "go.mod",
+        "main.go",
+        "hugo.toml",
+        "hugo.yaml",
+        "hugo.json",
+        "config/_default/hugo.toml",
+        "config/_default/hugo.yaml",
+        "config/_default/hugo.json",
+        "index.html",
+        "yarn.lock",
+        "requirements.txt",
+        "setup.py",
+        "main.py",
+        "app.py",
+        "server.py",
+        "src/main.py",
+        "src/app.py",
+        "src/server.py",
+        "package.json",
+        "pnpm-workspace.yaml",
+        "turbo.json",
+        "nx.json",
+        "next.config.js",
+        "next.config.mjs",
+        "next.config.ts",
+        "next.config.mts",
+        "nuxt.config.ts",
+        "nuxt.config.js",
+        "svelte.config.js",
+        "svelte.config.ts",
+        "astro.config.mjs",
+        "astro.config.ts",
+        "astro.config.js",
+        "remix.config.js",
+        "react-router.config.ts",
+        "react-router.config.js",
+        "vite.config.ts",
+        "vite.config.mts",
+        "vite.config.js",
+        "vite.config.mjs",
+        "app.config.ts",
+        "app.config.js",
+        "app.json",
+        "tsconfig.json",
+        "tsconfig.app.json",
+        "gatsby-config.js",
+        "gatsby-config.ts",
+        "angular.json",
+        "docusaurus.config.js",
+        "docusaurus.config.ts",
+        ".vitepress/config.ts",
+        ".vitepress/config.js",
+        "keystone.ts",
+        "keystone.js",
+        "redwood.toml",
+        "adonisrc.ts",
+        "adonisrc.js",
+        "nitro.config.ts",
+        "nitro.config.js",
+        "config/server.ts",
+        "config/server.js",
+    ],
+    server_entries: [
+        "server.js",
+        "server.mjs",
+        "server.cjs",
+        "server.ts",
+        "server.mts",
+        "server.cts",
+        "app.js",
+        "app.mjs",
+        "app.cjs",
+        "app.ts",
+        "app.mts",
+        "app.cts",
+        "index.js",
+        "index.mjs",
+        "index.cjs",
+        "index.ts",
+        "index.mts",
+        "index.cts",
+        "main.js",
+        "main.mjs",
+        "main.cjs",
+        "main.ts",
+        "main.mts",
+        "main.cts",
+        "src/server.js",
+        "src/server.mjs",
+        "src/server.cjs",
+        "src/server.ts",
+        "src/server.mts",
+        "src/server.cts",
+        "src/app.js",
+        "src/app.mjs",
+        "src/app.cjs",
+        "src/app.ts",
+        "src/app.mts",
+        "src/app.cts",
+        "src/index.js",
+        "src/index.mjs",
+        "src/index.cjs",
+        "src/index.ts",
+        "src/index.mts",
+        "src/index.cts",
+        "src/main.js",
+        "src/main.mjs",
+        "src/main.cjs",
+        "src/main.ts",
+        "src/main.mts",
+        "src/main.cts",
+        "dist/server.js",
+        "dist/server.mjs",
+        "dist/server.cjs",
+        "dist/index.js",
+        "dist/index.mjs",
+        "dist/index.cjs",
+        "dist/main.js",
+        "dist/main.mjs",
+        "dist/main.cjs",
+        "dist/src/main.js",
+        "dist/src/main.mjs",
+        "dist/src/main.cjs",
+        "build/server.js",
+        "build/server.mjs",
+        "build/server.cjs",
+        "build/index.js",
+        "build/index.mjs",
+        "build/index.cjs",
+        "build/main.js",
+        "build/main.mjs",
+        "build/main.cjs",
+    ],
+}

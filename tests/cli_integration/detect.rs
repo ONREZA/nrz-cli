@@ -396,7 +396,15 @@ fn detect_needed_files_includes_server_entry_candidates() {
 
 #[test]
 fn tree_aware_needed_files_preserves_local_go_detection() {
-    for path in ["server.go", "main_linux_amd64.go", "cmd/server/main.go"] {
+    for (path, tree) in [
+        ("server.go", ["go.mod", "server.go"]),
+        ("main_linux_amd64.go", ["go.mod", "main_linux_amd64.go"]),
+        ("cmd/server/main.go", ["go.mod", "cmd/server/main.go"]),
+        ("server.go", [r".\go.mod", r".\server.go"]),
+        ("cmd/server/main.go", ["./go.mod", r"cmd\server\.\main.go"]),
+        ("cmd/server/main.go", ["go.mod", "cmd//server/main.go"]),
+        ("cmd/server/main.go", ["go.mod", "cmd/./server/main.go"]),
+    ] {
         let temp = tempfile::tempdir().unwrap();
         let contents = std::collections::BTreeMap::from([
             ("go.mod", "module example.org/server\n"),
@@ -410,7 +418,6 @@ fn tree_aware_needed_files_preserves_local_go_detection() {
             fs::create_dir_all(target.parent().unwrap()).unwrap();
             fs::write(target, content).unwrap();
         }
-        let tree = contents.keys().copied().collect::<Vec<_>>();
         let output = nrz()
             .args(["detect", "--needed-files", "--stdin", "--json"])
             .write_stdin(json!({"tree":tree,"files":{}}).to_string())
@@ -467,6 +474,10 @@ fn tree_aware_needed_files_reports_invalid_or_over_budget_manifests() {
     for manifest in [
         json!({"tree":["../outside.go"],"files":{}}),
         json!({"tree":(0..257).map(|index|format!("cmd/server_{index}/main.go")).collect::<Vec<_>>(),"files":{}}),
+        json!({"files":{"package.json":"{}","./package.json":"{\"main\":\"server.js\"}"}}),
+        json!({"files":{"package.json":"{}",".\\package.json":"{}"}}),
+        json!({"tree":["src/"],"files":{"src":"not a directory"}}),
+        json!({"files":{".":"not a root directory"}}),
     ] {
         let output = nrz()
             .args(["detect", "--needed-files", "--stdin", "--json"])

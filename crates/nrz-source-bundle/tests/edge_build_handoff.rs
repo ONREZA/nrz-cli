@@ -52,3 +52,24 @@ fn rejects_noncanonical_digest_and_size_evidence() {
         Err("Edge build handoff source bundle sizeBytes is invalid".to_string())
     );
 }
+
+#[test]
+fn source_bundle_size_must_be_a_positive_safe_json_integer() {
+    const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+
+    for size_bytes in [1, MAX_SAFE_INTEGER] {
+        let mut handoff = valid_handoff();
+        handoff.source_bundle.size_bytes = size_bytes;
+        assert_eq!(handoff.validate(), Ok(()), "sizeBytes={size_bytes}");
+    }
+
+    for size_bytes in [MAX_SAFE_INTEGER + 1, MAX_SAFE_INTEGER + 2, u64::MAX] {
+        let mut handoff = valid_handoff();
+        handoff.source_bundle.size_bytes = size_bytes;
+        assert_eq!(
+            handoff.validate(),
+            Err("Edge build handoff source bundle sizeBytes is invalid".to_string()),
+            "sizeBytes={size_bytes}"
+        );
+    }
+}

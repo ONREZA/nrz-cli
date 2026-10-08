@@ -11,6 +11,7 @@ use crate::frameworks::{
     clear_before_build as clear_nextjs_descriptor_before_build, is_nextjs_project,
     is_sveltekit_with_adapter_auto,
 };
+use crate::test_support::make_detection;
 
 use super::hash::sha256_hex;
 use super::*;
@@ -107,34 +108,6 @@ fn file_breakdown() -> crate::artifact::RuntimeArtifactFileBreakdown {
         workspace_packages: 0,
         other: 0,
         total: 20_679,
-    }
-}
-
-fn make_detection(
-    framework: &str,
-    ssr: Option<crate::detect::types::SsrAnalysis>,
-) -> crate::detect::types::DetectionResult {
-    crate::detect::types::DetectionResult {
-        framework: framework.to_string(),
-        name: framework.to_string(),
-        version: None,
-        suggested_compute: crate::detect::types::ComputeType::Process,
-        reason: String::new(),
-        metadata: crate::detect::types::DetectionMetadata {
-            source_build_context: None,
-            uses_typescript: None,
-            config_files: vec![],
-            runtime: crate::detect::types::RuntimeInfo {
-                runtime_type: crate::detect::types::RuntimeType::Node,
-                version: None,
-            },
-            package_manager: None,
-            build_info: None,
-            monorepo: None,
-            ssr_analysis: ssr,
-
-            structure: vec![],
-        },
     }
 }
 

@@ -6,9 +6,112 @@ use super::{
 };
 use crate::cli::BuildArgs;
 use crate::frameworks::compute_aware_output_dirs;
+use crate::test_support::make_detection;
 
 fn output_hint(path: &str, source: BuildSettingSource) -> OutputDirectoryHint<'_> {
     OutputDirectoryHint { path, source }
+}
+
+fn write_build_file(root: &std::path::Path, relative: &str, content: &str) {
+    let path = root.join(relative);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, content).unwrap();
+}
+
+async fn build_fixture(
+    project: &std::path::Path,
+    detection: Option<&crate::detect::types::DetectionResult>,
+    skip_validation: bool,
+    hint: Option<OutputDirectoryHint<'_>>,
+) -> anyhow::Result<super::BuildResult> {
+    let args = BuildArgs {
+        dir: project.to_string_lossy().into_owned(),
+        skip_validation,
+    };
+    run_with_hint(args, true, &Default::default(), detection, hint).await
+}
+
+fn assert_static_server_routes(manifest: &super::manifest::Manifest, asset_pattern: &str) {
+    assert_eq!(manifest.routes.len(), 3);
+    assert_eq!(manifest.routes[0].pattern, asset_pattern);
+    assert_eq!(manifest.routes[0].priority, Some(100));
+    assert_eq!(manifest.routes[1].pattern, "^/.*$");
+    assert_eq!(manifest.routes[1].layer, "static-assets");
+    assert_eq!(manifest.routes[1].priority, Some(50));
+    assert_eq!(manifest.routes[2].pattern, "^/.*$");
+    assert_eq!(manifest.routes[2].layer, "server");
+    assert_eq!(manifest.routes[2].priority, Some(0));
+}
+
+fn make_ssr_detection(framework: &str, feature: &str) -> crate::detect::types::DetectionResult {
+    make_detection(
+        framework,
+        Some(crate::detect::types::SsrAnalysis {
+            is_static_compatible: false,
+            ssr_features: vec![feature.into()],
+        }),
+    )
+}
+
+async fn build_nextjs_fixture(
+    project: &std::path::Path,
+    hint: Option<OutputDirectoryHint<'_>>,
+) -> super::BuildResult {
+    let detection = make_detection("nextjs", None);
+    build_fixture(project, Some(&detection), false, hint)
+        .await
+        .unwrap()
+}
+
+fn nextjs_static_outputs(project: &std::path::Path) -> serde_json::Value {
+    serde_json::json!({ "staticFiles": [{
+        "type": "STATIC_FILE",
+        "pathname": "/_next/static/chunks/main.js",
+        "filePath": project.join(".next/static/chunks/main.js")
+    }] })
+}
+
+fn write_nextjs_adapter_output(project: &std::path::Path, outputs: serde_json::Value) {
+    let descriptor = serde_json::json!({
+        "version": 1,
+        "adapter": { "name": "@onreza/nrz-next-adapter", "version": "0.34.1" },
+        "nextVersion": "16.2.9",
+        "buildId": "build-123",
+        "outputs": outputs
+    });
+    write_build_file(
+        project,
+        ".onreza/next-adapter-output.json",
+        &descriptor.to_string(),
+    );
+}
+
+fn nextjs_middleware_project() -> (tempfile::TempDir, serde_json::Value) {
+    let project = tempfile::tempdir().unwrap();
+    write_build_file(project.path(), ".next/standalone/server.js", "// server");
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
+    write_build_file(project.path(), "public/robots.txt", "User-agent: *");
+    let mut outputs = nextjs_static_outputs(project.path());
+    outputs["middleware"] = serde_json::json!({
+        "type": "MIDDLEWARE", "pathname": "/_middleware", "runtime": "edge",
+        "edgeRuntime": { "entryKey": "middleware" }
+    });
+    (project, outputs)
+}
+
+async fn assert_nested_nextjs_entry(project: &std::path::Path, expected: &str) {
+    let result = build_nextjs_fixture(
+        project,
+        Some(output_hint(".next", BuildSettingSource::Detected)),
+    )
+    .await;
+    let manifest = result
+        .manifest
+        .expect("nested Next.js standalone output should produce a manifest");
+    assert_eq!(
+        manifest.layers.last().unwrap().entry.as_deref(),
+        Some(expected)
+    );
 }
 
 #[test]
@@ -395,8 +498,7 @@ fn nextjs_user_root_output_dir_allows_standalone_refinement() {
 #[test]
 fn nextjs_user_root_output_dir_preserves_root_manifest() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".onreza")).unwrap();
-    std::fs::write(dir.path().join(".onreza/manifest.json"), "{}").unwrap();
+    write_build_file(dir.path(), ".onreza/manifest.json", "{}");
     std::fs::create_dir_all(dir.path().join(".next/standalone/.onreza")).unwrap();
 
     let (found, has_manifest) = detect_output_dir_for_framework(
@@ -542,34 +644,6 @@ fn detected_parent_allows_framework_refinement_matrix() {
 
 // ── compute_aware_output_dirs ────────────────────────────────
 
-fn make_detection(
-    framework: &str,
-    ssr: Option<crate::detect::types::SsrAnalysis>,
-) -> crate::detect::types::DetectionResult {
-    crate::detect::types::DetectionResult {
-        framework: framework.to_string(),
-        name: framework.to_string(),
-        version: None,
-        suggested_compute: crate::detect::types::ComputeType::Process,
-        reason: String::new(),
-        metadata: crate::detect::types::DetectionMetadata {
-            source_build_context: None,
-            uses_typescript: None,
-            config_files: vec![],
-            runtime: crate::detect::types::RuntimeInfo {
-                runtime_type: crate::detect::types::RuntimeType::Node,
-                version: None,
-            },
-            package_manager: None,
-            build_info: None,
-            monorepo: None,
-            ssr_analysis: ssr,
-
-            structure: vec![],
-        },
-    }
-}
-
 #[test]
 fn nextjs_default_ssr_includes_standalone_probe() {
     let detection = make_detection("nextjs", None);
@@ -579,11 +653,7 @@ fn nextjs_default_ssr_includes_standalone_probe() {
 
 #[test]
 fn nextjs_standalone_returns_standalone_first() {
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["output: 'standalone'".into()],
-    };
-    let detection = make_detection("nextjs", Some(ssr));
+    let detection = make_ssr_detection("nextjs", "output: 'standalone'");
     let dirs = compute_aware_output_dirs(&detection);
     assert_eq!(dirs, vec![".next/standalone", ".next"]);
 }
@@ -774,45 +844,19 @@ fn generic_process_user_output_dir_wins_over_root_framework_dir() {
 // ── STATIC auto-gen in run_with_hint ─────────────────────────
 
 fn make_static_detection(framework: &str) -> crate::detect::types::DetectionResult {
-    crate::detect::types::DetectionResult {
-        framework: framework.to_string(),
-        name: framework.to_string(),
-        version: None,
-        suggested_compute: crate::detect::types::ComputeType::Static,
-        reason: String::new(),
-        metadata: crate::detect::types::DetectionMetadata {
-            source_build_context: None,
-            uses_typescript: None,
-            config_files: vec![],
-            runtime: crate::detect::types::RuntimeInfo {
-                runtime_type: crate::detect::types::RuntimeType::Node,
-                version: None,
-            },
-            package_manager: None,
-            build_info: None,
-            monorepo: None,
-            ssr_analysis: None,
-
-            structure: vec![],
-        },
-    }
+    let mut detection = make_detection(framework, None);
+    detection.suggested_compute = crate::detect::types::ComputeType::Static;
+    detection
 }
 
 #[tokio::test]
 async fn static_project_without_adapter_auto_generates_manifest() {
     let dir = tempfile::tempdir().unwrap();
     // Create a "dist" output dir with a file but no .onreza/ subdir
-    std::fs::create_dir(dir.path().join("dist")).unwrap();
-    std::fs::write(dir.path().join("dist/index.html"), "<h1>hi</h1>").unwrap();
+    write_build_file(dir.path(), "dist/index.html", "<h1>hi</h1>");
 
     let detection = make_static_detection("vite");
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: true,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let result = build_fixture(dir.path(), Some(&detection), true, None)
         .await
         .unwrap();
 
@@ -831,24 +875,15 @@ async fn static_project_without_adapter_auto_generates_manifest() {
 #[tokio::test]
 async fn package_backed_static_html_prefers_build_artifact_over_root() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("index.html"), "<h1>source</h1>").unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    write_build_file(dir.path(), "index.html", "<h1>source</h1>");
+    write_build_file(
+        dir.path(),
+        "package.json",
         r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir(dir.path().join("dist")).unwrap();
-    std::fs::write(dir.path().join("dist/index.html"), "<h1>built</h1>").unwrap();
+    );
+    write_build_file(dir.path(), "dist/index.html", "<h1>built</h1>");
 
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: true,
-    };
-
-    let result = run_with_hint(args, true, &config, None, None)
-        .await
-        .unwrap();
+    let result = build_fixture(dir.path(), None, true, None).await.unwrap();
 
     assert_eq!(result.output_dir, dir.path().join("dist"));
     let manifest = result
@@ -863,21 +898,15 @@ async fn package_backed_static_html_prefers_build_artifact_over_root() {
 #[tokio::test]
 async fn package_backed_static_html_without_artifact_does_not_deploy_root() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("index.html"), "<h1>source</h1>").unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    write_build_file(dir.path(), "index.html", "<h1>source</h1>");
+    write_build_file(
+        dir.path(),
+        "package.json",
         r#"{"scripts":{"build":"echo no output"}}"#,
-    )
-    .unwrap();
+    );
     std::fs::create_dir(dir.path().join("node_modules")).unwrap();
 
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: true,
-    };
-
-    let err = run_with_hint(args, true, &config, None, None)
+    let err = build_fixture(dir.path(), None, true, None)
         .await
         .expect_err("package-backed static HTML without an artifact dir must fail");
 
@@ -896,27 +925,19 @@ async fn package_backed_static_html_without_artifact_does_not_deploy_root() {
 #[tokio::test]
 async fn configured_vite_static_output_generates_static_manifest_even_with_server_dep() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    write_build_file(
+        dir.path(),
+        "package.json",
         r#"{
           "scripts": {"build": "vite build"},
           "dependencies": {"express": "^4.19.0", "react": "^18.3.0"},
           "devDependencies": {"vite": "^5.0.0", "@vitejs/plugin-react": "^4.0.0"}
         }"#,
-    )
-    .unwrap();
+    );
     std::fs::write(dir.path().join("vite.config.js"), "x".repeat(600)).unwrap();
     std::fs::create_dir_all(dir.path().join("dist/assets")).unwrap();
-    std::fs::write(
-        dir.path().join("dist/index.html"),
-        "<div id=\"root\"></div>",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("dist/assets/index.js"),
-        "console.log('app')",
-    )
-    .unwrap();
+    write_build_file(dir.path(), "dist/index.html", "<div id=\"root\"></div>");
+    write_build_file(dir.path(), "dist/assets/index.js", "console.log('app')");
 
     let mut config = nrz::config::ProjectConfig::default();
     config.project.framework = Some("vite".into());
@@ -951,17 +972,10 @@ async fn configured_vite_static_output_generates_static_manifest_even_with_serve
 async fn process_project_without_adapter_returns_no_manifest_from_build() {
     let dir = tempfile::tempdir().unwrap();
     // Create a "dist" output dir — no .onreza/ subdir, non-static detection
-    std::fs::create_dir(dir.path().join("dist")).unwrap();
-    std::fs::write(dir.path().join("dist/server.js"), "console.log('ok')").unwrap();
+    write_build_file(dir.path(), "dist/server.js", "console.log('ok')");
 
     let detection = make_detection("other", None); // suggested_compute == Process
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: true,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let result = build_fixture(dir.path(), Some(&detection), true, None)
         .await
         .unwrap();
 
@@ -977,15 +991,10 @@ fn nextjs_standalone_prepares_static_with_correct_nesting() {
     let output = tempfile::tempdir().unwrap();
 
     // Create .next/static/chunks/main.js in project dir
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
 
     // Create server.js in output dir
-    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+    write_build_file(output.path(), "server.js", "// server");
 
     prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
 
@@ -1003,9 +1012,8 @@ fn nextjs_standalone_copies_static_for_server() {
     let project = tempfile::tempdir().unwrap();
     let output = tempfile::tempdir().unwrap();
 
-    std::fs::create_dir_all(project.path().join(".next/static/css")).unwrap();
-    std::fs::write(project.path().join(".next/static/css/style.css"), "body{}").unwrap();
-    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+    write_build_file(project.path(), ".next/static/css/style.css", "body{}");
+    write_build_file(output.path(), "server.js", "// server");
 
     prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
 
@@ -1018,9 +1026,8 @@ fn nextjs_standalone_copies_public() {
     let project = tempfile::tempdir().unwrap();
     let output = tempfile::tempdir().unwrap();
 
-    std::fs::create_dir_all(project.path().join("public")).unwrap();
-    std::fs::write(project.path().join("public/favicon.ico"), "icon").unwrap();
-    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+    write_build_file(project.path(), "public/favicon.ico", "icon");
+    write_build_file(output.path(), "server.js", "// server");
 
     prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
 
@@ -1033,13 +1040,8 @@ fn nextjs_standalone_without_public_dir() {
     let output = tempfile::tempdir().unwrap();
 
     // No public/ dir in project
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
-    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
+    write_build_file(output.path(), "server.js", "// server");
 
     prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
 
@@ -1059,28 +1061,21 @@ fn nextjs_standalone_does_not_overwrite_existing() {
     let project = tempfile::tempdir().unwrap();
     let output = tempfile::tempdir().unwrap();
 
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// original",
-    )
-    .unwrap();
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// original");
 
     // Pre-create destination with different content — simulates a previous build
     // or an adapter that already prepared the output. prepare_nextjs_standalone
     // must not overwrite to avoid clobbering adapter-generated files.
-    std::fs::create_dir_all(output.path().join("_static/_next/static/chunks")).unwrap();
-    std::fs::write(
-        output.path().join("_static/_next/static/chunks/main.js"),
+    write_build_file(
+        output.path(),
+        "_static/_next/static/chunks/main.js",
         "// existing",
-    )
-    .unwrap();
-    std::fs::create_dir_all(output.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        output.path().join(".next/static/chunks/main.js"),
+    );
+    write_build_file(
+        output.path(),
+        ".next/static/chunks/main.js",
         "// existing-server",
-    )
-    .unwrap();
+    );
 
     prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
 
@@ -1099,7 +1094,7 @@ fn nextjs_standalone_prunes_broken_pnpm_hoist_symlinks() {
     let project = tempfile::tempdir().unwrap();
     let output = tempfile::tempdir().unwrap();
 
-    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+    write_build_file(output.path(), "server.js", "// server");
     let pnpm_hoist = output.path().join("node_modules/.pnpm/node_modules");
     std::fs::create_dir_all(&pnpm_hoist).unwrap();
     std::fs::create_dir_all(
@@ -1150,7 +1145,7 @@ fn nextjs_standalone_does_not_prune_symlinked_pnpm_hoist_directory() {
     let project = tempfile::tempdir().unwrap();
     let output = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
-    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+    write_build_file(output.path(), "server.js", "// server");
     std::os::unix::fs::symlink("missing", outside.path().join("victim")).unwrap();
     std::fs::create_dir_all(output.path().join("node_modules/.pnpm")).unwrap();
     std::os::unix::fs::symlink(
@@ -1170,13 +1165,8 @@ fn nextjs_metadata_copy_rejects_symlinked_public_directory() {
     let project = tempfile::tempdir().unwrap();
     let output = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
-    std::fs::write(output.path().join("server.js"), "// server").unwrap();
-    std::fs::create_dir_all(output.path().join(".next/server/app")).unwrap();
-    std::fs::write(
-        output.path().join(".next/server/app/favicon.ico.body"),
-        "icon",
-    )
-    .unwrap();
+    write_build_file(output.path(), "server.js", "// server");
+    write_build_file(output.path(), ".next/server/app/favicon.ico.body", "icon");
     std::os::unix::fs::symlink(outside.path(), output.path().join("public")).unwrap();
 
     let error = prepare_nextjs_standalone(project.path(), output.path(), true).unwrap_err();
@@ -1195,33 +1185,12 @@ async fn nextjs_standalone_run_with_hint_generates_manifest() {
     let project = tempfile::tempdir().unwrap();
 
     // Create Next.js standalone output structure
-    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
-    std::fs::write(
-        project.path().join(".next/standalone/server.js"),
-        "// server",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join("public")).unwrap();
-    std::fs::write(project.path().join("public/favicon.ico"), "icon").unwrap();
+    write_build_file(project.path(), ".next/standalone/server.js", "// server");
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
+    write_build_file(project.path(), "public/favicon.ico", "icon");
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["output: 'standalone'".into()],
-    };
-    let detection = make_detection("nextjs", Some(ssr));
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let detection = make_ssr_detection("nextjs", "output: 'standalone'");
+    let result = build_fixture(project.path(), Some(&detection), false, None)
         .await
         .unwrap();
 
@@ -1268,69 +1237,31 @@ async fn nextjs_standalone_run_with_hint_generates_manifest() {
 async fn nextjs_adapter_descriptor_generates_manifest_before_legacy_standalone() {
     let project = tempfile::tempdir().unwrap();
 
-    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
-    std::fs::write(
-        project.path().join(".next/standalone/server.js"),
-        "// server",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join(".next/server/app")).unwrap();
-    std::fs::write(
-        project.path().join(".next/server/app/index.html"),
+    write_build_file(project.path(), ".next/standalone/server.js", "// server");
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
+    write_build_file(
+        project.path(),
+        ".next/server/app/index.html",
         "<main>Home</main>",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join("public")).unwrap();
-    std::fs::write(project.path().join("public/robots.txt"), "User-agent: *").unwrap();
-    std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
-    let static_file_path = project.path().join(".next/static/chunks/main.js");
-    std::fs::write(
-        project.path().join(".onreza/next-adapter-output.json"),
-        format!(
-            r#"{{
-          "version": 1,
-          "adapter": {{ "name": "@onreza/nrz-next-adapter", "version": "0.34.1" }},
-          "nextVersion": "16.2.9",
-          "buildId": "build-123",
-          "outputs": {{
-            "staticFiles": [{{
-              "type": "STATIC_FILE",
-              "pathname": "/_next/static/chunks/main.js",
-              "filePath": "{}"
-            }}],
-            "prerenders": [{{
-              "type": "PRERENDER",
-              "pathname": "/",
-              "fallback": {{
-                "filePath": "{}",
-                "initialHeaders": {{ "content-type": "text/html; charset=utf-8" }},
-                "initialRevalidate": false
-              }}
-            }}]
-          }}
-        }}"#,
-            static_file_path.display(),
-            project.path().join(".next/server/app/index.html").display()
-        ),
-    )
-    .unwrap();
+    );
+    write_build_file(project.path(), "public/robots.txt", "User-agent: *");
+    let mut outputs = nextjs_static_outputs(project.path());
+    outputs["prerenders"] = serde_json::json!([
+      {
+        "type": "PRERENDER",
+        "pathname": "/",
+        "fallback": {
+          "filePath": project.path().join(".next/server/app/index.html"),
+          "initialHeaders": {
+            "content-type": "text/html; charset=utf-8"
+          },
+          "initialRevalidate": false
+        }
+      }
+    ]);
+    write_nextjs_adapter_output(project.path(), outputs);
 
-    let detection = make_detection("nextjs", None);
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
-        .await
-        .unwrap();
+    let result = build_nextjs_fixture(project.path(), None).await;
 
     let manifest = result
         .manifest
@@ -1397,13 +1328,7 @@ async fn nextjs_adapter_descriptor_generates_manifest_before_legacy_standalone()
 async fn nextjs_adapter_manifest_meta_stays_compact_for_many_isr_routes() {
     let project = tempfile::tempdir().unwrap();
 
-    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
-    std::fs::write(
-        project.path().join(".next/standalone/server.js"),
-        "// server",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
+    write_build_file(project.path(), ".next/standalone/server.js", "// server");
     let prerenders = (0..300)
         .map(|index| {
             serde_json::json!({
@@ -1419,31 +1344,12 @@ async fn nextjs_adapter_manifest_meta_stays_compact_for_many_isr_routes() {
             })
         })
         .collect::<Vec<_>>();
-    let descriptor = serde_json::json!({
-        "version": 1,
-        "adapter": { "name": "@onreza/nrz-next-adapter", "version": "0.34.1" },
-        "nextVersion": "16.2.9",
-        "buildId": "build-123",
-        "outputs": {
-            "prerenders": prerenders
-        }
-    });
-    std::fs::write(
-        project.path().join(".onreza/next-adapter-output.json"),
-        serde_json::to_string(&descriptor).unwrap(),
-    )
-    .unwrap();
+    write_nextjs_adapter_output(
+        project.path(),
+        serde_json::json!({ "prerenders": prerenders }),
+    );
 
-    let detection = make_detection("nextjs", None);
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
-        .await
-        .unwrap();
+    let result = build_nextjs_fixture(project.path(), None).await;
 
     let manifest = result
         .manifest
@@ -1471,61 +1377,10 @@ async fn nextjs_adapter_manifest_meta_stays_compact_for_many_isr_routes() {
 
 #[tokio::test]
 async fn nextjs_adapter_descriptor_with_middleware_uses_compute_fallback() {
-    let project = tempfile::tempdir().unwrap();
+    let (project, outputs) = nextjs_middleware_project();
+    write_nextjs_adapter_output(project.path(), outputs);
 
-    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
-    std::fs::write(
-        project.path().join(".next/standalone/server.js"),
-        "// server",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join("public")).unwrap();
-    std::fs::write(project.path().join("public/robots.txt"), "User-agent: *").unwrap();
-    std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
-    let static_file_path = project.path().join(".next/static/chunks/main.js");
-    std::fs::write(
-        project.path().join(".onreza/next-adapter-output.json"),
-        format!(
-            r#"{{
-          "version": 1,
-          "adapter": {{ "name": "@onreza/nrz-next-adapter", "version": "0.34.1" }},
-          "nextVersion": "16.2.9",
-          "buildId": "build-123",
-          "outputs": {{
-            "staticFiles": [{{
-              "type": "STATIC_FILE",
-              "pathname": "/_next/static/chunks/main.js",
-              "filePath": "{}"
-            }}],
-            "middleware": {{
-              "type": "MIDDLEWARE",
-              "pathname": "/_middleware",
-              "runtime": "edge",
-              "edgeRuntime": {{ "entryKey": "middleware" }}
-            }}
-          }}
-        }}"#,
-            static_file_path.display(),
-        ),
-    )
-    .unwrap();
-
-    let detection = make_detection("nextjs", None);
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
-        .await
-        .unwrap();
+    let result = build_nextjs_fixture(project.path(), None).await;
 
     let manifest = result
         .manifest
@@ -1567,67 +1422,18 @@ async fn nextjs_adapter_descriptor_with_middleware_uses_compute_fallback() {
 
 #[tokio::test]
 async fn nextjs_adapter_descriptor_with_disjoint_middleware_keeps_static_layers() {
-    let project = tempfile::tempdir().unwrap();
+    let (project, mut outputs) = nextjs_middleware_project();
+    outputs["middleware"]["config"] = serde_json::json!({
+      "matchers": [
+        {
+          "source": "/private/:path*",
+          "sourceRegex": "^(?:\\\\/(_next\\\\/data\\\\/[^/]{1,}))?\\\\/private(?:\\\\/((?:[^\\\\/#\\\\?]+?)(?:\\\\/(?:[^\\\\/#\\\\?]+?))*))?(\\\\.json|\\\\.rsc)?[\\\\/#\\\\?]?$"
+        }
+      ]
+    });
+    write_nextjs_adapter_output(project.path(), outputs);
 
-    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
-    std::fs::write(
-        project.path().join(".next/standalone/server.js"),
-        "// server",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join("public")).unwrap();
-    std::fs::write(project.path().join("public/robots.txt"), "User-agent: *").unwrap();
-    std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
-    let static_file_path = project.path().join(".next/static/chunks/main.js");
-    std::fs::write(
-        project.path().join(".onreza/next-adapter-output.json"),
-        format!(
-            r#"{{
-          "version": 1,
-          "adapter": {{ "name": "@onreza/nrz-next-adapter", "version": "0.34.1" }},
-          "nextVersion": "16.2.9",
-          "buildId": "build-123",
-          "outputs": {{
-            "staticFiles": [{{
-              "type": "STATIC_FILE",
-              "pathname": "/_next/static/chunks/main.js",
-              "filePath": "{}"
-            }}],
-            "middleware": {{
-              "type": "MIDDLEWARE",
-              "pathname": "/_middleware",
-              "runtime": "edge",
-              "config": {{
-                "matchers": [{{
-                  "source": "/private/:path*",
-                  "sourceRegex": "^(?:\\\\/(_next\\\\/data\\\\/[^/]{{1,}}))?\\\\/private(?:\\\\/((?:[^\\\\/#\\\\?]+?)(?:\\\\/(?:[^\\\\/#\\\\?]+?))*))?(\\\\.json|\\\\.rsc)?[\\\\/#\\\\?]?$"
-                }}]
-              }},
-              "edgeRuntime": {{ "entryKey": "middleware" }}
-            }}
-          }}
-        }}"#,
-            static_file_path.display(),
-        ),
-    )
-    .unwrap();
-
-    let detection = make_detection("nextjs", None);
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
-        .await
-        .unwrap();
+    let result = build_nextjs_fixture(project.path(), None).await;
 
     let manifest = result
         .manifest
@@ -1663,29 +1469,13 @@ async fn nextjs_detected_monorepo_standalone_keeps_bundle_root_and_nested_entry(
     std::fs::write(app.join("server.js"), "// server").unwrap();
     std::fs::create_dir_all(root.join("node_modules/shared")).unwrap();
     std::fs::write(root.join("node_modules/shared/index.js"), "// shared").unwrap();
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
 
-    let detection = make_detection("nextjs", None);
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(
-        args,
-        true,
-        &config,
-        Some(&detection),
+    let result = build_nextjs_fixture(
+        project.path(),
         Some(output_hint(".next", BuildSettingSource::Detected)),
     )
-    .await
-    .unwrap();
+    .await;
 
     assert!(result.output_dir.ends_with(".next/standalone"));
     assert!(
@@ -1717,33 +1507,17 @@ async fn nextjs_nested_standalone_copies_prisma_to_bundle_root() {
     let app = root.join("peerpulse");
     std::fs::create_dir_all(&app).unwrap();
     std::fs::write(app.join("server.js"), "// server").unwrap();
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
 
     let prisma = project.path().join("node_modules/@prisma/client-root");
     std::fs::create_dir_all(&prisma).unwrap();
     std::fs::write(prisma.join("index.js"), "// prisma").unwrap();
 
-    let detection = make_detection("nextjs", None);
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(
-        args,
-        true,
-        &config,
-        Some(&detection),
+    let result = build_nextjs_fixture(
+        project.path(),
         Some(output_hint(".next", BuildSettingSource::Detected)),
     )
-    .await
-    .unwrap();
+    .await;
 
     assert!(result.output_dir.ends_with(".next/standalone"));
     assert!(
@@ -1775,37 +1549,9 @@ async fn nextjs_nested_standalone_ignores_traced_server_js_files_when_selecting_
         "// traced workspace helper",
     )
     .unwrap();
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
 
-    let detection = make_detection("nextjs", None);
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(
-        args,
-        true,
-        &config,
-        Some(&detection),
-        Some(output_hint(".next", BuildSettingSource::Detected)),
-    )
-    .await
-    .unwrap();
-
-    let manifest = result
-        .manifest
-        .expect("nested Next.js standalone output should produce a manifest");
-    assert_eq!(
-        manifest.layers.last().unwrap().entry.as_deref(),
-        Some("apps/web/server.js")
-    );
+    assert_nested_nextjs_entry(project.path(), "apps/web/server.js").await;
 }
 
 #[tokio::test]
@@ -1823,49 +1569,20 @@ async fn nextjs_nested_standalone_prefers_app_shape_over_generated_traced_file()
         "process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = '{}'; require('next/dist/server/lib/start-server');",
     )
     .unwrap();
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
 
-    let detection = make_detection("nextjs", None);
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(
-        args,
-        true,
-        &config,
-        Some(&detection),
-        Some(output_hint(".next", BuildSettingSource::Detected)),
-    )
-    .await
-    .unwrap();
-
-    let manifest = result
-        .manifest
-        .expect("nested Next.js standalone output should produce a manifest");
-    assert_eq!(
-        manifest.layers.last().unwrap().entry.as_deref(),
-        Some("apps/web/server.js")
-    );
+    assert_nested_nextjs_entry(project.path(), "apps/web/server.js").await;
 }
 
 #[tokio::test]
 async fn nextjs_monorepo_standalone_nested_server_generates_manifest() {
     let project = tempfile::tempdir().unwrap();
 
-    std::fs::create_dir_all(project.path().join(".next/standalone/peerpulse")).unwrap();
-    std::fs::write(
-        project.path().join(".next/standalone/peerpulse/server.js"),
+    write_build_file(
+        project.path(),
+        ".next/standalone/peerpulse/server.js",
         "// server",
-    )
-    .unwrap();
+    );
     std::fs::create_dir_all(
         project
             .path()
@@ -1879,29 +1596,13 @@ async fn nextjs_monorepo_standalone_nested_server_generates_manifest() {
         "// not the app entry",
     )
     .unwrap();
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
 
-    let detection = make_detection("nextjs", None);
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(
-        args,
-        true,
-        &config,
-        Some(&detection),
+    let result = build_nextjs_fixture(
+        project.path(),
         Some(output_hint(".next", BuildSettingSource::Detected)),
     )
-    .await
-    .unwrap();
+    .await;
 
     assert!(result.output_dir.ends_with(".next/standalone"));
     let manifest = result
@@ -1923,35 +1624,18 @@ async fn nextjs_monorepo_standalone_nested_server_generates_manifest() {
 async fn nextjs_user_standalone_output_dir_is_not_rewritten() {
     let project = tempfile::tempdir().unwrap();
 
-    std::fs::create_dir_all(project.path().join(".next/standalone/peerpulse")).unwrap();
-    std::fs::write(
-        project.path().join(".next/standalone/peerpulse/server.js"),
+    write_build_file(
+        project.path(),
+        ".next/standalone/peerpulse/server.js",
         "// server",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
+    );
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
 
-    let detection = make_detection("nextjs", None);
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(
-        args,
-        true,
-        &config,
-        Some(&detection),
+    let result = build_nextjs_fixture(
+        project.path(),
         Some(output_hint(".next/standalone", BuildSettingSource::User)),
     )
-    .await
-    .unwrap();
+    .await;
 
     assert_eq!(result.output_dir, project.path().join(".next/standalone"));
     let manifest = result
@@ -1967,9 +1651,9 @@ async fn nextjs_user_standalone_output_dir_is_not_rewritten() {
 async fn nextjs_user_root_run_with_hint_preserves_root_manifest() {
     let project = tempfile::tempdir().unwrap();
 
-    std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
-    std::fs::write(
-        project.path().join(".onreza/manifest.json"),
+    write_build_file(
+        project.path(),
+        ".onreza/manifest.json",
         r#"{
           "version": 1,
           "layers": [
@@ -1979,27 +1663,14 @@ async fn nextjs_user_root_run_with_hint_preserves_root_manifest() {
             {"pattern": "^/.*$", "layer": "root-static"}
           ]
         }"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
-    std::fs::write(
-        project.path().join(".next/standalone/server.js"),
-        "// server",
-    )
-    .unwrap();
+    );
+    write_build_file(project.path(), ".next/standalone/server.js", "// server");
 
     let detection = make_detection("nextjs", None);
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: true,
-    };
-
-    let result = run_with_hint(
-        args,
-        true,
-        &config,
+    let result = build_fixture(
+        project.path(),
         Some(&detection),
+        true,
         Some(output_hint(".", BuildSettingSource::User)),
     )
     .await
@@ -2020,35 +1691,14 @@ async fn nextjs_user_root_run_with_hint_preserves_root_manifest() {
 async fn nextjs_user_dot_next_run_with_hint_uses_standalone_artifact() {
     let project = tempfile::tempdir().unwrap();
 
-    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
-    std::fs::write(
-        project.path().join(".next/standalone/server.js"),
-        "// server",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
+    write_build_file(project.path(), ".next/standalone/server.js", "// server");
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
 
-    let detection = make_detection("nextjs", None);
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(
-        args,
-        true,
-        &config,
-        Some(&detection),
+    let result = build_nextjs_fixture(
+        project.path(),
         Some(output_hint(".next", BuildSettingSource::User)),
     )
-    .await
-    .unwrap();
+    .await;
 
     assert_eq!(result.output_dir, project.path().join(".next/standalone"));
     let manifest = result
@@ -2065,31 +1715,11 @@ async fn nextjs_standalone_run_with_hint_without_public_generates_2_layer_manife
     let project = tempfile::tempdir().unwrap();
 
     // Create Next.js standalone without public/
-    std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
-    std::fs::write(
-        project.path().join(".next/standalone/server.js"),
-        "// server",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(
-        project.path().join(".next/static/chunks/main.js"),
-        "// main",
-    )
-    .unwrap();
+    write_build_file(project.path(), ".next/standalone/server.js", "// server");
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["output: 'standalone'".into()],
-    };
-    let detection = make_detection("nextjs", Some(ssr));
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let detection = make_ssr_detection("nextjs", "output: 'standalone'");
+    let result = build_fixture(project.path(), Some(&detection), false, None)
         .await
         .unwrap();
 
@@ -2107,7 +1737,7 @@ fn nextjs_standalone_without_next_static_dir() {
     let project = tempfile::tempdir().unwrap();
     let output = tempfile::tempdir().unwrap();
     // No .next/static/ at all — prepare should succeed but not create _static/
-    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+    write_build_file(output.path(), "server.js", "// server");
 
     prepare_nextjs_standalone(project.path(), output.path(), true).unwrap();
 
@@ -2122,18 +1752,8 @@ async fn nextjs_standalone_missing_server_js_is_error() {
     // Create standalone dir WITHOUT server.js
     std::fs::create_dir_all(project.path().join(".next/standalone")).unwrap();
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["output: 'standalone'".into()],
-    };
-    let detection = make_detection("nextjs", Some(ssr));
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: project.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let err = run_with_hint(args, true, &config, Some(&detection), None)
+    let detection = make_ssr_detection("nextjs", "output: 'standalone'");
+    let err = build_fixture(project.path(), Some(&detection), false, None)
         .await
         .unwrap_err();
     assert!(
@@ -2145,7 +1765,7 @@ async fn nextjs_standalone_missing_server_js_is_error() {
 #[test]
 fn copy_dir_recursive_skips_symlinks() {
     let src = tempfile::tempdir().unwrap();
-    std::fs::write(src.path().join("real.txt"), "real content").unwrap();
+    write_build_file(src.path(), "real.txt", "real content");
     std::os::unix::fs::symlink(src.path().join("real.txt"), src.path().join("link.txt")).unwrap();
 
     let dst = tempfile::tempdir().unwrap();
@@ -2180,10 +1800,10 @@ fn copy_dir_recursive_empty_src_creates_dst() {
 fn copy_dir_recursive_nested_directories() {
     let src = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(src.path().join("a/b/c")).unwrap();
-    std::fs::write(src.path().join("root.txt"), "root").unwrap();
-    std::fs::write(src.path().join("a/level1.txt"), "l1").unwrap();
-    std::fs::write(src.path().join("a/b/level2.txt"), "l2").unwrap();
-    std::fs::write(src.path().join("a/b/c/level3.txt"), "l3").unwrap();
+    write_build_file(src.path(), "root.txt", "root");
+    write_build_file(src.path(), "a/level1.txt", "l1");
+    write_build_file(src.path(), "a/b/level2.txt", "l2");
+    write_build_file(src.path(), "a/b/c/level3.txt", "l3");
 
     let dst = tempfile::tempdir().unwrap();
     let dst_sub = dst.path().join("out");
@@ -2296,27 +1916,11 @@ async fn nuxt_ssr_generates_manifest() {
     let dir = tempfile::tempdir().unwrap();
 
     // Create Nuxt .output/ structure
-    std::fs::create_dir_all(dir.path().join(".output/public/_nuxt")).unwrap();
-    std::fs::write(
-        dir.path().join(".output/public/_nuxt/entry.abc123.js"),
-        "// app",
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join(".output/server")).unwrap();
-    std::fs::write(dir.path().join(".output/server/index.mjs"), "// server").unwrap();
+    write_build_file(dir.path(), ".output/public/_nuxt/entry.abc123.js", "// app");
+    write_build_file(dir.path(), ".output/server/index.mjs", "// server");
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["server/api/ routes".into()],
-    };
-    let detection = make_detection("nuxt", Some(ssr));
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let detection = make_ssr_detection("nuxt", "server/api/ routes");
+    let result = build_fixture(dir.path(), Some(&detection), false, None)
         .await
         .unwrap();
 
@@ -2333,15 +1937,7 @@ async fn nuxt_ssr_generates_manifest() {
     );
     assert_eq!(manifest.layers[1].directory, "server");
     assert_eq!(manifest.layers[1].entry.as_deref(), Some("index.mjs"));
-    assert_eq!(manifest.routes.len(), 3);
-    assert_eq!(manifest.routes[0].pattern, "^/_nuxt/.*$");
-    assert_eq!(manifest.routes[0].priority, Some(100));
-    assert_eq!(manifest.routes[1].pattern, "^/.*$");
-    assert_eq!(manifest.routes[1].layer, "static-assets");
-    assert_eq!(manifest.routes[1].priority, Some(50));
-    assert_eq!(manifest.routes[2].pattern, "^/.*$");
-    assert_eq!(manifest.routes[2].layer, "server");
-    assert_eq!(manifest.routes[2].priority, Some(0));
+    assert_static_server_routes(&manifest, "^/_nuxt/.*$");
 }
 
 #[tokio::test]
@@ -2349,8 +1945,7 @@ async fn nuxt_static_falls_through_to_static_manifest() {
     let dir = tempfile::tempdir().unwrap();
 
     // Nuxt static: .output/public/ has the static site
-    std::fs::create_dir_all(dir.path().join(".output/public")).unwrap();
-    std::fs::write(dir.path().join(".output/public/index.html"), "<h1>hi</h1>").unwrap();
+    write_build_file(dir.path(), ".output/public/index.html", "<h1>hi</h1>");
 
     let ssr = crate::detect::types::SsrAnalysis {
         is_static_compatible: true,
@@ -2359,13 +1954,7 @@ async fn nuxt_static_falls_through_to_static_manifest() {
     let mut detection = make_detection("nuxt", Some(ssr));
     detection.suggested_compute = crate::detect::types::ComputeType::Static;
 
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: true,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let result = build_fixture(dir.path(), Some(&detection), true, None)
         .await
         .unwrap();
 
@@ -2410,21 +1999,10 @@ async fn nuxt_ssr_without_public_generates_compute_only() {
     let dir = tempfile::tempdir().unwrap();
 
     // Nuxt .output/ with server but no public/
-    std::fs::create_dir_all(dir.path().join(".output/server")).unwrap();
-    std::fs::write(dir.path().join(".output/server/index.mjs"), "// server").unwrap();
+    write_build_file(dir.path(), ".output/server/index.mjs", "// server");
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["server/api/ routes".into()],
-    };
-    let detection = make_detection("nuxt", Some(ssr));
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let detection = make_ssr_detection("nuxt", "server/api/ routes");
+    let result = build_fixture(dir.path(), Some(&detection), false, None)
         .await
         .unwrap();
 
@@ -2446,22 +2024,11 @@ async fn sveltekit_ssr_generates_manifest() {
     let dir = tempfile::tempdir().unwrap();
 
     // Create SvelteKit build/ structure (adapter-node)
-    std::fs::create_dir_all(dir.path().join("build/client/_app")).unwrap();
-    std::fs::write(dir.path().join("build/client/_app/immutable.js"), "// app").unwrap();
-    std::fs::write(dir.path().join("build/index.js"), "// server").unwrap();
+    write_build_file(dir.path(), "build/client/_app/immutable.js", "// app");
+    write_build_file(dir.path(), "build/index.js", "// server");
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["adapter-node (runtime)".into()],
-    };
-    let detection = make_detection("sveltekit", Some(ssr));
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let detection = make_ssr_detection("sveltekit", "adapter-node (runtime)");
+    let result = build_fixture(dir.path(), Some(&detection), false, None)
         .await
         .unwrap();
 
@@ -2476,15 +2043,7 @@ async fn sveltekit_ssr_generates_manifest() {
     );
     assert_eq!(manifest.layers[1].directory, ".");
     assert_eq!(manifest.layers[1].entry.as_deref(), Some("index.js"));
-    assert_eq!(manifest.routes.len(), 3);
-    assert_eq!(manifest.routes[0].pattern, "^/_app/.*$");
-    assert_eq!(manifest.routes[0].priority, Some(100));
-    assert_eq!(manifest.routes[1].pattern, "^/.*$");
-    assert_eq!(manifest.routes[1].layer, "static-assets");
-    assert_eq!(manifest.routes[1].priority, Some(50));
-    assert_eq!(manifest.routes[2].pattern, "^/.*$");
-    assert_eq!(manifest.routes[2].layer, "server");
-    assert_eq!(manifest.routes[2].priority, Some(0));
+    assert_static_server_routes(&manifest, "^/_app/.*$");
 }
 
 #[tokio::test]
@@ -2492,21 +2051,10 @@ async fn sveltekit_ssr_without_client_generates_compute_only() {
     let dir = tempfile::tempdir().unwrap();
 
     // SvelteKit build with no client/ dir
-    std::fs::create_dir_all(dir.path().join("build")).unwrap();
-    std::fs::write(dir.path().join("build/index.js"), "// server").unwrap();
+    write_build_file(dir.path(), "build/index.js", "// server");
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["adapter-node (runtime)".into()],
-    };
-    let detection = make_detection("sveltekit", Some(ssr));
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let detection = make_ssr_detection("sveltekit", "adapter-node (runtime)");
+    let result = build_fixture(dir.path(), Some(&detection), false, None)
         .await
         .unwrap();
 
@@ -2528,27 +2076,11 @@ async fn remix_ssr_generates_manifest() {
     let dir = tempfile::tempdir().unwrap();
 
     // Create Remix build/ structure
-    std::fs::create_dir_all(dir.path().join("build/client/assets")).unwrap();
-    std::fs::write(
-        dir.path().join("build/client/assets/root-abc123.js"),
-        "// app",
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("build/server")).unwrap();
-    std::fs::write(dir.path().join("build/server/index.js"), "// server").unwrap();
+    write_build_file(dir.path(), "build/client/assets/root-abc123.js", "// app");
+    write_build_file(dir.path(), "build/server/index.js", "// server");
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["route loaders".into()],
-    };
-    let detection = make_detection("remix", Some(ssr));
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let detection = make_ssr_detection("remix", "route loaders");
+    let result = build_fixture(dir.path(), Some(&detection), false, None)
         .await
         .unwrap();
 
@@ -2559,15 +2091,7 @@ async fn remix_ssr_generates_manifest() {
     assert_eq!(manifest.layers[0].directory, "client");
     assert_eq!(manifest.layers[1].directory, "server");
     assert_eq!(manifest.layers[1].entry.as_deref(), Some("index.js"));
-    assert_eq!(manifest.routes.len(), 3);
-    assert_eq!(manifest.routes[0].pattern, "^/assets/.*$");
-    assert_eq!(manifest.routes[0].priority, Some(100));
-    assert_eq!(manifest.routes[1].pattern, "^/.*$");
-    assert_eq!(manifest.routes[1].layer, "static-assets");
-    assert_eq!(manifest.routes[1].priority, Some(50));
-    assert_eq!(manifest.routes[2].pattern, "^/.*$");
-    assert_eq!(manifest.routes[2].layer, "server");
-    assert_eq!(manifest.routes[2].priority, Some(0));
+    assert_static_server_routes(&manifest, "^/assets/.*$");
 }
 
 #[tokio::test]
@@ -2575,27 +2099,11 @@ async fn react_router_ssr_generates_manifest() {
     let dir = tempfile::tempdir().unwrap();
 
     // React Router v7 uses the same build/ structure as Remix
-    std::fs::create_dir_all(dir.path().join("build/client/assets")).unwrap();
-    std::fs::write(
-        dir.path().join("build/client/assets/root-abc123.js"),
-        "// app",
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("build/server")).unwrap();
-    std::fs::write(dir.path().join("build/server/index.js"), "// server").unwrap();
+    write_build_file(dir.path(), "build/client/assets/root-abc123.js", "// app");
+    write_build_file(dir.path(), "build/server/index.js", "// server");
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["route loaders".into()],
-    };
-    let detection = make_detection("react-router", Some(ssr));
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let detection = make_ssr_detection("react-router", "route loaders");
+    let result = build_fixture(dir.path(), Some(&detection), false, None)
         .await
         .unwrap();
 
@@ -2606,15 +2114,7 @@ async fn react_router_ssr_generates_manifest() {
     assert_eq!(manifest.layers[0].directory, "client");
     assert_eq!(manifest.layers[1].directory, "server");
     assert_eq!(manifest.layers[1].entry.as_deref(), Some("index.js"));
-    assert_eq!(manifest.routes.len(), 3);
-    assert_eq!(manifest.routes[0].pattern, "^/assets/.*$");
-    assert_eq!(manifest.routes[0].priority, Some(100));
-    assert_eq!(manifest.routes[1].pattern, "^/.*$");
-    assert_eq!(manifest.routes[1].layer, "static-assets");
-    assert_eq!(manifest.routes[1].priority, Some(50));
-    assert_eq!(manifest.routes[2].pattern, "^/.*$");
-    assert_eq!(manifest.routes[2].layer, "server");
-    assert_eq!(manifest.routes[2].priority, Some(0));
+    assert_static_server_routes(&manifest, "^/assets/.*$");
 }
 
 #[test]
@@ -2648,21 +2148,10 @@ async fn remix_ssr_without_client_generates_compute_only() {
     let dir = tempfile::tempdir().unwrap();
 
     // Remix build with server but no client/
-    std::fs::create_dir_all(dir.path().join("build/server")).unwrap();
-    std::fs::write(dir.path().join("build/server/index.js"), "// server").unwrap();
+    write_build_file(dir.path(), "build/server/index.js", "// server");
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["route loaders".into()],
-    };
-    let detection = make_detection("remix", Some(ssr));
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let detection = make_ssr_detection("remix", "route loaders");
+    let result = build_fixture(dir.path(), Some(&detection), false, None)
         .await
         .unwrap();
 
@@ -2697,27 +2186,11 @@ async fn astro_ssr_generates_manifest() {
     let dir = tempfile::tempdir().unwrap();
 
     // Create Astro SSR dist/ structure
-    std::fs::create_dir_all(dir.path().join("dist/client/_astro")).unwrap();
-    std::fs::write(
-        dir.path().join("dist/client/_astro/index.abc123.js"),
-        "// app",
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("dist/server")).unwrap();
-    std::fs::write(dir.path().join("dist/server/entry.mjs"), "// server").unwrap();
+    write_build_file(dir.path(), "dist/client/_astro/index.abc123.js", "// app");
+    write_build_file(dir.path(), "dist/server/entry.mjs", "// server");
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["output: 'server' (SSR)".into()],
-    };
-    let detection = make_detection("astro", Some(ssr));
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let detection = make_ssr_detection("astro", "output: 'server' (SSR)");
+    let result = build_fixture(dir.path(), Some(&detection), false, None)
         .await
         .unwrap();
 
@@ -2732,15 +2205,7 @@ async fn astro_ssr_generates_manifest() {
     );
     assert_eq!(manifest.layers[1].directory, "server");
     assert_eq!(manifest.layers[1].entry.as_deref(), Some("entry.mjs"));
-    assert_eq!(manifest.routes.len(), 3);
-    assert_eq!(manifest.routes[0].pattern, "^/_astro/.*$");
-    assert_eq!(manifest.routes[0].priority, Some(100));
-    assert_eq!(manifest.routes[1].pattern, "^/.*$");
-    assert_eq!(manifest.routes[1].layer, "static-assets");
-    assert_eq!(manifest.routes[1].priority, Some(50));
-    assert_eq!(manifest.routes[2].pattern, "^/.*$");
-    assert_eq!(manifest.routes[2].layer, "server");
-    assert_eq!(manifest.routes[2].priority, Some(0));
+    assert_static_server_routes(&manifest, "^/_astro/.*$");
 }
 
 #[tokio::test]
@@ -2748,21 +2213,10 @@ async fn astro_ssr_without_client_generates_compute_only() {
     let dir = tempfile::tempdir().unwrap();
 
     // Astro SSR with no client/ dir
-    std::fs::create_dir_all(dir.path().join("dist/server")).unwrap();
-    std::fs::write(dir.path().join("dist/server/entry.mjs"), "// server").unwrap();
+    write_build_file(dir.path(), "dist/server/entry.mjs", "// server");
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["output: 'server' (SSR)".into()],
-    };
-    let detection = make_detection("astro", Some(ssr));
-    let config = nrz::config::ProjectConfig::default();
-    let args = BuildArgs {
-        dir: dir.path().to_string_lossy().into_owned(),
-        skip_validation: false,
-    };
-
-    let result = run_with_hint(args, true, &config, Some(&detection), None)
+    let detection = make_ssr_detection("astro", "output: 'server' (SSR)");
+    let result = build_fixture(dir.path(), Some(&detection), false, None)
         .await
         .unwrap();
 
@@ -2782,8 +2236,7 @@ async fn astro_ssr_without_client_generates_compute_only() {
 #[test]
 fn try_generate_ssr_returns_none_for_static_compatible() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join("server")).unwrap();
-    std::fs::write(dir.path().join("server/index.mjs"), "// server").unwrap();
+    write_build_file(dir.path(), "server/index.mjs", "// server");
 
     let ssr = crate::detect::types::SsrAnalysis {
         is_static_compatible: true,
@@ -2800,11 +2253,7 @@ fn try_generate_ssr_returns_none_for_missing_entry() {
     // Create output dir but NOT the entry file
     std::fs::create_dir_all(dir.path().join("server")).unwrap();
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["server/api/ routes".into()],
-    };
-    let detection = make_detection("nuxt", Some(ssr));
+    let detection = make_ssr_detection("nuxt", "server/api/ routes");
 
     assert!(try_generate_ssr_manifest(&detection, dir.path()).is_none());
 }
@@ -2813,11 +2262,7 @@ fn try_generate_ssr_returns_none_for_missing_entry() {
 fn try_generate_ssr_returns_none_for_unknown_framework() {
     let dir = tempfile::tempdir().unwrap();
 
-    let ssr = crate::detect::types::SsrAnalysis {
-        is_static_compatible: false,
-        ssr_features: vec!["some feature".into()],
-    };
-    let detection = make_detection("other", Some(ssr));
+    let detection = make_ssr_detection("other", "some feature");
 
     assert!(try_generate_ssr_manifest(&detection, dir.path()).is_none());
 }
@@ -2839,8 +2284,7 @@ fn astro_output_dirs_delegate_to_presets() {
 #[test]
 fn try_generate_ssr_returns_none_without_ssr_analysis() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join("server")).unwrap();
-    std::fs::write(dir.path().join("server/index.mjs"), "// server").unwrap();
+    write_build_file(dir.path(), "server/index.mjs", "// server");
 
     let detection = make_detection("nuxt", None);
 
@@ -2867,12 +2311,11 @@ fn prisma_client_hash_packages_copied_to_standalone() {
     .unwrap();
 
     // Create standalone output with node_modules/@prisma/ but WITHOUT the hash package
-    std::fs::create_dir_all(output.path().join("node_modules/@prisma/client")).unwrap();
-    std::fs::write(
-        output.path().join("node_modules/@prisma/client/index.js"),
+    write_build_file(
+        output.path(),
+        "node_modules/@prisma/client/index.js",
         "// base client",
-    )
-    .unwrap();
+    );
 
     copy_missing_prisma_packages(project.path(), project.path(), output.path(), true).unwrap();
 
@@ -2935,12 +2378,11 @@ fn prisma_skips_non_client_hash_packages() {
         "// engine",
     )
     .unwrap();
-    std::fs::create_dir_all(project.path().join("node_modules/@prisma/client")).unwrap();
-    std::fs::write(
-        project.path().join("node_modules/@prisma/client/index.js"),
+    write_build_file(
+        project.path(),
+        "node_modules/@prisma/client/index.js",
         "// client",
-    )
-    .unwrap();
+    );
 
     std::fs::create_dir_all(output.path().join("node_modules/@prisma")).unwrap();
 
@@ -2977,9 +2419,8 @@ fn prisma_standalone_integration_via_prepare() {
     let output = tempfile::tempdir().unwrap();
 
     // Set up minimal standalone structure
-    std::fs::create_dir_all(project.path().join(".next/static/chunks")).unwrap();
-    std::fs::write(project.path().join(".next/static/chunks/main.js"), "// js").unwrap();
-    std::fs::write(output.path().join("server.js"), "// server").unwrap();
+    write_build_file(project.path(), ".next/static/chunks/main.js", "// js");
+    write_build_file(output.path(), "server.js", "// server");
 
     // Add Prisma hash package
     let src = project.path().join("node_modules/@prisma/client-deadbeef");
@@ -3016,12 +2457,12 @@ async fn direct_monorepo_build_copies_prisma_from_workspace_pnpm_store() {
 
     std::fs::create_dir_all(&output).unwrap();
     std::fs::write(output.join("server.js"), "// server").unwrap();
-    std::fs::write(
-        workspace.path().join("pnpm-workspace.yaml"),
+    write_build_file(
+        workspace.path(),
+        "pnpm-workspace.yaml",
         "packages:\n  - 'apps/*'\n",
-    )
-    .unwrap();
-    std::fs::write(workspace.path().join("package.json"), r#"{"private":true}"#).unwrap();
+    );
+    write_build_file(workspace.path(), "package.json", r#"{"private":true}"#);
     std::fs::write(
         project.join("package.json"),
         r#"{"dependencies":{"next":"15.0.0"}}"#,
@@ -3202,8 +2643,12 @@ fn prisma_copy_rejects_symlinked_destination_parent() {
 async fn standalone_authored_compute_binds_declared_node_without_fabricating_build_target() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join(".onreza")).unwrap();
-    std::fs::write(dir.path().join("server.js"), "console.log('server')").unwrap();
-    std::fs::write(dir.path().join(".onreza/manifest.json"), r#"{"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js"}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#).unwrap();
+    write_build_file(dir.path(), "server.js", "console.log('server')");
+    write_build_file(
+        dir.path(),
+        ".onreza/manifest.json",
+        r#"{"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js"}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#,
+    );
     let config = toml::from_str("[build]\noutput_directory='.'\n[deploy]\nruntime='node'\nentry='server.js'\nargs=['literal argument']\n").unwrap();
     let result = run(
         BuildArgs {

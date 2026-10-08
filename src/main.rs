@@ -39,6 +39,8 @@ mod project_settings;
 mod rollback;
 #[cfg(test)]
 mod rollback_tests;
+#[cfg(test)]
+mod test_support;
 mod upgrade;
 
 use std::io::IsTerminal;

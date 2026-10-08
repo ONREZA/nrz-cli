@@ -9,6 +9,71 @@ fn write_detection_file(root: &Path, rel: &str, content: &str) {
     std::fs::write(path, content).unwrap();
 }
 
+fn detection_project(package_json: &str) -> tempfile::TempDir {
+    let project = tempfile::tempdir().unwrap();
+    write_detection_file(project.path(), "package.json", package_json);
+    project
+}
+
+fn detect_project(package_json: &str, files: &[(&str, &str)]) -> DetectionResult {
+    let project = detection_project(package_json);
+    for (path, content) in files {
+        write_detection_file(project.path(), path, content);
+    }
+    detect(project.path())
+}
+
+fn assert_framework_compute(result: &DetectionResult, framework: &str, compute: ComputeType) {
+    assert_eq!(result.framework, framework);
+    assert_eq!(result.suggested_compute, compute);
+}
+
+fn assert_output_directory(result: &DetectionResult, expected: &str) {
+    assert_eq!(
+        result
+            .metadata
+            .build_info
+            .as_ref()
+            .unwrap()
+            .output_dir
+            .as_deref(),
+        Some(expected)
+    );
+}
+
+fn assert_local_entry(root: &Path, expected: &str) {
+    let result = resolve_entry_point("other", root, root);
+    assert_eq!(result.as_deref(), Some(expected));
+}
+
+fn nestjs_detection() -> DetectionResult {
+    detect_project(
+        r#"{"dependencies": {"@nestjs/core": "10.0.0", "express": "4.18.0"}}"#,
+        &[(
+            "src/main.ts",
+            r#"import { NestFactory } from "@nestjs/core";"#,
+        )],
+    )
+}
+
+fn remix_spa_detection() -> DetectionResult {
+    detect_project(
+        r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
+        &[(
+            "vite.config.ts",
+            r#"import { vitePlugin as remix } from "@remix-run/dev";
+export default defineConfig({
+  plugins: [remix({ ssr: false })],
+})"#,
+        )],
+    )
+}
+
+fn assert_package_framework(package_json: &str, expected: &str) {
+    let result = detect_project(package_json, &[]);
+    assert_eq!(result.framework, expected);
+}
+
 #[test]
 fn javascript_start_rejects_shell_comment_and_tilde_expansion() {
     use application_runtime::resolve_application_runtime_with_project;
@@ -93,16 +158,13 @@ fn non_ssr_framework_always_static() {
 
 #[test]
 fn configured_vite_framework_overrides_server_dependency_autodetect() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{
           "scripts": {"build": "vite build"},
           "dependencies": {"express": "^4.19.0", "react": "^18.3.0"},
           "devDependencies": {"vite": "^5.0.0", "@vitejs/plugin-react": "^4.0.0"}
         }"#,
-    )
-    .unwrap();
+    );
     std::fs::write(dir.path().join("vite.config.js"), "x".repeat(600)).unwrap();
     write_detection_file(
         dir.path(),
@@ -134,12 +196,7 @@ fn configured_vite_framework_overrides_server_dependency_autodetect() {
 
 #[test]
 fn configured_other_framework_preserves_unknown_runtime_signals() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"main": "server.js", "scripts": {"start": "node server.js"}}"#,
-    )
-    .unwrap();
+    let dir = detection_project(r#"{"main": "server.js", "scripts": {"start": "node server.js"}}"#);
 
     let overridden = detect_with_framework_override(dir.path(), Some("other"));
     assert_eq!(overridden.framework, "other");
@@ -356,14 +413,10 @@ fn analog_static_compatible_is_static() {
 
 #[test]
 fn detect_nextjs_returns_process_by_default() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+        &[],
+    );
     assert_eq!(result.framework, "nextjs");
     // Next.js without adapter → PROCESS
     assert_eq!(result.suggested_compute, ComputeType::Process);
@@ -371,47 +424,22 @@ fn detect_nextjs_returns_process_by_default() {
 
 #[test]
 fn detect_nextjs_static_export_is_static() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("next.config.js"),
-        "module.exports = { output: 'export' }",
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "nextjs");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+        &[("next.config.js", "module.exports = { output: 'export' }")],
+    );
+    assert_framework_compute(&result, "nextjs", ComputeType::Static);
 }
 
 #[test]
 fn detect_vite_is_static() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"dependencies": {"vite": "5.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "vite");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+    let result = detect_project(r#"{"dependencies": {"vite": "5.0.0"}}"#, &[]);
+    assert_framework_compute(&result, "vite", ComputeType::Static);
 }
 
 #[test]
 fn detect_astro_is_static() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"dependencies": {"astro": "4.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+    let result = detect_project(r#"{"dependencies": {"astro": "4.0.0"}}"#, &[]);
     assert_eq!(result.framework, "astro");
     // Astro default (no output config) → SSR framework but static compatible → STATIC
     assert_eq!(result.suggested_compute, ComputeType::Static);
@@ -419,21 +447,14 @@ fn detect_astro_is_static() {
 
 #[test]
 fn detect_astro_ssr_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"astro": "4.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("astro.config.mjs"),
-        "import { defineConfig } from 'astro/config';\nexport default defineConfig({ output: 'server' })",
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "astro");
-    assert_eq!(result.suggested_compute, ComputeType::Process);
+        &[(
+            "astro.config.mjs",
+            "import { defineConfig } from 'astro/config';\nexport default defineConfig({ output: 'server' })",
+        )],
+    );
+    assert_framework_compute(&result, "astro", ComputeType::Process);
 }
 
 #[test]
@@ -444,34 +465,24 @@ fn astro_is_ssr_framework() {
 #[test]
 fn detect_static_html_is_static() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("index.html"),
-        "<html><body>hello</body></html>",
-    )
-    .unwrap();
+    write_detection_file(dir.path(), "index.html", "<html><body>hello</body></html>");
 
     let result = detect(dir.path());
-    assert_eq!(result.framework, "static-html");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+    assert_framework_compute(&result, "static-html", ComputeType::Static);
 }
 
 #[test]
 fn detect_static_html_with_package_metadata_has_no_root_output_hint() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("index.html"),
-        "<html><body>hello</body></html>",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    write_detection_file(dir.path(), "index.html", "<html><body>hello</body></html>");
+    write_detection_file(
+        dir.path(),
+        "package.json",
         r#"{"name":"asset-pack","scripts":{"build":"bash copy-to-dist.sh"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
-    assert_eq!(result.framework, "static-html");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+    assert_framework_compute(&result, "static-html", ComputeType::Static);
     assert!(
         result
             .metadata
@@ -485,22 +496,16 @@ fn detect_static_html_with_package_metadata_has_no_root_output_hint() {
 #[test]
 fn detect_static_html_with_package_build_output_prefers_artifact_dir() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("index.html"),
-        "<html><body>source</body></html>",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    write_detection_file(dir.path(), "index.html", "<html><body>source</body></html>");
+    write_detection_file(
+        dir.path(),
+        "package.json",
         r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
-    std::fs::write(dir.path().join("dist/index.html"), "<html>built</html>").unwrap();
+    );
+    write_detection_file(dir.path(), "dist/index.html", "<html>built</html>");
 
     let result = detect(dir.path());
-    assert_eq!(result.framework, "static-html");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+    assert_framework_compute(&result, "static-html", ComputeType::Static);
     assert_eq!(
         result
             .metadata
@@ -514,22 +519,17 @@ fn detect_static_html_with_package_build_output_prefers_artifact_dir() {
 #[test]
 fn detect_static_html_with_package_workspaces_preserves_monorepo_metadata() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("index.html"),
+    write_detection_file(
+        dir.path(),
+        "index.html",
         "<html><body>workspace root</body></html>",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    );
+    write_detection_file(
+        dir.path(),
+        "package.json",
         r#"{"name":"root","workspaces":["apps/*"],"scripts":{"build":"echo noop"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
-    std::fs::write(
-        dir.path().join("apps/web/package.json"),
-        r#"{"name":"web"}"#,
-    )
-    .unwrap();
+    );
+    write_detection_file(dir.path(), "apps/web/package.json", r#"{"name":"web"}"#);
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "static-html");
@@ -551,122 +551,76 @@ fn detect_static_html_with_resolvable_package_entry_is_process_other() {
         (r#"{"module":"dist/server.mjs"}"#, "dist/server.mjs"),
     ] {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("index.html"),
-            "<html><body>hello</body></html>",
-        )
-        .unwrap();
+        write_detection_file(dir.path(), "index.html", "<html><body>hello</body></html>");
         std::fs::write(dir.path().join("package.json"), package_json).unwrap();
         std::fs::create_dir_all(dir.path().join("dist")).unwrap();
         std::fs::write(dir.path().join(entry_path), "console.log('server')").unwrap();
 
         let result = detect(dir.path());
-        assert_eq!(result.framework, "other");
-        assert_eq!(result.suggested_compute, ComputeType::Process);
+        assert_framework_compute(&result, "other", ComputeType::Process);
     }
 }
 
 #[test]
 fn detect_static_html_with_runtime_script_is_process_other() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("index.html"),
-        "<html><body>hello</body></html>",
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    write_detection_file(dir.path(), "index.html", "<html><body>hello</body></html>");
+    write_detection_file(
+        dir.path(),
+        "package.json",
         r#"{"scripts":{"start":"node server.js"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
-    assert_eq!(result.framework, "other");
-    assert_eq!(result.suggested_compute, ComputeType::Process);
+    assert_framework_compute(&result, "other", ComputeType::Process);
 }
 
 #[test]
 fn detect_unknown_is_static() {
     let dir = tempfile::tempdir().unwrap();
     let result = detect(dir.path());
-    assert_eq!(result.framework, "other");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+    assert_framework_compute(&result, "other", ComputeType::Static);
 }
 
 #[test]
 fn detect_unknown_with_runtime_start_script_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"start":"bun run src/server.ts"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "other");
-    assert_eq!(result.suggested_compute, ComputeType::Process);
+    let result = detect_project(r#"{"scripts":{"start":"bun run src/server.ts"}}"#, &[]);
+    assert_framework_compute(&result, "other", ComputeType::Process);
 }
 
 #[test]
 fn detect_unknown_with_main_field_is_process() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("dist")).unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"main":"dist/server.js"}"#,
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("dist/server.js"), "console.log('ok')").unwrap();
+    write_detection_file(dir.path(), "package.json", r#"{"main":"dist/server.js"}"#);
+    write_detection_file(dir.path(), "dist/server.js", "console.log('ok')");
 
     let result = detect(dir.path());
-    assert_eq!(result.framework, "other");
-    assert_eq!(result.suggested_compute, ComputeType::Process);
+    assert_framework_compute(&result, "other", ComputeType::Process);
 }
 
 #[test]
 fn detect_unknown_with_only_test_script_stays_static() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"test":"vitest run"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "other");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+    let result = detect_project(r#"{"scripts":{"test":"vitest run"}}"#, &[]);
+    assert_framework_compute(&result, "other", ComputeType::Static);
 }
 
 #[test]
 fn detect_nuxt_with_server_api_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"nuxt": "3.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("server/api")).unwrap();
-    std::fs::write(
-        dir.path().join("server/api/hello.ts"),
-        "export default defineEventHandler()",
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "nuxt");
-    assert_eq!(result.suggested_compute, ComputeType::Process);
+        &[("server/api/hello.ts", "export default defineEventHandler()")],
+    );
+    assert_framework_compute(&result, "nuxt", ComputeType::Process);
 }
 
 // ── React Router v7 integration tests ────────────────────────
 
 #[test]
 fn detect_react_router_returns_process_by_default() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"devDependencies": {"@react-router/dev": "7.0.0"}, "dependencies": {"react-router": "7.0.0", "react": "19.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "react-router");
@@ -676,77 +630,46 @@ fn detect_react_router_returns_process_by_default() {
 
 #[test]
 fn detect_react_router_spa_mode_is_static() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"devDependencies": {"@react-router/dev": "7.0.0"}, "dependencies": {"react-router": "7.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("react-router.config.ts"),
+    );
+    write_detection_file(
+        dir.path(),
+        "react-router.config.ts",
         r#"import type { Config } from "@react-router/dev/config";
 export default { ssr: false } satisfies Config;"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
-    assert_eq!(result.framework, "react-router");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+    assert_framework_compute(&result, "react-router", ComputeType::Static);
 }
 
 #[test]
 fn detect_react_router_output_dir_default_is_build() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"devDependencies": {"@react-router/dev": "7.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some("build"));
+        &[],
+    );
+    assert_output_directory(&result, "build");
 }
 
 #[test]
 fn detect_react_router_spa_output_dir_is_build_client() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"devDependencies": {"@react-router/dev": "7.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("react-router.config.ts"),
-        r#"export default { ssr: false };"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some("build/client"));
+        &[(
+            "react-router.config.ts",
+            r#"export default { ssr: false };"#,
+        )],
+    );
+    assert_output_directory(&result, "build/client");
 }
 
 #[test]
 fn react_router_wins_over_vite() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"devDependencies": {"@react-router/dev": "7.0.0"}, "dependencies": {"vite": "6.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "react-router");
@@ -756,14 +679,10 @@ fn react_router_wins_over_vite() {
 
 #[test]
 fn detect_solidstart_returns_process_by_default() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"@solidjs/start": "1.0.0", "solid-js": "1.9.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+        &[],
+    );
     assert_eq!(result.framework, "solidstart");
     assert_eq!(result.name, "SolidStart");
     assert_eq!(result.suggested_compute, ComputeType::Process);
@@ -771,34 +690,24 @@ fn detect_solidstart_returns_process_by_default() {
 
 #[test]
 fn detect_solidstart_ssr_false_is_static() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"@solidjs/start": "1.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("app.config.ts"),
-        r#"import { defineConfig } from "@solidjs/start/config";
+        &[(
+            "app.config.ts",
+            r#"import { defineConfig } from "@solidjs/start/config";
 export default defineConfig({ ssr: false });"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "solidstart");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+        )],
+    );
+    assert_framework_compute(&result, "solidstart", ComputeType::Static);
 }
 
 // ── Qwik City integration tests ─────────────────────────────
 
 #[test]
 fn detect_qwik_returns_process_by_default() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"@builder.io/qwik": "1.0.0", "@builder.io/qwik-city": "1.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "qwik");
@@ -808,12 +717,9 @@ fn detect_qwik_returns_process_by_default() {
 
 #[test]
 fn detect_qwik_v2_via_new_package() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"@qwik.dev/core": "2.0.0", "@qwik.dev/router": "2.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "qwik");
@@ -822,34 +728,24 @@ fn detect_qwik_v2_via_new_package() {
 
 #[test]
 fn detect_qwik_static_adaptor_is_static() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"@builder.io/qwik-city": "1.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("vite.config.ts"),
-        r#"import staticAdapter from "@builder.io/qwik-city/adaptors/static/vite";
+        &[(
+            "vite.config.ts",
+            r#"import staticAdapter from "@builder.io/qwik-city/adaptors/static/vite";
 export default defineConfig({ plugins: [staticAdapter()] });"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "qwik");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+        )],
+    );
+    assert_framework_compute(&result, "qwik", ComputeType::Static);
 }
 
 // ── Analog integration tests ────────────────────────────────
 
 #[test]
 fn detect_analog_returns_process_by_default() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"@analogjs/platform": "1.0.0", "@angular/core": "17.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     // Analog has priority 9, Angular has priority 12 → Analog wins
@@ -860,41 +756,25 @@ fn detect_analog_returns_process_by_default() {
 
 #[test]
 fn detect_analog_ssr_false_is_static() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"@analogjs/platform": "1.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("vite.config.ts"),
-        r#"import analog from "@analogjs/platform";
+        &[(
+            "vite.config.ts",
+            r#"import analog from "@analogjs/platform";
 export default defineConfig({ plugins: [analog({ ssr: false })] });"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "analog");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+        )],
+    );
+    assert_framework_compute(&result, "analog", ComputeType::Static);
 }
 
 // ── Hono integration tests ──────────────────────────────────
 
 #[test]
 fn detect_hono_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"hono": "4.0.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "src/server.ts",
-        r#"import { Hono } from "hono";"#,
+        &[("src/server.ts", r#"import { Hono } from "hono";"#)],
     );
-
-    let result = detect(dir.path());
     assert_eq!(result.framework, "hono");
     assert_eq!(result.name, "Hono");
     assert_eq!(result.suggested_compute, ComputeType::Process);
@@ -902,19 +782,10 @@ fn detect_hono_is_process() {
 
 #[test]
 fn detect_hono_no_ssr_analysis() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"hono": "4.0.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "src/server.ts",
-        r#"import { Hono } from "hono";"#,
+        &[("src/server.ts", r#"import { Hono } from "hono";"#)],
     );
-
-    let result = detect(dir.path());
     assert!(result.metadata.ssr_analysis.is_none());
 }
 
@@ -922,19 +793,10 @@ fn detect_hono_no_ssr_analysis() {
 
 #[test]
 fn detect_elysia_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"elysia": "1.0.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "src/server.ts",
-        r#"import { Elysia } from "elysia";"#,
+        &[("src/server.ts", r#"import { Elysia } from "elysia";"#)],
     );
-
-    let result = detect(dir.path());
     assert_eq!(result.framework, "elysia");
     assert_eq!(result.name, "Elysia");
     assert_eq!(result.suggested_compute, ComputeType::Process);
@@ -942,19 +804,10 @@ fn detect_elysia_is_process() {
 
 #[test]
 fn detect_elysia_runtime_is_bun() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"elysia": "1.0.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "src/server.ts",
-        r#"import { Elysia } from "elysia";"#,
+        &[("src/server.ts", r#"import { Elysia } from "elysia";"#)],
     );
-
-    let result = detect(dir.path());
     // Elysia preset has runtime: Bun
     assert_eq!(
         result.metadata.runtime.runtime_type,
@@ -964,19 +817,10 @@ fn detect_elysia_runtime_is_bun() {
 
 #[test]
 fn detect_elysia_no_ssr_analysis() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"elysia": "1.0.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "src/server.ts",
-        r#"import { Elysia } from "elysia";"#,
+        &[("src/server.ts", r#"import { Elysia } from "elysia";"#)],
     );
-
-    let result = detect(dir.path());
     assert!(result.metadata.ssr_analysis.is_none());
 }
 
@@ -984,19 +828,10 @@ fn detect_elysia_no_ssr_analysis() {
 
 #[test]
 fn detect_express_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"express": "4.18.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "server.js",
-        r#"const express = require("express");"#,
+        &[("server.js", r#"const express = require("express");"#)],
     );
-
-    let result = detect(dir.path());
     assert_eq!(result.framework, "express");
     assert_eq!(result.name, "Express");
     assert_eq!(result.suggested_compute, ComputeType::Process);
@@ -1004,12 +839,9 @@ fn detect_express_is_process() {
 
 #[test]
 fn detect_express_no_start_script_still_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"express": "4.18.0"}, "scripts": {"test": "jest"}}"#,
-    )
-    .unwrap();
+    );
     write_detection_file(
         dir.path(),
         "server.js",
@@ -1017,43 +849,29 @@ fn detect_express_no_start_script_still_process() {
     );
 
     let result = detect(dir.path());
-    assert_eq!(result.framework, "express");
-    assert_eq!(result.suggested_compute, ComputeType::Process);
+    assert_framework_compute(&result, "express", ComputeType::Process);
 }
 
 #[test]
 fn detect_optional_express_dependency_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"optionalDependencies": {"express": "4.18.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "server.js",
-        r#"const express = require("express");"#,
+        &[("server.js", r#"const express = require("express");"#)],
     );
 
-    let result = detect(dir.path());
-
-    assert_eq!(result.framework, "express");
-    assert_eq!(result.suggested_compute, ComputeType::Process);
+    assert_framework_compute(&result, "express", ComputeType::Process);
 }
 
 #[test]
 fn vite_with_dev_only_express_mock_stays_static() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{
             "scripts": {"build": "vite build"},
             "dependencies": {"react": "19.0.0"},
             "devDependencies": {"vite": "7.0.0", "express": "5.0.0"}
         }"#,
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("vite.config.js"), "export default {}").unwrap();
+    );
+    write_detection_file(dir.path(), "vite.config.js", "export default {}");
     write_detection_file(
         dir.path(),
         "server.js",
@@ -1062,8 +880,7 @@ fn vite_with_dev_only_express_mock_stays_static() {
 
     let result = detect(dir.path());
 
-    assert_eq!(result.framework, "vite");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+    assert_framework_compute(&result, "vite", ComputeType::Static);
 }
 
 #[test]
@@ -1096,7 +913,7 @@ fn vite_with_dev_only_server_frameworks_stays_static() {
             ),
         )
         .unwrap();
-        std::fs::write(dir.path().join("vite.config.js"), "export default {}").unwrap();
+        write_detection_file(dir.path(), "vite.config.js", "export default {}");
         write_detection_file(dir.path(), source_path.unwrap_or("server.js"), source);
 
         let result = detect(dir.path());
@@ -1112,19 +929,10 @@ fn vite_with_dev_only_server_frameworks_stays_static() {
 
 #[test]
 fn detect_fastify_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"fastify": "4.0.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "server.js",
-        r#"const fastify = require("fastify");"#,
+        &[("server.js", r#"const fastify = require("fastify");"#)],
     );
-
-    let result = detect(dir.path());
     assert_eq!(result.framework, "fastify");
     assert_eq!(result.name, "Fastify");
     assert_eq!(result.suggested_compute, ComputeType::Process);
@@ -1132,19 +940,7 @@ fn detect_fastify_is_process() {
 
 #[test]
 fn detect_nestjs_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"dependencies": {"@nestjs/core": "10.0.0", "express": "4.18.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "src/main.ts",
-        r#"import { NestFactory } from "@nestjs/core";"#,
-    );
-
-    let result = detect(dir.path());
+    let result = nestjs_detection();
     assert_eq!(result.framework, "nestjs");
     assert_eq!(result.name, "NestJS");
     assert_eq!(result.suggested_compute, ComputeType::Process);
@@ -1153,33 +949,16 @@ fn detect_nestjs_is_process() {
 #[test]
 fn detect_nestjs_wins_over_express() {
     // NestJS (priority 32) should win over Express (priority 35)
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"dependencies": {"@nestjs/core": "10.0.0", "express": "4.18.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "src/main.ts",
-        r#"import { NestFactory } from "@nestjs/core";"#,
-    );
-
-    let result = detect(dir.path());
+    let result = nestjs_detection();
     assert_eq!(result.framework, "nestjs");
 }
 
 #[test]
 fn detect_koa_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"koa": "2.15.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(dir.path(), "server.js", r#"const Koa = require("koa");"#);
-
-    let result = detect(dir.path());
+        &[("server.js", r#"const Koa = require("koa");"#)],
+    );
     assert_eq!(result.framework, "koa");
     assert_eq!(result.name, "Koa");
     assert_eq!(result.suggested_compute, ComputeType::Process);
@@ -1187,15 +966,10 @@ fn detect_koa_is_process() {
 
 #[test]
 fn detect_adonis_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"@adonisjs/core": "6.0.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(dir.path(), "adonisrc.ts", "export default {};");
-
-    let result = detect(dir.path());
+        &[("adonisrc.ts", "export default {};")],
+    );
     assert_eq!(result.framework, "adonis");
     assert_eq!(result.name, "AdonisJS");
     assert_eq!(result.suggested_compute, ComputeType::Process);
@@ -1203,19 +977,10 @@ fn detect_adonis_is_process() {
 
 #[test]
 fn detect_h3_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"h3": "1.10.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "server.ts",
-        r#"import { createApp } from "h3";"#,
+        &[("server.ts", r#"import { createApp } from "h3";"#)],
     );
-
-    let result = detect(dir.path());
     assert_eq!(result.framework, "h3");
     assert_eq!(result.name, "H3");
     assert_eq!(result.suggested_compute, ComputeType::Process);
@@ -1223,19 +988,10 @@ fn detect_h3_is_process() {
 
 #[test]
 fn detect_nitro_standalone_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"nitropack": "2.8.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "nitro.config.ts",
-        "export default defineNitroConfig({});",
+        &[("nitro.config.ts", "export default defineNitroConfig({});")],
     );
-
-    let result = detect(dir.path());
     assert_eq!(result.framework, "nitro");
     assert_eq!(result.name, "Nitro");
     assert_eq!(result.suggested_compute, ComputeType::Process);
@@ -1244,12 +1000,9 @@ fn detect_nitro_standalone_is_process() {
 #[test]
 fn nuxt_wins_over_nitro_and_h3() {
     // Nuxt (priority 2) depends on nitropack and h3 internally — Nuxt should win
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"nuxt": "3.0.0", "nitropack": "2.8.0", "h3": "1.10.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "nuxt");
@@ -1258,15 +1011,10 @@ fn nuxt_wins_over_nitro_and_h3() {
 #[test]
 fn nextjs_wins_over_express() {
     // Next.js (priority 1) + express (priority 35) → Next.js wins
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    assert_package_framework(
         r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0", "express": "4.18.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "nextjs");
+        "nextjs",
+    );
 }
 
 #[test]
@@ -1323,37 +1071,19 @@ fn server_frameworks_no_ssr_analysis() {
 
 #[test]
 fn hono_wins_over_express() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"hono": "4.0.0", "express": "4.18.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "src/server.ts",
-        r#"import { Hono } from "hono";"#,
+        &[("src/server.ts", r#"import { Hono } from "hono";"#)],
     );
-
-    let result = detect(dir.path());
     assert_eq!(result.framework, "hono");
 }
 
 #[test]
 fn fastify_wins_over_express() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"fastify": "4.0.0", "express": "4.18.0"}}"#,
-    )
-    .unwrap();
-    write_detection_file(
-        dir.path(),
-        "server.js",
-        r#"const fastify = require("fastify");"#,
+        &[("server.js", r#"const fastify = require("fastify");"#)],
     );
-
-    let result = detect(dir.path());
     assert_eq!(result.framework, "fastify");
 }
 
@@ -1361,12 +1091,9 @@ fn fastify_wins_over_express() {
 
 #[test]
 fn detect_expo_is_static() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"expo": "~52.0.0", "react": "^19.0.0", "react-native": "0.76.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "expo");
@@ -1376,14 +1103,10 @@ fn detect_expo_is_static() {
 
 #[test]
 fn expo_loses_to_nextjs() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"expo": "~52.0.0", "next": "^15.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+        &[],
+    );
     assert_eq!(result.framework, "nextjs");
 }
 
@@ -1391,12 +1114,9 @@ fn expo_loses_to_nextjs() {
 
 #[test]
 fn payload_v3_detected_as_payload_with_next_output() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"payload": "^3.0.0", "next": "^15.0.0", "@payloadcms/next": "^3.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "payload");
@@ -1415,12 +1135,9 @@ fn payload_v3_detected_as_payload_with_next_output() {
 
 #[test]
 fn payload_wins_over_nextjs_for_v3() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"payload": "^3.0.0", "next": "^15.0.0", "@payloadcms/next": "^3.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "payload");
@@ -1428,27 +1145,19 @@ fn payload_wins_over_nextjs_for_v3() {
 
 #[test]
 fn payload_v2_detected_as_nextjs_not_payload() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"payload": "^2.0.0", "express": "^4.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+        &[],
+    );
     assert_ne!(result.framework, "payload");
 }
 
 #[test]
 fn blitzjs_detected_by_blitzjs_next() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"@blitzjs/next": "2.0.0", "next": "^14.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+        &[],
+    );
     assert_eq!(result.framework, "blitzjs");
     assert_eq!(result.name, "Blitz.js");
 }
@@ -1457,12 +1166,9 @@ fn blitzjs_detected_by_blitzjs_next() {
 
 #[test]
 fn detect_tanstack_start() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"@tanstack/react-start": "^1.0.0", "react": "^19.0.0", "vinxi": "^0.5.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "tanstack-start");
@@ -1471,12 +1177,9 @@ fn detect_tanstack_start() {
 
 #[test]
 fn tanstack_start_wins_over_vite() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"@tanstack/react-start": "^1.0.0", "vite": "^6.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "tanstack-start");
@@ -1486,12 +1189,9 @@ fn tanstack_start_wins_over_vite() {
 
 #[test]
 fn detect_hydrogen() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"@shopify/hydrogen": "^2026.4.0", "@react-router/dev": "^7.0.0", "react": "^19.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "hydrogen");
@@ -1500,12 +1200,9 @@ fn detect_hydrogen() {
 
 #[test]
 fn hydrogen_wins_over_react_router() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"@shopify/hydrogen": "^2026.4.0", "@react-router/dev": "^7.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "hydrogen");
@@ -1516,7 +1213,7 @@ fn hydrogen_wins_over_react_router() {
 #[test]
 fn config_files_nextjs() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("next.config.ts"), "").unwrap();
+    write_detection_file(dir.path(), "next.config.ts", "");
     let fs = fs::LocalFs::new(dir.path());
     let files = detect_config_files(&fs, "nextjs");
     assert_eq!(files, vec!["next.config.ts"]);
@@ -1525,8 +1222,8 @@ fn config_files_nextjs() {
 #[test]
 fn config_files_nextjs_multiple() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("next.config.js"), "").unwrap();
-    std::fs::write(dir.path().join("next.config.mjs"), "").unwrap();
+    write_detection_file(dir.path(), "next.config.js", "");
+    write_detection_file(dir.path(), "next.config.mjs", "");
     let fs = fs::LocalFs::new(dir.path());
     let files = detect_config_files(&fs, "nextjs");
     assert_eq!(files.len(), 2);
@@ -1537,7 +1234,7 @@ fn config_files_nextjs_multiple() {
 #[test]
 fn config_files_nuxt() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("nuxt.config.ts"), "").unwrap();
+    write_detection_file(dir.path(), "nuxt.config.ts", "");
     let fs = fs::LocalFs::new(dir.path());
     let files = detect_config_files(&fs, "nuxt");
     assert_eq!(files, vec!["nuxt.config.ts"]);
@@ -1546,7 +1243,7 @@ fn config_files_nuxt() {
 #[test]
 fn config_files_sveltekit() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("svelte.config.js"), "").unwrap();
+    write_detection_file(dir.path(), "svelte.config.js", "");
     let fs = fs::LocalFs::new(dir.path());
     let files = detect_config_files(&fs, "sveltekit");
     assert_eq!(files, vec!["svelte.config.js"]);
@@ -1555,7 +1252,7 @@ fn config_files_sveltekit() {
 #[test]
 fn config_files_sveltekit_ts() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("svelte.config.ts"), "").unwrap();
+    write_detection_file(dir.path(), "svelte.config.ts", "");
     let fs = fs::LocalFs::new(dir.path());
     let files = detect_config_files(&fs, "sveltekit");
     assert_eq!(files, vec!["svelte.config.ts"]);
@@ -1564,7 +1261,7 @@ fn config_files_sveltekit_ts() {
 #[test]
 fn config_files_remix_legacy() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("remix.config.js"), "").unwrap();
+    write_detection_file(dir.path(), "remix.config.js", "");
     let fs = fs::LocalFs::new(dir.path());
     let files = detect_config_files(&fs, "remix");
     assert_eq!(files, vec!["remix.config.js"]);
@@ -1573,7 +1270,7 @@ fn config_files_remix_legacy() {
 #[test]
 fn config_files_solidstart() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("app.config.ts"), "").unwrap();
+    write_detection_file(dir.path(), "app.config.ts", "");
     let fs = fs::LocalFs::new(dir.path());
     let files = detect_config_files(&fs, "solidstart");
     assert_eq!(files, vec!["app.config.ts"]);
@@ -1582,7 +1279,7 @@ fn config_files_solidstart() {
 #[test]
 fn config_files_qwik() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("vite.config.ts"), "").unwrap();
+    write_detection_file(dir.path(), "vite.config.ts", "");
     let fs = fs::LocalFs::new(dir.path());
     let files = detect_config_files(&fs, "qwik");
     assert_eq!(files, vec!["vite.config.ts"]);
@@ -1591,7 +1288,7 @@ fn config_files_qwik() {
 #[test]
 fn config_files_analog() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("vite.config.ts"), "").unwrap();
+    write_detection_file(dir.path(), "vite.config.ts", "");
     let fs = fs::LocalFs::new(dir.path());
     let files = detect_config_files(&fs, "analog");
     assert_eq!(files, vec!["vite.config.ts"]);
@@ -1600,7 +1297,7 @@ fn config_files_analog() {
 #[test]
 fn config_files_astro() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("astro.config.mjs"), "").unwrap();
+    write_detection_file(dir.path(), "astro.config.mjs", "");
     let fs = fs::LocalFs::new(dir.path());
     let files = detect_config_files(&fs, "astro");
     assert_eq!(files, vec!["astro.config.mjs"]);
@@ -1609,7 +1306,7 @@ fn config_files_astro() {
 #[test]
 fn config_files_tanstack_start() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("vite.config.ts"), "").unwrap();
+    write_detection_file(dir.path(), "vite.config.ts", "");
     let fs = fs::LocalFs::new(dir.path());
     let files = detect_config_files(&fs, "tanstack-start");
     assert_eq!(files, vec!["vite.config.ts"]);
@@ -1618,7 +1315,7 @@ fn config_files_tanstack_start() {
 #[test]
 fn config_files_hydrogen() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("vite.config.ts"), "").unwrap();
+    write_detection_file(dir.path(), "vite.config.ts", "");
     let fs = fs::LocalFs::new(dir.path());
     let files = detect_config_files(&fs, "hydrogen");
     assert_eq!(files, vec!["vite.config.ts"]);
@@ -1746,17 +1443,14 @@ fn framework_entry_point_koa_returns_none() {
 #[test]
 fn nestjs_ignores_vite_config_outdir() {
     // NestJS project with vite.config.ts for Vitest — output_dir should be "dist", not vite's outDir
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"@nestjs/core": "10.0.0"}, "devDependencies": {"vitest": "1.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("vite.config.ts"),
+    );
+    write_detection_file(
+        dir.path(),
+        "vite.config.ts",
         "export default { build: { outDir: 'coverage' } }",
-    )
-    .unwrap();
+    );
     write_detection_file(
         dir.path(),
         "src/main.ts",
@@ -1765,28 +1459,17 @@ fn nestjs_ignores_vite_config_outdir() {
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "nestjs");
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some("dist")); // NOT "coverage"
+    assert_output_directory(&result, "dist"); // NOT "coverage"
 }
 
 // ── Remix integration tests ──────────────────────────────────
 
 #[test]
 fn detect_remix_returns_process_by_default() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+        &[],
+    );
     assert_eq!(result.framework, "remix");
     assert_eq!(result.name, "Remix");
     assert_eq!(result.suggested_compute, ComputeType::Process);
@@ -1794,124 +1477,56 @@ fn detect_remix_returns_process_by_default() {
 
 #[test]
 fn detect_remix_spa_mode_is_static() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("vite.config.ts"),
-        r#"import { vitePlugin as remix } from "@remix-run/dev";
-export default defineConfig({
-  plugins: [remix({ ssr: false })],
-})"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "remix");
-    assert_eq!(result.suggested_compute, ComputeType::Static);
+    let result = remix_spa_detection();
+    assert_framework_compute(&result, "remix", ComputeType::Static);
 }
 
 #[test]
 fn detect_remix_with_loaders_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
-    std::fs::write(
-        dir.path().join("app/routes/_index.tsx"),
-        r#"export async function loader() { return json({ data: [] }); }
+        &[(
+            "app/routes/_index.tsx",
+            r#"export async function loader() { return json({ data: [] }); }
 export default function Index() { return <div/>; }"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "remix");
-    assert_eq!(result.suggested_compute, ComputeType::Process);
+        )],
+    );
+    assert_framework_compute(&result, "remix", ComputeType::Process);
 }
 
 #[test]
 fn detect_remix_with_actions_is_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("app/routes")).unwrap();
-    std::fs::write(
-        dir.path().join("app/routes/login.tsx"),
-        r#"export async function action({ request }) { }
+        &[(
+            "app/routes/login.tsx",
+            r#"export async function action({ request }) { }
 export default function Login() { return <form/>; }"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "remix");
-    assert_eq!(result.suggested_compute, ComputeType::Process);
+        )],
+    );
+    assert_framework_compute(&result, "remix", ComputeType::Process);
 }
 
 #[test]
 fn detect_remix_output_dir_default_is_build() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some("build"));
+        &[],
+    );
+    assert_output_directory(&result, "build");
 }
 
 #[test]
 fn detect_remix_spa_output_dir_is_build_client() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"dependencies": {"@remix-run/react": "2.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("vite.config.ts"),
-        r#"import { vitePlugin as remix } from "@remix-run/dev";
-export default defineConfig({
-  plugins: [remix({ ssr: false })],
-})"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some("build/client"));
+    let result = remix_spa_detection();
+    assert_output_directory(&result, "build/client");
 }
 
 #[test]
 fn detect_remix_via_dev_dependency() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"dependencies": {"react": "18.0.0"}, "devDependencies": {"@remix-run/dev": "2.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "remix");
@@ -1921,11 +1536,11 @@ fn detect_remix_via_dev_dependency() {
 fn remix_wins_over_vite() {
     let dir = tempfile::tempdir().unwrap();
     // Remix (priority 4) + Vite (priority 100) → Remix wins
-    std::fs::write(
-        dir.path().join("package.json"),
+    write_detection_file(
+        dir.path(),
+        "package.json",
         r#"{"dependencies": {"@remix-run/react": "2.0.0", "vite": "5.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "remix");
@@ -1935,27 +1550,22 @@ fn remix_wins_over_vite() {
 
 #[test]
 fn multiple_frameworks_highest_priority_wins() {
-    let dir = tempfile::tempdir().unwrap();
     // next (priority 1) + vite (priority 100) → nextjs wins
-    std::fs::write(
-        dir.path().join("package.json"),
+    assert_package_framework(
         r#"{"dependencies": {"next": "14.0.0", "vite": "5.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "nextjs");
+        "nextjs",
+    );
 }
 
 #[test]
 fn nuxt_wins_over_vue_cli() {
     let dir = tempfile::tempdir().unwrap();
     // nuxt (priority 2) + @vue/cli-service (priority 11) → nuxt wins
-    std::fs::write(
-        dir.path().join("package.json"),
+    write_detection_file(
+        dir.path(),
+        "package.json",
         r#"{"dependencies": {"nuxt": "3.0.0", "@vue/cli-service": "5.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "nuxt");
@@ -2041,7 +1651,7 @@ fn framework_entry_point_unknown_returns_none() {
 #[test]
 fn resolve_entry_point_framework_specific() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("server.js"), "module.exports = {}").unwrap();
+    write_detection_file(dir.path(), "server.js", "module.exports = {}");
 
     let result = resolve_entry_point("nextjs", dir.path(), dir.path());
     assert_eq!(result, Some("server.js".into()));
@@ -2051,7 +1661,7 @@ fn resolve_entry_point_framework_specific() {
 fn resolve_entry_point_framework_file_missing_falls_through() {
     // Next.js detected but server.js doesn't exist → fallback
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("index.js"), "").unwrap();
+    write_detection_file(dir.path(), "index.js", "");
 
     let result = resolve_entry_point("nextjs", dir.path(), dir.path());
     assert_eq!(result, Some("index.js".into()));
@@ -2059,41 +1669,23 @@ fn resolve_entry_point_framework_file_missing_falls_through() {
 
 #[test]
 fn resolve_entry_point_package_json_main() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"main": "dist/app.js"}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
-    std::fs::write(dir.path().join("dist/app.js"), "").unwrap();
+    let dir = detection_project(r#"{"main": "dist/app.js"}"#);
+    write_detection_file(dir.path(), "dist/app.js", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("dist/app.js".into()));
+    assert_local_entry(dir.path(), "dist/app.js");
 }
 
 #[test]
 fn resolve_entry_point_package_json_main_with_dot_slash() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"main": "./server.js"}"#,
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("server.js"), "").unwrap();
+    let dir = detection_project(r#"{"main": "./server.js"}"#);
+    write_detection_file(dir.path(), "server.js", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("server.js".into()));
+    assert_local_entry(dir.path(), "server.js");
 }
 
 #[test]
 fn resolve_entry_point_package_json_main_path_traversal_rejected() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"main": "../../etc/passwd"}"#,
-    )
-    .unwrap();
+    let dir = detection_project(r#"{"main": "../../etc/passwd"}"#);
 
     let result = resolve_entry_point("other", dir.path(), dir.path());
     // Should not return the traversal path, falls through to fallback
@@ -2105,8 +1697,8 @@ fn resolve_entry_point_project_dir_package_json() {
     // output_dir != project_dir, package.json in project_dir
     let project = tempfile::tempdir().unwrap();
     let output = tempfile::tempdir().unwrap();
-    std::fs::write(project.path().join("package.json"), r#"{"main": "app.js"}"#).unwrap();
-    std::fs::write(output.path().join("app.js"), "").unwrap();
+    write_detection_file(project.path(), "package.json", r#"{"main": "app.js"}"#);
+    write_detection_file(output.path(), "app.js", "");
 
     let result = resolve_entry_point("other", output.path(), project.path());
     assert_eq!(result, Some("app.js".into()));
@@ -2115,19 +1707,17 @@ fn resolve_entry_point_project_dir_package_json() {
 #[test]
 fn resolve_entry_point_fallback_index_ts() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("index.ts"), "").unwrap();
+    write_detection_file(dir.path(), "index.ts", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("index.ts".into()));
+    assert_local_entry(dir.path(), "index.ts");
 }
 
 #[test]
 fn resolve_entry_point_fallback_server_js() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("server.js"), "").unwrap();
+    write_detection_file(dir.path(), "server.js", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("server.js".into()));
+    assert_local_entry(dir.path(), "server.js");
 }
 
 #[test]
@@ -2136,19 +1726,17 @@ fn resolve_entry_point_fallback_src_index() {
     std::fs::create_dir_all(dir.path().join("src")).unwrap();
     std::fs::write(dir.path().join("src/index.ts"), "x".repeat(600)).unwrap();
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("src/index.ts".into()));
+    assert_local_entry(dir.path(), "src/index.ts");
 }
 
 #[test]
 fn resolve_entry_point_fallback_priority_order() {
     // Root ranking should prefer server.js over index.ts
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("index.ts"), "").unwrap();
-    std::fs::write(dir.path().join("server.js"), "").unwrap();
+    write_detection_file(dir.path(), "index.ts", "");
+    write_detection_file(dir.path(), "server.js", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("server.js".into()));
+    assert_local_entry(dir.path(), "server.js");
 }
 
 #[test]
@@ -2162,10 +1750,9 @@ fn resolve_entry_point_empty_dir_returns_none() {
 #[test]
 fn resolve_entry_point_framework_takes_priority_over_package_json() {
     // Next.js server.js should win over package.json "main"
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("package.json"), r#"{"main": "custom.js"}"#).unwrap();
-    std::fs::write(dir.path().join("server.js"), "").unwrap();
-    std::fs::write(dir.path().join("custom.js"), "").unwrap();
+    let dir = detection_project(r#"{"main": "custom.js"}"#);
+    write_detection_file(dir.path(), "server.js", "");
+    write_detection_file(dir.path(), "custom.js", "");
 
     let result = resolve_entry_point("nextjs", dir.path(), dir.path());
     assert_eq!(result, Some("server.js".into()));
@@ -2173,55 +1760,39 @@ fn resolve_entry_point_framework_takes_priority_over_package_json() {
 
 #[test]
 fn resolve_entry_point_package_json_module() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"module": "./dist/server.mjs"}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
-    std::fs::write(dir.path().join("dist/server.mjs"), "").unwrap();
+    let dir = detection_project(r#"{"module": "./dist/server.mjs"}"#);
+    write_detection_file(dir.path(), "dist/server.mjs", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("dist/server.mjs".into()));
+    assert_local_entry(dir.path(), "dist/server.mjs");
 }
 
 #[test]
 fn resolve_entry_point_package_json_main_without_extension() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("package.json"), r#"{"main":"server"}"#).unwrap();
-    std::fs::write(dir.path().join("server.js"), "").unwrap();
+    let dir = detection_project(r#"{"main":"server"}"#);
+    write_detection_file(dir.path(), "server.js", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("server.js".into()));
+    assert_local_entry(dir.path(), "server.js");
 }
 
 #[test]
 fn resolve_entry_point_from_start_script() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"start":"node ./server/app.mjs"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("server")).unwrap();
-    std::fs::write(dir.path().join("server/app.mjs"), "").unwrap();
+    let dir = detection_project(r#"{"scripts":{"start":"node ./server/app.mjs"}}"#);
+    write_detection_file(dir.path(), "server/app.mjs", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("server/app.mjs".into()));
+    assert_local_entry(dir.path(), "server/app.mjs");
 }
 
 #[test]
 fn resolve_entry_point_from_project_start_script_when_output_differs() {
     let project = tempfile::tempdir().unwrap();
     let output = tempfile::tempdir().unwrap();
-    std::fs::write(
-        project.path().join("package.json"),
+    write_detection_file(
+        project.path(),
+        "package.json",
         r#"{"scripts":{"start":"node dist/server.js"}}"#,
-    )
-    .unwrap();
+    );
     std::fs::create_dir_all(output.path().join("dist")).unwrap();
-    std::fs::write(output.path().join("dist/server.js"), "").unwrap();
+    write_detection_file(output.path(), "dist/server.js", "");
 
     let result = resolve_entry_point("other", output.path(), project.path());
     assert_eq!(result, Some("dist/server.js".into()));
@@ -2229,12 +1800,7 @@ fn resolve_entry_point_from_project_start_script_when_output_differs() {
 
 #[test]
 fn resolve_entry_point_from_project_start_script_when_output_is_nested() {
-    let project = tempfile::tempdir().unwrap();
-    std::fs::write(
-        project.path().join("package.json"),
-        r#"{"scripts":{"start":"node dist/server.js"}}"#,
-    )
-    .unwrap();
+    let project = detection_project(r#"{"scripts":{"start":"node dist/server.js"}}"#);
 
     let output_dir = project.path().join("dist");
     std::fs::create_dir_all(&output_dir).unwrap();
@@ -2275,11 +1841,10 @@ fn project_relative_entry_precedes_output_relative_collision() {
 #[test]
 fn resolve_entry_point_root_prefers_server_over_main() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("server.js"), "").unwrap();
-    std::fs::write(dir.path().join("main.js"), "").unwrap();
+    write_detection_file(dir.path(), "server.js", "");
+    write_detection_file(dir.path(), "main.js", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("server.js".into()));
+    assert_local_entry(dir.path(), "server.js");
 }
 
 #[test]
@@ -2310,8 +1875,7 @@ fn resolve_entry_point_heuristic_finds_nested_server_file() {
     std::fs::create_dir_all(dir.path().join("runtime")).unwrap();
     std::fs::write(dir.path().join("runtime/bootstrap.mjs"), "x".repeat(600)).unwrap();
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("runtime/bootstrap.mjs".into()));
+    assert_local_entry(dir.path(), "runtime/bootstrap.mjs");
 }
 
 #[test]
@@ -2373,8 +1937,7 @@ fn heuristic_scan_min_size_boundary_exact() {
 #[test]
 fn heuristic_scan_min_size_zero_byte_skipped() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
-    std::fs::write(dir.path().join("dist/empty.mjs"), "").unwrap();
+    write_detection_file(dir.path(), "dist/empty.mjs", "");
     assert_eq!(resolve_entry_point("other", dir.path(), dir.path()), None);
 }
 
@@ -2408,91 +1971,55 @@ fn heuristic_scan_skips_sub_threshold_stub() {
 
 #[test]
 fn resolve_entry_point_from_cross_env_start_script() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"scripts":{"start":"cross-env NODE_ENV=production node ./server.js"}}"#,
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("server.js"), "").unwrap();
+    );
+    write_detection_file(dir.path(), "server.js", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("server.js".into()));
+    assert_local_entry(dir.path(), "server.js");
 }
 
 #[test]
 fn resolve_entry_point_from_chained_start_script_uses_first_file() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"start":"node ./server.js && node ./fallback.js"}}"#,
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("server.js"), "").unwrap();
-    std::fs::write(dir.path().join("fallback.js"), "").unwrap();
+    let dir =
+        detection_project(r#"{"scripts":{"start":"node ./server.js && node ./fallback.js"}}"#);
+    write_detection_file(dir.path(), "server.js", "");
+    write_detection_file(dir.path(), "fallback.js", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("server.js".into()));
+    assert_local_entry(dir.path(), "server.js");
 }
 
 #[test]
 fn resolve_entry_point_from_windows_style_start_script_path() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"start":"node dist\\server.js"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("dist")).unwrap();
-    std::fs::write(dir.path().join("dist/server.js"), "").unwrap();
+    let dir = detection_project(r#"{"scripts":{"start":"node dist\\server.js"}}"#);
+    write_detection_file(dir.path(), "dist/server.js", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("dist/server.js".into()));
+    assert_local_entry(dir.path(), "dist/server.js");
 }
 
 #[test]
 fn resolve_entry_point_from_start_script_path_with_env_directory() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"start":"node env/server.js"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("env")).unwrap();
-    std::fs::write(dir.path().join("env/server.js"), "").unwrap();
+    let dir = detection_project(r#"{"scripts":{"start":"node env/server.js"}}"#);
+    write_detection_file(dir.path(), "env/server.js", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("env/server.js".into()));
+    assert_local_entry(dir.path(), "env/server.js");
 }
 
 #[test]
 fn resolve_entry_point_from_start_script_with_dotenv_require() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"start":"node -r dotenv/config ./server.js"}}"#,
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("server.js"), "").unwrap();
+    let dir = detection_project(r#"{"scripts":{"start":"node -r dotenv/config ./server.js"}}"#);
+    write_detection_file(dir.path(), "server.js", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("server.js".into()));
+    assert_local_entry(dir.path(), "server.js");
 }
 
 #[test]
 fn resolve_entry_point_ignores_non_runtime_scripts() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"test":"node ./src/test-runner.js"}}"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("src")).unwrap();
-    std::fs::write(dir.path().join("src/test-runner.js"), "").unwrap();
-    std::fs::write(dir.path().join("server.js"), "").unwrap();
+    let dir = detection_project(r#"{"scripts":{"test":"node ./src/test-runner.js"}}"#);
+    write_detection_file(dir.path(), "src/test-runner.js", "");
+    write_detection_file(dir.path(), "server.js", "");
 
-    let result = resolve_entry_point("other", dir.path(), dir.path());
-    assert_eq!(result, Some("server.js".into()));
+    assert_local_entry(dir.path(), "server.js");
 }
 
 #[test]
@@ -2531,70 +2058,36 @@ fn score_candidate_penalizes_chunks_paths() {
 
 #[test]
 fn nextjs_output_dir_default_ssr_is_dot_next() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+        &[],
+    );
     assert_eq!(result.framework, "nextjs");
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some(".next"));
+    assert_output_directory(&result, ".next");
 }
 
 #[test]
 fn nextjs_output_dir_export_is_out() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("next.config.js"),
-        "module.exports = { output: 'export' }",
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some("out"));
+        &[("next.config.js", "module.exports = { output: 'export' }")],
+    );
+    assert_output_directory(&result, "out");
 }
 
 #[test]
 fn nextjs_env_gated_export_is_not_static_export() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"next": "16.2.7", "react": "19.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("next.config.ts"),
-        r#"
+        &[(
+            "next.config.ts",
+            r#"
 const isExport = process.env.STATIC_EXPORT === "true";
 export default isExport ? { output: "export" } : {};
 "#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "nextjs");
-    assert_eq!(result.suggested_compute, ComputeType::Process);
+        )],
+    );
+    assert_framework_compute(&result, "nextjs", ComputeType::Process);
     assert_eq!(
         result
             .metadata
@@ -2607,27 +2100,17 @@ export default isExport ? { output: "export" } : {};
 
 #[test]
 fn nextjs_src_app_route_handlers_are_process() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"next": "16.2.7", "react": "19.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("next.config.ts"),
-        r#"export default { output: "export" };"#,
-    )
-    .unwrap();
-    std::fs::create_dir_all(dir.path().join("src/app/api/booking")).unwrap();
-    std::fs::write(
-        dir.path().join("src/app/api/booking/route.ts"),
-        "export async function POST() { return Response.json({ ok: true }); }",
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    assert_eq!(result.framework, "nextjs");
-    assert_eq!(result.suggested_compute, ComputeType::Process);
+        &[
+            ("next.config.ts", r#"export default { output: "export" };"#),
+            (
+                "src/app/api/booking/route.ts",
+                "export async function POST() { return Response.json({ ok: true }); }",
+            ),
+        ],
+    );
+    assert_framework_compute(&result, "nextjs", ComputeType::Process);
     assert!(
         result
             .metadata
@@ -2642,164 +2125,78 @@ fn nextjs_src_app_route_handlers_are_process() {
 
 #[test]
 fn nextjs_output_dir_standalone() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("next.config.mjs"),
-        "export default { output: 'standalone' }",
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some(".next/standalone"));
+        &[("next.config.mjs", "export default { output: 'standalone' }")],
+    );
+    assert_output_directory(&result, ".next/standalone");
 }
 
 #[test]
 fn nuxt_output_dir_default_ssr_is_dot_output() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"dependencies": {"nuxt": "3.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+    let result = detect_project(r#"{"dependencies": {"nuxt": "3.0.0"}}"#, &[]);
     assert_eq!(result.framework, "nuxt");
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some(".output"));
+    assert_output_directory(&result, ".output");
 }
 
 #[test]
 fn nuxt_output_dir_static_is_output_public() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"nuxt": "3.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("nuxt.config.ts"),
-        "export default defineNuxtConfig({ ssr: false })",
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some(".output/public"));
+        &[(
+            "nuxt.config.ts",
+            "export default defineNuxtConfig({ ssr: false })",
+        )],
+    );
+    assert_output_directory(&result, ".output/public");
 }
 
 #[test]
 fn vite_custom_outdir_detected() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"vite": "5.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("vite.config.ts"),
-        "export default defineConfig({ build: { outDir: 'custom-out' } })",
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some("custom-out"));
+        &[(
+            "vite.config.ts",
+            "export default defineConfig({ build: { outDir: 'custom-out' } })",
+        )],
+    );
+    assert_output_directory(&result, "custom-out");
 }
 
 #[test]
 fn vue_cli_with_vite_config_respects_outdir() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"@vue/cli-service": "5.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("vite.config.ts"),
-        "export default { build: { outDir: 'my-dist' } }",
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+        &[(
+            "vite.config.ts",
+            "export default { build: { outDir: 'my-dist' } }",
+        )],
+    );
     assert_eq!(result.framework, "vue");
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some("my-dist"));
+    assert_output_directory(&result, "my-dist");
 }
 
 #[test]
 fn nextjs_ignores_vite_config_outdir() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"next": "14.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(
-        dir.path().join("vite.config.ts"),
-        "export default { build: { outDir: 'wrong-dir' } }",
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+        &[(
+            "vite.config.ts",
+            "export default { build: { outDir: 'wrong-dir' } }",
+        )],
+    );
     assert_eq!(result.framework, "nextjs");
-    let output_dir = result
-        .metadata
-        .build_info
-        .as_ref()
-        .unwrap()
-        .output_dir
-        .as_deref();
-    assert_eq!(output_dir, Some(".next")); // NOT "wrong-dir"
+    assert_output_directory(&result, ".next"); // NOT "wrong-dir"
 }
 
 // ── Bun runtime detection (issue 8) ─────────────────────────
 
 #[test]
 fn bun_pm_sets_bun_runtime() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"packageManager": "bun@1.2.0", "dependencies": {"vite": "5.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+        &[],
+    );
     assert_eq!(
         result.metadata.runtime.runtime_type,
         types::RuntimeType::Bun
@@ -2808,15 +2205,10 @@ fn bun_pm_sets_bun_runtime() {
 
 #[test]
 fn npm_pm_keeps_node_runtime() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let result = detect_project(
         r#"{"dependencies": {"vite": "5.0.0"}}"#,
-    )
-    .unwrap();
-    std::fs::write(dir.path().join("package-lock.json"), "{}").unwrap();
-
-    let result = detect(dir.path());
+        &[("package-lock.json", "{}")],
+    );
     assert_eq!(
         result.metadata.runtime.runtime_type,
         types::RuntimeType::Node
@@ -2825,12 +2217,9 @@ fn npm_pm_keeps_node_runtime() {
 
 #[test]
 fn bun_pm_with_nextjs_sets_bun_runtime() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
+    let dir = detection_project(
         r#"{"packageManager": "bun@1.2.0", "dependencies": {"next": "14.0.0", "react": "18.0.0"}}"#,
-    )
-    .unwrap();
+    );
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "nextjs");
@@ -2845,8 +2234,8 @@ fn bun_pm_with_nextjs_sets_bun_runtime() {
 fn static_html_bun_keeps_static_runtime() {
     let dir = tempfile::tempdir().unwrap();
     // static-html project with bun.lockb — runtime should stay Static
-    std::fs::write(dir.path().join("index.html"), "<html></html>").unwrap();
-    std::fs::write(dir.path().join("bun.lockb"), "").unwrap();
+    write_detection_file(dir.path(), "index.html", "<html></html>");
+    write_detection_file(dir.path(), "bun.lockb", "");
 
     let result = detect(dir.path());
     assert_eq!(result.framework, "static-html");
@@ -2860,14 +2249,7 @@ fn static_html_bun_keeps_static_runtime() {
 
 #[test]
 fn nuxt_build_command_is_build_not_generate() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("package.json"),
-        r#"{"dependencies": {"nuxt": "3.0.0"}}"#,
-    )
-    .unwrap();
-
-    let result = detect(dir.path());
+    let result = detect_project(r#"{"dependencies": {"nuxt": "3.0.0"}}"#, &[]);
     let build_cmd = result
         .metadata
         .build_info
