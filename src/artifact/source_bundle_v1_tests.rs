@@ -550,26 +550,7 @@ async fn mixed_python_node_and_native_bundle_preserves_per_layer_runtime_authori
         .unwrap();
         let logical: nrz_source_bundle::SourceLogicalManifest =
             serde_json::from_value(serde_json::to_value(&plan.logical_manifest).unwrap()).unwrap();
-        let owner = uuid::Uuid::nil().to_string();
-        let input = nrz_source_bundle::SourceBundleVerificationInput {
-            owner_workspace_id: owner.clone(),
-            source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-                &owner,
-                &plan.logical_manifest_sha256,
-                &plan.source_sha256,
-                None,
-            ),
-            source_sha256: plan.source_sha256.clone(),
-            logical_manifest_sha256: plan.logical_manifest_sha256.clone(),
-            budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical)
-                .unwrap(),
-        };
-        let verified = nrz_source_bundle::verify_source_bundle_bytes(
-            input,
-            fs::read(plan.source_path()).unwrap().into(),
-        )
-        .await
-        .unwrap();
+        let verified = crate::test_support::verify_source_bundle(&plan, &logical).await;
         let logical: nrz_source_bundle::SourceLogicalManifest =
             serde_json::from_value(verified.logical_manifest).unwrap();
         let targets = std::collections::HashMap::from([

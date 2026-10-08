@@ -1,4 +1,5 @@
-use crate::{api::ApiClient, rollback::activate_release};
+use crate::rollback::activate_release;
+use crate::test_support::serve_api;
 use axum::{
     Json, Router,
     http::{HeaderMap, StatusCode},
@@ -49,7 +50,7 @@ async fn rollback_activates_exact_retained_release_with_generation_and_idempoten
                 )
             }),
         );
-    let (client, server) = serve(app).await;
+    let (client, server) = serve_api(app).await;
     let response = activate_release(&client, ENVIRONMENT, RELEASE)
         .await
         .unwrap();
@@ -82,7 +83,7 @@ async fn rollback_lists_releases_with_sha256_and_blake3_content_digests() {
                 }
             }),
         );
-        let (client, server) = serve(app).await;
+        let (client, server) = serve_api(app).await;
 
         let page = client.environment_releases(ENVIRONMENT).await.unwrap();
         let output = serde_json::to_value(&page).unwrap();
@@ -106,7 +107,7 @@ async fn rollback_rejects_serving_state_from_another_environment_before_mutation
             "/v1/environments/{id}/actions/activate-release",
             post(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
         );
-    let (client, server) = serve(app).await;
+    let (client, server) = serve_api(app).await;
     assert!(
         activate_release(&client, ENVIRONMENT, RELEASE)
             .await
@@ -115,17 +116,4 @@ async fn rollback_rejects_serving_state_from_another_environment_before_mutation
             .contains("another environment")
     );
     server.abort();
-}
-
-async fn serve(app: Router) -> (ApiClient, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = ApiClient::with_http_client(
-        format!("http://{}", listener.local_addr().unwrap()),
-        reqwest::Client::new(),
-    )
-    .unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (client, server)
 }

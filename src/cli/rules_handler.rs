@@ -6,14 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::api::ApiClient;
-use crate::auth;
-use crate::cli::rules::{
-    RulesArgs, RulesCheckArgs, RulesCommand, RulesPublishArgs, RulesPullArgs, RulesStatusArgs,
-};
+use crate::cli::rules::{RulesArgs, RulesCheckArgs, RulesCommand, RulesPublishArgs};
 use crate::execution_context;
 use crate::functions;
 use crate::output;
-use nrz::config;
 use nrz::config::ProjectConfig;
 
 const RULES_FILENAME: &str = "onreza.rules.toml";
@@ -28,9 +24,31 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     match args.command {
         RulesCommand::Check(args) => check(args, json),
-        RulesCommand::Pull(args) => pull(args, json, token, workspace, config).await,
         RulesCommand::Publish(args) => publish(args, json, token, workspace, config).await,
-        RulesCommand::Status(args) => status(args, json, token, workspace, config).await,
+        RulesCommand::Pull(args) => {
+            let (project_dir, ctx) = prepare_remote_context(
+                &args.dir,
+                token,
+                workspace,
+                config,
+                args.project_id.as_deref(),
+                args.environment.as_deref(),
+            )
+            .await?;
+            pull(args.force, json, &project_dir, ctx).await
+        }
+        RulesCommand::Status(args) => {
+            let (project_dir, ctx) = prepare_remote_context(
+                &args.dir,
+                token,
+                workspace,
+                config,
+                args.project_id.as_deref(),
+                args.environment.as_deref(),
+            )
+            .await?;
+            status(json, &project_dir, &ctx).await
+        }
     }
 }
 
@@ -60,28 +78,17 @@ fn check(args: RulesCheckArgs, json: bool) -> anyhow::Result<()> {
 }
 
 async fn pull(
-    args: RulesPullArgs,
+    force: bool,
     json: bool,
-    token: Option<&str>,
-    workspace: Option<&str>,
-    config: &ProjectConfig,
+    project_dir: &Path,
+    ctx: RemoteContext,
 ) -> anyhow::Result<()> {
-    let project_dir = canonical_project_dir(&args.dir)?;
-    let ctx = remote_context(
-        token,
-        workspace,
-        config,
-        &project_dir,
-        args.project_id.as_deref(),
-        args.environment.as_deref(),
-    )
-    .await?;
     let active = get_active_rule_set(&ctx.client, &ctx.project_id, &ctx.environment_id).await?;
     let authoring = active_rule_set_to_authoring_value(&active)?;
     let content = edge_rule_set_authoring_to_toml(&authoring)?;
     let path = project_dir.join(RULES_FILENAME);
 
-    confirm_overwrite(&path, args.force, json)?;
+    confirm_overwrite(&path, force, json)?;
     write_rules_file(&path, content.as_bytes())?;
 
     let rule_count = authoring
@@ -187,24 +194,8 @@ async fn publish(
     Ok(())
 }
 
-async fn status(
-    args: RulesStatusArgs,
-    json: bool,
-    token: Option<&str>,
-    workspace: Option<&str>,
-    config: &ProjectConfig,
-) -> anyhow::Result<()> {
-    let project_dir = canonical_project_dir(&args.dir)?;
-    let ctx = remote_context(
-        token,
-        workspace,
-        config,
-        &project_dir,
-        args.project_id.as_deref(),
-        args.environment.as_deref(),
-    )
-    .await?;
-    let local = load_local_rules_for_status(&project_dir);
+async fn status(json: bool, project_dir: &Path, ctx: &RemoteContext) -> anyhow::Result<()> {
+    let local = load_local_rules_for_status(project_dir);
     let request = build_edge_rules_status_request(local.edge_rules, local.local_invalid)?;
     let response =
         get_edge_rules_status(&ctx.client, &ctx.project_id, &ctx.environment_id, request).await?;
@@ -224,6 +215,27 @@ struct RemoteContext {
     environment_id: String,
 }
 
+async fn prepare_remote_context(
+    dir: &str,
+    token: Option<&str>,
+    workspace: Option<&str>,
+    config: &ProjectConfig,
+    project_id: Option<&str>,
+    environment: Option<&str>,
+) -> anyhow::Result<(PathBuf, RemoteContext)> {
+    let project_dir = canonical_project_dir(dir)?;
+    let ctx = remote_context(
+        token,
+        workspace,
+        config,
+        &project_dir,
+        project_id,
+        environment,
+    )
+    .await?;
+    Ok((project_dir, ctx))
+}
+
 async fn remote_context(
     token: Option<&str>,
     workspace: Option<&str>,
@@ -232,9 +244,7 @@ async fn remote_context(
     project_id: Option<&str>,
     environment: Option<&str>,
 ) -> anyhow::Result<RemoteContext> {
-    let tok = auth::resolve_token(token, workspace)?;
-    let client = ApiClient::authenticated(&tok)?;
-    let project_id = config::resolve_project_id(project_id, config)?;
+    let (client, project_id) = super::remote::project_client(token, workspace, project_id, config)?;
     let environment_id = execution_context::resolve_for_mutation(
         &client,
         &project_id,
@@ -337,14 +347,16 @@ fn canonical_project_dir(dir: &str) -> anyhow::Result<PathBuf> {
         .with_context(|| format!("project directory not found: {dir}"))
 }
 
+fn rules_file_metadata(path: &Path) -> anyhow::Result<Option<std::fs::Metadata>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
+    }
+}
+
 fn confirm_overwrite(path: &Path, force: bool, json: bool) -> anyhow::Result<()> {
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => Some(metadata),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
-        }
-    };
+    let metadata = rules_file_metadata(path)?;
     if metadata
         .as_ref()
         .is_some_and(|metadata| metadata.file_type().is_symlink())
@@ -388,14 +400,9 @@ pub(crate) fn write_rules_file(path: &Path, content: &[u8]) -> anyhow::Result<()
         .parent()
         .ok_or_else(|| anyhow::anyhow!("rules path has no parent: {}", path.display()))?;
     #[cfg(unix)]
-    let existing_permissions = match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_file() => Some(metadata.permissions()),
-        Ok(_) => None,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
-        }
-    };
+    let existing_permissions = rules_file_metadata(path)?
+        .filter(std::fs::Metadata::is_file)
+        .map(|metadata| metadata.permissions());
     let temp_path = parent.join(format!(
         ".{RULES_FILENAME}.tmp-{}",
         uuid::Uuid::now_v7().simple()
@@ -437,13 +444,7 @@ pub(crate) fn write_rules_file(path: &Path, content: &[u8]) -> anyhow::Result<()
 
 #[cfg(any(windows, test))]
 pub(crate) fn replace_file_with_rollback(temp_path: &Path, path: &Path) -> anyhow::Result<()> {
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => Some(metadata),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
-        }
-    };
+    let metadata = rules_file_metadata(path)?;
     let Some(metadata) = metadata else {
         return std::fs::rename(temp_path, path)
             .with_context(|| format!("failed to install {}", path.display()));
@@ -593,9 +594,6 @@ pub(crate) fn edge_rule_set_authoring_to_toml(value: &Value) -> anyhow::Result<S
         out.push('\n');
         out.push_str("[[rules]]\n");
         for key in ordered_rule_keys(rule) {
-            if key == "position" {
-                continue;
-            }
             let value = rule.get(key).expect("ordered key must exist");
             write_assignment(&mut out, key, value)?;
         }
@@ -608,12 +606,6 @@ fn ordered_rule_keys(rule: &Map<String, Value>) -> Vec<&str> {
     let mut keys = Vec::with_capacity(rule.len());
     for key in preferred {
         if rule.contains_key(key) {
-            keys.push(key);
-        }
-    }
-    for key in rule.keys() {
-        let key = key.as_str();
-        if key != "position" && !preferred.contains(&key) {
             keys.push(key);
         }
     }
@@ -708,14 +700,7 @@ fn toml_inline_value(value: &toml::Value) -> anyhow::Result<String> {
 }
 
 fn toml_key(key: &str) -> String {
-    if key
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
-    {
-        key.to_string()
-    } else {
-        toml::Value::String(key.to_string()).to_string()
-    }
+    toml::Value::String(key.to_string()).to_string()
 }
 
 pub(crate) fn build_edge_rules_status_request(
@@ -745,7 +730,7 @@ fn load_local_rules_for_status(project_dir: &Path) -> LocalRulesForStatus {
                 edge_rules: Some(edge_rules),
                 local_invalid: false,
                 file: LocalRulesFileStatus {
-                    path: Some(path),
+                    path,
                     rule_count: Some(rule_count),
                     valid: true,
                     error: None,
@@ -756,7 +741,7 @@ fn load_local_rules_for_status(project_dir: &Path) -> LocalRulesForStatus {
             edge_rules: None,
             local_invalid: false,
             file: LocalRulesFileStatus {
-                path: Some(path),
+                path,
                 rule_count: None,
                 valid: false,
                 error: Some("not found".to_string()),
@@ -766,7 +751,7 @@ fn load_local_rules_for_status(project_dir: &Path) -> LocalRulesForStatus {
             edge_rules: None,
             local_invalid: true,
             file: LocalRulesFileStatus {
-                path: Some(path),
+                path,
                 rule_count: None,
                 valid: false,
                 error: Some(format!("{error:#}")),
@@ -847,7 +832,7 @@ struct LocalRulesForStatus {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LocalRulesFileStatus {
-    path: Option<String>,
+    path: String,
     rule_count: Option<usize>,
     valid: bool,
     error: Option<String>,
@@ -855,14 +840,13 @@ struct LocalRulesFileStatus {
 
 impl LocalRulesFileStatus {
     fn summary(&self) -> String {
-        if self.valid {
-            match (self.path.as_deref(), self.rule_count) {
-                (Some(path), Some(count)) => format!("{path} ({count} rule(s), valid)"),
-                (Some(path), None) => format!("{path} (valid)"),
-                _ => "valid".to_string(),
-            }
-        } else {
-            self.error.as_deref().unwrap_or("invalid").to_string()
+        match self.rule_count {
+            Some(count) => format!("{} ({count} rule(s), valid)", self.path),
+            None => self
+                .error
+                .as_deref()
+                .expect("missing or invalid local rules must have an error")
+                .to_string(),
         }
     }
 }

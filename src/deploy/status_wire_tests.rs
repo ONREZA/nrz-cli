@@ -1,5 +1,5 @@
 use super::activation::{ActivationWait, is_activation_observation_error, wait_for_activation};
-use crate::api::ApiClient;
+use crate::test_support::serve_api;
 use axum::{Json, Router, routing::get};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -35,15 +35,7 @@ async fn generated_status_preserves_failure_authority_despite_unrecognized_diagn
                 async move { Json(body) }
             }),
         );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let client = ApiClient::with_http_client(
-            format!("http://{}", listener.local_addr().unwrap()),
-            reqwest::Client::new(),
-        )
-        .unwrap();
-        let server = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
+        let (client, server) = serve_api(app).await;
         let error = wait_for_activation(
             ActivationWait {
                 deployment_id: DEPLOYMENT,

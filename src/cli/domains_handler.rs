@@ -1,11 +1,9 @@
 use anyhow::{Context, bail};
-use nrz_api::{DomainResponse as DomainsListResponse, DomainResponseItem as Domain};
+use nrz_api::DomainResponseItem as Domain;
 
 use crate::api::ApiClient;
-use crate::auth;
 use crate::execution_context;
 use crate::output;
-use nrz::config;
 use nrz::config::ProjectConfig;
 
 use super::domains::{DomainsArgs, DomainsCommand};
@@ -17,10 +15,8 @@ pub async fn run(
     workspace: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
-    let tok = auth::resolve_token(token, workspace)?;
-
-    let client = ApiClient::authenticated(&tok)?;
-    let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
+    let (client, project_id) =
+        crate::cli::remote::project_client(token, workspace, args.project_id.as_deref(), config)?;
 
     match args.command {
         DomainsCommand::List => list(&client, &project_id, json).await,
@@ -38,7 +34,8 @@ pub async fn run(
 }
 
 async fn list(client: &ApiClient, project_id: &str, json: bool) -> anyhow::Result<()> {
-    let resp = fetch_project_domains(client, project_id)
+    let resp = client
+        .project_domains(project_id)
         .await
         .context("failed to fetch domains")?;
 
@@ -69,13 +66,6 @@ async fn list(client: &ApiClient, project_id: &str, json: bool) -> anyhow::Resul
     }
 
     Ok(())
-}
-
-async fn fetch_project_domains(
-    client: &ApiClient,
-    project_id: &str,
-) -> anyhow::Result<DomainsListResponse> {
-    client.project_domains(project_id).await
 }
 
 fn format_status(status: &str) -> String {
@@ -224,7 +214,8 @@ async fn find_project_domain(
     domain_id: &str,
 ) -> anyhow::Result<Domain> {
     let binding_id: uuid::Uuid = domain_id.parse().context("invalid domain binding ID")?;
-    fetch_project_domains(client, project_id)
+    client
+        .project_domains(project_id)
         .await
         .context("failed to fetch domains")?
         .domains

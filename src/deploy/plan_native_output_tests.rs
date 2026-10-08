@@ -68,57 +68,17 @@ async fn real_native_subdirectory_closure_uses_full_artifact_root() {
             config.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Executable);
             config.deploy.entry = Some("bin/server".into());
             config.deploy.args = Some(vec!["$(id)".into(), "two words".into()]);
-            let command = crate::context::CommandContext::resolve_platform_root(
+            let (command, mut args) = crate::deploy::test_support::deploy_context(
                 project.path(),
                 &config,
-                true,
-            )
-            .unwrap();
-            let mut args = DeployArgs::try_parse_from([
-                "deploy",
-                project.path().to_str().unwrap(),
-                "--dry",
-                "--skip-install",
-            ])
-            .unwrap();
+                &["--skip-install"],
+            );
             args.skip_build = skip_build;
-            let plan = build(DeployPlanRequest {
-                args: &args,
-                command: &command,
-                explicit_compute: None,
-                build_logs: None,
-                execution_env: &[],
-                target_production: None,
-                platform_runner: false,
-            })
-            .await
-            .unwrap();
-            let source = plan
-                .materialize_source_bundle(true, RuntimeDependencyPackaging::Embedded)
-                .unwrap();
+            let source = embedded_source_bundle(&args, &command).await;
             let logical: nrz_source_bundle::SourceLogicalManifest =
                 serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap())
                     .unwrap();
-            let owner = uuid::Uuid::nil().to_string();
-            let input = nrz_source_bundle::SourceBundleVerificationInput {
-                owner_workspace_id: owner.clone(),
-                source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-                    &owner,
-                    &source.logical_manifest_sha256,
-                    &source.source_sha256,
-                    None,
-                ),
-                source_sha256: source.source_sha256.clone(),
-                logical_manifest_sha256: source.logical_manifest_sha256.clone(),
-                budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical)
-                    .unwrap(),
-            };
-            let verified = nrz_source_bundle::verify_source_bundle_bytes(
-                input,
-                std::fs::read(source.source_path()).unwrap().into(),
-            )
-            .await
-            .unwrap();
+            let verified = crate::test_support::verify_source_bundle(&source, &logical).await;
             let logical: nrz_source_bundle::SourceLogicalManifest =
                 serde_json::from_value(verified.logical_manifest).unwrap();
             let targets = std::collections::HashMap::from([(
@@ -138,12 +98,7 @@ async fn real_native_subdirectory_closure_uses_full_artifact_root() {
             nrz_runtime_artifact::verify_source_runtime_graph_dependencies(&logical, &graph)
                 .unwrap();
             let runtime = &graph.wire().runtime_layers[0];
-            let unpacked = tempfile::tempdir().unwrap();
-            let decoder = zstd::stream::read::Decoder::new(
-                std::fs::File::open(source.source_path()).unwrap(),
-            )
-            .unwrap();
-            tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+            let unpacked = crate::test_support::unpack_source_bundle(&source);
             let cwd = unpacked.path().join(runtime.application_root.as_str());
             let entry = cwd.join(runtime.entrypoint.as_str());
             nrz_runtime_artifact::NativeExecutableRequirements::verify_artifact_closure(
@@ -177,18 +132,10 @@ async fn real_native_subdirectory_closure_uses_full_artifact_root() {
             )
             .unwrap();
             std::os::unix::fs::symlink("../outside-lib", project.path().join("dist/lib")).unwrap();
-            let error = build(DeployPlanRequest {
-                args: &args,
-                command: &command,
-                explicit_compute: None,
-                build_logs: None,
-                execution_env: &[],
-                target_production: None,
-                platform_runner: false,
-            })
-            .await
-            .err()
-            .expect("library outside the artifact was accepted");
+            let error = crate::deploy::test_support::build_plan(&args, &command, &[])
+                .await
+                .err()
+                .expect("library outside the artifact was accepted");
             assert!(error.to_string().contains("escape"), "{error:#}");
         }
     }
@@ -209,30 +156,15 @@ async fn native_default_equivalent_output_reaches_compiler_admission() {
         let mut config = crate::config::ProjectConfig::default();
         config.project.framework = Some(framework.into());
         config.build.output_directory = Some(format!("./{}", recipe.output_directory()));
-        let command =
-            crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
-                .unwrap();
-        let args = DeployArgs::try_parse_from([
-            "deploy",
-            project.path().to_str().unwrap(),
-            "--dry",
-            "--skip-install",
-        ])
-        .unwrap();
-        let tools = tempfile::tempdir().unwrap();
-        let environment = [("PATH".into(), tools.path().to_string_lossy().into_owned())];
-        let error = build(DeployPlanRequest {
-            args: &args,
-            command: &command,
-            explicit_compute: None,
-            build_logs: None,
-            execution_env: &environment,
-            target_production: None,
-            platform_runner: false,
-        })
-        .await
-        .err()
-        .expect("missing compiler must fail at compiler admission");
+        let (command, args) = crate::deploy::test_support::deploy_context(
+            project.path(),
+            &config,
+            &["--skip-install"],
+        );
+        let error = build_without_compiler(&args, &command)
+            .await
+            .err()
+            .expect("missing compiler must fail at compiler admission");
         let compiler = super::super::native_build::compiler_probe(recipe).program;
         assert!(
             error
@@ -276,16 +208,8 @@ async fn real_hugo_equivalent_output_directory_publishes_fresh_default_output() 
     let mut config = crate::config::ProjectConfig::default();
     config.project.framework = Some("hugo".into());
     config.build.output_directory = Some("./public".into());
-    let command =
-        crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
-            .unwrap();
-    let args = DeployArgs::try_parse_from([
-        "deploy",
-        project.path().to_str().unwrap(),
-        "--dry",
-        "--skip-install",
-    ])
-    .unwrap();
+    let (command, args) =
+        crate::deploy::test_support::deploy_context(project.path(), &config, &["--skip-install"]);
     let hugo = std::env::var_os("NRZ_HUGO_BIN")
         .map(PathBuf::from)
         .unwrap_or_else(|| "hugo".into());
@@ -300,25 +224,13 @@ async fn real_hugo_equivalent_output_directory_publishes_fresh_default_output() 
             .to_string_lossy()
             .into_owned(),
     )];
-    let plan = build(DeployPlanRequest {
-        args: &args,
-        command: &command,
-        explicit_compute: None,
-        build_logs: None,
-        execution_env: &environment,
-        target_production: None,
-        platform_runner: false,
-    })
-    .await
-    .unwrap();
+    let plan = crate::deploy::test_support::build_plan(&args, &command, &environment)
+        .await
+        .unwrap();
     let source = plan
         .materialize_source_bundle(true, RuntimeDependencyPackaging::Embedded)
         .unwrap();
-    let unpacked = tempfile::tempdir().unwrap();
-    let decoder =
-        zstd::stream::read::Decoder::new(std::fs::File::open(source.source_path()).unwrap())
-            .unwrap();
-    tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+    let unpacked = crate::test_support::unpack_source_bundle(&source);
     assert!(unpacked.path().join("about/index.html").is_file());
     assert_eq!(
         std::fs::read(unpacked.path().join("fixture.svg")).unwrap(),
@@ -343,18 +255,10 @@ async fn native_default_output_conflict_is_rejected_before_install_or_cleanup() 
         let args =
             DeployArgs::try_parse_from(["deploy", project.path().to_str().unwrap(), "--dry"])
                 .unwrap();
-        let error = build(DeployPlanRequest {
-            args: &args,
-            command: &command,
-            explicit_compute: None,
-            build_logs: None,
-            execution_env: &[],
-            target_production: None,
-            platform_runner: false,
-        })
-        .await
-        .err()
-        .expect("conflicting output must fail before tool execution");
+        let error = crate::deploy::test_support::build_plan(&args, &command, &[])
+            .await
+            .err()
+            .expect("conflicting output must fail before tool execution");
         assert!(
             error.to_string().contains("build.output_directory"),
             "{framework}: {error:#}"
@@ -404,30 +308,15 @@ async fn native_default_unsafe_output_is_rejected_before_cleanup() {
         let mut config = crate::config::ProjectConfig::default();
         config.project.framework = Some(framework.into());
         config.build.output_directory = Some(output.into());
-        let command =
-            crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
-                .unwrap();
-        let args = DeployArgs::try_parse_from([
-            "deploy",
-            project.path().to_str().unwrap(),
-            "--dry",
-            "--skip-install",
-        ])
-        .unwrap();
-        let tools = tempfile::tempdir().unwrap();
-        let environment = [("PATH".into(), tools.path().to_string_lossy().into_owned())];
-        let error = build(DeployPlanRequest {
-            args: &args,
-            command: &command,
-            explicit_compute: None,
-            build_logs: None,
-            execution_env: &environment,
-            target_production: None,
-            platform_runner: false,
-        })
-        .await
-        .err()
-        .expect("unsafe/different output must fail before compiler admission");
+        let (command, args) = crate::deploy::test_support::deploy_context(
+            project.path(),
+            &config,
+            &["--skip-install"],
+        );
+        let error = build_without_compiler(&args, &command)
+            .await
+            .err()
+            .expect("unsafe/different output must fail before compiler admission");
         assert!(
             error.to_string().contains("build.output_directory"),
             "{framework} {output}: wrong boundary: {error:#}"
@@ -454,36 +343,14 @@ async fn custom_native_command_and_prebuilt_output_keep_the_authored_directory()
         if !skip_build {
             config.build.command = Some("printf BUILT > custom-output/build-marker.txt".into());
         }
-        let command =
-            crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
-                .unwrap();
-        let mut args = DeployArgs::try_parse_from([
-            "deploy",
-            project.path().to_str().unwrap(),
-            "--dry",
-            "--skip-install",
-        ])
-        .unwrap();
+        let (command, mut args) = crate::deploy::test_support::deploy_context(
+            project.path(),
+            &config,
+            &["--skip-install"],
+        );
         args.skip_build = skip_build;
-        let plan = build(DeployPlanRequest {
-            args: &args,
-            command: &command,
-            explicit_compute: None,
-            build_logs: None,
-            execution_env: &[],
-            target_production: None,
-            platform_runner: false,
-        })
-        .await
-        .unwrap();
-        let source = plan
-            .materialize_source_bundle(true, RuntimeDependencyPackaging::Embedded)
-            .unwrap();
-        let unpacked = tempfile::tempdir().unwrap();
-        let decoder =
-            zstd::stream::read::Decoder::new(std::fs::File::open(source.source_path()).unwrap())
-                .unwrap();
-        tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+        let source = embedded_source_bundle(&args, &command).await;
+        let unpacked = crate::test_support::unpack_source_bundle(&source);
         assert_eq!(
             std::fs::read_to_string(unpacked.path().join("index.html")).unwrap(),
             "AUTHORED_STATIC_OUTPUT"
@@ -519,29 +386,13 @@ async fn native_default_recipe_cannot_publish_stale_custom_output() {
     let mut config = crate::config::ProjectConfig::default();
     config.project.framework = Some("hugo".into());
     config.build.output_directory = Some("custom-output".into());
-    let command =
-        crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
-            .unwrap();
-    let args = DeployArgs::try_parse_from([
-        "deploy",
-        project.path().to_str().unwrap(),
-        "--dry",
-        "--skip-install",
-    ])
-    .unwrap();
+    let (command, args) =
+        crate::deploy::test_support::deploy_context(project.path(), &config, &["--skip-install"]);
     let environment = [("PATH".into(), tools.path().to_string_lossy().into_owned())];
-    let error = build(DeployPlanRequest {
-        args: &args,
-        command: &command,
-        explicit_compute: None,
-        build_logs: None,
-        execution_env: &environment,
-        target_production: None,
-        platform_runner: false,
-    })
-    .await
-    .err()
-    .expect("default recipe must reject a different stale output directory");
+    let error = crate::deploy::test_support::build_plan(&args, &command, &environment)
+        .await
+        .err()
+        .expect("default recipe must reject a different stale output directory");
     assert!(
         error.to_string().contains("build.output_directory"),
         "{error:#}"
@@ -552,4 +403,24 @@ async fn native_default_recipe_cannot_publish_stale_custom_output() {
         std::fs::read_to_string(project.path().join("custom-output/index.html")).unwrap(),
         "STALE_HTML"
     );
+}
+
+async fn embedded_source_bundle(
+    args: &DeployArgs,
+    command: &crate::context::CommandContext,
+) -> SourceBundlePlan {
+    crate::deploy::test_support::build_plan(args, command, &[])
+        .await
+        .unwrap()
+        .materialize_source_bundle(true, RuntimeDependencyPackaging::Embedded)
+        .unwrap()
+}
+
+async fn build_without_compiler(
+    args: &DeployArgs,
+    command: &crate::context::CommandContext,
+) -> anyhow::Result<DeployPlan> {
+    let tools = tempfile::tempdir().unwrap();
+    let environment = [("PATH".into(), tools.path().to_string_lossy().into_owned())];
+    crate::deploy::test_support::build_plan(args, command, &environment).await
 }

@@ -1,42 +1,30 @@
 use anyhow::Context;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-use crate::api::ApiClient;
-use crate::auth;
 use crate::cli::DeploymentsArgs;
 use crate::output;
-use nrz::config;
 use nrz::config::ProjectConfig;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DeploymentsResponse {
     deployments: Vec<Deployment>,
     total: u64,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Deployment {
     pub id: String,
     pub status: DeploymentStatus,
-    #[serde(default)]
     pub is_preview: Option<bool>,
-    #[serde(default)]
     pub is_rollback: Option<bool>,
-    #[serde(default)]
     pub is_active: Option<bool>,
-    #[serde(default)]
     pub commit_sha: Option<String>,
-    #[serde(default)]
     pub branch: Option<String>,
-    #[serde(default)]
     pub url: Option<String>,
-    #[serde(default)]
     pub created_at: Option<String>,
-    #[serde(default)]
     pub deployed_at: Option<String>,
-    #[serde(default)]
     pub finished_at: Option<String>,
 }
 
@@ -98,33 +86,7 @@ pub enum DeploymentStatus {
     Live,
     Stopped,
     Failed,
-    Deploying,
     Cancelled,
-    Unknown,
-}
-
-impl<'de> Deserialize<'de> for DeploymentStatus {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let raw = String::deserialize(deserializer)?;
-        Ok(match raw.to_ascii_lowercase().as_str() {
-            "pending" => Self::Pending,
-            "queued" => Self::Queued,
-            "building" => Self::Building,
-            "uploading" => Self::Uploading,
-            "ingesting" => Self::Ingesting,
-            "skipped" => Self::Skipped,
-            "smoke_testing" => Self::SmokeTesting,
-            "live" => Self::Live,
-            "stopped" => Self::Stopped,
-            "failed" => Self::Failed,
-            "deploying" => Self::Deploying,
-            "cancelled" => Self::Cancelled,
-            _ => Self::Unknown,
-        })
-    }
 }
 
 impl std::fmt::Display for DeploymentStatus {
@@ -140,9 +102,7 @@ impl std::fmt::Display for DeploymentStatus {
             Self::Live => write!(f, "live"),
             Self::Stopped => write!(f, "stopped"),
             Self::Failed => write!(f, "failed"),
-            Self::Deploying => write!(f, "deploying"),
             Self::Cancelled => write!(f, "cancelled"),
-            Self::Unknown => write!(f, "unknown"),
         }
     }
 }
@@ -154,11 +114,8 @@ pub async fn run(
     workspace: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
-    let tok = auth::resolve_token(token, workspace)?;
-
-    let client = ApiClient::authenticated(&tok)?;
-
-    let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
+    let (client, project_id) =
+        crate::cli::remote::project_client(token, workspace, args.project_id.as_deref(), config)?;
 
     let page = client
         .project_deployments(&project_id, args.limit, 0)

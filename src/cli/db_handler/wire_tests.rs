@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::serve_api;
 use axum::{
     Json, Router,
     extract::{Request, State},
@@ -50,15 +51,7 @@ async fn serve(
             },
         )
         .with_state(Arc::clone(&pending));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = ApiClient::with_http_client(
-        format!("http://{}", listener.local_addr().unwrap()),
-        reqwest::Client::new(),
-    )
-    .unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
+    let (client, server) = serve_api(app).await;
     (client, pending, server)
 }
 

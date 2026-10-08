@@ -13,6 +13,10 @@ mod config;
 mod detect;
 #[path = "cli_integration/dev.rs"]
 mod dev;
+#[path = "cli_integration/domains.rs"]
+mod domains;
+#[path = "cli_integration/env.rs"]
+mod env;
 #[path = "cli_integration/fixtures.rs"]
 mod fixtures;
 #[path = "cli_integration/functions.rs"]
@@ -23,3 +27,11 @@ mod help;
 mod kv;
 #[path = "cli_integration/platform.rs"]
 mod platform;
+#[path = "cli_integration/projects.rs"]
+mod projects;
+#[path = "cli_integration/rules.rs"]
+mod rules;
+
+#[cfg(target_os = "linux")]
+#[path = "cli_integration/terminal.rs"]
+mod terminal;

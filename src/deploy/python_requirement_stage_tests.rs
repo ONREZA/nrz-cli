@@ -1,4 +1,3 @@
-use clap::Parser as _;
 use nrz_source_bundle::{ApplicationRuntimeFamily, PythonMinor};
 
 #[tokio::test]
@@ -9,32 +8,14 @@ async fn skipped_python_install_requires_staged_bare_requirement_dependencies() 
     config.deploy.runtime = Some(ApplicationRuntimeFamily::Python);
     config.deploy.python_version = Some(PythonMinor::Python314);
     config.deploy.entry = Some("main.py".into());
-    std::fs::write(
-        project.path().join("onreza.toml"),
-        toml::to_string(&config).unwrap(),
-    )
-    .unwrap();
+    crate::deploy::test_support::write_project_config(project.path(), &config);
     std::fs::write(project.path().join("main.py"), "import acme\n").unwrap();
-    let command =
-        crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
-            .unwrap();
-    let args = crate::cli::DeployArgs::try_parse_from([
-        "deploy",
-        project.path().to_str().unwrap(),
-        "--dry",
-        "--skip-install",
-        "--skip-build",
-    ])
-    .unwrap();
-    let request = || super::super::plan::DeployPlanRequest {
-        args: &args,
-        command: &command,
-        explicit_compute: None,
-        build_logs: None,
-        execution_env: &[],
-        target_production: None,
-        platform_runner: false,
-    };
+    let (command, args) = crate::deploy::test_support::deploy_context(
+        project.path(),
+        &config,
+        &["--skip-install", "--skip-build"],
+    );
+    let build_plan = || crate::deploy::test_support::build_plan(&args, &command, &[]);
     for requirement in [
         "./wheels/acme-1.0-py3-none-any.whl",
         "../localproject",
@@ -44,8 +25,11 @@ async fn skipped_python_install_requires_staged_bare_requirement_dependencies() 
         "git+https://git.example/acme.git",
     ] {
         std::fs::write(project.path().join("requirements.txt"), requirement).unwrap();
-        let error = super::super::plan::build(request()).await.err()
-            .unwrap_or_else(|| panic!("{requirement}: dependency-free plan silently accepted an uninstalled requirement"));
+        let error = build_plan().await.err().unwrap_or_else(|| {
+            panic!(
+                "{requirement}: dependency-free plan silently accepted an uninstalled requirement"
+            )
+        });
         assert!(
             error
                 .chain()
@@ -69,7 +53,7 @@ async fn skipped_python_install_requires_staged_bare_requirement_dependencies() 
         "./wheels/acme-1.0-py3-none-any.whl",
     )
     .unwrap();
-    let plan = super::super::plan::build(request()).await.unwrap();
+    let plan = build_plan().await.unwrap();
     let source = plan
         .materialize_source_bundle(
             true,
@@ -87,11 +71,7 @@ async fn skipped_python_install_requires_staged_bare_requirement_dependencies() 
         crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Compute
     );
     assert_eq!(published.layer_name.as_deref(), Some("server"));
-    let unpacked = tempfile::tempdir().unwrap();
-    let decoder =
-        zstd::stream::read::Decoder::new(std::fs::File::open(source.source_path()).unwrap())
-            .unwrap();
-    tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+    let unpacked = crate::test_support::unpack_source_bundle(&source);
     assert_eq!(
         std::fs::read_to_string(unpacked.path().join(&published.path)).unwrap(),
         "VALUE = 'PUBLISHED_REQUIREMENT'\n"
@@ -105,23 +85,13 @@ async fn dependency_free_python_requirements_preserve_skip_install_publication()
     config.build.output_directory = Some(".".into());
     config.deploy.runtime = Some(ApplicationRuntimeFamily::Python);
     config.deploy.entry = Some("main.py".into());
-    std::fs::write(
-        project.path().join("onreza.toml"),
-        toml::to_string(&config).unwrap(),
-    )
-    .unwrap();
+    crate::deploy::test_support::write_project_config(project.path(), &config);
     std::fs::write(project.path().join("main.py"), "print('DEPENDENCY_FREE')\n").unwrap();
-    let command =
-        crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
-            .unwrap();
-    let args = crate::cli::DeployArgs::try_parse_from([
-        "deploy",
-        project.path().to_str().unwrap(),
-        "--dry",
-        "--skip-install",
-        "--skip-build",
-    ])
-    .unwrap();
+    let (command, args) = crate::deploy::test_support::deploy_context(
+        project.path(),
+        &config,
+        &["--skip-install", "--skip-build"],
+    );
     for requirements in [
         None,
         Some(""),
@@ -131,17 +101,9 @@ async fn dependency_free_python_requirements_preserve_skip_install_publication()
         if let Some(requirements) = requirements {
             std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
         }
-        let plan = super::super::plan::build(super::super::plan::DeployPlanRequest {
-            args: &args,
-            command: &command,
-            explicit_compute: None,
-            build_logs: None,
-            execution_env: &[],
-            target_production: None,
-            platform_runner: false,
-        })
-        .await
-        .unwrap();
+        let plan = crate::deploy::test_support::build_plan(&args, &command, &[])
+            .await
+            .unwrap();
         let source = plan
             .materialize_source_bundle(
                 true,
@@ -177,22 +139,12 @@ fn staged_requirement_project(
     std::fs::create_dir_all(project.path().join(output)).unwrap();
     std::fs::write(project.path().join(output).join("main.py"), "import acme\n").unwrap();
     std::fs::write(project.path().join("requirements.txt"), "acme==1.0\n").unwrap();
-    std::fs::write(
-        project.path().join("onreza.toml"),
-        toml::to_string(&config).unwrap(),
-    )
-    .unwrap();
-    let command =
-        crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
-            .unwrap();
-    let args = crate::cli::DeployArgs::try_parse_from([
-        "deploy",
-        project.path().to_str().unwrap(),
-        "--dry",
-        "--skip-install",
-        "--skip-build",
-    ])
-    .unwrap();
+    crate::deploy::test_support::write_project_config(project.path(), &config);
+    let (command, args) = crate::deploy::test_support::deploy_context(
+        project.path(),
+        &config,
+        &["--skip-install", "--skip-build"],
+    );
     (project, command, args)
 }
 
@@ -222,17 +174,9 @@ async fn target_excluded_python_requirements_publish_without_a_dependency_stage(
                     "print('TARGET_DEPENDENCY_FREE')\n",
                 )
                 .unwrap();
-                let plan = super::super::plan::build(super::super::plan::DeployPlanRequest {
-                    args: &args,
-                    command: &command,
-                    explicit_compute: None,
-                    build_logs: None,
-                    execution_env: &[],
-                    target_production: None,
-                    platform_runner: false,
-                })
-                .await
-                .unwrap();
+                let plan = crate::deploy::test_support::build_plan(&args, &command, &[])
+                    .await
+                    .unwrap();
                 let source = plan
                     .materialize_source_bundle(
                         true,
@@ -246,12 +190,7 @@ async fn target_excluded_python_requirements_publish_without_a_dependency_stage(
                         .iter()
                         .all(|file| !file.path.contains("site-packages/"))
                 );
-                let unpacked = tempfile::tempdir().unwrap();
-                let decoder = zstd::stream::read::Decoder::new(
-                    std::fs::File::open(source.source_path()).unwrap(),
-                )
-                .unwrap();
-                tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+                let unpacked = crate::test_support::unpack_source_bundle(&source);
                 let entry = &source.logical_manifest.entrypoints[0];
                 assert_eq!(
                     std::fs::read_to_string(unpacked.path().join(entry)).unwrap(),
@@ -297,10 +236,7 @@ async fn skipped_python_install_rejects_stages_without_retained_files() {
                     }
                     _ => {}
                 }
-                let error = super::super::plan::build(super::super::plan::DeployPlanRequest {
-                    args: &args, command: &command, explicit_compute: None, build_logs: None,
-                    execution_env: &[], target_production: None, platform_runner: false,
-                }).await.err().unwrap_or_else(|| panic!("{minor:?}/{output}/{state}: published a required stage with no retained files"));
+                let error = crate::deploy::test_support::build_plan(&args, &command, &[]).await.err().unwrap_or_else(|| panic!("{minor:?}/{output}/{state}: published a required stage with no retained files"));
                 assert!(
                     error
                         .chain()
@@ -374,17 +310,9 @@ async fn prebuilt_python_stage_retains_regular_metadata_cache_and_link_targets()
                     }
                     _ => unreachable!(),
                 }
-                let plan = super::super::plan::build(super::super::plan::DeployPlanRequest {
-                    args: &args,
-                    command: &command,
-                    explicit_compute: None,
-                    build_logs: None,
-                    execution_env: &[],
-                    target_production: None,
-                    platform_runner: false,
-                })
-                .await
-                .unwrap_or_else(|error| panic!("{minor:?}/{output}/{state}: {error:#}"));
+                let plan = crate::deploy::test_support::build_plan(&args, &command, &[])
+                    .await
+                    .unwrap_or_else(|error| panic!("{minor:?}/{output}/{state}: {error:#}"));
                 let source = plan
                     .materialize_source_bundle(
                         true,
@@ -394,22 +322,8 @@ async fn prebuilt_python_stage_retains_regular_metadata_cache_and_link_targets()
                 let logical: nrz_source_bundle::SourceLogicalManifest =
                     serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap())
                         .unwrap();
-                let owner = uuid::Uuid::nil().to_string();
-                let input = nrz_source_bundle::SourceBundleVerificationInput {
-                    owner_workspace_id: owner.clone(),
-                    source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-                        &owner,
-                        &source.logical_manifest_sha256,
-                        &source.source_sha256,
-                        None,
-                    ),
-                    source_sha256: source.source_sha256.clone(),
-                    logical_manifest_sha256: source.logical_manifest_sha256.clone(),
-                    budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(
-                        &logical,
-                    )
-                    .unwrap(),
-                };
+                let input =
+                    crate::test_support::source_bundle_verification_input(&source, &logical);
                 nrz_source_bundle::verify_source_bundle_bytes(
                     input,
                     std::fs::read(source.source_path()).unwrap().into(),

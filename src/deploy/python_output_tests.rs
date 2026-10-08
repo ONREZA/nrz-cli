@@ -1,7 +1,5 @@
 use super::*;
 #[cfg(unix)]
-use clap::Parser as _;
-#[cfg(unix)]
 use nrz_source_bundle::{ApplicationRuntimeFamily, BuildToolchainFamily};
 
 #[test]
@@ -67,31 +65,10 @@ async fn authored_local_build_rejects_python_owned_native_output() {
     config.build.command = Some("printf '\\317\\372\\355\\376HOST_MACH_O' > native-host.so".into());
     config.deploy.runtime = Some(ApplicationRuntimeFamily::Python);
     config.deploy.entry = Some("main.py".into());
-    std::fs::write(
-        project.path().join("onreza.toml"),
-        toml::to_string(&config).unwrap(),
-    )
-    .unwrap();
-    let command =
-        crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
-            .unwrap();
-    let args = crate::cli::DeployArgs::try_parse_from([
-        "deploy",
-        project.path().to_str().unwrap(),
-        "--dry",
-        "--skip-install",
-    ])
-    .unwrap();
-    let result = super::super::plan::build(super::super::plan::DeployPlanRequest {
-        args: &args,
-        command: &command,
-        explicit_compute: None,
-        build_logs: None,
-        execution_env: &[],
-        target_production: None,
-        platform_runner: false,
-    })
-    .await;
+    crate::deploy::test_support::write_project_config(project.path(), &config);
+    let (command, args) =
+        crate::deploy::test_support::deploy_context(project.path(), &config, &["--skip-install"]);
+    let result = crate::deploy::test_support::build_plan(&args, &command, &[]).await;
     assert!(
         project.path().join("native-host.so").is_file(),
         "authored build was not executed"

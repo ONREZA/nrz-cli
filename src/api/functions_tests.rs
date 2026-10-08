@@ -1,4 +1,4 @@
-use super::ApiClient;
+use crate::test_support::serve_api;
 use axum::{
     Json, Router,
     extract::Path,
@@ -38,15 +38,7 @@ async fn functions_and_rules_use_typed_requests_and_responses() {
             assert_eq!(body, json!({}));
             Json(json!({"environmentId":ENVIRONMENT,"status":"absent","active":{"present":false},"local":{"present":false}}))
         }));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = ApiClient::with_http_client(
-        format!("http://{}", listener.local_addr().unwrap()),
-        reqwest::Client::new(),
-    )
-    .unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
+    let (client, server) = serve_api(app).await;
     assert!(
         client
             .functions(PROJECT, ENVIRONMENT)

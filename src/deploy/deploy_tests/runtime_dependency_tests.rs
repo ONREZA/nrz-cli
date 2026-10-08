@@ -111,7 +111,7 @@ async fn mixed_python_javascript_published_bundle_keeps_actual_dependency_roots(
             );
             assert_eq!(html.layer_name.as_deref(), Some("public"));
             let logical = crate::test_support::validated_source_bundle_manifest(&source);
-            crate::test_support::assert_source_bundle_verified(&source, &logical).await;
+            crate::test_support::verify_source_bundle(&source, &logical).await;
             let entry = logical
                 .layers
                 .iter()
@@ -327,7 +327,7 @@ async fn relocated_python_dependencies_keep_frozen_primary_owner() {
                             .unwrap();
                             assert_eq!(Some(entry.as_str()), layer.entrypoint.as_deref());
                         }
-                        crate::test_support::assert_source_bundle_verified(&source, &logical).await;
+                        crate::test_support::verify_source_bundle(&source, &logical).await;
                         let unpacked = crate::test_support::unpack_source_bundle(&source);
                         fs::remove_dir_all(project.path()).unwrap();
                         let output = assert_cmd::Command::new("python3")
@@ -573,7 +573,7 @@ async fn assert_workspace_python_state_boundary(bootstrap: bool, package_metadat
         source_bundle_v1::SourceLogicalManifestFileRole::Dependency
     );
     let logical = crate::test_support::validated_source_bundle_manifest(&source);
-    crate::test_support::assert_source_bundle_verified(&source, &logical).await;
+    crate::test_support::verify_source_bundle(&source, &logical).await;
     let unpacked = crate::test_support::unpack_source_bundle(&source);
     assert_eq!(
         fs::read_to_string(

@@ -31,7 +31,10 @@ async fn build_fixture(
     run_with_hint(args, true, &Default::default(), detection, hint).await
 }
 
-fn assert_static_server_routes(manifest: &super::manifest::Manifest, asset_pattern: &str) {
+pub(super) fn assert_static_server_routes(
+    manifest: &super::manifest::Manifest,
+    asset_pattern: &str,
+) {
     assert_eq!(manifest.routes.len(), 3);
     assert_eq!(manifest.routes[0].pattern, asset_pattern);
     assert_eq!(manifest.routes[0].priority, Some(100));
@@ -99,7 +102,7 @@ fn nextjs_middleware_project() -> (tempfile::TempDir, serde_json::Value) {
     (project, outputs)
 }
 
-async fn assert_nested_nextjs_entry(project: &std::path::Path, expected: &str) {
+async fn assert_nested_nextjs_entry(project: &std::path::Path, expected: &str, label: &str) {
     let result = build_nextjs_fixture(
         project,
         Some(output_hint(".next", BuildSettingSource::Detected)),
@@ -110,7 +113,8 @@ async fn assert_nested_nextjs_entry(project: &std::path::Path, expected: &str) {
         .expect("nested Next.js standalone output should produce a manifest");
     assert_eq!(
         manifest.layers.last().unwrap().entry.as_deref(),
-        Some(expected)
+        Some(expected),
+        "{label}"
     );
 }
 
@@ -697,54 +701,28 @@ fn nextjs_standalone_found_before_dot_next() {
 }
 
 #[test]
-fn nextjs_preset_output_dir_allows_standalone_refinement() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".next/standalone")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".next/server")).unwrap();
-
-    let (found, _) = detect_output_dir(
-        dir.path(),
-        &["dist"],
-        &[".next/standalone", ".next"],
-        Some(output_hint(".next", BuildSettingSource::Preset)),
-    )
-    .unwrap();
-
-    assert!(found.ends_with(".next/standalone"));
-}
-
-#[test]
-fn nextjs_detected_dot_next_allows_standalone_refinement() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".next/standalone")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".next/server")).unwrap();
-
-    let (found, _) = detect_output_dir(
-        dir.path(),
-        &["dist"],
-        &[".next/standalone", ".next"],
-        Some(output_hint(".next", BuildSettingSource::Detected)),
-    )
-    .unwrap();
-
-    assert!(found.ends_with(".next/standalone"));
-}
-
-#[test]
-fn nextjs_user_dot_next_allows_standalone_refinement() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".next/standalone")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".next/server")).unwrap();
-
-    let (found, _) = detect_output_dir(
-        dir.path(),
-        &["dist"],
-        &[".next/standalone", ".next"],
-        Some(output_hint(".next", BuildSettingSource::User)),
-    )
-    .unwrap();
-
-    assert!(found.ends_with(".next/standalone"));
+fn nextjs_output_hints_allow_standalone_refinement() {
+    for (label, source) in [
+        ("preset", BuildSettingSource::Preset),
+        ("detected", BuildSettingSource::Detected),
+        ("user", BuildSettingSource::User),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".next/standalone")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".next/server")).unwrap();
+        let (found, _) = detect_output_dir(
+            dir.path(),
+            &["dist"],
+            &[".next/standalone", ".next"],
+            Some(output_hint(".next", source)),
+        )
+        .unwrap();
+        assert!(
+            found.ends_with(".next/standalone"),
+            "{label}: {}",
+            found.display()
+        );
+    }
 }
 
 #[test]
@@ -775,54 +753,24 @@ fn user_project_root_refinement_is_limited_to_next_like_frameworks() {
 }
 
 #[test]
-fn nextjs_user_dot_next_allows_static_export_refinement() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir(dir.path().join("out")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".next")).unwrap();
-
-    let (found, _) = detect_output_dir(
-        dir.path(),
-        &["dist"],
-        &["out"],
-        Some(output_hint(".next", BuildSettingSource::User)),
-    )
-    .unwrap();
-
-    assert_eq!(found.file_name().unwrap(), "out");
-}
-
-#[test]
-fn detected_nextjs_dot_next_allows_static_export_refinement() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir(dir.path().join("out")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".next")).unwrap();
-
-    let (found, _) = detect_output_dir(
-        dir.path(),
-        &["dist"],
-        &["out"],
-        Some(output_hint(".next", BuildSettingSource::Detected)),
-    )
-    .unwrap();
-
-    assert_eq!(found.file_name().unwrap(), "out");
-}
-
-#[test]
-fn nextjs_static_export_prefers_out_over_preset_dot_next() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir(dir.path().join("out")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".next")).unwrap();
-
-    let (found, _) = detect_output_dir(
-        dir.path(),
-        &["dist"],
-        &["out"],
-        Some(output_hint(".next", BuildSettingSource::Preset)),
-    )
-    .unwrap();
-
-    assert_eq!(found.file_name().unwrap(), "out");
+fn nextjs_output_hints_allow_static_export_refinement() {
+    for (label, source) in [
+        ("user", BuildSettingSource::User),
+        ("detected", BuildSettingSource::Detected),
+        ("preset", BuildSettingSource::Preset),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("out")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".next")).unwrap();
+        let (found, _) = detect_output_dir(
+            dir.path(),
+            &["dist"],
+            &["out"],
+            Some(output_hint(".next", source)),
+        )
+        .unwrap();
+        assert_eq!(found.file_name().unwrap(), "out", "{label}");
+    }
 }
 
 #[test]
@@ -1608,47 +1556,40 @@ async fn nextjs_nested_standalone_copies_prisma_to_bundle_root() {
 }
 
 #[tokio::test]
-async fn nextjs_nested_standalone_ignores_traced_server_js_files_when_selecting_entry() {
-    let project = tempfile::tempdir().unwrap();
-
-    let root = project.path().join(".next/standalone");
-    let app = root.join("apps/web");
-    let traced_package = root.join("packages/api");
-    std::fs::create_dir_all(app.join(".next/server")).unwrap();
-    std::fs::create_dir_all(&traced_package).unwrap();
-    std::fs::write(
-        app.join("server.js"),
-        "process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = '{}'; require('next/dist/server/lib/start-server');",
-    )
-    .unwrap();
-    std::fs::write(
-        traced_package.join("server.js"),
-        "// traced workspace helper",
-    )
-    .unwrap();
-    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
-
-    assert_nested_nextjs_entry(project.path(), "apps/web/server.js").await;
-}
-
-#[tokio::test]
-async fn nextjs_nested_standalone_prefers_app_shape_over_generated_traced_file() {
-    let project = tempfile::tempdir().unwrap();
-
-    let root = project.path().join(".next/standalone");
-    let app = root.join("apps/web");
-    let traced_package = root.join("packages/api");
-    std::fs::create_dir_all(app.join(".next/server")).unwrap();
-    std::fs::create_dir_all(&traced_package).unwrap();
-    std::fs::write(app.join("server.js"), "// app server").unwrap();
-    std::fs::write(
-        traced_package.join("server.js"),
-        "process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = '{}'; require('next/dist/server/lib/start-server');",
-    )
-    .unwrap();
-    write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
-
-    assert_nested_nextjs_entry(project.path(), "apps/web/server.js").await;
+async fn nextjs_nested_standalone_selects_app_entry_over_traced_files() {
+    let generated_server = "process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = '{}'; require('next/dist/server/lib/start-server');";
+    for (label, app_server, traced_server) in [
+        (
+            "ignores traced server.js",
+            generated_server,
+            "// traced workspace helper",
+        ),
+        (
+            "prefers app shape over generated traced file",
+            "// app server",
+            generated_server,
+        ),
+    ] {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(
+            project
+                .path()
+                .join(".next/standalone/apps/web/.next/server"),
+        )
+        .unwrap();
+        write_build_file(
+            project.path(),
+            ".next/standalone/apps/web/server.js",
+            app_server,
+        );
+        write_build_file(
+            project.path(),
+            ".next/standalone/packages/api/server.js",
+            traced_server,
+        );
+        write_build_file(project.path(), ".next/static/chunks/main.js", "// main");
+        assert_nested_nextjs_entry(project.path(), "apps/web/server.js", label).await;
+    }
 }
 
 #[tokio::test]
@@ -1907,83 +1848,73 @@ fn copy_dir_recursive_nested_directories() {
 // ── collect_body_files (metadata routes) ────────────────────
 
 #[test]
-fn metadata_routes_favicon_copied_to_public() {
-    let output = tempfile::tempdir().unwrap();
-    let app_dir = output.path().join(".next/server/app");
-    std::fs::create_dir_all(&app_dir).unwrap();
-    std::fs::write(app_dir.join("favicon.ico.body"), b"\x00\x00\x01\x00").unwrap();
-    std::fs::write(app_dir.join("favicon.ico.meta"), r#"{"status":200}"#).unwrap();
-
-    let public_dst = output.path().join("public");
-    std::fs::create_dir_all(&public_dst).unwrap();
-
-    let mut copied = 0usize;
-    collect_body_files(&app_dir, &app_dir, &public_dst, &mut copied).unwrap();
-
-    assert_eq!(copied, 1);
-    assert!(public_dst.join("favicon.ico").is_file());
-    assert_eq!(
-        std::fs::read(public_dst.join("favicon.ico")).unwrap(),
-        b"\x00\x00\x01\x00"
-    );
-}
-
-#[test]
-fn metadata_routes_nested_copied_to_public() {
-    let output = tempfile::tempdir().unwrap();
-    let app_dir = output.path().join(".next/server/app");
-    let og_dir = app_dir.join("og");
-    std::fs::create_dir_all(&og_dir).unwrap();
-    std::fs::write(og_dir.join("opengraph-image.png.body"), b"PNG").unwrap();
-
-    let public_dst = output.path().join("public");
-    std::fs::create_dir_all(&public_dst).unwrap();
-
-    let mut copied = 0usize;
-    collect_body_files(&app_dir, &app_dir, &public_dst, &mut copied).unwrap();
-
-    assert_eq!(copied, 1);
-    assert!(public_dst.join("og/opengraph-image.png").is_file());
-}
-
-#[test]
-fn metadata_routes_skips_existing() {
-    let output = tempfile::tempdir().unwrap();
-    let app_dir = output.path().join(".next/server/app");
-    std::fs::create_dir_all(&app_dir).unwrap();
-    std::fs::write(app_dir.join("favicon.ico.body"), b"new").unwrap();
-
-    let public_dst = output.path().join("public");
-    std::fs::create_dir_all(&public_dst).unwrap();
-    // Pre-existing file — should not be overwritten
-    std::fs::write(public_dst.join("favicon.ico"), b"existing").unwrap();
-
-    let mut copied = 0usize;
-    collect_body_files(&app_dir, &app_dir, &public_dst, &mut copied).unwrap();
-
-    assert_eq!(copied, 0, "should skip existing file");
-    assert_eq!(
-        std::fs::read(public_dst.join("favicon.ico")).unwrap(),
-        b"existing"
-    );
-}
-
-#[test]
-fn metadata_routes_ignores_meta_files() {
-    let output = tempfile::tempdir().unwrap();
-    let app_dir = output.path().join(".next/server/app");
-    std::fs::create_dir_all(&app_dir).unwrap();
-    // Only .meta, no .body — nothing should be copied
-    std::fs::write(app_dir.join("favicon.ico.meta"), r#"{"status":200}"#).unwrap();
-
-    let public_dst = output.path().join("public");
-    std::fs::create_dir_all(&public_dst).unwrap();
-
-    let mut copied = 0usize;
-    collect_body_files(&app_dir, &app_dir, &public_dst, &mut copied).unwrap();
-
-    assert_eq!(copied, 0);
-    assert!(!public_dst.join("favicon.ico").exists());
+fn metadata_routes_copy_body_files_and_preserve_existing_assets() {
+    for (label, files, existing, destination, copied_count, expected_file, expected_content) in [
+        (
+            "favicon copied with exact bytes",
+            vec![
+                ("favicon.ico.body", &b"\x00\x00\x01\x00"[..]),
+                ("favicon.ico.meta", &br#"{"status":200}"#[..]),
+            ],
+            None,
+            "favicon.ico",
+            1,
+            true,
+            Some(&b"\x00\x00\x01\x00"[..]),
+        ),
+        (
+            "nested metadata body copied",
+            vec![("og/opengraph-image.png.body", &b"PNG"[..])],
+            None,
+            "og/opengraph-image.png",
+            1,
+            true,
+            None,
+        ),
+        (
+            "existing asset is not overwritten",
+            vec![("favicon.ico.body", &b"new"[..])],
+            Some(&b"existing"[..]),
+            "favicon.ico",
+            0,
+            true,
+            Some(&b"existing"[..]),
+        ),
+        (
+            "meta file without body is ignored",
+            vec![("favicon.ico.meta", &br#"{"status":200}"#[..])],
+            None,
+            "favicon.ico",
+            0,
+            false,
+            None,
+        ),
+    ] {
+        let output = tempfile::tempdir().unwrap();
+        let app_dir = output.path().join(".next/server/app");
+        for (relative, contents) in files {
+            let path = app_dir.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, contents).unwrap();
+        }
+        let public_dst = output.path().join("public");
+        std::fs::create_dir_all(&public_dst).unwrap();
+        if let Some(contents) = existing {
+            std::fs::write(public_dst.join(destination), contents).unwrap();
+        }
+        let mut copied = 0usize;
+        collect_body_files(&app_dir, &app_dir, &public_dst, &mut copied).unwrap();
+        assert_eq!(copied, copied_count, "{label}");
+        let asset = public_dst.join(destination);
+        if expected_file {
+            assert!(asset.is_file(), "{label}");
+        } else {
+            assert!(!asset.exists(), "{label}");
+        }
+        if let Some(expected) = expected_content {
+            assert_eq!(std::fs::read(asset).unwrap(), expected, "{label}");
+        }
+    }
 }
 
 // ── SSR auto-manifest: Nuxt ─────────────────────────────────

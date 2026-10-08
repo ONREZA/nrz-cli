@@ -1,21 +1,40 @@
 use super::deployments::{Deployment, DeploymentStatus, first_preview_url};
 
 #[test]
-fn deployment_status_accepts_server_enum_case() {
-    let status: DeploymentStatus = serde_json::from_str(r#""LIVE""#).unwrap();
-    assert_eq!(status, DeploymentStatus::Live);
-
-    let status: DeploymentStatus = serde_json::from_str(r#""SMOKE_TESTING""#).unwrap();
-    assert_eq!(status, DeploymentStatus::SmokeTesting);
+fn generated_deployment_statuses_keep_cli_json_and_human_names() {
+    use nrz_api::Project200ResponseProjectLatestDeploymentStatus as Wire;
+    for (wire, expected) in [
+        (Wire::Pending, "pending"),
+        (Wire::Queued, "queued"),
+        (Wire::Building, "building"),
+        (Wire::Uploading, "uploading"),
+        (Wire::Ingesting, "ingesting"),
+        (Wire::Skipped, "skipped"),
+        (Wire::SmokeTesting, "smoke_testing"),
+        (Wire::Live, "live"),
+        (Wire::Stopped, "stopped"),
+        (Wire::Failed, "failed"),
+        (Wire::Cancelled, "cancelled"),
+    ] {
+        let status = DeploymentStatus::from(wire);
+        assert_eq!(serde_json::to_value(&status).unwrap(), expected);
+        assert_eq!(status.to_string(), expected);
+    }
 }
 
 #[test]
-fn deployment_status_still_accepts_cli_lowercase_case() {
-    let status: DeploymentStatus = serde_json::from_str(r#""live""#).unwrap();
-    assert_eq!(status, DeploymentStatus::Live);
-
-    let status: DeploymentStatus = serde_json::from_str(r#""smoke_testing""#).unwrap();
-    assert_eq!(status, DeploymentStatus::SmokeTesting);
+fn shortened_ids_preserve_short_inputs_and_utf8_boundaries() {
+    use super::deployments::truncate_id;
+    for (input, limit, expected) in [
+        ("89abcdef-0123", 8, "89abcdef"),
+        ("short", 8, "short"),
+        ("", 8, ""),
+        ("short", 0, ""),
+        ("é🙂", 2, "é"),
+        ("é🙂", 3, "é🙂"),
+    ] {
+        assert_eq!(truncate_id(input, limit), expected);
+    }
 }
 
 #[test]

@@ -1,5 +1,4 @@
 use super::*;
-use clap::Parser as _;
 use nrz_source_bundle::{ApplicationRuntimeFamily, BuildToolchainFamily, PythonMinor};
 
 #[tokio::test]
@@ -31,35 +30,14 @@ async fn code_only_python_plan_ignores_stale_unselected_minors_and_rejects_selec
             config.deploy.runtime = Some(ApplicationRuntimeFamily::Python);
             config.deploy.python_version = Some(selected);
             config.deploy.entry = Some("main.py".into());
-            std::fs::write(
-                project.path().join("onreza.toml"),
-                toml::to_string(&config).unwrap(),
-            )
-            .unwrap();
-            let command = crate::context::CommandContext::resolve_platform_root(
+            crate::deploy::test_support::write_project_config(project.path(), &config);
+            let (command, args) = crate::deploy::test_support::deploy_context(
                 project.path(),
                 &config,
-                true,
-            )
-            .unwrap();
-            let args = DeployArgs::try_parse_from([
-                "deploy",
-                project.path().to_str().unwrap(),
-                "--dry",
-                "--skip-build",
-                "--skip-install",
-            ])
-            .unwrap();
-            let request = || DeployPlanRequest {
-                args: &args,
-                command: &command,
-                explicit_compute: None,
-                build_logs: None,
-                execution_env: &[],
-                target_production: None,
-                platform_runner: false,
-            };
-            let plan = build(request()).await.unwrap_or_else(|error| {
+                &["--skip-build", "--skip-install"],
+            );
+            let build_plan = || crate::deploy::test_support::build_plan(&args, &command, &[]);
+            let plan = build_plan().await.unwrap_or_else(|error| {
                 panic!(
                     "stale ABI rejected {compiler:?}/{}: {error:#}",
                     selected.version()
@@ -77,12 +55,7 @@ async fn code_only_python_plan_ignores_stale_unselected_minors_and_rejects_selec
             );
             assert!(source.logical_manifest.files.iter().all(|file| file.role
                 != crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Dependency));
-            let unpacked = tempfile::tempdir().unwrap();
-            let decoder = zstd::stream::read::Decoder::new(
-                std::fs::File::open(source.source_path()).unwrap(),
-            )
-            .unwrap();
-            tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+            let unpacked = crate::test_support::unpack_source_bundle(&source);
             assert_eq!(
                 std::fs::read_to_string(unpacked.path().join("main.py")).unwrap(),
                 "print('CODE_ONLY')\n"
@@ -99,7 +72,7 @@ async fn code_only_python_plan_ignores_stale_unselected_minors_and_rejects_selec
                 .join("active");
             std::fs::create_dir_all(&active).unwrap();
             std::fs::write(active.join("__init__.py"), "RETAINED_RUNTIME_DEPENDENCY").unwrap();
-            let error = build(request())
+            let error = build_plan()
                 .await
                 .err()
                 .expect("selected dependencies require a Python installer ABI");

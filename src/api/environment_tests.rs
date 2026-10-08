@@ -1,3 +1,4 @@
+use crate::test_support::serve_api;
 use axum::{
     Json, Router,
     extract::{Path, Query},
@@ -5,8 +6,6 @@ use axum::{
 };
 use serde_json::{Value, json};
 use std::collections::HashMap;
-
-use super::ApiClient;
 
 const PROJECT_ID: &str = "00000000-0000-0000-0000-000000000001";
 const ENVIRONMENT_ID: &str = "00000000-0000-0000-0000-000000000002";
@@ -43,15 +42,7 @@ async fn environment_mutations_follow_typed_scope_and_confirmation_contracts() {
                 },
             ),
         );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = ApiClient::with_http_client(
-        format!("http://{}", listener.local_addr().unwrap()),
-        reqwest::Client::new(),
-    )
-    .unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
+    let (client, server) = serve_api(app).await;
     let created = client
         .set_environment_variable(
             PROJECT_ID,
@@ -84,15 +75,7 @@ async fn malformed_env_response_is_an_error_instead_of_an_empty_listing() {
         "/v1/projects/{id}/env",
         get(|| async { Json(json!({"total":"sensitive-mismatched-value", "envVars":[]})) }),
     );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = ApiClient::with_http_client(
-        format!("http://{}", listener.local_addr().unwrap()),
-        reqwest::Client::new(),
-    )
-    .unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
+    let (client, server) = serve_api(app).await;
     let error = client.environment_variables(PROJECT_ID).await.unwrap_err();
     assert!(super::classify_api_retry(&error).is_none());
     assert!(error.to_string().contains("OpenAPI contract"));

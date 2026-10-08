@@ -1,22 +1,10 @@
 use super::*;
+use crate::test_support::serve_api;
 use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::post};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
 const DEPLOYMENT: &str = "00000000-0000-0000-0000-000000000001";
-
-async fn serve(app: Router) -> (ApiClient, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = ApiClient::with_http_client(
-        format!("http://{}", listener.local_addr().unwrap()),
-        reqwest::Client::new(),
-    )
-    .unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (client, server)
-}
 
 #[tokio::test]
 async fn source_registration_retries_the_same_operation_and_snapshot() {
@@ -29,7 +17,7 @@ async fn source_registration_retries_the_same_operation_and_snapshot() {
                 (StatusCode::TOO_MANY_REQUESTS, [("retry-after","0")], Json(json!({"message":"busy"}))).into_response()
             } else { Json(json!({"id":DEPLOYMENT,"status":"UPLOADING","url":null})).into_response() }
         })).with_state(Arc::clone(&requests));
-    let (client, server) = serve(app).await;
+    let (client, server) = serve_api(app).await;
     register_deployment_source(&client, DEPLOYMENT, 3,
         json!({"version":1,"layers":[{"name":"static","target":"STATIC","directory":"."}],"routes":[{"pattern":"^/.*","layer":"static"}]}), None, true
     ).await.unwrap();
@@ -57,7 +45,7 @@ async fn skipped_build_requires_acceptance_for_the_requested_deployment() {
                 Json(response)
             }
         }));
-        let (client, server) = serve(app).await;
+        let (client, server) = serve_api(app).await;
         assert!(
             mark_pre_source_skipped(&client, DEPLOYMENT, 2, "unchanged")
                 .await
@@ -77,7 +65,7 @@ async fn pre_source_failure_uploads_redacted_diagnostics_and_attempt() {
             requests.lock().unwrap().push(body);
             Json(json!({"id":DEPLOYMENT,"accepted":true}))
         })).with_state(Arc::clone(&requests));
-    let (client, server) = serve(app).await;
+    let (client, server) = serve_api(app).await;
     let error = crate::errors::CliError::new("BUILD_FAILED", "failed using secret-token")
         .details(json!({"lastError":null,"value":"secret-token"}))
         .into_anyhow();
@@ -122,7 +110,7 @@ async fn admission_preserves_selection_and_rejects_another_scope() {
                 "deployment":{"id":DEPLOYMENT,"attempt":2,"status":"BUILDING","url":null},
                 "snapshot":{"fingerprint":format!("v1:{}","a".repeat(64)),"resolvedAt":"2026-09-12T00:00:00Z"}}))
         }));
-        let (client, server) = serve(app).await;
+        let (client, server) = serve_api(app).await;
         let context: crate::execution_context::ExecutionContext =
             serde_json::from_value(context_json()).unwrap();
         let result = wire::admit(
@@ -164,7 +152,7 @@ async fn runner_context_validates_identity_and_protocol_before_applying_settings
                     "installCommand":null,"installCommandSource":"PRESET","buildCommand":"bun run build","buildCommandSource":"USER",
                     "outputDirectory":null,"outputDirectorySource":"DETECTED","ignoredBuildBehavior":"AUTOMATIC","ignoredBuildFolder":null,"ignoredBuildCommand":null}}))
         }));
-        let (client, server) = serve(app).await;
+        let (client, server) = serve_api(app).await;
         let result = wire::load_runner_context(&client, DEPLOYMENT.parse().unwrap()).await;
         if id != DEPLOYMENT {
             assert!(
@@ -201,7 +189,7 @@ async fn runner_v6_rejects_absent_context_and_accepts_explicit_null() {
             async move { Json(json!({"protocolVersion":"runner-context-v6","context":context_json(),
                 "deployment":{"id":DEPLOYMENT,"attempt":5,"status":"BUILDING","url":null,"branch":"main","commitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"settings":settings})) }
         }));
-        let (client, server) = serve(app).await;
+        let (client, server) = serve_api(app).await;
         let result = wire::load_runner_context(&client, DEPLOYMENT.parse().unwrap()).await;
         if present {
             let settings = result.unwrap().settings;

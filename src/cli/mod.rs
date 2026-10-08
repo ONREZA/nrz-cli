@@ -24,6 +24,7 @@ pub mod projects;
 pub mod projects_handler;
 #[cfg(test)]
 mod projects_handler_tests;
+pub(crate) mod remote;
 pub mod rules;
 pub mod rules_handler;
 #[cfg(test)]

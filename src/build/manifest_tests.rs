@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use super::build_tests::assert_static_server_routes;
+
 use super::manifest::{
     LayerTarget, NextjsAdapterPrerenderPage, generate_astro_ssr_manifest,
     generate_compute_manifest, generate_nextjs_adapter_manifest_for_server,
@@ -52,6 +54,23 @@ const STATIC_MANIFEST: &str = r#"{
         { "pattern": "^/.*$", "layer": "site" }
     ]
 }"#;
+
+const PRERENDER_MANIFEST: &str = r#"{
+        "version": 1,
+        "layers": [
+            { "name": "prerendered", "target": "STATIC", "directory": "prerender" },
+            { "name": "server", "target": "COMPUTE", "directory": "server",
+              "entry": "entry.mjs" }
+        ],
+        "routes": [
+            { "pattern": "^/about/?$", "layer": "prerendered", "priority": 50 },
+            { "pattern": "^/.*$", "layer": "server", "priority": 0 }
+        ],
+        "prerender": {
+            "layer": "prerendered",
+            "pages": { "/about": { "html": "about/index.html" } }
+        }
+    }"#;
 
 fn write_manifest(dir: &Path, content: &str) -> std::path::PathBuf {
     let path = dir.join("manifest.json");
@@ -515,23 +534,7 @@ fn manifest_with_edge_rules_is_rejected() {
 #[test]
 fn manifest_with_prerender_parses() {
     let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "prerendered", "target": "STATIC", "directory": "prerender" },
-            { "name": "server", "target": "COMPUTE", "directory": "server",
-              "entry": "entry.mjs" }
-        ],
-        "routes": [
-            { "pattern": "^/about/?$", "layer": "prerendered", "priority": 50 },
-            { "pattern": "^/.*$", "layer": "server", "priority": 0 }
-        ],
-        "prerender": {
-            "layer": "prerendered",
-            "pages": { "/about": { "html": "about/index.html" } }
-        }
-    }"#;
-    let path = write_manifest(dir.path(), json);
+    let path = write_manifest(dir.path(), PRERENDER_MANIFEST);
     let m = load_and_validate(&path).unwrap();
     let pr = m.prerender.unwrap();
     assert_eq!(pr.layer, "prerendered");
@@ -641,23 +644,7 @@ fn validate_prerender_unknown_layer_is_error() {
 #[test]
 fn verify_files_prerender_pages_exist() {
     let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "prerendered", "target": "STATIC", "directory": "prerender" },
-            { "name": "server", "target": "COMPUTE", "directory": "server",
-              "entry": "entry.mjs" }
-        ],
-        "routes": [
-            { "pattern": "^/about/?$", "layer": "prerendered", "priority": 50 },
-            { "pattern": "^/.*$", "layer": "server", "priority": 0 }
-        ],
-        "prerender": {
-            "layer": "prerendered",
-            "pages": { "/about": { "html": "about/index.html" } }
-        }
-    }"#;
-    let path = write_manifest(dir.path(), json);
+    let path = write_manifest(dir.path(), PRERENDER_MANIFEST);
     let m = load_and_validate(&path).unwrap();
 
     std::fs::create_dir_all(dir.path().join("prerender/about")).unwrap();
@@ -1584,16 +1571,8 @@ fn generate_nuxt_manifest_with_public_is_valid() {
     assert_eq!(m.layers[0].target, LayerTarget::Static);
     assert_eq!(m.layers[0].directory, "public");
     assert_eq!(m.layers[1].target, LayerTarget::Compute);
-    assert_eq!(m.routes.len(), 3);
-    assert_eq!(m.routes[0].pattern, "^/_nuxt/.*$");
+    assert_static_server_routes(&m, "^/_nuxt/.*$");
     assert_eq!(m.routes[0].layer, "static-assets");
-    assert_eq!(m.routes[0].priority, Some(100));
-    assert_eq!(m.routes[1].pattern, "^/.*$");
-    assert_eq!(m.routes[1].layer, "static-assets");
-    assert_eq!(m.routes[1].priority, Some(50));
-    assert_eq!(m.routes[2].pattern, "^/.*$");
-    assert_eq!(m.routes[2].layer, "server");
-    assert_eq!(m.routes[2].priority, Some(0));
 }
 
 #[test]
@@ -1609,14 +1588,7 @@ fn generate_sveltekit_manifest_with_client_is_valid() {
     let m = generate_sveltekit_manifest(true);
     validate(&m).unwrap();
     assert_eq!(m.layers.len(), 2);
-    assert_eq!(m.routes.len(), 3);
-    assert_eq!(m.routes[0].pattern, "^/_app/.*$");
-    assert_eq!(m.routes[0].priority, Some(100));
-    assert_eq!(m.routes[1].pattern, "^/.*$");
-    assert_eq!(m.routes[1].layer, "static-assets");
-    assert_eq!(m.routes[1].priority, Some(50));
-    assert_eq!(m.routes[2].layer, "server");
-    assert_eq!(m.routes[2].priority, Some(0));
+    assert_static_server_routes(&m, "^/_app/.*$");
 }
 
 #[test]
@@ -1631,14 +1603,7 @@ fn generate_remix_manifest_with_client_is_valid() {
     let m = generate_remix_manifest(true);
     validate(&m).unwrap();
     assert_eq!(m.layers.len(), 2);
-    assert_eq!(m.routes.len(), 3);
-    assert_eq!(m.routes[0].pattern, "^/assets/.*$");
-    assert_eq!(m.routes[0].priority, Some(100));
-    assert_eq!(m.routes[1].pattern, "^/.*$");
-    assert_eq!(m.routes[1].layer, "static-assets");
-    assert_eq!(m.routes[1].priority, Some(50));
-    assert_eq!(m.routes[2].layer, "server");
-    assert_eq!(m.routes[2].priority, Some(0));
+    assert_static_server_routes(&m, "^/assets/.*$");
 }
 
 #[test]
@@ -1653,14 +1618,7 @@ fn generate_astro_ssr_manifest_with_client_is_valid() {
     let m = generate_astro_ssr_manifest(true);
     validate(&m).unwrap();
     assert_eq!(m.layers.len(), 2);
-    assert_eq!(m.routes.len(), 3);
-    assert_eq!(m.routes[0].pattern, "^/_astro/.*$");
-    assert_eq!(m.routes[0].priority, Some(100));
-    assert_eq!(m.routes[1].pattern, "^/.*$");
-    assert_eq!(m.routes[1].layer, "static-assets");
-    assert_eq!(m.routes[1].priority, Some(50));
-    assert_eq!(m.routes[2].layer, "server");
-    assert_eq!(m.routes[2].priority, Some(0));
+    assert_static_server_routes(&m, "^/_astro/.*$");
 }
 
 #[test]

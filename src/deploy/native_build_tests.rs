@@ -63,25 +63,7 @@ async fn flutter_static_cache_default_survives_wire_and_verified_source_publicat
     .unwrap();
     let logical: nrz_source_bundle::SourceLogicalManifest =
         serde_json::from_value(serde_json::to_value(&plan.logical_manifest).unwrap()).unwrap();
-    let owner = uuid::Uuid::nil().to_string();
-    let input = nrz_source_bundle::SourceBundleVerificationInput {
-        owner_workspace_id: owner.clone(),
-        source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-            &owner,
-            &plan.logical_manifest_sha256,
-            &plan.source_sha256,
-            None,
-        ),
-        source_sha256: plan.source_sha256.clone(),
-        logical_manifest_sha256: plan.logical_manifest_sha256.clone(),
-        budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical).unwrap(),
-    };
-    let verified = nrz_source_bundle::verify_source_bundle_bytes(
-        input,
-        std::fs::read(plan.source_path()).unwrap().into(),
-    )
-    .await
-    .unwrap();
+    let verified = crate::test_support::verify_source_bundle(&plan, &logical).await;
     assert_eq!(
         verified.logical_manifest["routes"][0]["headers"]["Cache-Control"],
         "no-cache"
@@ -151,19 +133,7 @@ async fn execute_verified_native_source_bundle(
             .executable
     );
     let compressed = std::fs::read(plan.source_path()).unwrap();
-    let owner = uuid::Uuid::nil().to_string();
-    let input = nrz_source_bundle::SourceBundleVerificationInput {
-        owner_workspace_id: owner.clone(),
-        source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-            &owner,
-            &plan.logical_manifest_sha256,
-            &plan.source_sha256,
-            None,
-        ),
-        source_sha256: plan.source_sha256.clone(),
-        logical_manifest_sha256: plan.logical_manifest_sha256.clone(),
-        budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical).unwrap(),
-    };
+    let input = crate::test_support::source_bundle_verification_input(&plan, &logical);
     let verified = nrz_source_bundle::verify_source_bundle_bytes(input, compressed.clone().into())
         .await
         .unwrap();

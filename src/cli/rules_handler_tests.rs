@@ -25,7 +25,8 @@ fn active_rule_set_pull_conversion_drops_position_and_writes_rules_tables() {
                 "id": "first",
                 "position": 0,
                 "enabled": true,
-                "condition": { "path": { "type": "prefix", "value": "/old" } },
+                "condition": { "path": { "type": "prefix", "value": "/old" },
+                    "query": { "a.b": "dot", "ключ": "unicode", "quote\"key": "quote" } },
                 "action": { "type": "redirect", "target": "/new", "statusCode": 301 }
             }
         ]),
@@ -45,12 +46,7 @@ fn active_rule_set_pull_conversion_drops_position_and_writes_rules_tables() {
     assert!(!toml.contains("source"));
     assert!(toml.contains("[[rules]]"));
     assert!(toml.contains("[[imageSources]]"));
-    assert!(toml.contains("hostname = \"cdn.example.com\""));
     assert!(!toml.contains("position"));
-    assert!(
-        toml.find("id = \"first\"").unwrap() < toml.find("id = \"second\"").unwrap(),
-        "rules must be ordered by server position: {toml}"
-    );
 
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("onreza.rules.toml"), toml).unwrap();
@@ -58,6 +54,12 @@ fn active_rule_set_pull_conversion_drops_position_and_writes_rules_tables() {
         .unwrap()
         .unwrap();
     assert_eq!(parsed["rules"][0]["id"], "first");
+    assert_eq!(parsed["rules"][1]["id"], "second");
+    assert_eq!(
+        parsed["rules"][0]["condition"]["query"],
+        authoring["rules"][0]["condition"]["query"]
+    );
+    assert_eq!(parsed["imageSources"][0]["hostname"], "cdn.example.com");
     assert_eq!(parsed["imageSources"][0]["id"], "product-images");
     assert!(parsed["rules"][0].get("position").is_none());
 }
@@ -101,6 +103,20 @@ fn rules_pull_write_preserves_existing_permissions() {
         std::fs::metadata(&rules_path).unwrap().permissions().mode() & 0o777,
         0o600
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn rules_write_reports_metadata_errors_without_overwriting_parent_files() {
+    let project = tempfile::tempdir().unwrap();
+    let parent = project.path().join("regular-file");
+    std::fs::write(&parent, "keep").unwrap();
+    let error = write_rules_file(&parent.join("onreza.rules.toml"), b"replacement").unwrap_err();
+    assert!(
+        format!("{error:#}").contains("failed to inspect"),
+        "{error:#}"
+    );
+    assert_eq!(std::fs::read_to_string(parent).unwrap(), "keep");
 }
 
 #[test]
@@ -212,4 +228,42 @@ fn edge_rules_status_request_rejects_local_rules_with_invalid_flag() {
     .unwrap_err();
 
     assert!(format!("{error:#}").contains("localInvalid cannot be used with local Edge Rules"));
+}
+
+#[cfg(unix)]
+#[test]
+fn rules_replacement_preserves_symlink_targets_and_restores_links_on_failure() {
+    for install_succeeds in [true, false] {
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("protected.toml");
+        std::fs::write(&target, "protected").unwrap();
+        let path = project.path().join("onreza.rules.toml");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        let candidate = project.path().join("candidate.toml");
+        if install_succeeds {
+            std::fs::write(&candidate, "replacement").unwrap();
+        }
+
+        let result = replace_file_with_rollback(&candidate, &path);
+        if install_succeeds {
+            result.unwrap();
+            assert!(std::fs::symlink_metadata(&path).unwrap().is_file());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "replacement");
+        } else {
+            let error = result.unwrap_err();
+            assert!(
+                error.to_string().contains("previous file was restored"),
+                "{error:#}"
+            );
+            assert_eq!(std::fs::read_link(&path).unwrap(), target);
+        }
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "protected");
+        assert!(
+            std::fs::read_dir(project.path())
+                .unwrap()
+                .flatten()
+                .all(|entry| !entry.file_name().to_string_lossy().contains(".backup-"))
+        );
+    }
 }

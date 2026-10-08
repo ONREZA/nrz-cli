@@ -1,10 +1,7 @@
 use anyhow::Context;
 
-use crate::api::ApiClient;
-use crate::auth;
 use crate::cli::LogsArgs;
 use crate::output;
-use nrz::config;
 use nrz::config::ProjectConfig;
 
 pub async fn run(
@@ -14,11 +11,8 @@ pub async fn run(
     workspace: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
-    let tok = auth::resolve_token(token, workspace)?;
-
-    let client = ApiClient::authenticated(&tok)?;
-
-    let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
+    let (client, project_id) =
+        crate::cli::remote::project_client(token, workspace, args.project_id.as_deref(), config)?;
 
     let resp = client
         .runtime_logs(

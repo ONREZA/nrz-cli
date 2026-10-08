@@ -1,3 +1,18 @@
+pub(crate) async fn serve_api(
+    app: axum::Router,
+) -> (crate::api::ApiClient, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let client = crate::api::ApiClient::with_http_client(
+        format!("http://{}", listener.local_addr().unwrap()),
+        reqwest::Client::new(),
+    )
+    .unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    (client, server)
+}
+
 pub(crate) fn make_detection(
     framework: &str,
     ssr: Option<crate::detect::types::SsrAnalysis>,
@@ -41,29 +56,35 @@ pub(crate) fn validated_source_bundle_manifest(
     logical
 }
 
-pub(crate) async fn assert_source_bundle_verified(
+pub(crate) async fn verify_source_bundle(
     source: &crate::artifact::source_bundle_v1::SourceBundlePlan,
     logical: &nrz_source_bundle::SourceLogicalManifest,
-) {
-    let owner = uuid::Uuid::nil().to_string();
+) -> nrz_source_bundle::SourceBundleVerificationResult {
     nrz_source_bundle::verify_source_bundle_bytes(
-        nrz_source_bundle::SourceBundleVerificationInput {
-            owner_workspace_id: owner.clone(),
-            source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-                &owner,
-                &source.logical_manifest_sha256,
-                &source.source_sha256,
-                None,
-            ),
-            source_sha256: source.source_sha256.clone(),
-            logical_manifest_sha256: source.logical_manifest_sha256.clone(),
-            budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(logical)
-                .unwrap(),
-        },
+        source_bundle_verification_input(source, logical),
         std::fs::read(source.source_path()).unwrap().into(),
     )
     .await
-    .unwrap();
+    .unwrap()
+}
+
+pub(crate) fn source_bundle_verification_input(
+    source: &crate::artifact::source_bundle_v1::SourceBundlePlan,
+    logical: &nrz_source_bundle::SourceLogicalManifest,
+) -> nrz_source_bundle::SourceBundleVerificationInput {
+    let owner = uuid::Uuid::nil().to_string();
+    nrz_source_bundle::SourceBundleVerificationInput {
+        owner_workspace_id: owner.clone(),
+        source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
+            &owner,
+            &source.logical_manifest_sha256,
+            &source.source_sha256,
+            None,
+        ),
+        source_sha256: source.source_sha256.clone(),
+        logical_manifest_sha256: source.logical_manifest_sha256.clone(),
+        budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(logical).unwrap(),
+    }
 }
 
 pub(crate) fn unpack_source_bundle(

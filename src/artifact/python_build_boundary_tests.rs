@@ -205,7 +205,7 @@ async fn published_build_python_dependencies_follow_serving_owner() {
                 assert_eq!(node.layer_name.as_deref(), Some("server"));
             }
             let logical = crate::test_support::validated_source_bundle_manifest(&source);
-            crate::test_support::assert_source_bundle_verified(&source, &logical).await;
+            crate::test_support::verify_source_bundle(&source, &logical).await;
             let unpacked = crate::test_support::unpack_source_bundle(&source);
             assert_eq!(
                 fs::read_to_string(unpacked.path().join(&asset_path)).unwrap(),

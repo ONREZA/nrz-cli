@@ -1,4 +1,5 @@
 use super::logs::format_log_entry;
+use crate::cli::LogsArgs;
 use nrz_api::RuntimeLog200Response as LogsResponse;
 
 #[test]
@@ -74,25 +75,17 @@ async fn runtime_logs_encode_search_and_deployment_filters_with_generated_client
     let app = Router::new().route("/v1/projects/{id}/runtime-logs", get(move |Query(query):Query<HashMap<String,String>>| async move {
         assert_eq!(query["search"], "a&b + /שלום");
         assert_eq!(query["deploymentId"], id);
-        assert_eq!(query["limit"], "50");
+        assert_eq!(query["limit"], "73");
         Json(serde_json::json!({"entries":[{"timestamp":"2026-09-12T00:00:00Z", "level":"WARN", "message":"slow path", "deploymentId":id}],
-            "pagination":{"limit":50,"hasMore":false,"nextCursor":null},
+            "pagination":{"limit":73,"hasMore":false,"nextCursor":null},
             "filters":{"stream":"access","startTime":"2026-09-11T00:00:00Z","endTime":"2026-09-12T00:00:00Z"}}))
     }));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = crate::api::ApiClient::with_http_client(
-        format!("http://{}", listener.local_addr().unwrap()),
-        reqwest::Client::new(),
-    )
-    .unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
+    let (client, server) = crate::test_support::serve_api(app).await;
     let response = client
         .runtime_logs(
             id,
             nrz_api::GetV1projectsByIdRuntimeLogsRequestQuery {
-                limit: Some(serde_json::json!(50)),
+                limit: Some(serde_json::json!(73)),
                 deployment_id: Some(id.parse().unwrap()),
                 search: Some("a&b + /שלום".into()),
                 ..Default::default()
@@ -105,4 +98,44 @@ async fn runtime_logs_encode_search_and_deployment_filters_with_generated_client
         "[2026-09-12T00:00:00Z] [WARN] slow path"
     );
     server.abort();
+}
+
+#[tokio::test]
+async fn logs_run_requires_valid_authentication_in_both_output_modes() {
+    for json in [false, true] {
+        let error = super::logs::run(
+            LogsArgs {
+                project_id: None,
+                limit: 50,
+                deployment_id: None,
+                search: None,
+            },
+            json,
+            Some("invalid\ntoken"),
+            None,
+            &nrz::config::ProjectConfig::default(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), "invalid token format", "json={json}");
+    }
+}
+
+#[tokio::test]
+async fn logs_handler_rejects_invalid_deployment_before_transport() {
+    let error = super::logs::run(
+        LogsArgs {
+            project_id: Some("00000000-0000-0000-0000-000000000001".into()),
+            limit: 50,
+            deployment_id: Some("deployment/../other?force=true".into()),
+            search: None,
+        },
+        true,
+        Some("test-token"),
+        None,
+        &nrz::config::ProjectConfig::default(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.to_string(), "invalid deployment ID");
 }

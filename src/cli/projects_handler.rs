@@ -121,6 +121,28 @@ async fn list(client: &ApiClient, limit: u32, json: bool) -> anyhow::Result<()> 
     Ok(())
 }
 
+pub(super) fn user_build_settings(
+    install_command: Option<String>,
+    build_command: Option<String>,
+    output_directory: Option<String>,
+) -> nrz_api::ProjectRequestBody {
+    nrz_api::ProjectRequestBody {
+        install_command_source: install_command
+            .as_ref()
+            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
+        install_command: install_command.map(Some),
+        build_command_source: build_command
+            .as_ref()
+            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
+        build_command: build_command.map(Some),
+        output_directory_source: output_directory
+            .as_ref()
+            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
+        output_directory,
+        ..Default::default()
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn create(
     client: &ApiClient,
@@ -141,19 +163,7 @@ async fn create(
         git_url,
         branch,
         framework_preset: framework,
-        install_command_source: install_command
-            .as_ref()
-            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
-        install_command: install_command.map(Some),
-        build_command_source: build_command
-            .as_ref()
-            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
-        build_command: build_command.map(Some),
-        output_directory_source: output_directory
-            .as_ref()
-            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
-        output_directory,
-        ..Default::default()
+        ..user_build_settings(install_command, build_command, output_directory)
     };
 
     let resp: CreateProjectResponse = client
@@ -317,23 +327,18 @@ async fn update(
     {
         bail!("no fields to update. Specify at least one --flag.");
     }
+    let settings = user_build_settings(install_command, build_command, output_directory);
     let body = nrz_api::ProjectRequestBody2 {
         display_name,
         git_url: git_url.map(Some),
         branch,
         framework_preset: framework,
-        install_command_source: install_command
-            .as_ref()
-            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
-        install_command: install_command.map(Some),
-        build_command_source: build_command
-            .as_ref()
-            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
-        build_command: build_command.map(Some),
-        output_directory_source: output_directory
-            .as_ref()
-            .map(|_| nrz_api::ProjectRequestBodyInstallCommandSource::User),
-        output_directory: output_directory.map(Some),
+        install_command_source: settings.install_command_source,
+        install_command: settings.install_command,
+        build_command_source: settings.build_command_source,
+        build_command: settings.build_command,
+        output_directory_source: settings.output_directory_source,
+        output_directory: settings.output_directory.map(Some),
         root_directory,
         node_version: node_version
             .map(|value| serde_json::from_value(serde_json::Value::String(value)))

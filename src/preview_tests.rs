@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::serve_api;
 
 fn access() -> ServerPreviewAccess {
     ServerPreviewAccess {
@@ -107,15 +108,7 @@ async fn preview_access_uses_generated_requests_and_checks_project_binding() {
                 "/v1/preview-access/{id}/{secret_id}",
                 delete(|| async { Json(json!({"success":true})) }),
             );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let client = ApiClient::with_http_client(
-            format!("http://{}", listener.local_addr().unwrap()),
-            reqwest::Client::new(),
-        )
-        .unwrap();
-        let server = tokio::spawn(async move {
-            axum::serve(listener, app).await.unwrap();
-        });
+        let (client, server) = serve_api(app).await;
         let result = create_preview_access(&client, &project_id, "test".into(), None, 3600).await;
         if wrong_project {
             assert!(result.unwrap_err().to_string().contains("another project"));

@@ -33,33 +33,10 @@ async fn authored_python_install_cannot_publish_unqualified_native_dependencies(
             config.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Python);
             config.deploy.entry = Some("main.py".into());
             config.deploy.python_version = Some(minor);
-            std::fs::write(
-                project.path().join("onreza.toml"),
-                toml::to_string(&config).unwrap(),
-            )
-            .unwrap();
-            let command = crate::context::CommandContext::resolve_platform_root(
-                project.path(),
-                &config,
-                true,
-            )
-            .unwrap();
-            let args = crate::cli::DeployArgs::try_parse_from([
-                "deploy",
-                project.path().to_str().unwrap(),
-                "--dry",
-            ])
-            .unwrap();
-            let result = super::super::plan::build(super::super::plan::DeployPlanRequest {
-                args: &args,
-                command: &command,
-                explicit_compute: None,
-                build_logs: None,
-                execution_env: &[],
-                target_production: None,
-                platform_runner: false,
-            })
-            .await;
+            crate::deploy::test_support::write_project_config(project.path(), &config);
+            let (command, args) =
+                crate::deploy::test_support::deploy_context(project.path(), &config, &[]);
+            let result = crate::deploy::test_support::build_plan(&args, &command, &[]).await;
             assert_eq!(
                 std::fs::read(
                     project
@@ -131,36 +108,14 @@ async fn authored_python_install_preserves_pure_prebuilt_and_static_stage_bounda
                 std::fs::create_dir_all(project.path().join(&relative).parent().unwrap()).unwrap();
                 std::fs::write(project.path().join(&relative), bytes).unwrap();
             }
-            std::fs::write(
-                project.path().join("onreza.toml"),
-                toml::to_string(&config).unwrap(),
-            )
-            .unwrap();
-            let command = crate::context::CommandContext::resolve_platform_root(
-                project.path(),
-                &config,
-                true,
-            )
-            .unwrap();
-            let mut args = crate::cli::DeployArgs::try_parse_from([
-                "deploy",
-                project.path().to_str().unwrap(),
-                "--dry",
-            ])
-            .unwrap();
+            crate::deploy::test_support::write_project_config(project.path(), &config);
+            let (command, mut args) =
+                crate::deploy::test_support::deploy_context(project.path(), &config, &[]);
             args.skip_install = mode == "skip-install";
             args.skip_build = mode == "skip-build";
-            let plan = super::super::plan::build(super::super::plan::DeployPlanRequest {
-                args: &args,
-                command: &command,
-                explicit_compute: None,
-                build_logs: None,
-                execution_env: &[],
-                target_production: None,
-                platform_runner: false,
-            })
-            .await
-            .unwrap();
+            let plan = crate::deploy::test_support::build_plan(&args, &command, &[])
+                .await
+                .unwrap();
             assert_eq!(
                 project.path().join("installer-marker").exists(),
                 matches!(mode, "pure" | "static")
@@ -187,12 +142,7 @@ async fn authored_python_install_preserves_pure_prebuilt_and_static_stage_bounda
                     published.role,
                     crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Compute
                 );
-                let unpacked = tempfile::tempdir().unwrap();
-                let decoder = zstd::stream::read::Decoder::new(
-                    std::fs::File::open(source.source_path()).unwrap(),
-                )
-                .unwrap();
-                tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+                let unpacked = crate::test_support::unpack_source_bundle(&source);
                 assert_eq!(
                     std::fs::read(unpacked.path().join(&relative)).unwrap(),
                     bytes
@@ -235,11 +185,7 @@ async fn authored_install_qualifies_python_sibling_dependencies_under_node_prima
         config.build.install_command=Some("mkdir -p .onreza/python/3.14/site-packages/demo && cp host.bin .onreza/python/3.14/site-packages/demo/native.data && printf INSTALLED > installer-marker".into());
         config.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Node);
         config.deploy.entry = Some("api/server.js".into());
-        std::fs::write(
-            project.path().join("onreza.toml"),
-            toml::to_string(&config).unwrap(),
-        )
-        .unwrap();
+        crate::deploy::test_support::write_project_config(project.path(), &config);
         let mut command =
             crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
                 .unwrap();
@@ -272,18 +218,10 @@ async fn authored_install_qualifies_python_sibling_dependencies_under_node_prima
         ))
         .unwrap();
         let environment = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
-        let error = super::super::plan::build(super::super::plan::DeployPlanRequest {
-            args: &args,
-            command: &command,
-            explicit_compute: None,
-            build_logs: None,
-            execution_env: &environment,
-            target_production: None,
-            platform_runner: false,
-        })
-        .await
-        .err()
-        .expect("Node primary erased Python dependency qualification");
+        let error = crate::deploy::test_support::build_plan(&args, &command, &environment)
+            .await
+            .err()
+            .expect("Node primary erased Python dependency qualification");
         assert!(
             project.path().join("installer-marker").exists(),
             "custom install was not executed"
@@ -388,29 +326,12 @@ async fn retained_python_native_platform_is_checked_without_install_or_build() {
                 config.deploy.runtime = Some(nrz_source_bundle::ApplicationRuntimeFamily::Python);
                 config.deploy.python_version = Some(minor);
                 config.deploy.entry = Some("main.py".into());
-                std::fs::write(
-                    project.path().join("onreza.toml"),
-                    toml::to_string(&config).unwrap(),
-                )
-                .unwrap();
-                let command = crate::context::CommandContext::resolve_platform_root(
-                    project.path(),
-                    &config,
-                    true,
-                )
-                .unwrap();
-                let mut args = crate::cli::DeployArgs::try_parse_from([
-                    "deploy",
-                    project.path().to_str().unwrap(),
-                    "--dry",
-                ])
-                .unwrap();
+                crate::deploy::test_support::write_project_config(project.path(), &config);
+                let (command, mut args) =
+                    crate::deploy::test_support::deploy_context(project.path(), &config, &[]);
                 args.skip_install = invocation == "skip-install";
                 args.skip_build = invocation == "skip-build";
-                let error = super::super::plan::build(super::super::plan::DeployPlanRequest {
-                    args: &args, command: &command, explicit_compute: None, build_logs: None,
-                    execution_env: &[], target_production: None, platform_runner: false,
-                }).await.err().unwrap_or_else(|| panic!("{minor:?}/{placement}/{invocation}: foreign native payload published without any installer/build execution"));
+                let error = crate::deploy::test_support::build_plan(&args, &command, &[]).await.err().unwrap_or_else(|| panic!("{minor:?}/{placement}/{invocation}: foreign native payload published without any installer/build execution"));
                 assert!(!project.path().join("installer-marker").exists());
                 assert!(
                     error

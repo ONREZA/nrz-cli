@@ -221,7 +221,7 @@ async fn assert_python_scan_archive(
     .unwrap();
     let logical: nrz_source_bundle::SourceLogicalManifest =
         serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap()).unwrap();
-    crate::test_support::assert_source_bundle_verified(&source, &logical).await;
+    crate::test_support::verify_source_bundle(&source, &logical).await;
     nrz_runtime_artifact::validate_source_bundle_application_graph(
         &source.logical_manifest_sha256,
         &source.source_sha256,
@@ -229,11 +229,7 @@ async fn assert_python_scan_archive(
         &logical,
     )
     .unwrap();
-    let unpacked = tempfile::tempdir().unwrap();
-    let decoder =
-        zstd::stream::read::Decoder::new(std::fs::File::open(source.source_path()).unwrap())
-            .unwrap();
-    tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+    let unpacked = crate::test_support::unpack_source_bundle(&source);
     for (path, bytes) in retained {
         let file = logical
             .files
@@ -354,12 +350,7 @@ fn published_python_bundle_excludes_installer_staging_and_retains_installed_asse
                 None,
             )
             .unwrap();
-            let unpacked = tempfile::tempdir().unwrap();
-            let decoder = zstd::stream::read::Decoder::new(
-                std::fs::File::open(source.source_path()).unwrap(),
-            )
-            .unwrap();
-            tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+            let unpacked = crate::test_support::unpack_source_bundle(&source);
             for path in staging {
                 assert!(
                     !source

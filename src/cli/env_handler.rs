@@ -4,12 +4,14 @@ use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::api::ApiClient;
-use crate::auth;
 use crate::output;
-use nrz::config;
 use nrz::config::{EnvVisibility, ProjectConfig};
 
 use super::env::{EnvArgs, EnvCommand};
+
+#[cfg(test)]
+#[path = "env_handler_wire_tests.rs"]
+mod wire_tests;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,10 +93,8 @@ pub async fn run(
     workspace: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
-    let tok = auth::resolve_token(token, workspace)?;
-
-    let client = ApiClient::authenticated(&tok)?;
-    let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
+    let (client, project_id) =
+        crate::cli::remote::project_client(token, workspace, args.project_id.as_deref(), config)?;
     match args.command {
         EnvCommand::List { environment } => {
             let environment_id = crate::execution_context::resolve_optional(
@@ -577,7 +577,15 @@ fn validate(
         if valid {
             output::success(
                 false,
-                format!("All {} required variable(s) are set", present.len()),
+                format!(
+                    "All {} required variable(s) are set",
+                    config
+                        .env
+                        .declarations
+                        .values()
+                        .filter(|decl| decl.required)
+                        .count()
+                ),
                 output::Phase::Env,
             );
         } else {

@@ -1,19 +1,8 @@
 use super::*;
+use crate::test_support::serve_api;
 use axum::{Json, Router, extract::Query, routing::get};
 use std::collections::HashMap;
 
-async fn serve(app: Router) -> (ApiClient, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = ApiClient::with_http_client(
-        format!("http://{}", listener.local_addr().unwrap()),
-        reqwest::Client::new(),
-    )
-    .unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    (client, server)
-}
 fn project(id: u128) -> nrz_api::Project200ResponseProject {
     nrz_api::Project200ResponseProject {
         id: uuid::Uuid::from_u128(id),
@@ -43,7 +32,7 @@ async fn interactive_choices_include_projects_after_the_first_page() {
             })
         }),
     );
-    let (client, server) = serve(app).await;
+    let (client, server) = serve_api(app).await;
     let projects = selection_projects(&client).await.unwrap();
     assert_eq!(projects.len(), 101);
     assert_eq!(projects.last().unwrap().project_name, "Project 100");
@@ -63,7 +52,7 @@ async fn project_selection_rejects_incomplete_pagination() {
                 })
             }),
         );
-        let (client, server) = serve(app).await;
+        let (client, server) = serve_api(app).await;
         assert!(
             selection_projects(&client)
                 .await

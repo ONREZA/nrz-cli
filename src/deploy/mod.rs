@@ -62,6 +62,8 @@ mod runtime_artifact;
 mod runtime_packaging;
 mod scan;
 mod source_upload;
+#[cfg(test)]
+mod test_support;
 mod verify;
 #[cfg(test)]
 mod verify_tests;

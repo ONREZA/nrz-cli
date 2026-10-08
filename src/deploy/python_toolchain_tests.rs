@@ -1077,19 +1077,7 @@ async fn export_qualification_artifact(
     .unwrap();
     let logical: nrz_source_bundle::SourceLogicalManifest =
         serde_json::from_value(serde_json::to_value(&plan.logical_manifest).unwrap()).unwrap();
-    let owner = uuid::Uuid::nil().to_string();
-    let input = nrz_source_bundle::SourceBundleVerificationInput {
-        owner_workspace_id: owner.clone(),
-        source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-            &owner,
-            &plan.logical_manifest_sha256,
-            &plan.source_sha256,
-            None,
-        ),
-        source_sha256: plan.source_sha256.clone(),
-        logical_manifest_sha256: plan.logical_manifest_sha256.clone(),
-        budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical).unwrap(),
-    };
+    let input = crate::test_support::source_bundle_verification_input(&plan, &logical);
     let compressed = std::fs::read(plan.source_path()).unwrap();
     let verified = nrz_source_bundle::verify_source_bundle_bytes(input, compressed.clone().into())
         .await
@@ -1212,11 +1200,7 @@ async fn real_mkdocs_static_builds_publish_without_process_runtime() {
     ));
     config.build.output_directory = Some("site".into());
     config.deploy.compute = Some("static".into());
-    std::fs::write(
-        project.path().join("onreza.toml"),
-        toml::to_string(&config).unwrap(),
-    )
-    .unwrap();
+    crate::deploy::test_support::write_project_config(project.path(), &config);
     let mut command =
         crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
             .unwrap();
@@ -1289,19 +1273,7 @@ async fn real_mkdocs_static_builds_publish_without_process_runtime() {
             .all(|layer| layer.runtime_config.is_none())
     );
     assert!(logical.files.iter().all(|file| file.role != "dependency"));
-    let owner = uuid::Uuid::nil().to_string();
-    let input = nrz_source_bundle::SourceBundleVerificationInput {
-        owner_workspace_id: owner.clone(),
-        source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-            &owner,
-            &source.logical_manifest_sha256,
-            &source.source_sha256,
-            None,
-        ),
-        source_sha256: source.source_sha256.clone(),
-        logical_manifest_sha256: source.logical_manifest_sha256.clone(),
-        budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical).unwrap(),
-    };
+    let input = crate::test_support::source_bundle_verification_input(&source, &logical);
     nrz_source_bundle::verify_source_bundle_bytes(
         input,
         std::fs::read(source.source_path()).unwrap().into(),
@@ -1317,7 +1289,6 @@ async fn real_mkdocs_static_builds_publish_without_process_runtime() {
 
 #[tokio::test]
 async fn python_published_nonroot_output_keeps_project_owned_bootstrap() {
-    use clap::Parser as _;
     for mode in ["MODULE", "CALLABLE", "AUTHORED", "SCRIPT"] {
         let project = tempfile::tempdir().unwrap();
         let minor = nrz_source_bundle::PythonMinor::default();
@@ -1374,28 +1345,14 @@ async fn python_published_nonroot_output_keeps_project_owned_bootstrap() {
             .unwrap();
         }
         config.deploy.args = Some(vec!["literal argument".into()]);
-        let command =
-            crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
-                .unwrap();
-        let args = crate::cli::DeployArgs::try_parse_from([
-            "deploy",
-            project.path().to_str().unwrap(),
-            "--dry",
-            "--skip-install",
-            "--skip-build",
-        ])
-        .unwrap();
-        let plan = super::plan::build(super::plan::DeployPlanRequest {
-            args: &args,
-            command: &command,
-            explicit_compute: None,
-            build_logs: None,
-            execution_env: &[],
-            target_production: None,
-            platform_runner: false,
-        })
-        .await
-        .unwrap();
+        let (command, args) = crate::deploy::test_support::deploy_context(
+            project.path(),
+            &config,
+            &["--skip-install", "--skip-build"],
+        );
+        let plan = crate::deploy::test_support::build_plan(&args, &command, &[])
+            .await
+            .unwrap();
         assert_eq!(plan.artifact.build.output_dir, project.path().join("dist"));
         assert_eq!(plan.artifact.runtime.root_dir, project.path());
         let source = plan
@@ -1427,7 +1384,7 @@ async fn python_published_nonroot_output_keeps_project_owned_bootstrap() {
         let logical: nrz_source_bundle::SourceLogicalManifest =
             serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap())
                 .unwrap();
-        crate::test_support::assert_source_bundle_verified(&source, &logical).await;
+        crate::test_support::verify_source_bundle(&source, &logical).await;
         let unpacked = crate::test_support::unpack_source_bundle(&source);
         std::fs::remove_dir_all(project.path()).unwrap();
         let launch_args = &plan.artifact.runtime.manifest.layers[0]
@@ -1466,7 +1423,6 @@ async fn python_published_nonroot_output_keeps_project_owned_bootstrap() {
 
 #[tokio::test]
 async fn different_python_minors_preserve_code_only_and_reject_runtime_dependencies() {
-    use clap::Parser as _;
     let project = tempfile::tempdir().unwrap();
     std::fs::write(project.path().join("main.py"), "print('ready')\n").unwrap();
     let mut config = nrz::config::ProjectConfig::default();
@@ -1474,22 +1430,12 @@ async fn different_python_minors_preserve_code_only_and_reject_runtime_dependenc
     config.build.output_directory = Some(".".into());
     config.deploy.python_version = Some(nrz_source_bundle::PythonMinor::Python314);
     config.deploy.entry = Some("main.py".into());
-    std::fs::write(
-        project.path().join("onreza.toml"),
-        toml::to_string(&config).unwrap(),
-    )
-    .unwrap();
-    let command =
-        crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
-            .unwrap();
-    let args = crate::cli::DeployArgs::try_parse_from([
-        "deploy",
-        project.path().to_str().unwrap(),
-        "--dry",
-        "--skip-install",
-        "--skip-build",
-    ])
-    .unwrap();
+    crate::deploy::test_support::write_project_config(project.path(), &config);
+    let (command, args) = crate::deploy::test_support::deploy_context(
+        project.path(),
+        &config,
+        &["--skip-install", "--skip-build"],
+    );
     for (requirements, dependencies) in [
         ("", false),
         ("# no runtime dependencies\n", false),
@@ -1499,16 +1445,7 @@ async fn different_python_minors_preserve_code_only_and_reject_runtime_dependenc
         ("../localproject\n", true),
     ] {
         std::fs::write(project.path().join("requirements.txt"), requirements).unwrap();
-        let result = super::plan::build(super::plan::DeployPlanRequest {
-            args: &args,
-            command: &command,
-            explicit_compute: None,
-            build_logs: None,
-            execution_env: &[],
-            target_production: None,
-            platform_runner: false,
-        })
-        .await;
+        let result = crate::deploy::test_support::build_plan(&args, &command, &[]).await;
         if dependencies {
             assert!(
                 result
@@ -1538,7 +1475,6 @@ async fn different_python_minors_preserve_code_only_and_reject_runtime_dependenc
 
 #[tokio::test]
 async fn typed_python_layers_cannot_replace_the_selected_dependency_abi() {
-    use clap::Parser as _;
     use nrz_source_bundle::{BuildToolchainFamily, PythonMinor};
 
     for (target, python_dependencies, javascript_dependencies, node_layer, accepted) in [
@@ -1558,11 +1494,7 @@ async fn typed_python_layers_cannot_replace_the_selected_dependency_abi() {
         config.build.toolchain = Some(BuildToolchainFamily::Python);
         config.build.python_version = Some(PythonMinor::Python314);
         config.build.output_directory = Some(".".into());
-        std::fs::write(
-            project.path().join("onreza.toml"),
-            toml::to_string(&config).unwrap(),
-        )
-        .unwrap();
+        crate::deploy::test_support::write_project_config(project.path(), &config);
         if python_dependencies {
             let dependencies = project.path().join(target.site_packages_root());
             std::fs::create_dir_all(&dependencies).unwrap();
@@ -1593,27 +1525,12 @@ async fn typed_python_layers_cannot_replace_the_selected_dependency_abi() {
             .unwrap(),
         )
         .unwrap();
-        let command =
-            crate::context::CommandContext::resolve_platform_root(project.path(), &config, true)
-                .unwrap();
-        let args = crate::cli::DeployArgs::try_parse_from([
-            "deploy",
-            project.path().to_str().unwrap(),
-            "--dry",
-            "--skip-install",
-            "--skip-build",
-        ])
-        .unwrap();
-        let result = super::plan::build(super::plan::DeployPlanRequest {
-            args: &args,
-            command: &command,
-            explicit_compute: None,
-            build_logs: None,
-            execution_env: &[],
-            target_production: None,
-            platform_runner: false,
-        })
-        .await;
+        let (command, args) = crate::deploy::test_support::deploy_context(
+            project.path(),
+            &config,
+            &["--skip-install", "--skip-build"],
+        );
+        let result = crate::deploy::test_support::build_plan(&args, &command, &[]).await;
         if accepted {
             let plan = result.unwrap();
             assert!(

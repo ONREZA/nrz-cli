@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::serve_api;
 use axum::{Json, Router, routing::post};
 use serde_json::{Value, json};
 
@@ -33,15 +34,7 @@ async fn generated_execution_requests_preserve_selection_and_validate_snapshot_b
                 "snapshot":{"fingerprint":format!("v1:{}", "a".repeat(64)), "resolvedAt":"2026-09-12T00:00:00Z",
                     "source":"DEPLOYMENT", "deploymentId":"00000000-0000-0000-0000-000000000099"}}))
         }));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let client = ApiClient::with_http_client(
-        format!("http://{}", listener.local_addr().unwrap()),
-        reqwest::Client::new(),
-    )
-    .unwrap();
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
+    let (client, server) = serve_api(app).await;
     let context = resolve(&client, PROJECT_ID, "Production", None, "EXPLICIT")
         .await
         .unwrap();

@@ -1,26 +1,37 @@
-use nrz_api::{ProjectRequestBody, ProjectRequestBodyInstallCommandSource};
-
 #[test]
 fn create_project_body_marks_user_supplied_build_settings() {
-    let body = ProjectRequestBody {
-        name: "app".to_string(),
-        display_name: None,
-        git_url: None,
-        branch: None,
-        framework_preset: Some("nextjs".to_string()),
-        install_command: Some(Some("pnpm install".to_string())),
-        install_command_source: Some(ProjectRequestBodyInstallCommandSource::User),
-        build_command: Some(Some("pnpm build".to_string())),
-        build_command_source: Some(ProjectRequestBodyInstallCommandSource::User),
-        output_directory: Some(".next".to_string()),
-        output_directory_source: Some(ProjectRequestBodyInstallCommandSource::User),
-        ..Default::default()
-    };
+    let body = super::projects_handler::user_build_settings(
+        Some("pnpm install".to_string()),
+        Some("pnpm build".to_string()),
+        Some(".next".to_string()),
+    );
 
     let value = serde_json::to_value(body).unwrap();
+    assert_eq!(value["installCommand"], "pnpm install");
+    assert_eq!(value["buildCommand"], "pnpm build");
+    assert_eq!(value["outputDirectory"], ".next");
     assert_eq!(value["installCommandSource"], "USER");
     assert_eq!(value["buildCommandSource"], "USER");
     assert_eq!(value["outputDirectorySource"], "USER");
+}
+
+#[test]
+fn omitted_project_build_settings_preserve_default_sources() {
+    let body = super::projects_handler::user_build_settings(None, None, None);
+    let value = serde_json::to_value(body).unwrap();
+    for field in [
+        "installCommand",
+        "installCommandSource",
+        "buildCommand",
+        "buildCommandSource",
+        "outputDirectory",
+        "outputDirectorySource",
+    ] {
+        assert!(
+            value.get(field).is_none(),
+            "unexpected setting {field}: {value}"
+        );
+    }
 }
 
 #[tokio::test]
