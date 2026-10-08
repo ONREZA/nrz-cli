@@ -1,6 +1,102 @@
 use super::*;
 
 #[test]
+fn ssr_config_certainty_controls_compute_and_output_in_local_and_stdin_detection() {
+    for (framework, property, compute, output_dir) in [
+        (
+            "nuxt",
+            "ssr: process.env.SSR ?? false",
+            "PROCESS",
+            ".output",
+        ),
+        ("nuxt", "ssr: (false as const)", "STATIC", ".output/public"),
+        (
+            "nuxt",
+            "ssr: false, ssr: process.env.SSR",
+            "PROCESS",
+            ".output",
+        ),
+        ("nuxt", "ssr: false, ...options", "PROCESS", ".output"),
+        (
+            "react-router",
+            "ssr: process.env.SSR ?? false",
+            "PROCESS",
+            "build",
+        ),
+        (
+            "react-router",
+            "ssr: false as const",
+            "STATIC",
+            "build/client",
+        ),
+        (
+            "nextjs",
+            "output: process.env.OUTPUT ?? 'export'",
+            "PROCESS",
+            ".next",
+        ),
+        ("nextjs", "output: ('export' as const)", "STATIC", "out"),
+        (
+            "nextjs",
+            "experimental: { output: 'export' }, output: process.env.OUTPUT",
+            "PROCESS",
+            ".next",
+        ),
+        (
+            "astro",
+            "output: process.env.OUTPUT ?? 'static'",
+            "PROCESS",
+            "dist",
+        ),
+        ("astro", "output: 'static' as const", "STATIC", "dist"),
+        ("astro", "...options", "PROCESS", "dist"),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let config_name = if framework == "nextjs" {
+            "next"
+        } else {
+            framework
+        };
+        let dependency = nrz::detect::presets::get_preset_by_slug(framework)
+            .unwrap()
+            .dependencies[0];
+        let package = json!({"dependencies": {dependency: "1.0.0"}}).to_string();
+        let config_file = format!("{config_name}.config.ts");
+        let config = format!("export default {{ {property} }}");
+        fs::write(temp.path().join("package.json"), &package).unwrap();
+        fs::write(temp.path().join(&config_file), &config).unwrap();
+        let local = nrz()
+            .current_dir(temp.path())
+            .args(["detect", "--json"])
+            .output()
+            .unwrap();
+        let remote = nrz()
+            .args(["detect", "--stdin", "--json"])
+            .write_stdin(
+                json!({"tree": ["package.json", config_file], "files": {
+                    "package.json": package, config_file: config,
+                }})
+                .to_string(),
+            )
+            .output()
+            .unwrap();
+        assert!(local.status.success(), "{framework}: {property}: {local:?}");
+        assert!(
+            remote.status.success(),
+            "{framework}: {property}: {remote:?}"
+        );
+        let result = stdout_json(&local);
+        assert_eq!(result, stdout_json(&remote), "{framework}: {property}");
+        assert_eq!(result["framework"], framework, "{property}");
+        assert_eq!(result["suggestedCompute"], compute, "{property}");
+        assert_eq!(
+            result["metadata"]["buildInfo"]["outputDir"], output_dir,
+            "{property}"
+        );
+    }
+}
+
+#[test]
 fn detect_preserves_bun_start_runtime_before_build() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(

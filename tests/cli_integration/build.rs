@@ -40,6 +40,49 @@ fn deploy_app_not_found_lists_available() {
 }
 
 #[test]
+fn deploy_cli_static_overrides_configured_process_and_inferred_ssr_manifest() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"dependencies":{"nuxt":"3.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("nuxt.config.ts"),
+        "export default { ssr: true }",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("onreza.toml"),
+        "[build]\noutput_directory='custom-out'\n[deploy]\ncompute='process'\n",
+    )
+    .unwrap();
+    fs::create_dir_all(temp.path().join("custom-out/server")).unwrap();
+    fs::write(temp.path().join("custom-out/server/index.mjs"), "// server").unwrap();
+    fs::write(temp.path().join("custom-out/index.html"), "<h1>export</h1>").unwrap();
+
+    let output = nrz()
+        .current_dir(temp.path())
+        .args([
+            "--token",
+            "test-token",
+            "deploy",
+            "--compute",
+            "static",
+            "--dry",
+            "--skip-build",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let plan = stdout_json(&output);
+    assert_eq!(plan["compute"], "STATIC");
+    assert_eq!(plan["build"]["outputManifestSource"], "generated");
+    assert_eq!(plan["files"]["deployableFiles"], 2);
+}
+
+#[test]
 fn deploy_dry_json_outputs_plan_without_creating_deployment() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(temp.path().join("index.html"), "<h1>hello</h1>").unwrap();

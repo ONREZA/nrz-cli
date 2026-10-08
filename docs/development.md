@@ -15,6 +15,9 @@ proto run moon -- run workspace:check
 
 Detection lives under `src/detect`, build orchestration under `src/build`, and
 the Next.js adapter under `src/nextjs_adapter.rs` and `src/nextjs_adapter/`.
+The binary consumes `nrz::detect` from the library. Runtime binding and Python
+launch resolution are part of that library API; keep detection and its tests
+under one owner rather than compiling a second copy in the binary.
 Behavioral fixtures live under `tests`. Add a representative project fixture and
 assert its detection/build output when introducing a framework. Keep framework
 behavior in these public modules; server-side publication consumes their typed
@@ -47,7 +50,7 @@ Use `workspace:cpd-baseline` only for an explicit, reviewed baseline update.
 
 cargo-mutants mutates handwritten production Rust; generated models retain their
 drift checks. It runs the baseline tests before mutations and fails on surviving
-or timed-out mutants. The full workspace run is expensive (roughly 9,700 mutations)
+or timed-out mutants. The full workspace run is expensive (thousands of mutations)
 and is intended for manual runs. The full GitHub workflow has a six-hour timeout;
 it may need several shards to finish on this workspace. For example:
 
@@ -59,6 +62,36 @@ Run every shard from `1/16` to `16/16` to check the full workspace. Pull request
 in changed lines using `--in-diff`; it does not replace the full test suite or
 claim a clean result for unchanged code. Inspect reports in `.cache/mutants.out` when a
 mutation gate fails.
+
+For a focused investigation, keep the workspace selected and filter mutations by
+source path or name. This preserves workspace consumer tests and the configured
+`nrz-contract/codegen` feature:
+
+```sh
+proto run moon -- run workspace:mutants -- --file crates/nrz-source-bundle/src/handoff.rs
+proto run moon -- run workspace:mutants -- --file src/detect/fs.rs --re 'normalize_path'
+```
+
+In the pinned cargo-mutants 27.1.0, struct-field deletion mutations bypass
+`--re` and `--exclude-re` in the
+[mutation visitor](https://github.com/sourcefrog/cargo-mutants/blob/v27.1.0/src/visit.rs#L704-L748).
+Use `--file` to bound source scope and inspect `--list` before running: a name
+filter alone does not guarantee that only the requested functions are tested.
+
+Selecting only a package with `-p` can fail before testing any mutation: the
+configured `nrz-contract/codegen` feature is not available to every package's
+baseline build. A report with zero tested mutations is not a successful mutation
+check; inspect its baseline outcome and log. A focused run proves only its selected
+mutations. Do not disable the baseline or remove required features to obtain a
+passing report.
+
+Before starting a full run, `cargo mutants --workspace --list --json` lists the
+current mutation scope without building it. Estimate execution time from completed
+reports, including build and test phases, and run every shard against the same
+source and configuration. Surviving mutations need investigation: they may expose
+missing assertions, redundant code or a behaviorally equivalent mutation. A full
+gate is clean only when it completes without survivors or timeouts; an interrupted
+run or one completed shard does not establish that result.
 
 A diff containing only tests, generated code or no mutatable Rust produces no
 mutations; cargo-mutants may skip its baseline in that case. The ordinary

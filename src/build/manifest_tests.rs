@@ -1510,6 +1510,34 @@ fn runtime_negative_memory_is_error() {
 // ── Auto-generation ────────────────────────────────────────────
 
 #[test]
+fn generated_terminal_routes_preserve_the_wire_contract() {
+    for (manifest, layer) in [
+        (generate_static_manifest(), "site"),
+        (generate_compute_manifest("server.js"), "server"),
+        (
+            generate_nextjs_standalone_manifest_for_server(true, "", "server.js"),
+            "server",
+        ),
+        (
+            generate_nextjs_adapter_manifest_for_server(
+                true,
+                true,
+                "public",
+                "server.js",
+                Vec::new(),
+            ),
+            "server",
+        ),
+        (generate_nuxt_manifest(true), "server"),
+    ] {
+        assert_eq!(
+            serde_json::to_value(manifest.routes.last().unwrap()).unwrap(),
+            serde_json::json!({"pattern": "^/.*$", "layer": layer, "priority": 0}),
+        );
+    }
+}
+
+#[test]
 fn generate_static_manifest_is_valid() {
     let m = generate_static_manifest();
     validate(&m).unwrap();

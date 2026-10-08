@@ -1264,7 +1264,7 @@ fn analog_clean_project() {
     assert!(result.ssr_features.is_empty());
 }
 
-// ── strip_inline_comment edge cases (tested via analyze_ssr) ──
+// ── Config comments and quoting (tested via analyze_ssr) ──
 
 #[test]
 fn nextjs_inline_comment_with_escaped_quotes() {
@@ -1477,7 +1477,7 @@ fn remix_vite_exists_ignores_legacy_ssr_false() {
 }
 
 #[test]
-fn nextjs_env_fallback_standalone() {
+fn nextjs_env_fallback_standalone_is_unknown() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("next.config.js"),
@@ -1486,11 +1486,11 @@ fn nextjs_env_fallback_standalone() {
     .unwrap();
     let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
     assert!(!result.is_static_compatible);
-    assert!(result.ssr_features.iter().any(|f| f.contains("standalone")));
+    assert!(!result.ssr_features.iter().any(|f| f.contains("standalone")));
 }
 
 #[test]
-fn nextjs_env_nullish_coalescing_export() {
+fn nextjs_env_nullish_coalescing_export_is_unknown() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("next.config.mjs"),
@@ -1498,8 +1498,8 @@ fn nextjs_env_nullish_coalescing_export() {
     )
     .unwrap();
     let result = analyze_ssr(&LocalFs::new(dir.path()), "nextjs").unwrap();
-    assert!(result.is_static_compatible);
-    assert!(result.ssr_features.iter().any(|f| f.contains("export")));
+    assert!(!result.is_static_compatible);
+    assert!(!result.ssr_features.iter().any(|f| f.contains("export")));
 }
 
 #[test]
@@ -1516,7 +1516,7 @@ fn nextjs_backtick_quoted_standalone() {
 }
 
 #[test]
-fn nuxt_env_fallback_ssr_false() {
+fn nuxt_env_fallback_ssr_false_is_unknown() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("nuxt.config.ts"),
@@ -1524,14 +1524,23 @@ fn nuxt_env_fallback_ssr_false() {
     )
     .unwrap();
     let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
-    assert!(result.is_static_compatible);
+    assert!(!result.is_static_compatible);
 }
 
 #[test]
-fn nuxt_grouped_env_fallback_ssr_false() {
-    for expression in [
-        "(process.env.NUXT_SSR ?? false)",
-        "((process.env.NUXT_SSR ?? false))",
+fn nuxt_nonliteral_expressions_require_ssr() {
+    for (expression, is_static) in [
+        ("(process.env.NUXT_SSR ?? false)", false),
+        ("((process.env.NUXT_SSR ?? false))", false),
+        ("process.env.NUXT_SSR??false", false),
+        ("process.env.NUXT_SSR||false", false),
+        ("Boolean({ enabled: true, other: false })??false", false),
+        ("Boolean([true, false])||false", false),
+        ("Boolean(flag||false)", false),
+        ("Boolean(flag??false)", false),
+        ("process.env.NUXT_SSR | false", false),
+        ("process.env.NUXT_SSR ? false : true", false),
+        ("flag)", false),
     ] {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
@@ -1542,7 +1551,503 @@ fn nuxt_grouped_env_fallback_ssr_false() {
 
         let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
 
+        assert_eq!(
+            result.is_static_compatible, is_static,
+            "expression: {expression}"
+        );
+    }
+}
+
+#[test]
+fn ssr_settings_match_properties_and_complete_literals() {
+    let mut failures = Vec::new();
+    for (framework, properties, is_static) in [
+        ("nuxt", "css: ['ssr.css'], ssr: false", true),
+        ("nuxt", "no_ssr: false, ssr: true", false),
+        ("nuxt", "note: 'ssr: false ', ssr: true", false),
+        ("nuxt", "note: `🦊 ssr: false `, ssr: true", false),
+        ("nuxt", "ssr: false || true", false),
+        ("nuxt", "ssr: flag || false || true", false),
+        ("nuxt", "ssr: false as const", true),
+        ("nuxt", "ssr: flag ?? false as const", false),
+        ("nuxt", "\"ssr\": false", true),
+        ("nuxt", "'ssr': false", true),
+        ("nuxt", "ssr: (false)", true),
+        ("nuxt", "ssr: (false as const)", true),
+        ("nuxt", "ssr: (false) as const", true),
+        ("nuxt", "ssr: false // ignored || true\n", true),
+        ("nuxt", "ssr: false /* 🦊 */ || true", false),
+        ("nextjs", "output: 'export' + 'foo'", false),
+        ("nextjs", "'output': 'export' as const", true),
+        ("astro", "output: 'server' as const", false),
+        ("astro", "\"output\": ('server' as const)", false),
+    ] {
+        let config_name = if framework == "nextjs" {
+            "next"
+        } else {
+            framework
+        };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(format!("{config_name}.config.ts")),
+            format!("export default {{ {properties} }}"),
+        )
+        .unwrap();
+
+        let result = analyze_ssr(&LocalFs::new(dir.path()), framework).unwrap();
+        if result.is_static_compatible != is_static {
+            failures.push(properties);
+        }
+    }
+    assert!(failures.is_empty(), "incorrect SSR settings: {failures:?}");
+}
+
+#[test]
+fn ssr_config_scans_multiline_properties_without_reading_strings_as_code() {
+    let mut failures = Vec::new();
+    for (properties, is_static) in [
+        ("note: `hello\nssr: false\nbye`, ssr: true", false),
+        ("note: '${flag}', ssr: false", true),
+        ("note: `$flag`, ssr: false", true),
+        ("ssr:\nfalse", true),
+        ("ssr: false\n || true", false),
+        ("ssr /* 🦊 */ : // comment\n false", true),
+        ("\"ssr\" // comment\n : /* comment */ false", true),
+        ("ssr: false /* comment */ as  const", true),
+        ("ssr: false\tas\tconst", true),
+        ("ssr: false as boolean", true),
+        ("ssr: false as unknown as boolean", true),
+        ("ssr: false as unknown as boolean || true", false),
+        ("ssr: false satisfies boolean", true),
+        ("ssr: false as boolean || true", false),
+        ("ssr: // note\u{2028} false", true),
+        ("ssr: // note\u{2029} false", true),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("nuxt.config.ts"),
+            format!("export default defineNuxtConfig({{ {properties} }})"),
+        )
+        .unwrap();
+        let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
+        if result.is_static_compatible != is_static {
+            failures.push(properties);
+        }
+    }
+    assert!(failures.is_empty(), "incorrect SSR settings: {failures:?}");
+}
+
+#[test]
+fn nuxt_quoted_delimiters_do_not_make_dynamic_values_static() {
+    for expression in [
+        r#"(process.env["),} || ??"] ?? false)"#,
+        r#"((process.env['\'),} || ??'] || false))"#,
+        r#"(process.env[`\`),} || ??`] ?? false)"#,
+        r#"(process.env["\"),} || ??"] || false)"#,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("nuxt.config.ts"),
+            format!("export default defineNuxtConfig({{ ssr: {expression}, featureFlag: true }})"),
+        )
+        .unwrap();
+
+        let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
+
+        assert!(!result.is_static_compatible, "expression: {expression}");
+    }
+}
+
+#[test]
+fn nuxt_unknown_or_ambiguous_exported_config_requires_ssr() {
+    let deep_config = format!(
+        "export default {{ ssr: {}false{} }}",
+        "(".repeat(512),
+        ")".repeat(512)
+    );
+    for config in [
+        "const note = `${flag}`; export default { ssr: false }",
+        "export default custom({ ssr: false })",
+        "export default { ssr: 'false' }",
+        "export default { ssr: `false` }",
+        "export default { ssr: false, ssr: false }",
+        "export default { ssr: false, ssr: flag }",
+        "export default { ssr: false, ...options }",
+        "export default { ssr: true, feature: { ssr: false } }",
+        "export default { ssr: flag, nitro: { preset: 'static' } }",
+        "export default { ssr: false, nitro: { preset: flag } }",
+        "export default { ssr: false, nitro: { ...options } }",
+        "import adapter from '@sveltejs/adapter-static'; export default { ssr: adapter(), nitro: { preset: 'static' } }",
+        "import adapter from '@sveltejs/adapter-static'; export default { ssr: false, nitro: { preset: adapter() } }",
+        "export default { note: /, ssr: false, / }",
+        "export default { ssr: false as any in { false: true } }",
+        "export default { ssr: false as any < true }",
+        "export default { ssr: false as any >= false }",
+        "export default { ssr: false as any ^ true }",
+        "export default { ssr: false as App.1 }",
+        "export default { ssr: false as Array<boolean true }",
+        "export default { ssr: false satisfies boolean ? true : false }",
+        "export default { ssr: (false as any).constructor(1) }",
+        "export default { ssr: false,, }",
+        "export default { ssr: false, other: }",
+        "export default { ssr: false, other: 1; }",
+        "export default { ssr: false",
+        "export default defineNuxtConfig({ ssr: false }, options)",
+        "export default defineNuxtConfig(defineNuxtConfig({ ssr: false }))",
+        "const config = { ssr: false }; export default config",
+        "const example = { ssr: false }; export default { ssr: flag }",
+        "if (flag) module.exports = { ssr: false }",
+        "while (false) module.exports = { ssr: false }",
+        "holder.module.exports = { ssr: false }",
+        "const module = {}; module.exports = { ssr: false }",
+        "import module from '@sveltejs/adapter-static'; module.exports = { ssr: false }",
+        "const { module } = holder; module.exports = { ssr: false }",
+        "const { defineNuxtConfig } = holder; export default defineNuxtConfig({ ssr: false })",
+        "const { defineConfig } = holder; export default defineConfig({ ssr: false })",
+        "const note = 1, defineConfig = options => ({ ssr: true }); export default defineConfig({ ssr: false })",
+        "defineNuxtConfig = options => ({ ssr: true }); export default defineNuxtConfig({ ssr: false })",
+        "import { defineConfig } from 'unrecognized-package'; export default defineConfig({ ssr: false })",
+        "import * as defineConfig from 'vite'; export default defineConfig({ ssr: false })",
+        "import { mergeConfig as defineConfig } from 'vite'; export default defineConfig({ ssr: false })",
+        "import defineConfig from 'vite'; export default defineConfig({ ssr: false })",
+        "import { type defineConfig as defineConfig } from 'vite'; export default defineConfig({ ssr: false })",
+        "import { fake as defineNuxtConfig } from 'nuxt/config'; export default defineNuxtConfig({ ssr: false })",
+        "import { defineNuxtConfig } from 'other-module'; export default defineNuxtConfig({ ssr: false })",
+        "import 'unrelated'; const defineNuxtConfig = config => ({ ssr: true }); export default defineNuxtConfig({ ssr: false })",
+        "const ssr = true; export default { ssr }",
+        "module.exports = { ssr: false }; module.exports.ssr = true",
+        "module.exports = { ssr: false }; Object.assign(module.exports, { ssr: true })",
+    ].into_iter().chain(std::iter::once(deep_config.as_str())) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("nuxt.config.ts"), config).unwrap();
+        let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
+        assert!(!result.is_static_compatible, "config: {config}");
+    }
+}
+
+#[test]
+fn local_plugin_binding_is_not_trusted_as_framework_configuration() {
+    for (framework, plugin) in [("analog", "analog"), ("remix", "remix")] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("vite.config.ts"),
+            format!("const {plugin} = options => ({{ ssr: true }}); export default defineConfig({{ plugins: [{plugin}({{ ssr: false }})] }})"),
+        )
+        .unwrap();
+        let result = analyze_ssr(&LocalFs::new(dir.path()), framework).unwrap();
+        assert!(!result.is_static_compatible, "framework: {framework}");
+    }
+}
+
+#[test]
+fn nuxt_imports_and_unrelated_shorthand_preserve_static_settings() {
+    for config in [
+        "import { defineNuxtConfig } from 'nuxt/config'; export default defineNuxtConfig({ ssr: false })",
+        "import { defineNuxtConfig as ignored } from 'other-module'; import { defineNuxtConfig } from 'nuxt/config'; export default defineNuxtConfig({ ssr: false })",
+        "import 'unrelated'; export default defineNuxtConfig({ ssr: false })",
+        "type as = boolean; export default { ssr: (false as as) as boolean }",
+        "const other = 0; export default { ssr: false, other }",
+        "const other = 0; export default { other, ssr: false }",
+        "export default { nitro: { preset: 'static' }, routeRules: { '/': { headers: { hello: 'x' } } } }",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("nuxt.config.ts"), config).unwrap();
+        let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
+        assert!(result.is_static_compatible, "config: {config}");
+    }
+}
+
+#[test]
+fn nuxt_config_nesting_accepts_128_levels_and_declines_129() {
+    for depth in [128, 129] {
+        let unary = "keyof ".repeat(depth - 1);
+        let compound = "keyof ".repeat(depth - 2);
+        for (form, config) in [
+            (
+                "balanced arrays",
+                format!(
+                    "export default {{ ssr: false, other: {}0{} }}",
+                    "[".repeat(depth - 1),
+                    "]".repeat(depth - 1)
+                ),
+            ),
+            (
+                "unary type",
+                format!("export default {{ ssr: false as unknown as {unary}any }}"),
+            ),
+            (
+                "grouped type",
+                format!("export default {{ ssr: false as unknown as {compound}(any) }}"),
+            ),
+            (
+                "tuple type",
+                format!("export default {{ ssr: false as unknown as {compound}[any] }}"),
+            ),
+            (
+                "generic type",
+                format!("export default {{ ssr: false as unknown as {compound}Array<any> }}"),
+            ),
+            (
+                "indexed type",
+                format!(
+                    "type App = {{ 0: boolean }}; export default {{ ssr: false as unknown as {compound}App[0] }}"
+                ),
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("nuxt.config.ts"), config).unwrap();
+            let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
+            assert_eq!(
+                result.is_static_compatible,
+                depth == 128,
+                "{form}: depth {depth}"
+            );
+        }
+    }
+}
+
+#[test]
+fn framework_plugin_settings_require_an_owned_literal_array() {
+    for (framework, prefix, plugins, is_static) in [
+        ("remix", "", "[remix({ ssr: false }),]", true),
+        (
+            "remix",
+            "",
+            "[remix({ ssr: false, appDirectory: 'app' })]",
+            true,
+        ),
+        (
+            "remix",
+            "const extras = { disabled: false };",
+            "[extras.disabled, remix({ ssr: false })]",
+            true,
+        ),
+        ("remix", "", "foo([remix({ ssr: false })])", false),
+        ("remix", "", "(remix({ ssr: false }))", false),
+        (
+            "remix",
+            "",
+            "[...runtimePlugins, remix({ ssr: false })]",
+            false,
+        ),
+        (
+            "analog",
+            "",
+            "[...runtimePlugins, analog({ ssr: false })]",
+            false,
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("vite.config.ts"),
+            format!("{prefix} export default defineConfig({{ plugins: {plugins} }})"),
+        )
+        .unwrap();
+        let result = analyze_ssr(&LocalFs::new(dir.path()), framework).unwrap();
+        assert_eq!(
+            result.is_static_compatible, is_static,
+            "{framework} plugins: {plugins}"
+        );
+    }
+}
+
+#[test]
+fn nuxt_type_assertions_keep_complete_boolean_literals_static() {
+    for expression in [
+        "(false as const) as boolean",
+        "false as []",
+        "false as unknown as []",
+        "false as boolean | true",
+        "false satisfies Config['ssr']",
+        "false as Namespace.Type",
+        "false as Array<boolean>",
+        "false as [boolean, 'ssr']",
+        "false as (boolean & Unknown)",
+        "false as readonly boolean[]",
+        "false as keyof Config",
+        "false as typeof flag",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("nuxt.config.ts"),
+            format!("export default {{ ssr: {expression} }}"),
+        )
+        .unwrap();
+        let result = analyze_ssr(&LocalFs::new(dir.path()), "nuxt").unwrap();
         assert!(result.is_static_compatible, "expression: {expression}");
+    }
+}
+
+#[test]
+fn unreadable_preferred_config_requires_ssr_without_selecting_lower_priority_static_config() {
+    for (framework, preferred, fallback) in [
+        ("astro", "astro.config.mjs", None),
+        (
+            "astro",
+            "astro.config.mjs",
+            Some(("astro.config.js", "export default { output: 'static' }")),
+        ),
+        (
+            "remix",
+            "vite.config.ts",
+            Some(("remix.config.js", "module.exports = { ssr: false }")),
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(preferred), [0xff]).unwrap();
+        if let Some((file, content)) = fallback {
+            std::fs::write(dir.path().join(file), content).unwrap();
+        }
+        let result = analyze_ssr(&LocalFs::new(dir.path()), framework).unwrap();
+        assert!(!result.is_static_compatible, "{framework}: {fallback:?}");
+    }
+}
+
+#[test]
+fn astro_only_defaults_to_static_when_exported_output_is_absent_or_literal_static() {
+    for (config, is_static) in [
+        ("export default {}", true),
+        ("export default []", false),
+        ("export default defineConfig({ output: 'static' })", true),
+        ("export default { output: 'server' as  string }", false),
+        ("export default { output: mode ?? 'static' }", false),
+        (
+            "export default { // note\u{2028} output: 'server'\n }",
+            false,
+        ),
+        (
+            "export default { // note\u{2029} output: 'server'\n }",
+            false,
+        ),
+        ("export default { ...options }", false),
+        ("export default { ['output']: 'server' }", false),
+        (r#"export default { 'out\u0070ut': 'server' }"#, false),
+        (r#"export default { \u006futput: 'server' }"#, false),
+        (
+            "const config = { output: 'static' }; export default config",
+            false,
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("astro.config.ts"), config).unwrap();
+        let result = analyze_ssr(&LocalFs::new(dir.path()), "astro").unwrap();
+        assert_eq!(result.is_static_compatible, is_static, "config: {config}");
+    }
+}
+
+#[test]
+fn unsupported_templates_do_not_reintroduce_commented_static_adapters() {
+    for (framework, file, config) in [
+        (
+            "sveltekit",
+            "svelte.config.js",
+            "/* adapter-static */ import adapter from '@sveltejs/adapter-node'; const note = `hello ${flag}`; export default { kit: { adapter: adapter() } };",
+        ),
+        (
+            "qwik",
+            "vite.config.ts",
+            "/* @builder.io/qwik-city/static */ const note = `hello ${flag}`; export default defineConfig({ plugins: [] });",
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(file), config).unwrap();
+        let result = analyze_ssr(&LocalFs::new(dir.path()), framework).unwrap();
+        assert!(!result.is_static_compatible, "config: {config}");
+    }
+}
+
+#[test]
+fn static_adapter_imports_require_an_applied_adapter_in_exported_config() {
+    for (framework, file, config, is_static) in [
+        (
+            "sveltekit",
+            "svelte.config.js",
+            "import from from '@sveltejs/adapter-static'; export default { kit: { adapter: from() } };",
+            true,
+        ),
+        (
+            "sveltekit",
+            "svelte.config.js",
+            "import module from '@sveltejs/adapter-static'; export default { kit: { adapter: module() } };",
+            true,
+        ),
+        (
+            "sveltekit",
+            "svelte.config.js",
+            "import staticAdapter from '@sveltejs/adapter-static'; import node from '@sveltejs/adapter-node'; export default { kit: { adapter: node() } };",
+            false,
+        ),
+        (
+            "sveltekit",
+            "svelte.config.js",
+            "import staticAdapter from '@sveltejs/adapter-static'; export default { kit: {} };",
+            false,
+        ),
+        (
+            "sveltekit",
+            "svelte.config.js",
+            "import customStatic from '@sveltejs/adapter-static'; export default { kit: { adapter: customStatic() } };",
+            true,
+        ),
+        (
+            "sveltekit",
+            "svelte.config.js",
+            "import { default as customStatic } from '@sveltejs/adapter-static'; export default { kit: { adapter: customStatic() } };",
+            true,
+        ),
+        (
+            "sveltekit",
+            "svelte.config.js",
+            "import adapter from '@sveltejs/adapter-static'; export default { kit: { adapter: flag ? adapter() : node() } };",
+            false,
+        ),
+        (
+            "sveltekit",
+            "svelte.config.js",
+            "import adapter from '@sveltejs/adapter-static'; export default { kit: { adapter: adapter[0] } };",
+            false,
+        ),
+        (
+            "sveltekit",
+            "svelte.config.js",
+            "import adapter from '@sveltejs/adapter-static'; export default { kit: { adapter: adapter() || fallback } };",
+            false,
+        ),
+        (
+            "qwik",
+            "vite.config.ts",
+            "import staticAdapter from '@builder.io/qwik-city/adaptors/static/vite'; import { qwikCity } from '@builder.io/qwik-city/vite'; export default defineConfig({ plugins: [qwikCity()] });",
+            false,
+        ),
+        (
+            "qwik",
+            "vite.config.ts",
+            "import adapter from '@qwik.dev/router/adaptors/static/vite'; export default defineConfig({ plugins: [adapter()] });",
+            true,
+        ),
+        (
+            "qwik",
+            "vite.config.ts",
+            "import { default as adapter } from '@qwik.dev/router/adaptors/static/vite'; export default defineConfig({ plugins: [adapter()] });",
+            true,
+        ),
+        (
+            "qwik",
+            "vite.config.ts",
+            "import adapter from '@qwik.dev/router/adaptors/static/vite'; export default defineConfig({ plugins: [flag ? adapter() : other()] });",
+            false,
+        ),
+        (
+            "qwik",
+            "vite.config.ts",
+            "import adapter from '@qwik.dev/router/adaptors/static/vite'; export default defineConfig({ plugins: [...options, adapter()] });",
+            false,
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(file), config).unwrap();
+        let result = analyze_ssr(&LocalFs::new(dir.path()), framework).unwrap();
+        assert_eq!(result.is_static_compatible, is_static, "config: {config}");
     }
 }
 

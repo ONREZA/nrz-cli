@@ -41,17 +41,13 @@ fn analyze_nextjs(fs: &dyn Fs) -> SsrAnalysis {
     );
 
     if let Some(ref content) = config_content {
-        let stripped = strip_block_comments(content);
-        if contains_value(&stripped, "output", "standalone") {
+        let stripped = strip_comments(content);
+        if config_value(&stripped, &["output"], None) == ConfigValue::String("standalone") {
             features.push("output: 'standalone'".into());
         }
-        if contains_value(&stripped, "output", "export") {
-            if next_static_export_is_env_gated(&stripped) {
-                features.push("output: 'export' (env-gated; ignored)".into());
-            } else {
-                features.push("output: 'export' (static)".into());
-                is_static_compatible = true;
-            }
+        if config_value(&stripped, &["output"], None) == ConfigValue::String("export") {
+            features.push("output: 'export' (static)".into());
+            is_static_compatible = true;
         }
     }
 
@@ -127,19 +123,19 @@ fn analyze_nuxt(fs: &dyn Fs) -> SsrAnalysis {
     let config_content = read_config_file(fs, &["nuxt.config.ts", "nuxt.config.js"]);
 
     if let Some(ref content) = config_content {
-        let stripped = strip_block_comments(content);
+        let stripped = strip_comments(content);
 
-        // ssr: false means static-only
-        if contains_value(&stripped, "ssr", "false") {
+        let ssr = config_value(&stripped, &["ssr"], None);
+        let preset = config_value(&stripped, &["nitro", "preset"], None);
+        if ssr == ConfigValue::Boolean(false) {
             features.push("ssr: false (static)".into());
-            is_static_compatible = true;
         }
-
-        // nitro preset: 'static' — use contains_value for accurate matching
-        if contains_value(&stripped, "preset", "static") {
+        if preset == ConfigValue::String("static") {
             features.push("preset: 'static'".into());
-            is_static_compatible = true;
         }
+        is_static_compatible = ssr != ConfigValue::Unknown
+            && preset != ConfigValue::Unknown
+            && (ssr == ConfigValue::Boolean(false) || preset == ConfigValue::String("static"));
 
         // routeRules with SSR-specific values
         if stripped.contains("routeRules")
@@ -184,19 +180,20 @@ fn analyze_sveltekit(fs: &dyn Fs) -> SsrAnalysis {
     let config_content = read_config_file(fs, &["svelte.config.js", "svelte.config.ts"]);
 
     if let Some(ref content) = config_content {
-        let stripped = strip_block_comments(content);
+        let stripped = strip_comments(content);
 
-        if stripped.contains("adapter-static") {
-            features.push("adapter-static (static)".into());
-            is_static_compatible = true;
-        }
-
-        // adapter-node or adapter-auto require runtime
-        if stripped.contains("adapter-node") {
-            features.push("adapter-node (runtime)".into());
-        }
-        if stripped.contains("adapter-auto") {
-            features.push("adapter-auto (runtime)".into());
+        match config_adapter(&stripped, &["kit", "adapter"]) {
+            Some("@sveltejs/adapter-static") => {
+                features.push("adapter-static (static)".into());
+                is_static_compatible = true;
+            }
+            Some("@sveltejs/adapter-node") => {
+                features.push("adapter-node (runtime)".into());
+            }
+            Some("@sveltejs/adapter-auto") => {
+                features.push("adapter-auto (runtime)".into());
+            }
+            _ => {}
         }
     }
 
@@ -258,18 +255,22 @@ fn analyze_astro(fs: &dyn Fs) -> SsrAnalysis {
     );
 
     if let Some(ref content) = config_content {
-        let stripped = strip_block_comments(content);
+        let stripped = strip_comments(content);
 
-        // output: 'server' — full SSR mode
-        if contains_value(&stripped, "output", "server") {
-            features.push("output: 'server' (SSR)".into());
-            is_static_compatible = false;
-        }
-
-        // output: 'hybrid' — hybrid rendering (some SSR, some static)
-        if contains_value(&stripped, "output", "hybrid") {
-            features.push("output: 'hybrid'".into());
-            is_static_compatible = false;
+        match config_value(&stripped, &["output"], None) {
+            ConfigValue::Absent | ConfigValue::String("static") => {}
+            ConfigValue::String("server") => {
+                features.push("output: 'server' (SSR)".into());
+                is_static_compatible = false;
+            }
+            ConfigValue::String("hybrid") => {
+                features.push("output: 'hybrid'".into());
+                is_static_compatible = false;
+            }
+            ConfigValue::String(_) | ConfigValue::Boolean(_) | ConfigValue::Unknown => {
+                features.push("output: unknown (SSR)".into());
+                is_static_compatible = false;
+            }
         }
 
         // Check for SSR adapter integrations in config
@@ -301,9 +302,9 @@ fn analyze_react_router(fs: &dyn Fs) -> SsrAnalysis {
         read_config_file(fs, &["react-router.config.ts", "react-router.config.js"]);
 
     if let Some(ref content) = config_content {
-        let stripped = strip_block_comments(content);
+        let stripped = strip_comments(content);
 
-        if contains_value(&stripped, "ssr", "false") {
+        if config_value(&stripped, &["ssr"], None) == ConfigValue::Boolean(false) {
             features.push("ssr: false (SPA mode)".into());
             is_static_compatible = true;
         }
@@ -350,10 +351,10 @@ fn analyze_remix(fs: &dyn Fs) -> SsrAnalysis {
     );
 
     if let Some(ref content) = config_content {
-        let stripped = strip_block_comments(content);
+        let stripped = strip_comments(content);
 
         // ssr: false disables server rendering
-        if contains_value(&stripped, "ssr", "false") {
+        if config_value(&stripped, &["ssr"], Some("remix")) == ConfigValue::Boolean(false) {
             features.push("ssr: false (SPA mode)".into());
             is_static_compatible = true;
         }
@@ -363,8 +364,8 @@ fn analyze_remix(fs: &dyn Fs) -> SsrAnalysis {
     if config_content.is_none() {
         let legacy_config = read_config_file(fs, &["remix.config.js"]);
         if let Some(ref content) = legacy_config {
-            let stripped = strip_block_comments(content);
-            if contains_value(&stripped, "ssr", "false") {
+            let stripped = strip_comments(content);
+            if config_value(&stripped, &["ssr"], None) == ConfigValue::Boolean(false) {
                 features.push("ssr: false (legacy remix.config)".into());
                 is_static_compatible = true;
             }
@@ -412,9 +413,9 @@ fn analyze_solidstart(fs: &dyn Fs) -> SsrAnalysis {
     let config_content = read_config_file(fs, &["app.config.ts", "app.config.js"]);
 
     if let Some(ref content) = config_content {
-        let stripped = strip_block_comments(content);
+        let stripped = strip_comments(content);
 
-        if contains_value(&stripped, "ssr", "false") {
+        if config_value(&stripped, &["ssr"], None) == ConfigValue::Boolean(false) {
             features.push("ssr: false (static)".into());
             is_static_compatible = true;
         }
@@ -472,12 +473,10 @@ fn analyze_qwik(fs: &dyn Fs) -> SsrAnalysis {
     );
 
     if let Some(ref content) = config_content {
-        let stripped = strip_block_comments(content);
+        let stripped = strip_comments(content);
 
         // Check for static adapter
-        if stripped.contains("@builder.io/qwik-city/adaptors/static")
-            || stripped.contains("@qwik.dev/router/adaptors/static")
-        {
+        if has_applied_qwik_static_adapter(&stripped) {
             features.push("static adaptor".into());
             is_static_compatible = true;
         }
@@ -527,9 +526,9 @@ fn analyze_analog(fs: &dyn Fs) -> SsrAnalysis {
     );
 
     if let Some(ref content) = config_content {
-        let stripped = strip_block_comments(content);
+        let stripped = strip_comments(content);
 
-        if contains_value(&stripped, "ssr", "false") {
+        if config_value(&stripped, &["ssr"], Some("analog")) == ConfigValue::Boolean(false) {
             features.push("ssr: false (static)".into());
             is_static_compatible = true;
         }
@@ -561,51 +560,34 @@ fn read_config_file(fs: &dyn Fs, candidates: &[&str]) -> Option<String> {
         if let Some(content) = fs.read_file(name) {
             return Some(content);
         }
+        if fs.exists(name) {
+            // An unreadable preferred config is unknown, rather than a missing config.
+            return Some(String::new());
+        }
     }
     None
 }
 
-/// Strip block comments (`/* ... */`) from content, respecting string literals.
-/// Line comments (`//`) are handled separately in `contains_value`/`contains_any_pattern`.
-fn strip_block_comments(content: &str) -> String {
+/// Remove comments without changing quoted text or UTF-8 characters.
+fn strip_comments(content: &str) -> String {
+    let Some(tokens) = config_tokens(content) else {
+        return String::new();
+    };
     let mut result = String::with_capacity(content.len());
-    let bytes = content.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        // Skip string literals (don't interpret /* inside strings)
-        if b == b'\'' || b == b'"' || b == b'`' {
-            let quote = b;
-            result.push(b as char);
-            i += 1;
-            while i < bytes.len() && bytes[i] != quote {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    result.push(bytes[i] as char);
-                    result.push(bytes[i + 1] as char);
-                    i += 2;
-                } else {
-                    result.push(bytes[i] as char);
-                    i += 1;
-                }
-            }
-            if i < bytes.len() {
-                result.push(bytes[i] as char);
-                i += 1;
-            }
-        } else if i + 1 < bytes.len() && b == b'/' && bytes[i + 1] == b'*' {
-            // Block comment — skip until */
-            i += 2;
-            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
-                i += 1;
-            }
-            if i + 1 < bytes.len() {
-                i += 2; // skip */
-            }
+    let mut end = 0;
+    let comment_whitespace = |character: char| {
+        if character.is_whitespace() {
+            character
         } else {
-            result.push(b as char);
-            i += 1;
+            ' '
         }
+    };
+    for token in &tokens {
+        result.extend(content[end..token.start].chars().map(comment_whitespace));
+        result.push_str(token.text);
+        end = token.end;
     }
+    result.extend(content[end..].chars().map(comment_whitespace));
     result
 }
 
@@ -625,233 +607,700 @@ fn dir_has_files(fs: &dyn Fs, subdir: &str) -> bool {
     })
 }
 
-/// Strip `//` inline comment from a line, respecting string literals.
-fn strip_inline_comment(line: &str) -> &str {
-    let bytes = line.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b == b'\'' || b == b'"' || b == b'`' {
-            let quote = b;
-            i += 1;
-            while i < bytes.len() && bytes[i] != quote {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    i += 1;
-                }
-                i += 1;
-            }
-            if i < bytes.len() {
-                i += 1;
-            }
-        } else if i + 1 < bytes.len() && b == b'/' && bytes[i + 1] == b'/' {
-            return &line[..i];
-        } else {
-            i += 1;
-        }
-    }
-    line
+#[derive(Clone, Copy)]
+struct ConfigToken<'a> {
+    text: &'a str,
+    start: usize,
+    end: usize,
 }
 
-/// Simple string check: does the content contain `key: value` (with or without quotes)
-/// anywhere in a non-comment line?
-fn contains_value(content: &str, key: &str, value: &str) -> bool {
-    for line in content.lines() {
-        let trimmed = line.trim_start();
-        // Skip full-line comments
-        if trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with('*') {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConfigValue<'a> {
+    Absent,
+    Boolean(bool),
+    String(&'a str),
+    Unknown,
+}
+
+/// Tokenize the whole file; quoted text is never interpreted as code.
+fn config_tokens(content: &str) -> Option<Vec<ConfigToken<'_>>> {
+    let mut characters = content.char_indices().peekable();
+    let mut tokens = Vec::new();
+    while let Some((start, character)) = characters.next() {
+        if character.is_whitespace() {
             continue;
         }
-        // Strip inline comments (// ...) respecting string literals
-        let line = strip_inline_comment(line);
-        if let Some(idx) = line.find(key) {
-            let after = &line[idx + key.len()..];
-            let after = after.trim_start();
-            if let Some(after) = after.strip_prefix(':') {
-                let after = after.trim();
-                if match_value_token(after, value) {
-                    return true;
-                }
-                // Check for env variable fallback: process.env.X || 'value' / ?? 'value'
-                if let Some(fallback) = find_fallback_value(after)
-                    && match_value_token(fallback, value)
-                {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-/// Check if a value token starts at the given position (quoted or unquoted).
-fn match_value_token(after: &str, value: &str) -> bool {
-    // Match quoted values: 'value', "value", `value`
-    if after.starts_with(&format!("'{value}'"))
-        || after.starts_with(&format!("\"{value}\""))
-        || after.starts_with(&format!("`{value}`"))
-    {
-        return true;
-    }
-    // Match unquoted value with word boundary check
-    if let Some(rest) = after.strip_prefix(value)
-        && (rest.is_empty()
-            || rest.starts_with(',')
-            || rest.starts_with('}')
-            || rest.starts_with(')')
-            || rest.starts_with(';')
-            || rest.starts_with(' ')
-            || rest.starts_with('\t'))
-    {
-        return true;
-    }
-    false
-}
-
-/// Find the fallback value after `||` or `??` operators.
-/// Returns the trimmed text after the operator.
-fn find_fallback_value(text: &str) -> Option<&str> {
-    let expression = strip_balanced_outer_parentheses(property_expression(text));
-    let idx = top_level_fallback_index(expression)? + 2;
-    let after = expression[idx..].trim();
-    if after.is_empty() { None } else { Some(after) }
-}
-
-fn strip_balanced_outer_parentheses(mut text: &str) -> &str {
-    loop {
-        let expression = text.trim();
-        let bytes = expression.as_bytes();
-        if bytes.first() != Some(&b'(') {
-            return expression;
-        }
-
-        let mut quote = None;
-        let mut depth = 0usize;
-        let mut closing = None;
-        let mut index = 0usize;
-        while index < bytes.len() {
-            let byte = bytes[index];
-            if let Some(active_quote) = quote {
-                if byte == b'\\' {
-                    index = index.saturating_add(2);
-                    continue;
-                }
-                if byte == active_quote {
-                    quote = None;
-                }
-            } else {
-                match byte {
-                    b'\'' | b'"' | b'`' => quote = Some(byte),
-                    b'(' => depth += 1,
-                    b')' if depth > 0 => {
-                        depth -= 1;
-                        if depth == 0 {
-                            closing = Some(index);
+        if character == '/' {
+            match characters.peek().map(|(_, character)| *character) {
+                Some('/') => {
+                    characters.next();
+                    for (_, next) in characters.by_ref() {
+                        if matches!(next, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
                             break;
                         }
                     }
-                    _ => {}
+                }
+                Some('*') => {
+                    characters.next();
+                    let mut closed = false;
+                    while let Some((_, next)) = characters.next() {
+                        if next == '*'
+                            && characters
+                                .peek()
+                                .is_some_and(|(_, character)| *character == '/')
+                        {
+                            characters.next();
+                            closed = true;
+                            break;
+                        }
+                    }
+                    if !closed {
+                        return None;
+                    }
+                }
+                _ => return None,
+            }
+            continue;
+        }
+        if matches!(character, '\'' | '"' | '`') {
+            let mut closed = false;
+            while let Some((_, next)) = characters.next() {
+                if next == '\\' {
+                    characters.next()?;
+                } else if next == character {
+                    closed = true;
+                    break;
+                } else if character == '`'
+                    && next == '$'
+                    && characters
+                        .peek()
+                        .is_some_and(|(_, character)| *character == '{')
+                {
+                    // Template interpolation requires JavaScript parsing.
+                    return None;
                 }
             }
-            index += 1;
-        }
-
-        match closing {
-            Some(index) if index + 1 == bytes.len() => {
-                text = &expression[1..index];
+            if !closed {
+                return None;
             }
-            _ => return expression,
+        } else if !"{}[]():,.;=<>?!+-*%&|^~".contains(character) {
+            while characters.peek().is_some_and(|(_, next)| {
+                !next.is_whitespace() && !"{}[]():,.;=<>?!+-*/%&|^~'\"`".contains(*next)
+            }) {
+                characters.next();
+            }
         }
+        let end = characters.peek().map_or(content.len(), |(index, _)| *index);
+        tokens.push(ConfigToken {
+            text: &content[start..end],
+            start,
+            end,
+        });
     }
+    Some(tokens)
 }
 
-fn top_level_fallback_index(text: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let mut quote = None;
-    let mut depth = 0usize;
-    let mut index = 0usize;
-    while index + 1 < bytes.len() {
-        let byte = bytes[index];
-        if let Some(active_quote) = quote {
-            if byte == b'\\' {
-                index = index.saturating_add(2);
-                continue;
+const MAX_CONFIG_NESTING: usize = 128;
+
+fn closing_token(tokens: &[ConfigToken<'_>], start: usize) -> Option<usize> {
+    let mut stack = Vec::new();
+    for (index, token) in tokens.iter().enumerate().skip(start) {
+        match token.text {
+            "(" => stack.push(")"),
+            "[" => stack.push("]"),
+            "{" => stack.push("}"),
+            ")" | "]" | "}" => {
+                if stack.pop() != Some(token.text) {
+                    return None;
+                }
+                if stack.is_empty() {
+                    return Some(index);
+                }
             }
-            if byte == active_quote {
-                quote = None;
-            }
-        } else {
-            match byte {
-                b'\'' | b'"' | b'`' => quote = Some(byte),
-                b'(' | b'[' | b'{' => depth += 1,
-                b')' | b']' | b'}' if depth > 0 => depth -= 1,
-                b'|' if depth == 0 && bytes[index + 1] == b'|' => return Some(index),
-                b'?' if depth == 0 && bytes[index + 1] == b'?' => return Some(index),
-                _ => {}
-            }
+            _ => {}
         }
-        index += 1;
+        if stack.len() > MAX_CONFIG_NESTING {
+            return None;
+        }
     }
     None
 }
 
-fn property_expression(text: &str) -> &str {
-    let bytes = text.as_bytes();
-    let mut quote = None;
-    let mut depth = 0usize;
-    let mut index = 0usize;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        if let Some(active_quote) = quote {
-            if byte == b'\\' {
-                index = index.saturating_add(2);
-                continue;
+fn group_contents<'a, 't>(
+    tokens: &'t [ConfigToken<'a>],
+    opening: &str,
+) -> Option<&'t [ConfigToken<'a>]> {
+    let [first, inner @ .., _] = tokens else {
+        return None;
+    };
+    if first.text != opening {
+        return None;
+    }
+    if closing_token(tokens, 0)? != tokens.len() - 1 {
+        return None;
+    }
+    Some(inner)
+}
+
+fn is_identifier(text: &str) -> bool {
+    let mut characters = text.chars();
+    characters
+        .next()
+        .is_some_and(|first| first.is_alphabetic() || matches!(first, '_' | '$'))
+        && characters.all(|character| character.is_alphanumeric() || matches!(character, '_' | '$'))
+}
+
+fn type_expression_end(tokens: &[ConfigToken<'_>], start: usize, depth: usize) -> Option<usize> {
+    let mut end = type_term_end(tokens, start, depth)?;
+    for _ in 0..tokens.len() {
+        if !tokens
+            .get(end)
+            .is_some_and(|token| matches!(token.text, "|" | "&"))
+        {
+            break;
+        }
+        end = type_term_end(tokens, end + 1, depth)?;
+    }
+    Some(end)
+}
+
+fn type_term_end(tokens: &[ConfigToken<'_>], start: usize, depth: usize) -> Option<usize> {
+    if depth >= MAX_CONFIG_NESTING {
+        return None;
+    }
+    let first = tokens.get(start)?.text;
+    let mut end = if matches!(first, "readonly" | "keyof" | "typeof") {
+        type_term_end(tokens, start + 1, depth + 1)?
+    } else if first == "(" {
+        let end = type_expression_end(tokens, start + 1, depth + 1)?;
+        if tokens.get(end)?.text != ")" {
+            return None;
+        }
+        end + 1
+    } else if first == "[" {
+        type_list_end(tokens, start + 1, "]", depth + 1)?
+    } else if is_identifier(first)
+        || first.chars().all(|character| character.is_ascii_digit())
+        || matches!(first.as_bytes().first(), Some(b'\'' | b'"'))
+    {
+        start + 1
+    } else {
+        return None;
+    };
+    for _ in 0..tokens.len() {
+        match tokens.get(end).map(|token| token.text) {
+            Some(".")
+                if tokens
+                    .get(end + 1)
+                    .is_some_and(|token| is_identifier(token.text)) =>
+            {
+                end += 2
             }
-            if byte == active_quote {
-                quote = None;
+            Some("<") => end = type_list_end(tokens, end + 1, ">", depth + 1)?,
+            Some("[") => {
+                end += 1;
+                if tokens.get(end)?.text != "]" {
+                    end = type_expression_end(tokens, end, depth + 1)?;
+                }
+                if tokens.get(end)?.text != "]" {
+                    return None;
+                }
+                end += 1;
             }
-        } else {
-            match byte {
-                b'\'' | b'"' | b'`' => quote = Some(byte),
-                b'(' | b'[' | b'{' => depth += 1,
-                b')' | b']' | b'}' if depth > 0 => depth -= 1,
-                b',' | b'}' if depth == 0 => return &text[..index],
+            _ => return Some(end),
+        }
+    }
+    None
+}
+
+fn type_list_end(
+    tokens: &[ConfigToken<'_>],
+    start: usize,
+    closing: &str,
+    depth: usize,
+) -> Option<usize> {
+    let mut cursor = tokens.iter().enumerate().skip(start).peekable();
+    if cursor.peek()?.1.text == closing {
+        cursor.next();
+    } else {
+        loop {
+            let start = cursor.peek()?.0;
+            let end = type_expression_end(tokens, start, depth)?;
+            let (_, separator) = cursor.find(|(index, _)| *index == end)?;
+            match separator.text {
+                "," => {}
+                token if token == closing => break,
+                _ => return None,
+            }
+        }
+    }
+    Some(cursor.peek().map_or(tokens.len(), |(index, _)| *index))
+}
+
+fn without_type_assertions<'a, 't>(
+    mut tokens: &'t [ConfigToken<'a>],
+) -> Option<&'t [ConfigToken<'a>]> {
+    for _ in 0..MAX_CONFIG_NESTING {
+        if let Some(inner) = group_contents(tokens, "(") {
+            tokens = inner;
+            continue;
+        }
+        let mut cursor = tokens.iter().enumerate();
+        let mut assertion = None;
+        while let Some((index, token)) = cursor.next() {
+            match token.text {
+                "(" | "[" | "{" => {
+                    let closing = closing_token(tokens, index)?;
+                    cursor.find(|(position, _)| *position == closing)?;
+                }
+                "as" | "satisfies" => {
+                    assertion = Some(index);
+                    break;
+                }
                 _ => {}
             }
         }
-        index += 1;
+        let Some(index) = assertion else {
+            return Some(tokens);
+        };
+        let annotation = &tokens[index + 1..];
+        let mut end = type_expression_end(annotation, 0, 0)?;
+        for _ in 0..annotation.len() {
+            if end >= annotation.len() {
+                break;
+            }
+            if !matches!(annotation[end].text, "as" | "satisfies") {
+                return None;
+            }
+            end = type_expression_end(annotation, end + 1, 0)?;
+        }
+        tokens = &tokens[..index];
     }
-    text
+    None
 }
 
-/// Check if content contains any of the given patterns (non-comment lines only).
-fn contains_any_pattern(content: &str, patterns: &[&str]) -> bool {
-    for line in content.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with('*') {
+fn literal_value<'a>(tokens: &[ConfigToken<'a>]) -> ConfigValue<'a> {
+    let Some(tokens) = without_type_assertions(tokens) else {
+        return ConfigValue::Unknown;
+    };
+    let [token] = tokens else {
+        return ConfigValue::Unknown;
+    };
+    if matches!(token.text, "true" | "false") {
+        return ConfigValue::Boolean(token.text == "true");
+    }
+    if matches!(token.text.as_bytes().first(), Some(b'\'' | b'"' | b'`'))
+        && !token.text.contains('\\')
+    {
+        return ConfigValue::String(&token.text[1..token.text.len() - 1]);
+    }
+    ConfigValue::Unknown
+}
+
+fn object_expression<'a, 't>(tokens: &'t [ConfigToken<'a>]) -> Option<&'t [ConfigToken<'a>]> {
+    let mut tokens = without_type_assertions(tokens)?;
+    if matches!(tokens.first()?.text, "defineConfig" | "defineNuxtConfig") {
+        tokens = without_type_assertions(group_contents(&tokens[1..], "(")?)?;
+    }
+    group_contents(tokens, "{")
+}
+
+fn trusted_import_binding(local: &str, imported: &str, source: &str) -> bool {
+    match local {
+        "defineConfig" => matches!(
+            (imported, source),
+            (
+                "defineConfig",
+                "vite" | "astro/config" | "@solidjs/start/config"
+            )
+        ),
+        "defineNuxtConfig" => matches!((imported, source), ("defineNuxtConfig", "nuxt/config")),
+        "remix" => matches!((imported, source), ("vitePlugin", "@remix-run/dev")),
+        "analog" => matches!((imported, source), ("default", "@analogjs/platform")),
+        "qwikCity" => matches!(
+            (imported, source),
+            ("qwikCity", "@builder.io/qwik-city/vite")
+        ),
+        "qwikRouter" => matches!((imported, source), ("qwikRouter", "@qwik.dev/router/vite")),
+        _ => matches!(
+            (imported, source),
+            (
+                "default",
+                "@sveltejs/adapter-static"
+                    | "@sveltejs/adapter-node"
+                    | "@sveltejs/adapter-auto"
+                    | "@builder.io/qwik-city/adaptors/static/vite"
+                    | "@qwik.dev/router/adaptors/static/vite"
+            )
+        ),
+    }
+}
+
+fn config_import<'a, 't>(
+    tokens: &'t [ConfigToken<'a>],
+    index: usize,
+) -> Option<(&'t [ConfigToken<'a>], &'t ConfigToken<'a>)> {
+    let (_, remaining) = tokens.get(index..)?.split_first()?;
+    if matches!(
+        remaining.first()?.text.as_bytes().first(),
+        Some(b'\'' | b'"')
+    ) {
+        return Some((&[], &remaining[0]));
+    }
+    let from = remaining.windows(2).position(|pair| {
+        matches!(
+            (pair[0].text, pair[1].text.as_bytes().first()),
+            ("from", Some(b'\'' | b'"'))
+        )
+    })?;
+    let (clause, source) = remaining.split_at(from);
+    let [_, source, ..] = source else {
+        return None;
+    };
+    Some((clause, source))
+}
+
+fn verified_imports<'a>(
+    tokens: &[ConfigToken<'a>],
+    names: &[&str],
+) -> Result<Vec<(&'a str, &'a str)>, ()> {
+    let mut bindings = Vec::new();
+    let mut cursor = tokens.iter().enumerate().peekable();
+    while let Some((index, token)) = cursor.next() {
+        if token.text == "import" && cursor.peek().is_some_and(|(_, token)| token.text != "(") {
+            let (clause, source) = config_import(tokens, index).ok_or(())?;
+            let source_module = &source.text[1..source.text.len() - 1];
+            let mut locals = clause.iter().enumerate().peekable();
+            while let Some((local_index, local)) = locals.next() {
+                if !names.contains(&local.text)
+                    || locals.peek().is_some_and(|(_, token)| token.text == "as")
+                {
+                    continue;
+                }
+                let original = if local_index > 0 && clause[local_index - 1].text == "as" {
+                    local_index.checked_sub(2).ok_or(())?
+                } else {
+                    local_index
+                };
+                if clause.first().is_some_and(|token| token.text == "type")
+                    || original > 0 && clause[original - 1].text == "type"
+                {
+                    return Err(());
+                }
+                let imported = if local_index == 0 {
+                    "default"
+                } else {
+                    clause[original].text
+                };
+                if !is_identifier(local.text)
+                    || !trusted_import_binding(local.text, imported, source_module)
+                {
+                    return Err(());
+                }
+                bindings.push((local.text, source_module));
+            }
+            cursor
+                .find(|(_, token)| token.end == source.end)
+                .ok_or(())?;
             continue;
         }
-        let effective = strip_inline_comment(trimmed);
-        for &pattern in patterns {
-            if effective.contains(pattern) {
-                return true;
-            }
+        if names.contains(&token.text) {
+            return Err(());
         }
     }
-    false
+    Ok(bindings)
 }
 
-fn next_static_export_is_env_gated(content: &str) -> bool {
-    if !contains_any_pattern(
-        content,
-        &["process.env", "import.meta.env", "Bun.env", "Deno.env"],
-    ) {
-        return false;
-    }
+fn has_untrusted_reference(tokens: &[ConfigToken<'_>], names: &[&str]) -> bool {
+    verified_imports(tokens, names).is_err()
+}
 
-    let compact: String = content.chars().filter(|c| !c.is_whitespace()).collect();
-    ["'", "\"", "`"]
-        .iter()
-        .any(|quote| compact.contains(&format!("?{{output:{quote}export{quote}")))
+fn exported_object<'a, 't>(
+    tokens: &'t [ConfigToken<'a>],
+) -> Option<(&'t [ConfigToken<'a>], &'t [ConfigToken<'a>])> {
+    let mut exports = Vec::new();
+    let mut cursor = tokens.iter().enumerate();
+    while let Some((index, token)) = cursor.next() {
+        let standalone = index == 0
+            || matches!(tokens[index - 1].text, ";" | "}")
+            || matches!(
+                tokens[index - 1].text.as_bytes().first(),
+                Some(b'\'' | b'"')
+            );
+        if tokens[index].text == "export"
+            && tokens
+                .get(index + 1)
+                .is_some_and(|token| token.text == "default")
+        {
+            if !standalone {
+                return None;
+            }
+            exports.push((index, index + 2));
+        }
+        if let [owner, dot, property, assignment, ..] = &tokens[index..]
+            && matches!(
+                [owner.text, dot.text, property.text, assignment.text],
+                ["module", ".", "exports", "="]
+            )
+        {
+            if !standalone {
+                return None;
+            }
+            exports.push((index, index + 4));
+        }
+        if matches!(token.text, "(" | "[" | "{") {
+            let closing = closing_token(tokens, index)?;
+            cursor.find(|(position, _)| *position == closing)?;
+        }
+    }
+    let module_references = tokens
+        .windows(3)
+        .filter(|sequence| {
+            matches!(
+                [sequence[0].text, sequence[1].text, sequence[2].text],
+                ["module", ".", "exports"]
+            )
+        })
+        .count();
+    if exports.len() != 1 || module_references > 1 {
+        return None;
+    }
+    let (marker, start) = exports[0];
+    let prefix = &tokens[..marker];
+    let commonjs = tokens[marker].text == "module";
+    let protected = if commonjs {
+        &["defineConfig", "defineNuxtConfig", "module"][..]
+    } else {
+        &["defineConfig", "defineNuxtConfig"][..]
+    };
+    let imports = verified_imports(prefix, protected).ok()?;
+    if commonjs && imports.iter().any(|(local, _)| *local == "module") {
+        return None;
+    }
+    let mut expression = &tokens[start..];
+    for _ in 0..expression.len() {
+        if expression.last().is_none_or(|token| token.text != ";") {
+            break;
+        }
+        expression = &expression[..expression.len() - 1];
+    }
+    // ponytail: no JS execution; unresolved configs or nesting above 128 require SSR.
+    Some((object_expression(expression)?, prefix))
+}
+
+fn object_property<'a, 't>(
+    tokens: &'t [ConfigToken<'a>],
+    key: &str,
+) -> Result<Option<&'t [ConfigToken<'a>]>, ()> {
+    let mut found = None;
+    let mut index = 0;
+    for _ in 0..tokens.len() {
+        if index >= tokens.len() {
+            break;
+        }
+        let token = tokens[index];
+        if token.text == "[" || token.text.contains('\\') {
+            return Err(());
+        }
+        let name = if matches!(token.text.as_bytes().first(), Some(b'\'' | b'"')) {
+            &token.text[1..token.text.len() - 1]
+        } else if is_identifier(token.text)
+            || token
+                .text
+                .chars()
+                .all(|character| character.is_ascii_digit())
+        {
+            token.text
+        } else {
+            return Err(());
+        };
+        index += 1;
+        let has_colon = tokens.get(index).is_some_and(|token| token.text == ":");
+        let value_start = if has_colon {
+            index += 1;
+            index
+        } else if index == tokens.len() || tokens[index].text == "," {
+            if name == key {
+                return Err(());
+            }
+            index
+        } else {
+            return Err(());
+        };
+        for _ in 0..tokens.len() {
+            if index >= tokens.len() || tokens[index].text == "," {
+                break;
+            }
+            match tokens[index].text {
+                "(" | "[" | "{" => index = closing_token(tokens, index).ok_or(())? + 1,
+                ")" | "]" | "}" | ";" => return Err(()),
+                _ => index += 1,
+            }
+        }
+        if has_colon && value_start == index {
+            return Err(());
+        }
+        if name == key {
+            if found.is_some() || value_start == index {
+                return Err(());
+            }
+            found = Some(&tokens[value_start..index]);
+        }
+        if tokens.get(index).is_none() {
+            break;
+        }
+        index += 1;
+    }
+    Ok(found)
+}
+
+fn array_expressions<'a, 't>(tokens: &'t [ConfigToken<'a>]) -> Option<Vec<&'t [ConfigToken<'a>]>> {
+    let tokens = without_type_assertions(tokens)?;
+    let inner = group_contents(tokens, "[")?;
+    let mut expressions = Vec::new();
+    let mut start = 0;
+    let mut cursor = inner.iter().enumerate();
+    while let Some((index, token)) = cursor.next() {
+        match token.text {
+            "." if index == start => return None,
+            "(" | "[" | "{" => {
+                let closing = closing_token(inner, index)?;
+                cursor.find(|(position, _)| *position == closing)?;
+            }
+            "," => {
+                if start == index {
+                    return None;
+                }
+                expressions.push(&inner[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    let tail = &inner[start..];
+    if !tail.is_empty() {
+        expressions.push(tail);
+    }
+    Some(expressions)
+}
+
+fn call_expression<'a, 't>(
+    tokens: &'t [ConfigToken<'a>],
+) -> Option<(&'a str, &'t [ConfigToken<'a>])> {
+    let tokens = without_type_assertions(tokens)?;
+    let (callee, arguments) = tokens.split_first()?;
+    Some((callee.text, group_contents(arguments, "(")?))
+}
+
+fn imported_call<'a>(tokens: &[ConfigToken<'a>], prefix: &[ConfigToken<'a>]) -> Option<&'a str> {
+    let (callee, _) = call_expression(tokens)?;
+    let imports = verified_imports(prefix, &[callee]).ok()?;
+    let [(_, source)] = imports.as_slice() else {
+        return None;
+    };
+    Some(source)
+}
+
+fn object_path<'a, 't>(
+    mut object: &'t [ConfigToken<'a>],
+    path: &[&str],
+) -> Result<Option<&'t [ConfigToken<'a>]>, ()> {
+    for (index, key) in path.iter().enumerate() {
+        let Some(value) = object_property(object, key)? else {
+            return Ok(None);
+        };
+        if index + 1 == path.len() {
+            return Ok(Some(value));
+        }
+        object = object_expression(value).ok_or(())?;
+    }
+    Err(())
+}
+
+fn config_adapter<'a>(content: &'a str, path: &[&str]) -> Option<&'a str> {
+    let tokens = config_tokens(content)?;
+    let (object, prefix) = exported_object(&tokens)?;
+    imported_call(object_path(object, path).ok()??, prefix)
+}
+
+fn has_applied_qwik_static_adapter(content: &str) -> bool {
+    let Some(tokens) = config_tokens(content) else {
+        return false;
+    };
+    let Some((object, prefix)) = exported_object(&tokens) else {
+        return false;
+    };
+    let Ok(Some(plugins)) = object_property(object, "plugins") else {
+        return false;
+    };
+    let Some(plugins) = array_expressions(plugins) else {
+        return false;
+    };
+    let mut found = false;
+    for plugin in plugins {
+        match imported_call(plugin, prefix) {
+            Some(
+                "@builder.io/qwik-city/adaptors/static/vite"
+                | "@qwik.dev/router/adaptors/static/vite",
+            ) => {
+                if found {
+                    return false;
+                }
+                found = true;
+            }
+            Some("@builder.io/qwik-city/vite" | "@qwik.dev/router/vite") => {}
+            _ => return false,
+        }
+    }
+    found
+}
+
+fn config_value<'a>(content: &'a str, path: &[&str], plugin: Option<&str>) -> ConfigValue<'a> {
+    let Some(tokens) = config_tokens(content) else {
+        return ConfigValue::Unknown;
+    };
+    let Some((mut object, prefix)) = exported_object(&tokens) else {
+        return ConfigValue::Unknown;
+    };
+    if let Some(plugin) = plugin {
+        if has_untrusted_reference(prefix, &[plugin]) {
+            return ConfigValue::Unknown;
+        }
+        let Ok(Some(plugins)) = object_property(object, "plugins") else {
+            return ConfigValue::Unknown;
+        };
+        let Some(plugins) = array_expressions(plugins) else {
+            return ConfigValue::Unknown;
+        };
+        let mut found = None;
+        for expression in plugins {
+            if expression.first().is_some_and(|token| token.text == plugin) {
+                if found.is_some() {
+                    return ConfigValue::Unknown;
+                }
+                let Some((_, arguments)) = call_expression(expression) else {
+                    return ConfigValue::Unknown;
+                };
+                let Some(config) = object_expression(arguments) else {
+                    return ConfigValue::Unknown;
+                };
+                found = Some(config);
+            }
+        }
+        let Some(config) = found else {
+            return ConfigValue::Absent;
+        };
+        object = config;
+    }
+    match object_path(object, path) {
+        Ok(Some(value)) => literal_value(value),
+        Ok(None) => ConfigValue::Absent,
+        Err(()) => ConfigValue::Unknown,
+    }
+}
+
+fn contains_any_pattern(content: &str, patterns: &[&str]) -> bool {
+    patterns.iter().any(|pattern| content.contains(pattern))
 }
 
 fn next_app_walk_for_content(fs: &dyn Fs, needle: &str) -> bool {

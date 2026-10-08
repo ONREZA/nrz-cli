@@ -121,3 +121,51 @@ fn expect_code(err: &anyhow::Error, expected: &str) {
         "wrong code in chain for error: {err:#}"
     );
 }
+
+fn runtime_artifact_source_bundle(
+    artifact: &crate::artifact::RuntimeArtifact,
+) -> source_bundle_v1::SourceBundlePlan {
+    let files = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    source_bundle_v1::build_source_bundle_plan_with_scan(
+        &artifact.root_dir,
+        &artifact.manifest,
+        &files,
+        &artifact.scan,
+        source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap()
+}
+
+fn project_root_runtime_artifact(
+    project: &Path,
+    manifest: build_manifest::Manifest,
+    detection: &crate::detect::types::DetectionResult,
+) -> crate::artifact::RuntimeArtifact {
+    resolve_runtime_artifact(
+        project,
+        project,
+        project.to_owned(),
+        manifest,
+        detection,
+        true,
+    )
+    .unwrap()
+}
+
+fn assert_dependency_owner(dependency: &source_bundle_v1::SourceLogicalManifestFile, owner: &str) {
+    assert_eq!(
+        dependency.role,
+        source_bundle_v1::SourceLogicalManifestFileRole::Dependency
+    );
+    assert_eq!(dependency.layer_name.as_deref(), Some(owner));
+}
+
+fn runtime_source_bundle_with_checked_entrypoints(
+    artifact: &crate::artifact::RuntimeArtifact,
+) -> source_bundle_v1::SourceBundlePlan {
+    let source = runtime_artifact_source_bundle(artifact);
+    let logical = crate::test_support::validated_source_bundle_manifest(&source);
+    crate::test_support::assert_compute_layer_entrypoints(&logical);
+    source
+}

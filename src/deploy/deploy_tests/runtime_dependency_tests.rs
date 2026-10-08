@@ -82,16 +82,7 @@ async fn mixed_python_javascript_published_bundle_keeps_actual_dependency_roots(
                 true,
             )
             .unwrap();
-            let files = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
-            let source = source_bundle_v1::build_source_bundle_plan_with_scan(
-                &artifact.root_dir,
-                &artifact.manifest,
-                &files,
-                &artifact.scan,
-                source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
-                None,
-            )
-            .unwrap();
+            let source = runtime_artifact_source_bundle(&artifact);
             let dependency_path = relative_runtime_artifact_path(
                 &artifact.root_dir,
                 &dependencies.join("demo/index.js"),
@@ -119,37 +110,8 @@ async fn mixed_python_javascript_published_bundle_keeps_actual_dependency_roots(
                 source_bundle_v1::SourceLogicalManifestFileRole::Static
             );
             assert_eq!(html.layer_name.as_deref(), Some("public"));
-            let logical: nrz_source_bundle::SourceLogicalManifest =
-                serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap())
-                    .unwrap();
-            nrz_runtime_artifact::validate_source_bundle_application_graph(
-                &source.logical_manifest_sha256,
-                &source.source_sha256,
-                source.source_size_bytes,
-                &logical,
-            )
-            .unwrap();
-            let owner = uuid::Uuid::nil().to_string();
-            nrz_source_bundle::verify_source_bundle_bytes(
-                nrz_source_bundle::SourceBundleVerificationInput {
-                    owner_workspace_id: owner.clone(),
-                    source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-                        &owner,
-                        &source.logical_manifest_sha256,
-                        &source.source_sha256,
-                        None,
-                    ),
-                    source_sha256: source.source_sha256.clone(),
-                    logical_manifest_sha256: source.logical_manifest_sha256.clone(),
-                    budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(
-                        &logical,
-                    )
-                    .unwrap(),
-                },
-                fs::read(source.source_path()).unwrap().into(),
-            )
-            .await
-            .unwrap();
+            let logical = crate::test_support::validated_source_bundle_manifest(&source);
+            crate::test_support::assert_source_bundle_verified(&source, &logical).await;
             let entry = logical
                 .layers
                 .iter()
@@ -158,11 +120,7 @@ async fn mixed_python_javascript_published_bundle_keeps_actual_dependency_roots(
                 .entrypoint
                 .as_deref()
                 .unwrap();
-            let unpacked = tempdir().unwrap();
-            let decoder =
-                zstd::stream::read::Decoder::new(fs::File::open(source.source_path()).unwrap())
-                    .unwrap();
-            tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+            let unpacked = crate::test_support::unpack_source_bundle(&source);
             if dependency_directory == "apps/site/dist/api/node_modules" {
                 fs::create_dir_all(project.join("dist/extra")).unwrap();
                 fs::write(
@@ -344,18 +302,8 @@ async fn relocated_python_dependencies_keep_frozen_primary_owner() {
                                 .unwrap();
                             assert_eq!(file.layer_name.as_deref(), Some(owner));
                         }
-                        let logical: nrz_source_bundle::SourceLogicalManifest =
-                            serde_json::from_value(
-                                serde_json::to_value(&source.logical_manifest).unwrap(),
-                            )
-                            .unwrap();
-                        nrz_runtime_artifact::validate_source_bundle_application_graph(
-                            &source.logical_manifest_sha256,
-                            &source.source_sha256,
-                            source.source_size_bytes,
-                            &logical,
-                        )
-                        .unwrap();
+                        let logical =
+                            crate::test_support::validated_source_bundle_manifest(&source);
                         for layer in logical
                             .layers
                             .iter()
@@ -379,36 +327,8 @@ async fn relocated_python_dependencies_keep_frozen_primary_owner() {
                             .unwrap();
                             assert_eq!(Some(entry.as_str()), layer.entrypoint.as_deref());
                         }
-                        let owner = uuid::Uuid::nil().to_string();
-                        nrz_source_bundle::verify_source_bundle_bytes(
-                    nrz_source_bundle::SourceBundleVerificationInput {
-                        owner_workspace_id: owner.clone(),
-                        source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-                            &owner,
-                            &source.logical_manifest_sha256,
-                            &source.source_sha256,
-                            None,
-                        ),
-                        source_sha256: source.source_sha256.clone(),
-                        logical_manifest_sha256: source.logical_manifest_sha256.clone(),
-                        budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(
-                            &logical,
-                        )
-                        .unwrap(),
-                    },
-                    fs::read(source.source_path()).unwrap().into(),
-                )
-                .await
-                .unwrap();
-                        let unpacked = tempdir().unwrap();
-                        tar::Archive::new(
-                            zstd::stream::read::Decoder::new(
-                                fs::File::open(source.source_path()).unwrap(),
-                            )
-                            .unwrap(),
-                        )
-                        .unpack(unpacked.path())
-                        .unwrap();
+                        crate::test_support::assert_source_bundle_verified(&source, &logical).await;
+                        let unpacked = crate::test_support::unpack_source_bundle(&source);
                         fs::remove_dir_all(project.path()).unwrap();
                         let output = assert_cmd::Command::new("python3")
                             .arg(&api_entry)
@@ -652,40 +572,9 @@ async fn assert_workspace_python_state_boundary(bootstrap: bool, package_metadat
         node.role,
         source_bundle_v1::SourceLogicalManifestFileRole::Dependency
     );
-    let logical: nrz_source_bundle::SourceLogicalManifest =
-        serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap()).unwrap();
-    nrz_runtime_artifact::validate_source_bundle_application_graph(
-        &source.logical_manifest_sha256,
-        &source.source_sha256,
-        source.source_size_bytes,
-        &logical,
-    )
-    .unwrap();
-    let owner = uuid::Uuid::nil().to_string();
-    nrz_source_bundle::verify_source_bundle_bytes(
-        nrz_source_bundle::SourceBundleVerificationInput {
-            owner_workspace_id: owner.clone(),
-            source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-                &owner,
-                &source.logical_manifest_sha256,
-                &source.source_sha256,
-                None,
-            ),
-            source_sha256: source.source_sha256.clone(),
-            logical_manifest_sha256: source.logical_manifest_sha256.clone(),
-            budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical)
-                .unwrap(),
-        },
-        fs::read(source.source_path()).unwrap().into(),
-    )
-    .await
-    .unwrap();
-    let unpacked = tempdir().unwrap();
-    tar::Archive::new(
-        zstd::stream::read::Decoder::new(fs::File::open(source.source_path()).unwrap()).unwrap(),
-    )
-    .unpack(unpacked.path())
-    .unwrap();
+    let logical = crate::test_support::validated_source_bundle_manifest(&source);
+    crate::test_support::assert_source_bundle_verified(&source, &logical).await;
+    let unpacked = crate::test_support::unpack_source_bundle(&source);
     assert_eq!(
         fs::read_to_string(
             unpacked

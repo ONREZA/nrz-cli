@@ -36,7 +36,6 @@ struct RuntimeDeploy {
     server: Option<String>,
 }
 
-#[allow(dead_code)] // Public library API; the CLI uses resolve_and_bind_detection.
 pub fn resolve_application_runtime(
     fs: &dyn Fs,
     framework: &str,
@@ -61,8 +60,8 @@ fn read_runtime_config(fs: &dyn Fs) -> anyhow::Result<RuntimeDeploy> {
     })
 }
 
-#[allow(dead_code)] // Shared detect module is also compiled by the public library.
-pub(crate) fn resolve_and_bind_detection(
+/// Read authored source build and launch intent and bind it to detection metadata.
+pub fn resolve_and_bind_detection(
     fs: &dyn Fs,
     detection: &mut super::types::DetectionResult,
 ) -> anyhow::Result<()> {
@@ -83,7 +82,6 @@ pub(crate) fn resolve_and_bind_detection(
 }
 
 /// Bind frozen launch intent to fresh framework/build-output inference.
-#[allow(dead_code)] // CLI-only binding; keep it out of the public library API.
 pub(crate) fn bind_application_runtime(
     fs: &dyn Fs,
     detection: &mut super::types::DetectionResult,
@@ -121,17 +119,7 @@ pub(crate) fn bind_application_runtime(
                 detection.suggested_compute = super::types::ComputeType::Process;
                 detection.metadata.runtime.runtime_type = super::types::RuntimeType::Python;
                 detection.metadata.runtime.version = Some(minor.version().into());
-                if detection
-                    .metadata
-                    .package_manager
-                    .as_ref()
-                    .is_some_and(|manager| manager.pm_type == super::types::PackageManagerType::Pip)
-                    && let Some(build) = detection.metadata.build_info.as_mut()
-                    && let Some(manifest) = super::python::dependency_manifest(fs)
-                {
-                    build.install_command =
-                        Some(super::python::install_command_for_minor(manifest, minor));
-                }
+                bind_python_install_command(fs, detection, minor);
             }
             ApplicationRuntimeFamily::Executable => {
                 detection.suggested_compute = super::types::ComputeType::Process;
@@ -153,7 +141,6 @@ pub(crate) fn bind_application_runtime(
     Ok(())
 }
 
-#[allow(dead_code)] // Retained public library API; the CLI uses the complete project declaration.
 pub fn resolve_application_runtime_with_config(
     fs: &dyn Fs,
     framework: &str,
@@ -340,10 +327,8 @@ fn validate_python_runtime_family(
     Ok(())
 }
 
-pub(crate) fn validate_framework(
-    framework: &str,
-    family: ApplicationRuntimeFamily,
-) -> anyhow::Result<()> {
+/// Reject launch runtime families incompatible with a framework's serving contract.
+pub fn validate_framework(framework: &str, family: ApplicationRuntimeFamily) -> anyhow::Result<()> {
     let python = super::python::is_python_framework(framework);
     let native = matches!(
         super::native::native_recipe(framework),
@@ -610,7 +595,8 @@ pub(crate) fn resolve_serving_python_minor(
     ))
 }
 
-pub(crate) fn resolve_and_bind_source_build_context(
+/// Resolve compiler and launch declarations before the build and freeze their selection.
+pub fn resolve_and_bind_source_build_context(
     fs: &dyn Fs,
     detection: &mut super::types::DetectionResult,
     config: &crate::config::ProjectConfig,
@@ -657,7 +643,7 @@ pub(crate) fn resolve_and_bind_source_build_context(
 
 /// Keep frozen source intent while refreshing build output inference. Generated
 /// package metadata cannot replace the pre-build serving or compiler selection.
-pub(crate) fn bind_source_build_context(
+pub fn bind_source_build_context(
     fs: &dyn Fs,
     detection: &mut super::types::DetectionResult,
     context: &SourceBuildContext,
@@ -704,27 +690,32 @@ pub(crate) fn bind_source_build_context(
             detection.metadata.runtime.runtime_type = super::types::RuntimeType::Python;
             detection.metadata.runtime.version = Some(minor.version().into());
         }
-        if detection
-            .metadata
-            .package_manager
-            .as_ref()
-            .is_some_and(|manager| manager.pm_type == super::types::PackageManagerType::Pip)
-            && let Some(build) = detection.metadata.build_info.as_mut()
-            && let Some(manifest) = super::python::dependency_manifest(fs)
-        {
-            build.install_command = Some(super::python::install_command_for_minor(manifest, minor));
-        }
+        bind_python_install_command(fs, detection, minor);
     }
     detection.metadata.source_build_context = Some(context.clone());
     Ok(())
 }
 
+fn bind_python_install_command(
+    fs: &dyn Fs,
+    detection: &mut super::types::DetectionResult,
+    minor: nrz_source_bundle::PythonMinor,
+) {
+    if detection
+        .metadata
+        .package_manager
+        .as_ref()
+        .is_some_and(|manager| manager.pm_type == super::types::PackageManagerType::Pip)
+        && let Some(build) = detection.metadata.build_info.as_mut()
+        && let Some(manifest) = super::python::dependency_manifest(fs)
+    {
+        build.install_command = Some(super::python::install_command_for_minor(manifest, minor));
+    }
+}
+
 /// Generic language evidence describes a build recipe. Authored framework presets
 /// retain their launch contract; an authored converter can replace an inferred preset.
-pub(crate) fn serving_framework<'a>(
-    config: &crate::config::ProjectConfig,
-    detected: &'a str,
-) -> &'a str {
+pub fn serving_framework<'a>(config: &crate::config::ProjectConfig, detected: &'a str) -> &'a str {
     let selected_runtime = config.deploy.selected_runtime_family();
     let converter = config
         .build

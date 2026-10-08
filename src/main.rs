@@ -2,6 +2,9 @@ mod api;
 mod artifact;
 mod auth;
 mod build;
+mod cache;
+#[cfg(test)]
+mod cache_tests;
 mod cli;
 mod context;
 #[cfg(test)]
@@ -10,7 +13,6 @@ mod deploy;
 mod deployments;
 #[cfg(test)]
 mod deployments_tests;
-mod detect;
 mod detect_sync;
 #[cfg(test)]
 mod detect_sync_tests;
@@ -49,6 +51,7 @@ use std::path::{Path, PathBuf};
 use clap::Parser;
 use cli::{Cli, Command};
 use nrz::config::{self, ProjectConfig};
+use nrz::detect;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]

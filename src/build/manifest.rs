@@ -579,6 +579,19 @@ fn validate_route_fallthrough_condition(
     Ok(())
 }
 
+fn terminal_catch_all_route(layer: &str) -> Route {
+    Route {
+        pattern: "^/.*$".to_string(),
+        layer: layer.to_string(),
+        priority: Some(0),
+        revalidate: None,
+        methods: None,
+        headers: None,
+        fallthrough: None,
+        fallthrough_when: None,
+    }
+}
+
 /// Auto-generate a minimal STATIC manifest for plain static deploys.
 pub fn generate_static_manifest() -> Manifest {
     Manifest {
@@ -591,16 +604,7 @@ pub fn generate_static_manifest() -> Manifest {
             export_format: None,
             runtime: None,
         }],
-        routes: vec![Route {
-            pattern: "^/.*$".to_string(),
-            layer: "site".to_string(),
-            priority: Some(0),
-            revalidate: None,
-            methods: None,
-            headers: None,
-            fallthrough: None,
-            fallthrough_when: None,
-        }],
+        routes: vec![terminal_catch_all_route("site")],
         prerender: None,
         middleware: None,
         edge_rules: None,
@@ -621,16 +625,7 @@ pub fn generate_compute_manifest(entry: &str) -> Manifest {
             export_format: None,
             runtime: None,
         }],
-        routes: vec![Route {
-            pattern: "^/.*$".to_string(),
-            layer: "server".to_string(),
-            priority: Some(0),
-            revalidate: None,
-            methods: None,
-            headers: None,
-            fallthrough: None,
-            fallthrough_when: None,
-        }],
+        routes: vec![terminal_catch_all_route("server")],
         prerender: None,
         middleware: None,
         edge_rules: None,
@@ -709,16 +704,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         });
     }
 
-    routes.push(Route {
-        pattern: "^/.*$".to_string(),
-        layer: "server".to_string(),
-        priority: Some(0),
-        revalidate: None,
-        methods: None,
-        headers: None,
-        fallthrough: None,
-        fallthrough_when: None,
-    });
+    routes.push(terminal_catch_all_route("server"));
 
     Manifest {
         version: 1,
@@ -815,16 +801,7 @@ pub fn generate_nextjs_adapter_manifest_for_server(
         export_format: None,
         runtime: None,
     });
-    routes.push(Route {
-        pattern: "^/.*$".to_string(),
-        layer: "server".to_string(),
-        priority: Some(0),
-        revalidate: None,
-        methods: None,
-        headers: None,
-        fallthrough: None,
-        fallthrough_when: None,
-    });
+    routes.push(terminal_catch_all_route("server"));
 
     Manifest {
         version: 1,
@@ -958,16 +935,7 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
         export_format: None,
         runtime: None,
     });
-    routes.push(Route {
-        pattern: "^/.*$".to_string(),
-        layer: "server".to_string(),
-        priority: Some(0),
-        revalidate: None,
-        methods: None,
-        headers: None,
-        fallthrough: None,
-        fallthrough_when: None,
-    });
+    routes.push(terminal_catch_all_route("server"));
 
     Manifest {
         version: 1,

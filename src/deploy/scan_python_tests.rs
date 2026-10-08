@@ -221,25 +221,7 @@ async fn assert_python_scan_archive(
     .unwrap();
     let logical: nrz_source_bundle::SourceLogicalManifest =
         serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap()).unwrap();
-    let owner = uuid::Uuid::nil().to_string();
-    nrz_source_bundle::verify_source_bundle_bytes(
-        nrz_source_bundle::SourceBundleVerificationInput {
-            owner_workspace_id: owner.clone(),
-            source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-                &owner,
-                &source.logical_manifest_sha256,
-                &source.source_sha256,
-                None,
-            ),
-            source_sha256: source.source_sha256.clone(),
-            logical_manifest_sha256: source.logical_manifest_sha256.clone(),
-            budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical)
-                .unwrap(),
-        },
-        std::fs::read(source.source_path()).unwrap().into(),
-    )
-    .await
-    .unwrap();
+    crate::test_support::assert_source_bundle_verified(&source, &logical).await;
     nrz_runtime_artifact::validate_source_bundle_application_graph(
         &source.logical_manifest_sha256,
         &source.source_sha256,

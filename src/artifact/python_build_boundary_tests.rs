@@ -204,44 +204,9 @@ async fn published_build_python_dependencies_follow_serving_owner() {
                 );
                 assert_eq!(node.layer_name.as_deref(), Some("server"));
             }
-            let logical: nrz_source_bundle::SourceLogicalManifest =
-                serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap())
-                    .unwrap();
-            nrz_runtime_artifact::validate_source_bundle_application_graph(
-                &source.logical_manifest_sha256,
-                &source.source_sha256,
-                source.source_size_bytes,
-                &logical,
-            )
-            .unwrap();
-            let owner = uuid::Uuid::nil().to_string();
-            nrz_source_bundle::verify_source_bundle_bytes(
-                nrz_source_bundle::SourceBundleVerificationInput {
-                    owner_workspace_id: owner.clone(),
-                    source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-                        &owner,
-                        &source.logical_manifest_sha256,
-                        &source.source_sha256,
-                        None,
-                    ),
-                    source_sha256: source.source_sha256.clone(),
-                    logical_manifest_sha256: source.logical_manifest_sha256.clone(),
-                    budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(
-                        &logical,
-                    )
-                    .unwrap(),
-                },
-                fs::read(source.source_path()).unwrap().into(),
-            )
-            .await
-            .unwrap();
-            let unpacked = tempdir().unwrap();
-            tar::Archive::new(
-                zstd::stream::read::Decoder::new(fs::File::open(source.source_path()).unwrap())
-                    .unwrap(),
-            )
-            .unpack(unpacked.path())
-            .unwrap();
+            let logical = crate::test_support::validated_source_bundle_manifest(&source);
+            crate::test_support::assert_source_bundle_verified(&source, &logical).await;
+            let unpacked = crate::test_support::unpack_source_bundle(&source);
             assert_eq!(
                 fs::read_to_string(unpacked.path().join(&asset_path)).unwrap(),
                 "AUTHORED_OUTPUT_ASSET"

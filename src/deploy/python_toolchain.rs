@@ -95,7 +95,8 @@ pub(super) struct UvArtifact {
 
 pub(super) async fn resolve() -> anyhow::Result<PathBuf> {
     let artifact = artifact_for(std::env::consts::OS, std::env::consts::ARCH)?;
-    let cached_path = default_cache_root()?
+    let cached_path = crate::cache::default_root()
+        .context("HOME or USERPROFILE is required to locate the nrz Python toolchain cache")?
         .join("nrz")
         .join("python-tools")
         .join("uv")
@@ -1194,28 +1195,6 @@ async fn install_binary(path: &Path, bytes: &[u8], artifact: UvArtifact) -> anyh
         }
     }
     Ok(())
-}
-
-fn default_cache_root() -> anyhow::Result<PathBuf> {
-    #[cfg(windows)]
-    if let Some(path) = std::env::var_os("LOCALAPPDATA") {
-        return Ok(PathBuf::from(path));
-    }
-
-    #[cfg(target_os = "macos")]
-    if let Some(home) = std::env::var_os("HOME") {
-        return Ok(PathBuf::from(home).join("Library").join("Caches"));
-    }
-
-    #[cfg(not(windows))]
-    if let Some(path) = std::env::var_os("XDG_CACHE_HOME") {
-        return Ok(PathBuf::from(path));
-    }
-
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .context("HOME or USERPROFILE is required to locate the nrz Python toolchain cache")?;
-    Ok(PathBuf::from(home).join(".cache"))
 }
 
 async fn sha256_file(path: &Path) -> anyhow::Result<String> {

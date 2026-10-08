@@ -1,5 +1,18 @@
 use super::*;
 
+fn manifest_with_python_sibling(
+    family: &str,
+    entry: &str,
+    target: &str,
+) -> build_manifest::Manifest {
+    serde_json::from_value(serde_json::json!({
+        "version":1, "routes":[{"pattern":"^/.*$", "layer":"api"}], "layers":[
+            {"name":"api","target":"COMPUTE","directory":".","entry":entry,"runtime":{"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":target}},
+            {"name":"side","target":"COMPUTE","directory":"side","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}}
+        ]
+    })).unwrap()
+}
+
 #[test]
 fn bun_process_archive_resolves_dynamic_and_transitive_dependencies_offline() {
     let dir = tempdir().unwrap();
@@ -344,10 +357,7 @@ fn python_published_staged_dependencies_keep_assets_named_like_project_build_out
             source_bundle_v1::SourceLogicalManifestFileRole::Dependency
         );
     }
-    let unpacked = tempdir().unwrap();
-    let decoder =
-        zstd::stream::read::Decoder::new(fs::File::open(source.source_path()).unwrap()).unwrap();
-    tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+    let unpacked = crate::test_support::unpack_source_bundle(&source);
     fs::remove_dir_all(project.path()).unwrap();
     let output = std::process::Command::new("python3")
         .args(["-S", "main.py"])
@@ -1078,69 +1088,16 @@ fn mixed_python_minors_keep_dependencies_with_their_declared_owner() {
         },
         application_runtime: None,
     });
-    let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version":1, "routes":[{"pattern":"^/.*$", "layer":"api"}], "layers":[
-            {"name":"api","target":"COMPUTE","directory":".","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}},
-            {"name":"side","target":"COMPUTE","directory":"side","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}}
-        ]
-    })).unwrap();
-    let artifact = resolve_runtime_artifact(
-        project.path(),
-        project.path(),
-        project.path().to_owned(),
-        manifest,
-        &detection,
-        true,
-    )
-    .unwrap();
-    let files = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
-    let source = source_bundle_v1::build_source_bundle_plan_with_scan(
-        &artifact.root_dir,
-        &artifact.manifest,
-        &files,
-        &artifact.scan,
-        source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
-        None,
-    )
-    .unwrap();
-    let logical: nrz_source_bundle::SourceLogicalManifest =
-        serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap()).unwrap();
-    nrz_runtime_artifact::validate_source_bundle_application_graph(
-        &source.logical_manifest_sha256,
-        &source.source_sha256,
-        source.source_size_bytes,
-        &logical,
-    )
-    .unwrap();
-    for layer in logical
-        .layers
-        .iter()
-        .filter(|layer| layer.target == "COMPUTE")
-    {
-        let file = logical
-            .files
-            .iter()
-            .find(|file| Some(file.path.as_str()) == layer.entrypoint.as_deref())
-            .unwrap();
-        assert_eq!(file.role, "compute");
-        assert_eq!(file.layer_name.as_deref(), Some(layer.name.as_str()));
-        let target = layer.runtime_config.as_ref().unwrap()["buildRuntimeVersion"]
-            .as_str()
-            .unwrap();
-        nrz_runtime_artifact::compile_source_runtime_layer_for_target(layer, &[], Some(target))
-            .unwrap();
-    }
+    let manifest = manifest_with_python_sibling("PYTHON", "main.py", "python-3.14");
+    let artifact = project_root_runtime_artifact(project.path(), manifest, &detection);
+    let source = runtime_source_bundle_with_checked_entrypoints(&artifact);
     let dependency = source
         .logical_manifest
         .files
         .iter()
         .find(|file| file.path.ends_with("site-packages/demo.py"))
         .unwrap();
-    assert_eq!(
-        dependency.role,
-        source_bundle_v1::SourceLogicalManifestFileRole::Dependency
-    );
-    assert_eq!(dependency.layer_name.as_deref(), Some("api"));
+    assert_dependency_owner(dependency, "api");
     assert_eq!(
         source.logical_manifest.layers[1]
             .runtime_config
@@ -1188,69 +1145,16 @@ fn javascript_dependency_closure_survives_a_code_only_python_sibling() {
     )
     .unwrap();
     let detection = make_detection("other", None);
-    let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version":1, "routes":[{"pattern":"^/.*$", "layer":"api"}], "layers":[
-            {"name":"api","target":"COMPUTE","directory":".","entry":"server.js","runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
-            {"name":"side","target":"COMPUTE","directory":"side","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}}
-        ]
-    })).unwrap();
-    let artifact = resolve_runtime_artifact(
-        project.path(),
-        project.path(),
-        project.path().to_owned(),
-        manifest,
-        &detection,
-        true,
-    )
-    .unwrap();
-    let files = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
-    let source = source_bundle_v1::build_source_bundle_plan_with_scan(
-        &artifact.root_dir,
-        &artifact.manifest,
-        &files,
-        &artifact.scan,
-        source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
-        None,
-    )
-    .unwrap();
-    let logical: nrz_source_bundle::SourceLogicalManifest =
-        serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap()).unwrap();
-    nrz_runtime_artifact::validate_source_bundle_application_graph(
-        &source.logical_manifest_sha256,
-        &source.source_sha256,
-        source.source_size_bytes,
-        &logical,
-    )
-    .unwrap();
-    for layer in logical
-        .layers
-        .iter()
-        .filter(|layer| layer.target == "COMPUTE")
-    {
-        let file = logical
-            .files
-            .iter()
-            .find(|file| Some(file.path.as_str()) == layer.entrypoint.as_deref())
-            .unwrap();
-        assert_eq!(file.role, "compute");
-        assert_eq!(file.layer_name.as_deref(), Some(layer.name.as_str()));
-        let target = layer.runtime_config.as_ref().unwrap()["buildRuntimeVersion"]
-            .as_str()
-            .unwrap();
-        nrz_runtime_artifact::compile_source_runtime_layer_for_target(layer, &[], Some(target))
-            .unwrap();
-    }
+    let manifest = manifest_with_python_sibling("NODE", "server.js", "node-24");
+    let artifact = project_root_runtime_artifact(project.path(), manifest, &detection);
+    let source = runtime_source_bundle_with_checked_entrypoints(&artifact);
     let dependency = source
         .logical_manifest
         .files
         .iter()
         .find(|file| file.path == "node_modules/demo/index.js")
         .unwrap();
-    assert_eq!(
-        dependency.role,
-        source_bundle_v1::SourceLogicalManifestFileRole::Dependency
-    );
-    assert_eq!(dependency.layer_name.as_deref(), Some("api"));
+    assert_dependency_owner(dependency, "api");
     assert!(
         source
             .logical_manifest
@@ -1343,59 +1247,14 @@ fn hoisted_javascript_dependencies_survive_a_code_only_python_sibling() {
             .unwrap_err();
             expect_code(&error, "APPLICATION_RUNTIME_INVALID");
 
-            let files = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
-            let source = source_bundle_v1::build_source_bundle_plan_with_scan(
-                &artifact.root_dir,
-                &artifact.manifest,
-                &files,
-                &artifact.scan,
-                source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
-                None,
-            )
-            .unwrap();
-            let logical: nrz_source_bundle::SourceLogicalManifest =
-                serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap())
-                    .unwrap();
-            nrz_runtime_artifact::validate_source_bundle_application_graph(
-                &source.logical_manifest_sha256,
-                &source.source_sha256,
-                source.source_size_bytes,
-                &logical,
-            )
-            .unwrap();
-            for layer in logical
-                .layers
-                .iter()
-                .filter(|layer| layer.target == "COMPUTE")
-            {
-                let file = logical
-                    .files
-                    .iter()
-                    .find(|file| Some(file.path.as_str()) == layer.entrypoint.as_deref())
-                    .unwrap();
-                assert_eq!(file.role, "compute");
-                assert_eq!(file.layer_name.as_deref(), Some(layer.name.as_str()));
-                let target = layer.runtime_config.as_ref().unwrap()["buildRuntimeVersion"]
-                    .as_str()
-                    .unwrap();
-                nrz_runtime_artifact::compile_source_runtime_layer_for_target(
-                    layer,
-                    &[],
-                    Some(target),
-                )
-                .unwrap();
-            }
+            let source = runtime_source_bundle_with_checked_entrypoints(&artifact);
             let dependency = source
                 .logical_manifest
                 .files
                 .iter()
                 .find(|file| file.path == "node_modules/demo/index.js")
                 .unwrap();
-            assert_eq!(
-                dependency.role,
-                source_bundle_v1::SourceLogicalManifestFileRole::Dependency
-            );
-            assert_eq!(dependency.layer_name.as_deref(), Some("api"));
+            assert_dependency_owner(dependency, "api");
             let python = source
                 .logical_manifest
                 .files

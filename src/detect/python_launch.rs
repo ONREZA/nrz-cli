@@ -7,9 +7,11 @@ use super::python::{
     PYTHON_ENTRY_CANDIDATES, dependency_plan, framework, framework_evidence_complete,
 };
 
-pub(crate) const PYTHON_BOOTSTRAP_ENTRY: &str = ".onreza/python/launch.py";
+/// Generated bootstrap path consumed by Python launch packaging and artifact classification.
+pub const PYTHON_BOOTSTRAP_ENTRY: &str = ".onreza/python/launch.py";
 
-pub(crate) struct PythonLaunchRequest<'a> {
+/// Authored Python launch selectors resolved independently of source materialization.
+pub struct PythonLaunchRequest<'a> {
     pub entry: Option<&'a str>,
     pub module: Option<&'a str>,
     pub application: Option<&'a str>,
@@ -17,13 +19,15 @@ pub(crate) struct PythonLaunchRequest<'a> {
     pub args: &'a [String],
 }
 
+/// Resolved entry and arguments consumed by the Python bootstrap materializer.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PythonLaunch {
+pub struct PythonLaunch {
     pub entry: String,
     pub args: Vec<String>,
 }
 
-pub(crate) fn resolve_launch_for_framework(
+/// Validate Python launch intent and infer its server from the selected framework.
+pub fn resolve_launch_for_framework(
     fs: &dyn Fs,
     request: PythonLaunchRequest<'_>,
     framework_override: Option<&str>,

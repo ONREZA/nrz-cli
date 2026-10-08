@@ -1,5 +1,26 @@
 use super::*;
 
+fn node_command_project(package_json: &str, lockfile: Option<&str>) -> tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("package.json"), package_json).unwrap();
+    if let Some(lockfile) = lockfile {
+        fs::write(dir.path().join(lockfile), "").unwrap();
+    }
+    dir
+}
+
+fn prepared_python_project() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
+    let prepared = dir
+        .path()
+        .join(nrz_source_bundle::PythonMinor::default().site_packages_root())
+        .join("prepared.py");
+    fs::create_dir_all(prepared.parent().unwrap()).unwrap();
+    fs::write(&prepared, "prepared = True").unwrap();
+    (dir, prepared)
+}
+
 #[test]
 fn native_output_cleanup_preserves_source_and_nested_build_siblings() {
     let project = tempdir().unwrap();
@@ -162,9 +183,7 @@ fn missing_prebuilt_output_explains_skipped_build() {
 
 #[test]
 fn build_command_explicit_wins_over_config_and_auto() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}").unwrap();
-    fs::write(dir.path().join("yarn.lock"), "").unwrap();
+    let dir = node_command_project("{}", Some("yarn.lock"));
 
     let mut config = nrz::config::ProjectConfig::default();
     config.build.command = Some("config cmd".into());
@@ -176,9 +195,7 @@ fn build_command_explicit_wins_over_config_and_auto() {
 
 #[test]
 fn build_command_config_wins_over_auto() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}").unwrap();
-    fs::write(dir.path().join("yarn.lock"), "").unwrap();
+    let dir = node_command_project("{}", Some("yarn.lock"));
 
     let mut config = nrz::config::ProjectConfig::default();
     config.build.command = Some("config cmd".into());
@@ -190,13 +207,7 @@ fn build_command_config_wins_over_auto() {
 
 #[test]
 fn build_command_auto_detect_bun_lock() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
-    fs::write(dir.path().join("bun.lock"), "").unwrap();
+    let dir = node_command_project(r#"{"scripts":{"build":"vite build"}}"#, Some("bun.lock"));
 
     let config = nrz::config::ProjectConfig::default();
     let effective = effective_config(dir.path(), config);
@@ -206,13 +217,7 @@ fn build_command_auto_detect_bun_lock() {
 
 #[test]
 fn build_command_auto_detect_bun_lockb() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
-    fs::write(dir.path().join("bun.lockb"), "").unwrap();
+    let dir = node_command_project(r#"{"scripts":{"build":"vite build"}}"#, Some("bun.lockb"));
 
     let config = nrz::config::ProjectConfig::default();
     let effective = effective_config(dir.path(), config);
@@ -222,13 +227,10 @@ fn build_command_auto_detect_bun_lockb() {
 
 #[test]
 fn build_command_auto_detect_pnpm() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
+    let dir = node_command_project(
         r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
-    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+        Some("pnpm-lock.yaml"),
+    );
 
     let config = nrz::config::ProjectConfig::default();
     let effective = effective_config(dir.path(), config);
@@ -238,13 +240,7 @@ fn build_command_auto_detect_pnpm() {
 
 #[test]
 fn build_command_auto_detect_yarn() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
-    fs::write(dir.path().join("yarn.lock"), "").unwrap();
+    let dir = node_command_project(r#"{"scripts":{"build":"vite build"}}"#, Some("yarn.lock"));
 
     let config = nrz::config::ProjectConfig::default();
     let effective = effective_config(dir.path(), config);
@@ -254,12 +250,7 @@ fn build_command_auto_detect_yarn() {
 
 #[test]
 fn build_command_auto_detect_npm_fallback() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"build":"next build"}}"#,
-    )
-    .unwrap();
+    let dir = node_command_project(r#"{"scripts":{"build":"next build"}}"#, None);
 
     let config = nrz::config::ProjectConfig::default();
     let effective = effective_config(dir.path(), config);
@@ -269,12 +260,7 @@ fn build_command_auto_detect_npm_fallback() {
 
 #[test]
 fn build_command_none_without_build_script() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"dev":"next dev"}}"#,
-    )
-    .unwrap();
+    let dir = node_command_project(r#"{"scripts":{"dev":"next dev"}}"#, None);
 
     let config = nrz::config::ProjectConfig::default();
     let effective = effective_config(dir.path(), config);
@@ -337,8 +323,7 @@ async fn recursive_deploy_install_commands_are_classified_as_invalid_config() {
 
 #[test]
 fn build_command_server_wins_over_auto_detect() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    let dir = node_command_project("{}", None);
 
     let config = nrz::config::ProjectConfig::default();
     let effective = effective_with_server_settings(
@@ -428,13 +413,10 @@ fn build_command_preset_source_without_package_json_skips() {
 
 #[test]
 fn build_command_preset_source_uses_local_package_manager() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
+    let dir = node_command_project(
         r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
-    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+        Some("pnpm-lock.yaml"),
+    );
 
     let config = nrz::config::ProjectConfig::default();
     let effective = effective_with_server_settings(
@@ -451,12 +433,7 @@ fn build_command_preset_source_uses_local_package_manager() {
 
 #[test]
 fn build_command_detected_empty_keeps_auto_detect() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
+    let dir = node_command_project(r#"{"scripts":{"build":"vite build"}}"#, None);
 
     let config = nrz::config::ProjectConfig::default();
     let effective = effective_with_server_settings(
@@ -470,12 +447,7 @@ fn build_command_detected_empty_keeps_auto_detect() {
 
 #[test]
 fn build_command_user_empty_suppresses_auto_detect() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
+    let dir = node_command_project(r#"{"scripts":{"build":"vite build"}}"#, None);
 
     let config = nrz::config::ProjectConfig::default();
     let effective = effective_with_server_settings(
@@ -489,13 +461,10 @@ fn build_command_user_empty_suppresses_auto_detect() {
 
 #[test]
 fn build_command_detected_source_uses_local_package_manager() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
+    let dir = node_command_project(
         r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
-    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+        Some("pnpm-lock.yaml"),
+    );
 
     let config = nrz::config::ProjectConfig::default();
     let effective = effective_with_server_settings(
@@ -512,13 +481,10 @@ fn build_command_detected_source_uses_local_package_manager() {
 
 #[test]
 fn platform_runner_build_command_uses_the_immutable_snapshot() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
+    let dir = node_command_project(
         r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
-    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+        Some("pnpm-lock.yaml"),
+    );
     let mut effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
     effective.apply_platform_runner_settings(&server_build_settings(
         Some("npm run build"),
@@ -533,12 +499,7 @@ fn platform_runner_build_command_uses_the_immutable_snapshot() {
 
 #[test]
 fn build_command_preset_empty_keeps_auto_detect_fallback() {
-    let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("package.json"),
-        r#"{"scripts":{"build":"vite build"}}"#,
-    )
-    .unwrap();
+    let dir = node_command_project(r#"{"scripts":{"build":"vite build"}}"#, None);
 
     let config = nrz::config::ProjectConfig::default();
     let effective = effective_with_server_settings(
@@ -569,9 +530,7 @@ fn install_command_preset_source_without_package_json_skips() {
 
 #[test]
 fn install_command_preset_source_uses_local_package_manager() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}").unwrap();
-    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+    let dir = node_command_project("{}", Some("pnpm-lock.yaml"));
 
     let effective = effective_with_server_settings(
         dir.path(),
@@ -587,9 +546,7 @@ fn install_command_preset_source_uses_local_package_manager() {
 
 #[test]
 fn install_command_detected_source_uses_local_package_manager() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}").unwrap();
-    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+    let dir = node_command_project("{}", Some("pnpm-lock.yaml"));
 
     let effective = effective_with_server_settings(
         dir.path(),
@@ -605,9 +562,7 @@ fn install_command_detected_source_uses_local_package_manager() {
 
 #[test]
 fn platform_runner_install_command_uses_the_immutable_snapshot() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}").unwrap();
-    fs::write(dir.path().join("pnpm-lock.yaml"), "").unwrap();
+    let dir = node_command_project("{}", Some("pnpm-lock.yaml"));
     let mut effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
     effective.apply_platform_runner_settings(&server_install_settings(
         Some("npm ci"),
@@ -622,8 +577,7 @@ fn platform_runner_install_command_uses_the_immutable_snapshot() {
 
 #[test]
 fn install_command_user_empty_suppresses_auto_detect() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("package.json"), "{}").unwrap();
+    let dir = node_command_project("{}", None);
 
     let effective = effective_with_server_settings(
         dir.path(),
@@ -734,14 +688,7 @@ async fn python_install_step_ignores_retained_shell_command_without_manifest() {
 #[tokio::test]
 async fn python_install_step_preserves_authored_command_and_dependencies() {
     for platform_runner in [false, true] {
-        let dir = tempdir().unwrap();
-        fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
-        let stale = dir
-            .path()
-            .join(nrz_source_bundle::PythonMinor::default().site_packages_root())
-            .join("prepared.py");
-        fs::create_dir_all(stale.parent().unwrap()).unwrap();
-        fs::write(&stale, "prepared = True").unwrap();
+        let (dir, stale) = prepared_python_project();
         let settings = server_install_settings(
             Some("echo authored > installed.txt"),
             Some(nrz::config::BuildSettingSource::User),
@@ -771,14 +718,7 @@ async fn python_install_step_preserves_authored_command_and_dependencies() {
 #[tokio::test]
 async fn python_install_step_user_absence_preserves_prepared_dependencies() {
     for platform_runner in [false, true] {
-        let dir = tempdir().unwrap();
-        fs::write(dir.path().join("main.py"), "print('ready')").unwrap();
-        let prepared = dir
-            .path()
-            .join(nrz_source_bundle::PythonMinor::default().site_packages_root())
-            .join("prepared.py");
-        fs::create_dir_all(prepared.parent().unwrap()).unwrap();
-        fs::write(&prepared, "prepared = True").unwrap();
+        let (dir, prepared) = prepared_python_project();
         let settings = server_install_settings(None, Some(nrz::config::BuildSettingSource::User));
         let mut effective = effective_config(dir.path(), nrz::config::ProjectConfig::default());
         if platform_runner {

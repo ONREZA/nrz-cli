@@ -923,6 +923,83 @@ async fn package_backed_static_html_without_artifact_does_not_deploy_root() {
 }
 
 #[tokio::test]
+async fn explicit_compute_controls_inferred_ssr_manifests_at_the_authored_output_root() {
+    use crate::detect::types::ComputeType;
+
+    for recipe in ["nuxt", "astro", "nextjs", "nextjs-adapter"] {
+        for (configured_compute, explicit_compute, expected_static) in [
+            ("static", None, true),
+            ("process", None, false),
+            ("process", Some(ComputeType::Static), true),
+            ("static", Some(ComputeType::Process), false),
+        ] {
+            for skip_validation in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let framework = if recipe == "nextjs-adapter" {
+                    "nextjs"
+                } else {
+                    recipe
+                };
+                let entry = match framework {
+                    "nuxt" => "server/index.mjs",
+                    "astro" => "server/entry.mjs",
+                    _ => "server.js",
+                };
+                write_build_file(dir.path(), &format!("custom-out/{entry}"), "// server");
+                write_build_file(dir.path(), "custom-out/index.html", "<h1>export</h1>");
+                if framework == "nextjs" {
+                    write_build_file(dir.path(), ".next/static/chunks/main.js", "// app");
+                }
+                if recipe == "nextjs-adapter" {
+                    write_nextjs_adapter_output(dir.path(), nextjs_static_outputs(dir.path()));
+                }
+                let mut config = nrz::config::ProjectConfig::default();
+                config.project.framework = Some(framework.into());
+                config.build.output_directory = Some("custom-out".into());
+                config.deploy.compute = Some(configured_compute.into());
+                let effective = nrz::config::EffectiveProjectConfig::from_project_config(
+                    dir.path().to_owned(),
+                    config,
+                );
+                let detection = make_ssr_detection(framework, "SSR configuration");
+                let result = super::run_with_effective_config(
+                    BuildArgs {
+                        dir: dir.path().to_string_lossy().into_owned(),
+                        skip_validation,
+                    },
+                    true,
+                    &effective,
+                    Some(&detection),
+                    false,
+                    dir.path(),
+                    explicit_compute,
+                )
+                .await
+                .unwrap();
+                assert_eq!(result.output_dir, dir.path().join("custom-out"));
+                let manifest = result.manifest.unwrap();
+                assert_eq!(
+                    manifest
+                        .layers
+                        .iter()
+                        .any(|layer| layer.target == super::manifest::LayerTarget::Compute),
+                    !expected_static,
+                    "{recipe}: configured={configured_compute}, explicit={explicit_compute:?}, skip_validation={skip_validation}",
+                );
+                if expected_static {
+                    assert_eq!(manifest.layers.len(), 1);
+                    assert_eq!(manifest.layers[0].directory, ".");
+                    assert_eq!(
+                        manifest.layers[0].target,
+                        super::manifest::LayerTarget::Static
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn configured_vite_static_output_generates_static_manifest_even_with_server_dep() {
     let dir = tempfile::tempdir().unwrap();
     write_build_file(

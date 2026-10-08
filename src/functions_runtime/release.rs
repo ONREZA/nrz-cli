@@ -110,7 +110,10 @@ impl RuntimeResolver {
                 .context("invalid pinned runtime signature URL")?,
             verifying_key: VerifyingKey::from_public_key_pem(SIGNING_PUBLIC_KEY_PEM)
                 .context("invalid embedded Functions runtime signing key")?,
-            cache_root: default_cache_root()?.join("nrz").join("functions-runtime"),
+            cache_root: crate::cache::default_root()
+                .context("HOME or USERPROFILE is required to locate the nrz runtime cache")?
+                .join("nrz")
+                .join("functions-runtime"),
             require_release_origin: true,
         })
     }
@@ -489,28 +492,6 @@ fn runtime_target() -> anyhow::Result<&'static str> {
 fn runtime_file_name(target: &str) -> String {
     let suffix = if target == "windows-x64" { ".exe" } else { "" };
     format!("onreza-functions-runtime-{target}{suffix}")
-}
-
-fn default_cache_root() -> anyhow::Result<PathBuf> {
-    #[cfg(windows)]
-    if let Some(path) = std::env::var_os("LOCALAPPDATA") {
-        return Ok(PathBuf::from(path));
-    }
-
-    #[cfg(target_os = "macos")]
-    if let Some(home) = std::env::var_os("HOME") {
-        return Ok(PathBuf::from(home).join("Library").join("Caches"));
-    }
-
-    #[cfg(not(windows))]
-    if let Some(path) = std::env::var_os("XDG_CACHE_HOME") {
-        return Ok(PathBuf::from(path));
-    }
-
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .context("HOME or USERPROFILE is required to locate the nrz runtime cache")?;
-    Ok(PathBuf::from(home).join(".cache"))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

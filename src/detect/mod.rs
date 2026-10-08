@@ -9,7 +9,7 @@ pub mod package_json;
 pub mod package_manager;
 pub mod presets;
 pub mod python;
-pub(crate) mod python_launch;
+pub mod python_launch;
 pub mod ssr;
 pub mod static_html;
 pub mod types;

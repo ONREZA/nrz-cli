@@ -560,6 +560,7 @@ async fn selected_node_primary_build_rejects_conflicting_authored_target() {
         Some(&detection),
         false,
         directory.path(),
+        None,
     )
     .await
     .unwrap_err();
@@ -858,6 +859,7 @@ async fn build_binds_only_the_selected_entry_in_the_output_coordinate_frame() {
             Some(&detection),
             false,
             directory.path(),
+            None,
         )
         .await;
         assert_eq!(
@@ -911,6 +913,7 @@ async fn inferred_source_entry_uses_process_output_mapping_before_manifest_bindi
         Some(&detection),
         false,
         project.path(),
+        None,
     )
     .await
     .unwrap();

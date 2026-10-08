@@ -446,6 +446,7 @@ async fn python_bundle_without_dependencies_freezes_provided_build_manifest_targ
         Some(&detection),
         false,
         dir.path(),
+        None,
     )
     .await
     .unwrap();
@@ -651,6 +652,7 @@ async fn admitted_node_build_preserves_code_only_sibling_target() {
         None,
         false,
         directory.path(),
+        None,
     )
     .await
     .unwrap()
@@ -764,6 +766,7 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
                 Some(&detection),
                 false,
                 directory.path(),
+                None,
             )
             .await;
             let built = result.unwrap().manifest.unwrap();
@@ -823,6 +826,7 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
             Some(&detection),
             false,
             directory.path(),
+            None,
         )
         .await
         .unwrap()
@@ -1069,6 +1073,7 @@ async fn managed_build_declarations_preserve_frozen_targets_and_static_publicati
             Some(&static_detection),
             false,
             directory.path(),
+            None,
         )
         .await
         .unwrap();

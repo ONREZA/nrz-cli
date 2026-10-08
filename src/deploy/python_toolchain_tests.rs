@@ -8,6 +8,44 @@ use super::python_toolchain::{
 mod requirement_stage_tests;
 
 #[test]
+fn managed_uv_requires_cache_root_before_downloading() {
+    const CHILD: &str = "NRZ_TEST_UV_WITHOUT_CACHE_ROOT";
+    if std::env::var_os(CHILD).is_some() {
+        let error = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(super::python_toolchain::resolve())
+            .unwrap_err();
+        let expected = artifact_for(std::env::consts::OS, std::env::consts::ARCH)
+            .err()
+            .map_or_else(
+                || {
+                    "HOME or USERPROFILE is required to locate the nrz Python toolchain cache"
+                        .to_string()
+                },
+                |error| error.to_string(),
+            );
+        assert_eq!(error.to_string(), expected);
+        return;
+    }
+
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command.args([
+        "--exact",
+        "deploy::python_toolchain_tests::managed_uv_requires_cache_root_before_downloading",
+    ]);
+    for variable in ["HOME", "USERPROFILE", "LOCALAPPDATA", "XDG_CACHE_HOME"] {
+        command.env_remove(variable);
+    }
+    let output = command.env(CHILD, "1").output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn pins_uv_artifacts_for_every_cli_release_platform() {
     let cases = [
         (
@@ -1389,30 +1427,8 @@ async fn python_published_nonroot_output_keeps_project_owned_bootstrap() {
         let logical: nrz_source_bundle::SourceLogicalManifest =
             serde_json::from_value(serde_json::to_value(&source.logical_manifest).unwrap())
                 .unwrap();
-        let owner = uuid::Uuid::nil().to_string();
-        nrz_source_bundle::verify_source_bundle_bytes(
-            nrz_source_bundle::SourceBundleVerificationInput {
-                owner_workspace_id: owner.clone(),
-                source_artifact_id: nrz_source_bundle::compute_source_artifact_id(
-                    &owner,
-                    &source.logical_manifest_sha256,
-                    &source.source_sha256,
-                    None,
-                ),
-                source_sha256: source.source_sha256.clone(),
-                logical_manifest_sha256: source.logical_manifest_sha256.clone(),
-                budget: nrz_source_bundle::SourceBundleVerificationBudget::from_manifest(&logical)
-                    .unwrap(),
-            },
-            std::fs::read(source.source_path()).unwrap().into(),
-        )
-        .await
-        .unwrap();
-        let unpacked = tempfile::tempdir().unwrap();
-        let decoder =
-            zstd::stream::read::Decoder::new(std::fs::File::open(source.source_path()).unwrap())
-                .unwrap();
-        tar::Archive::new(decoder).unpack(unpacked.path()).unwrap();
+        crate::test_support::assert_source_bundle_verified(&source, &logical).await;
+        let unpacked = crate::test_support::unpack_source_bundle(&source);
         std::fs::remove_dir_all(project.path()).unwrap();
         let launch_args = &plan.artifact.runtime.manifest.layers[0]
             .runtime
@@ -1622,28 +1638,7 @@ async fn typed_python_layers_cannot_replace_the_selected_dependency_abi() {
                 &logical,
             )
             .unwrap();
-            for layer in logical
-                .layers
-                .iter()
-                .filter(|layer| layer.target == "COMPUTE")
-            {
-                let file = logical
-                    .files
-                    .iter()
-                    .find(|file| Some(file.path.as_str()) == layer.entrypoint.as_deref())
-                    .unwrap();
-                assert_eq!(file.role, "compute");
-                assert_eq!(file.layer_name.as_deref(), Some(layer.name.as_str()));
-                let target = layer.runtime_config.as_ref().unwrap()["buildRuntimeVersion"]
-                    .as_str()
-                    .unwrap();
-                nrz_runtime_artifact::compile_source_runtime_layer_for_target(
-                    layer,
-                    &[],
-                    Some(target),
-                )
-                .unwrap();
-            }
+            crate::test_support::assert_compute_layer_entrypoints(&logical);
             assert_eq!(source.logical_manifest.files.iter().filter(|file| file.role == crate::artifact::source_bundle_v1::SourceLogicalManifestFileRole::Dependency).count(), usize::from(python_dependencies));
             assert_eq!(
                 source.logical_manifest.layers[0]

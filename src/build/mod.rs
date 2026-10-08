@@ -112,7 +112,7 @@ pub async fn run(
         .with_context(|| format!("project directory not found: {}", args.dir))?;
     let workspace_root = crate::detect::monorepo::discover_workspace_root(&project_dir);
     let effective = EffectiveProjectConfig::from_project_config(project_dir, config.clone());
-    run_with_effective_config(args, json, &effective, None, true, &workspace_root).await
+    run_with_effective_config(args, json, &effective, None, true, &workspace_root, None).await
 }
 
 #[cfg(test)]
@@ -137,7 +137,16 @@ pub async fn run_with_hint(
         effective.apply_server_settings(Some(&settings));
     }
 
-    run_with_effective_config(args, json, &effective, detection, true, &workspace_root).await
+    run_with_effective_config(
+        args,
+        json,
+        &effective,
+        detection,
+        true,
+        &workspace_root,
+        None,
+    )
+    .await
 }
 
 pub(crate) async fn run_with_effective_config(
@@ -147,6 +156,7 @@ pub(crate) async fn run_with_effective_config(
     detection: Option<&crate::detect::types::DetectionResult>,
     emit_json_result: bool,
     workspace_root: &Path,
+    explicit_compute: Option<crate::detect::types::ComputeType>,
 ) -> anyhow::Result<BuildResult> {
     let project_dir = effective.project_dir();
     let mut detection = detection.cloned().unwrap_or_else(|| {
@@ -159,7 +169,7 @@ pub(crate) async fn run_with_effective_config(
             &mut detection,
             effective.config(),
             effective.framework_override(),
-            None,
+            explicit_compute,
         )
         .map_err(|error| {
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
@@ -167,6 +177,13 @@ pub(crate) async fn run_with_effective_config(
     };
     let application_runtime = source_build_context.application_runtime.as_ref();
     let detection = &detection;
+    let configured_compute = effective
+        .deploy_compute()
+        .map(crate::deploy::parse_compute_type)
+        .transpose()?;
+    let authored_compute = explicit_compute.or(configured_compute);
+    let explicit_static = authored_compute == Some(crate::detect::types::ComputeType::Static);
+    let selected_compute = authored_compute.unwrap_or(detection.suggested_compute);
     let fw_dirs = crate::frameworks::compute_aware_output_dirs(detection);
     let output_directory_hint = effective
         .output_directory()
@@ -199,19 +216,22 @@ pub(crate) async fn run_with_effective_config(
         }
 
         (Some(manifest), BuildManifestSource::File)
-    } else if let Some(auto) = try_generate_nextjs_adapter_manifest(
-        workspace_root,
-        project_dir,
-        &output_dir,
-        detection,
-        json,
-    )? {
+    } else if !explicit_static
+        && let Some(auto) = try_generate_nextjs_adapter_manifest(
+            workspace_root,
+            project_dir,
+            &output_dir,
+            detection,
+            json,
+        )?
+    {
         if !args.skip_validation {
             manifest::verify_files(&output_dir, &auto)
                 .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
         (Some(auto), BuildManifestSource::Generated)
-    } else if is_nextjs_standalone_framework(&detection.framework)
+    } else if !explicit_static
+        && is_nextjs_standalone_framework(&detection.framework)
         && (detection
             .metadata
             .ssr_analysis
@@ -256,7 +276,8 @@ pub(crate) async fn run_with_effective_config(
                 .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
         (Some(auto), BuildManifestSource::Generated)
-    } else if let Some(auto) = try_generate_ssr_manifest(detection, &output_dir) {
+    } else if !explicit_static && let Some(auto) = try_generate_ssr_manifest(detection, &output_dir)
+    {
         output::status(
             json,
             "~",
@@ -271,13 +292,7 @@ pub(crate) async fn run_with_effective_config(
                 .map_err(|e| output::with_default_code(e, "MISSING_BUILD_OUTPUT"))?;
         }
         (Some(auto), BuildManifestSource::Generated)
-    } else if effective
-        .deploy_compute()
-        .map(crate::deploy::parse_compute_type)
-        .transpose()?
-        .unwrap_or(detection.suggested_compute)
-        == crate::detect::types::ComputeType::Static
-    {
+    } else if selected_compute == crate::detect::types::ComputeType::Static {
         let auto = manifest::generate_static_manifest();
         output::status(
             json,

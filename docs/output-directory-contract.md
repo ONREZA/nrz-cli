@@ -39,6 +39,30 @@ As a compatibility exception, a user-sourced Next.js `.next` setting also
 uses the concrete Next artifact when it exists (`.next/standalone/` for
 PROCESS or `out/` for static export), because `.next` is the framework
 container rather than a stable deploy root.
+
+Detection of SSR mode settings (`ssr`, `output`, Nuxt's `nitro.preset`) reads
+literals from the exported config object without executing JavaScript or
+TypeScript. Strings, comments, line breaks and TypeScript
+assertions are accounted for; unrelated objects do not select the serving mode.
+An expression such as `ssr: process.env.SSR ?? false` does not establish static
+compatibility: its value is unknown, so detection requires a server runtime.
+Likewise, an unknown Astro `output` requires SSR; omitting `output` from a known
+config object preserves Astro's static default. Config functions, unresolved
+aliases and object spreads require SSR because detection cannot establish their
+effective values.
+An existing config that cannot be read is unknown; lower-priority config files
+do not override it.
+For SvelteKit and Qwik, static compatibility requires the static adapter call
+in the exported configuration; importing an unused static adapter is insufficient.
+Unsupported syntax, including regular expressions and interpolated template
+strings, also requires SSR. Nesting is limited to 128 levels to bound parsing
+work on remote inputs.
+
+Explicit compute and output-directory settings retain their source-aware
+precedence. An explicit STATIC compute selection suppresses inferred SSR manifest
+generation. An authored `.onreza/manifest.json` is still validated; deploy rejects
+a conflict between its layers and the explicit compute selection.
+
 For monorepo Next.js standalone builds, `.next/standalone/` remains the artifact
 root even when `server.js` lives in a nested app directory; only the generated
 manifest entry is nested. Preparation keeps the same split: static/public assets
