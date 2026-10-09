@@ -230,9 +230,10 @@ fn publish_new_file(source: &Path, destination: &Path) -> std::io::Result<()> {
         use std::os::unix::ffi::OsStrExt as _;
         let source = std::ffi::CString::new(source.as_os_str().as_bytes())?;
         let destination = std::ffi::CString::new(destination.as_os_str().as_bytes())?;
-        // Both C strings remain alive; RENAME_NOREPLACE atomically claims an absent final name.
+        // Bundled musl lacks the renameat2 wrapper; NOREPLACE still atomically claims the name.
         if unsafe {
-            libc::renameat2(
+            libc::syscall(
+                libc::SYS_renameat2,
                 libc::AT_FDCWD,
                 source.as_ptr(),
                 libc::AT_FDCWD,

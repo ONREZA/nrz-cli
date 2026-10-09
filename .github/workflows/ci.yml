@@ -18,7 +18,7 @@ concurrency:
 jobs:
   test:
     name: Quality
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6.0.2
@@ -54,10 +54,33 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
 
+  musl-build:
+    name: Build Linux musl
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.98'
+          targets: x86_64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          cache-on-failure: true
+
+      - name: Build release binary
+        run: cargo build --locked --release --target x86_64-unknown-linux-musl
+
   # Check commit messages on PR
   conventional-commits:
     name: Conventional Commits
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v6.0.2
