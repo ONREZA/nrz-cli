@@ -94,3 +94,41 @@ fn platform_yarn_rejects_a_non_executable_bundled_toolchain() {
 
     assert!(error.to_string().contains("is not executable"));
 }
+
+#[test]
+fn platform_yarn_uses_the_selected_apps_nearest_workspace_generation() {
+    let root = tempdir().unwrap();
+    fs::write(
+        root.path().join("package.json"),
+        r#"{"packageManager":"yarn@1.22.22"}"#,
+    )
+    .unwrap();
+    let workspace = root.path().join("nested");
+    let app = workspace.join("apps/api");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(
+        workspace.join("package.json"),
+        r#"{"private":true,"packageManager":"yarn@4.18.0","workspaces":["apps/*"]}"#,
+    )
+    .unwrap();
+    fs::write(app.join("package.json"), r#"{"name":"api"}"#).unwrap();
+    let detection = crate::detect::detect(&app);
+    assert_eq!(
+        detection
+            .metadata
+            .package_manager
+            .unwrap()
+            .version
+            .as_deref(),
+        Some("4.18.0")
+    );
+    assert_eq!(
+        select_environment("YARN", &app, root.path(), PATHS)
+            .unwrap()
+            .as_slice(),
+        [(
+            "PATH".to_string(),
+            "/opt/toolchains/yarn-modern/bin:/usr/local/bin:/usr/bin:/bin".to_string()
+        )]
+    );
+}

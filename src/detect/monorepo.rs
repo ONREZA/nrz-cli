@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::fs::{Fs, LocalFs, MAX_DETECTION_PATH_DEPTH};
 use super::package_json::PackageJson;
-use super::package_manager::detect_package_manager;
+use super::package_manager::detect_local_package_manager;
 use super::types::{
     MonorepoInfo, MonorepoPackage, MonorepoTool, PackageManagerInfo, PackageManagerType,
 };
@@ -100,7 +100,7 @@ pub fn discover_workspace_root(project_dir: &Path) -> PathBuf {
         };
         let fs = LocalFs::new(candidate);
         let package_json = PackageJson::load_from_fs(&fs);
-        let package_manager = detect_package_manager(&fs, package_json.as_ref());
+        let package_manager = detect_local_package_manager(&fs, package_json.as_ref());
         let Some(monorepo) = detect_monorepo(&fs, package_json.as_ref(), package_manager.as_ref())
         else {
             continue;

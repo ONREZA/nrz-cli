@@ -96,7 +96,12 @@ pub(super) fn resolve_runtime_artifact_with_manifest_source(
                         )
                     })
         });
-        let dependency_root = select_node_project_runtime_root(workspace_root_dir, project_dir);
+        let dependency_root =
+            if javascript_output_owns_dependencies(project_dir, &build_output_dir, detection) {
+                build_output_dir.clone()
+            } else {
+                select_node_project_runtime_root(workspace_root_dir, project_dir)
+            };
         let external_javascript_dependencies =
             javascript_runtime_dependency_roots(&build_output_dir, &dependency_root, &manifest)
                 .iter()
@@ -768,6 +773,9 @@ pub(super) fn plan_node_project_runtime_artifact(
     manifest: &build_manifest::Manifest,
     detection: &crate::detect::types::DetectionResult,
 ) -> Option<NodeProjectRuntimePlan> {
+    if javascript_output_owns_dependencies(project_dir, build_output_dir, detection) {
+        return None;
+    }
     let runtime_root = select_node_project_runtime_root(workspace_root_dir, project_dir);
     if !is_node_project_runtime_candidate(
         project_dir,
@@ -871,6 +879,19 @@ pub(super) fn compute_layer_count(manifest: &build_manifest::Manifest) -> usize 
         .iter()
         .filter(|layer| layer.target == build_manifest::LayerTarget::Compute)
         .count()
+}
+
+fn javascript_output_owns_dependencies(
+    project_dir: &Path,
+    build_output_dir: &Path,
+    detection: &crate::detect::types::DetectionResult,
+) -> bool {
+    matches!(
+        detection.framework.as_str(),
+        "nextjs" | "blitzjs" | "payload" | "nuxt" | "nitro"
+    ) && crate::detect::presets::framework_output_dirs(&detection.framework)
+        .iter()
+        .any(|directory| project_dir.join(directory) == build_output_dir)
 }
 
 pub(super) fn is_node_project_runtime_framework(framework: &str) -> bool {

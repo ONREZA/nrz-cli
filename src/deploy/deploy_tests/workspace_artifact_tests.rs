@@ -326,24 +326,48 @@ fn node_process_runtime_artifact_prefers_workspace_root_for_hoisted_app_symlink(
         fs::write(
             app.join("package.json"),
             r#"{
+                "name": "@qualification/api",
                 "dependencies": {
                     "@nestjs/core": "10.0.0"
                 }
             }"#,
         )
         .unwrap();
-        fs::write(app.join("dist/src/main.js"), "require('@nestjs/core')").unwrap();
+        fs::write(
+            app.join("dist/src/main.js"),
+            "console.log(require('@nestjs/core'))",
+        )
+        .unwrap();
 
         fs::create_dir_all(workspace.path().join("node_modules/@nestjs/core")).unwrap();
         fs::write(
             workspace.path().join("node_modules/@nestjs/core/index.js"),
-            "module.exports = {}",
+            "module.exports = 'WORKSPACE_ALIAS_OK'",
         )
         .unwrap();
         fs::create_dir_all(app.join("node_modules/@nestjs")).unwrap();
         std::os::unix::fs::symlink(
             "../../../../node_modules/@nestjs/core",
             app.join("node_modules/@nestjs/core"),
+        )
+        .unwrap();
+
+        fs::write(
+            workspace.path().join("package.json"),
+            r#"{"private":true,"workspaces":["apps/*"]}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(
+            workspace
+                .path()
+                .join("node_modules/.pnpm/node_modules/@qualification"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(
+            "../../../../apps/api",
+            workspace
+                .path()
+                .join("node_modules/.pnpm/node_modules/@qualification/api"),
         )
         .unwrap();
 
@@ -383,21 +407,40 @@ fn node_process_runtime_artifact_prefers_workspace_root_for_hoisted_app_symlink(
         assert!(paths.contains(&"apps/api/node_modules/@nestjs/core"));
         assert!(paths.contains(&"node_modules/@nestjs/core/index.js"));
 
-        let plan = workspace_bundle(&artifact, scanned, &detection, Embedded);
-        let symlink = plan
-            .logical_manifest
-            .files
-            .iter()
-            .find(|file| file.path == "apps/api/node_modules/@nestjs/core")
-            .unwrap();
-        assert_eq!(
-            symlink.entry_type,
-            Some(source_bundle_v1::SourceLogicalManifestEntryType::Symlink)
-        );
-        assert_eq!(
-            symlink.link_target.as_deref(),
-            Some("../../../../node_modules/@nestjs/core")
-        );
+        for packaging in [Embedded, TrustedMaterialization] {
+            let plan = workspace_bundle(&artifact, scanned.clone(), &detection, packaging);
+            let symlink = plan
+                .logical_manifest
+                .files
+                .iter()
+                .find(|file| file.path == "apps/api/node_modules/@nestjs/core")
+                .unwrap();
+            assert_eq!(
+                symlink.entry_type,
+                Some(source_bundle_v1::SourceLogicalManifestEntryType::Symlink)
+            );
+            assert_eq!(
+                symlink.link_target.as_deref(),
+                Some("../../../../node_modules/@nestjs/core")
+            );
+            let restored = crate::test_support::unpack_source_bundle(&plan);
+            let result = assert_cmd::Command::new("node")
+                .arg(&plan.logical_manifest.entrypoints[0])
+                .current_dir(restored.path())
+                .env_remove("NODE_PATH")
+                .env_remove("NODE_OPTIONS")
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&result.stdout).trim(),
+                "WORKSPACE_ALIAS_OK"
+            );
+        }
     }
 }
 

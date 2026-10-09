@@ -788,3 +788,39 @@ fn declared_python_defaults_ignore_javascript_build_tooling() {
         Some("npm run configured-assets")
     );
 }
+
+#[test]
+fn selected_workspace_app_inherits_install_and_build_manager() {
+    let workspace = tempdir().unwrap();
+    fs::write(
+        workspace.path().join("package.json"),
+        r#"{"private":true,"packageManager":"pnpm@11.22.0","workspaces":["apps/*"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        workspace.path().join("pnpm-lock.yaml"),
+        "lockfileVersion: '9.0'",
+    )
+    .unwrap();
+    let app = workspace.path().join("apps/api");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(
+        app.join("package.json"),
+        r#"{"name":"api","scripts":{"build":"node build.mjs"},"dependencies":{"express":"5.2.1"}}"#,
+    )
+    .unwrap();
+    let detection = crate::detect::detect(&app);
+    assert_eq!(
+        detection.metadata.package_manager.unwrap().pm_type,
+        crate::detect::types::PackageManagerType::Pnpm
+    );
+    let effective = effective_config(&app, nrz::config::ProjectConfig::default());
+    assert_eq!(
+        resolve_install_command(&app, &effective).as_deref(),
+        Some("pnpm install")
+    );
+    assert_eq!(
+        resolve_build_command(None, &app, &effective).as_deref(),
+        Some("pnpm run build")
+    );
+}

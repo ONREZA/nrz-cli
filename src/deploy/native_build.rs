@@ -512,6 +512,7 @@ pub(crate) fn recipe_commands(
                     &[
                         "build",
                         "-mod=readonly",
+                        "-buildvcs=false",
                         "-trimpath",
                         "-o",
                         "build/onreza-go/server",

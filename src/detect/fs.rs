@@ -19,6 +19,9 @@ const MAX_DETECTION_TOTAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 
 /// Abstract filesystem for detection logic.
 pub trait Fs {
+    fn project_root(&self) -> Option<&Path> {
+        None
+    }
     fn exists(&self, path: &str) -> bool;
     fn is_dir(&self, path: &str) -> bool;
     fn is_file(&self, path: &str) -> bool {
@@ -66,6 +69,9 @@ impl LocalFs {
 }
 
 impl Fs for LocalFs {
+    fn project_root(&self) -> Option<&Path> {
+        Some(&self.canonical_root)
+    }
     fn exists(&self, path: &str) -> bool {
         self.resolve_existing(path).is_some()
     }

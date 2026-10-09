@@ -70,7 +70,14 @@ pub(super) fn select_environment(
     }
     let generation = configured_yarn_generation(project_dir).or_else(|| {
         (source_root != project_dir && project_dir.starts_with(source_root))
-            .then(|| configured_yarn_generation(source_root))
+            .then(|| {
+                let workspace = crate::detect::monorepo::discover_workspace_root(project_dir);
+                workspace
+                    .starts_with(source_root)
+                    .then(|| configured_yarn_generation(&workspace))
+                    .flatten()
+                    .or_else(|| configured_yarn_generation(source_root))
+            })
             .flatten()
     });
     let bin_dir = match generation.unwrap_or(YarnGeneration::Modern) {

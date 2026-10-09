@@ -940,6 +940,14 @@ async fn real_go_executable_reads_artifact_assets_and_literal_argv() {
         "assets/message.txt",
         include_str!("../../tests/fixtures/native-go/assets/message.txt"),
     );
+    let initialized = std::process::Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(project.path())
+        .status()
+        .unwrap();
+    assert!(initialized.success());
+    // Builder source custody does not guarantee usable Git status for Go stamping.
+    file(project.path(), ".git/index", "invalid index");
     let mut plan = recipe_commands(project.path(), NativeRecipe::GoServer, false).unwrap();
     let inputs = GoModuleInputs::freeze(project.path(), &mut plan.build).unwrap();
     let go = std::env::var("NRZ_GO_BIN").unwrap_or_else(|_| plan.build.program.clone());

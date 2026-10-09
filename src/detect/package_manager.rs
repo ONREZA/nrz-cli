@@ -17,6 +17,36 @@ pub fn detect_package_manager(
     fs: &dyn Fs,
     pkg: Option<&PackageJson>,
 ) -> Option<PackageManagerInfo> {
+    let local = detect_local_package_manager(fs, pkg);
+    let declared = pkg
+        .and_then(|pkg| pkg.package_manager.as_deref())
+        .and_then(parse_package_manager_field)
+        .is_some();
+    if pkg.is_some()
+        && !declared
+        && local
+            .as_ref()
+            .is_none_or(|manager| manager.lockfile.is_none())
+        && let Some(project) = fs.project_root()
+    {
+        let workspace = super::monorepo::discover_workspace_root(project);
+        if workspace != project {
+            let workspace_fs = super::fs::LocalFs::new(&workspace);
+            let workspace_package = PackageJson::load_from_fs(&workspace_fs);
+            if let Some(manager) =
+                detect_local_package_manager(&workspace_fs, workspace_package.as_ref())
+            {
+                return Some(manager);
+            }
+        }
+    }
+    local
+}
+
+pub(super) fn detect_local_package_manager(
+    fs: &dyn Fs,
+    pkg: Option<&PackageJson>,
+) -> Option<PackageManagerInfo> {
     if pkg.is_none()
         && super::python::has_entry(fs)
         && let Some(lockfile) = super::python::dependency_manifest(fs)
@@ -30,8 +60,11 @@ pub fn detect_package_manager(
     // 1. Check packageManager field in package.json (e.g. "pnpm@9.0.0")
     if let Some(pkg) = pkg
         && let Some(ref pm_field) = pkg.package_manager
-        && let Some(info) = parse_package_manager_field(pm_field)
+        && let Some(mut info) = parse_package_manager_field(pm_field)
     {
+        info.lockfile = detect_from_lockfile(fs)
+            .filter(|locked| locked.pm_type == info.pm_type)
+            .and_then(|locked| locked.lockfile);
         return Some(info);
     }
 

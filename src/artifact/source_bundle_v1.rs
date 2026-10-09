@@ -507,6 +507,7 @@ struct WorkspaceDependencyProjection {
     dependency_root: String,
     link_path: String,
     workspace_root: String,
+    retains_source: bool,
 }
 
 fn project_workspace_dependencies(
@@ -534,6 +535,10 @@ fn project_workspace_dependencies(
                 dependency_root,
                 link_path: entry.path.clone(),
                 workspace_root: workspace_root.clone(),
+                retains_source: entries.iter().any(|entry| {
+                    path_in_root(&entry.path, workspace_root)
+                        && !scan.owns_as_dependency(&entry.path)
+                }),
             })
         })
         .collect::<Vec<_>>();
@@ -552,7 +557,11 @@ fn project_workspace_dependencies(
         let requires_projection = projections
             .iter()
             .any(|projection| path_in_root(&entry.path, &projection.workspace_root));
-        if !requires_projection || !scan.owns_as_dependency(&entry.path) {
+        // An application's unchanged entry still resolves aliases at its source path.
+        let retains_source = projections.iter().any(|projection| {
+            projection.retains_source && path_in_root(&entry.path, &projection.workspace_root)
+        });
+        if !requires_projection || !scan.owns_as_dependency(&entry.path) || retains_source {
             projected.push(rewrite_dependency_symlink(entry, &projections)?);
         }
         if !requires_projection {

@@ -1391,3 +1391,83 @@ fn hoisted_javascript_dependencies_survive_a_code_only_python_sibling() {
         }
     }
 }
+
+#[test]
+fn standalone_output_owns_dependencies_with_source_install_present() {
+    for (framework, output, directory, entry) in [
+        ("nextjs", ".next/standalone", ".", "server.js"),
+        ("nuxt", ".output", "server", "index.mjs"),
+    ] {
+        let project = tempdir().unwrap();
+        fs::write(project.path().join("package.json"), r#"{"type":"module"}"#).unwrap();
+        fs::create_dir_all(project.path().join("node_modules/build-only")).unwrap();
+        fs::write(
+            project.path().join("node_modules/build-only/index.js"),
+            "throw new Error('build only')",
+        )
+        .unwrap();
+        let output = project.path().join(output);
+        let server = output.join(directory);
+        fs::create_dir_all(server.join("node_modules/runtime-pkg")).unwrap();
+        fs::write(
+            server.join("node_modules/runtime-pkg/package.json"),
+            r#"{"type":"module","main":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(
+            server.join("node_modules/runtime-pkg/index.js"),
+            "export default 'STANDALONE_OK'",
+        )
+        .unwrap();
+        fs::write(server.join("package.json"), r#"{"type":"module"}"#).unwrap();
+        fs::write(
+            server.join(entry),
+            "import value from 'runtime-pkg'; console.log(value)",
+        )
+        .unwrap();
+        let manifest = serde_json::from_value(serde_json::json!({
+            "version":1,"routes":[{"pattern":"^/.*$","layer":"server"}],
+            "layers":[{"name":"server","target":"COMPUTE","directory":directory,"entry":entry,
+                "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}}]
+        })).unwrap();
+        let detection =
+            crate::detect::detect_with_framework_override(project.path(), Some(framework));
+        let artifact = resolve_runtime_artifact(
+            project.path(),
+            project.path(),
+            output.clone(),
+            manifest,
+            &detection,
+            true,
+        )
+        .unwrap();
+        assert_eq!(artifact.root_dir, output);
+        let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+        let plan = source_bundle_v1::build_source_bundle_plan_with_scan(
+            &artifact.root_dir,
+            &artifact.manifest,
+            &scanned,
+            &artifact.scan,
+            source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+            None,
+        )
+        .unwrap();
+        let restored = crate::test_support::unpack_source_bundle(&plan);
+        let result = assert_cmd::Command::new("node")
+            .arg(&plan.logical_manifest.entrypoints[0])
+            .current_dir(restored.path())
+            .env_remove("NODE_PATH")
+            .env_remove("NODE_OPTIONS")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&result.stdout).trim(),
+            "STANDALONE_OK"
+        );
+    }
+}

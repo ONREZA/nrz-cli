@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Context;
-use reqwest::header::{HeaderName, HeaderValue, LOCATION};
+use reqwest::header::{COOKIE, HeaderValue, LOCATION, RETRY_AFTER, SET_COOKIE};
 use serde::Serialize;
 
 use crate::api::ApiClient;
@@ -32,9 +32,12 @@ pub(super) struct DeployVerificationOutput {
     pub(super) preview_access_revoked: Option<bool>,
 }
 
-struct VerificationHeader {
-    name: HeaderName,
-    value: HeaderValue,
+const PREVIEW_COOKIE_NAME: &str = "__Host-onreza-preview-capability";
+
+pub(super) struct PreviewAccessResponse {
+    pub(super) status_code: u16,
+    pub(super) cookie: Option<HeaderValue>,
+    pub(super) retry_after: Option<Duration>,
 }
 
 pub(super) struct VerificationResponse {
@@ -82,18 +85,8 @@ pub(super) async fn verify_deployment(
             )
             .await
             .context("failed to create temporary preview access for deploy verification")?;
-            let name = HeaderName::from_bytes(access.header_name.as_bytes())
-                .context("preview access returned an invalid header name")?;
-            let value = HeaderValue::from_str(&access.header_value)
-                .context("preview access returned an invalid header value")?;
-            let header = VerificationHeader { name, value };
             (
-                wait_for_preview_access(
-                    PREVIEW_ACCESS_READY_TIMEOUT,
-                    Duration::from_secs(1),
-                    || fetch_verification_url(&url, Some(&header)),
-                )
-                .await,
+                verify_with_preview_access(&url, &access.header_value).await,
                 Some(access.secret_id),
                 true,
             )
@@ -188,37 +181,112 @@ pub(super) async fn wait_for_preview_access<F, Fut>(
     timeout: Duration,
     interval: Duration,
     mut fetch: F,
-) -> anyhow::Result<VerificationResponse>
+) -> anyhow::Result<PreviewAccessResponse>
 where
     F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = anyhow::Result<VerificationResponse>>,
+    Fut: std::future::Future<Output = anyhow::Result<PreviewAccessResponse>>,
 {
     tokio::time::timeout(timeout, async {
         loop {
             let response = fetch().await?;
-            if !matches!(response.status_code, 401 | 403) {
+            if !matches!(response.status_code, 401 | 403 | 429 | 503) {
                 return Ok(response);
             }
-            tokio::time::sleep(interval).await;
+            tokio::time::sleep(response.retry_after.unwrap_or(interval).max(interval)).await;
         }
     })
     .await
     .context("temporary preview access did not become available before the deadline")?
 }
 
-async fn fetch_verification_url(
+pub(super) async fn verify_with_preview_access(
     url: &str,
-    header: Option<&VerificationHeader>,
+    credential: &str,
 ) -> anyhow::Result<VerificationResponse> {
-    let client = reqwest::Client::builder()
+    let deadline = tokio::time::Instant::now() + PREVIEW_ACCESS_READY_TIMEOUT;
+    let client = verification_http_client()?;
+    let exchange_url = verification_url(url, "/.onreza/preview/credential")?;
+    let response = wait_for_preview_access(
+        deadline.saturating_duration_since(tokio::time::Instant::now()),
+        Duration::from_secs(1),
+        || async {
+            let response = client
+                .post(&exchange_url)
+                .json(&serde_json::json!({"kind":"BYPASS","credential":credential}))
+                .send()
+                .await
+                .context("preview credential exchange failed")?;
+            let cookie = response
+                .headers()
+                .get_all(SET_COOKIE)
+                .iter()
+                .filter_map(|header| header.to_str().ok())
+                .filter(|header| header.len() <= 4096)
+                .filter_map(|header| header.split(';').next())
+                .find(|cookie| {
+                    cookie
+                        .strip_prefix(PREVIEW_COOKIE_NAME)
+                        .is_some_and(|value| value.starts_with("=P2.") && value.len() > 4)
+                })
+                .map(HeaderValue::from_str)
+                .transpose()?;
+            let retry_after = response
+                .headers()
+                .get(RETRY_AFTER)
+                .and_then(|header| header.to_str().ok())
+                .and_then(|value| {
+                    value
+                        .parse::<u64>()
+                        .ok()
+                        .map(Duration::from_secs)
+                        .or_else(|| {
+                            chrono::DateTime::parse_from_rfc2822(value)
+                                .ok()
+                                .map(|time| {
+                                    time.signed_duration_since(chrono::Utc::now())
+                                        .to_std()
+                                        .unwrap_or(Duration::ZERO)
+                                })
+                        })
+                });
+            Ok(PreviewAccessResponse {
+                status_code: response.status().as_u16(),
+                cookie,
+                retry_after,
+            })
+        },
+    )
+    .await?;
+    anyhow::ensure!(
+        response.status_code == 204,
+        "preview credential exchange returned HTTP {}",
+        response.status_code
+    );
+    let cookie = response
+        .cookie
+        .context("preview credential exchange did not return a capability cookie")?;
+    // Re-exchanging the bypass on the app GET would consume the initial attempt budget again.
+    tokio::time::timeout_at(deadline, fetch_verification_url(url, Some(&cookie)))
+        .await
+        .context("temporary preview access verification did not finish before the deadline")?
+}
+
+fn verification_http_client() -> anyhow::Result<reqwest::Client> {
+    reqwest::Client::builder()
         .timeout(VERIFY_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .context("failed to create deploy verification HTTP client")?;
+        .context("failed to create deploy verification HTTP client")
+}
 
+async fn fetch_verification_url(
+    url: &str,
+    cookie: Option<&HeaderValue>,
+) -> anyhow::Result<VerificationResponse> {
+    let client = verification_http_client()?;
     let mut request = client.get(url);
-    if let Some(header) = header {
-        request = request.header(header.name.clone(), header.value.clone());
+    if let Some(cookie) = cookie {
+        request = request.header(COOKIE, cookie.clone());
     }
 
     let response = request
