@@ -325,7 +325,7 @@ async fn run_bounded_command(
     }
 }
 
-pub(super) fn remove_git_repository_environment(command: &mut std::process::Command) {
+pub(crate) fn remove_git_repository_environment(command: &mut std::process::Command) {
     for key in GIT_REPOSITORY_ENVIRONMENT_KEYS {
         command.env_remove(key);
     }

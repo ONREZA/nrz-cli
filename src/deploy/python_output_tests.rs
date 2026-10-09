@@ -5,8 +5,10 @@ use nrz_source_bundle::{ApplicationRuntimeFamily, BuildToolchainFamily};
 #[test]
 fn generated_python_state_is_gitignored_for_manual_project_configuration() {
     let project = tempfile::tempdir().unwrap();
+    let mut command = std::process::Command::new("git");
+    super::super::ignored_build::remove_git_repository_environment(&mut command);
     assert!(
-        std::process::Command::new("git")
+        command
             .args(["init", "--quiet"])
             .arg(project.path())
             .status()
@@ -31,7 +33,9 @@ fn generated_python_state_is_gitignored_for_manual_project_configuration() {
         ".onreza/python/build/startup/sitecustomize.py",
         ".onreza/python/launch.py",
     ] {
-        let ignored = std::process::Command::new("git")
+        let mut command = std::process::Command::new("git");
+        super::super::ignored_build::remove_git_repository_environment(&mut command);
+        let ignored = command
             .arg("-C")
             .arg(project.path())
             .args(["check-ignore", path])

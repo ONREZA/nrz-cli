@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import { resolve } from "node:path";
+import { gitEnvironment } from "./git-environment";
 
 export async function runTool(command: string[], cwd: string): Promise<void> {
-  const child = Bun.spawn(command, { cwd, stdout: "inherit", stderr: "inherit" });
+  const child = Bun.spawn(command, {
+    cwd, stdout: "inherit", stderr: "inherit",
+    ...(command[0] === "git" ? { env: gitEnvironment() } : {}),
+  });
   if (await child.exited !== 0) throw new Error(`Tool failed: ${command[0]}`);
 }
 

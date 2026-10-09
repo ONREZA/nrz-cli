@@ -940,7 +940,9 @@ async fn real_go_executable_reads_artifact_assets_and_literal_argv() {
         "assets/message.txt",
         include_str!("../../tests/fixtures/native-go/assets/message.txt"),
     );
-    let initialized = std::process::Command::new("git")
+    let mut command = std::process::Command::new("git");
+    super::ignored_build::remove_git_repository_environment(&mut command);
+    let initialized = command
         .args(["init", "--quiet"])
         .current_dir(project.path())
         .status()

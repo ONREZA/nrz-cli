@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
+import { gitEnvironment } from "../../scripts/git-environment";
 
 export interface GitCommitMetadata {
   hash: string;
@@ -19,8 +20,9 @@ export interface ReleaseGitMetadata {
 }
 
 export function captureGitMetadata(cwd: string): ReleaseGitMetadata {
+  const env = gitEnvironment();
   const run = (args: string[]) => execFileSync("git", args, {
-    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
   });
   const tags = (args: string[]) => run(["tag", "--list", "v[0-9]*", "--sort=-v:refname", ...args])
     .trim().split("\n").filter(Boolean);

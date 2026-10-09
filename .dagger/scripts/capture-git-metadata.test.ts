@@ -4,15 +4,17 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { captureGitMetadata } from "./capture-git-metadata";
+import { gitEnvironment } from "../../scripts/git-environment";
 
 test("metadata follows the selected worktree and reachable release history", () => {
   const root = mkdtempSync(join(tmpdir(), "nrz-release-worktree-"));
   try {
+    const env = { ...gitEnvironment(), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" };
     const git = (...args: string[]) => execFileSync("git", [
       "-c", "core.hooksPath=/dev/null", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", ...args,
     ], {
       cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
+      env,
     }).trim();
     git("init", "-b", "main");
     writeFileSync(join(root, "source"), "first");

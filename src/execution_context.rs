@@ -348,6 +348,7 @@ pub fn warn_local_dotenv_drift(project_dir: &Path, json: bool) -> anyhow::Result
             true
         } else {
             let mut command = std::process::Command::new("git");
+            crate::deploy::remove_git_repository_environment(&mut command);
             command
                 .args(["check-ignore", "-q", "--", &name])
                 .current_dir(project_dir);
