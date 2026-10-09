@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.43.0] - 2026-10-09
+
+### ♻️ Changed
+
+- **deploy:** harden source bundle custody ([1080af9](https://github.com/ONREZA/nrz-cli/commit/1080af9d759dda0054d936afe42204889b9f9483))
+- **cli:** reduce mutation and clone debt ([ee1ff6d](https://github.com/ONREZA/nrz-cli/commit/ee1ff6dba339c1ddd13ec597f40d396e7304a261))
+- **cli:** consolidate detection and debt ([c924f65](https://github.com/ONREZA/nrz-cli/commit/c924f655442e53123e286ca6bce8eade27a4189d))
+
+### 🐛 Bug Fixes
+
+- **cli:** align detection paths and reduce debt ([934f7c2](https://github.com/ONREZA/nrz-cli/commit/934f7c2519622930fbee25a6632b43fe4e2e29b1))
+
+### 🔧 Changed
+
+- add codegraph & update deps ([d532237](https://github.com/ONREZA/nrz-cli/commit/d5322372d3f94d3cc47cae76f64094c058c59da0))
+- **ci:** migrate tooling to moon and proto ([a0d9089](https://github.com/ONREZA/nrz-cli/commit/a0d90890d924df2dfc7ea4d639bbf373e1d7a305))
+
+### ✨ Features
+
+- **deploy:** add qualified language support ([4022122](https://github.com/ONREZA/nrz-cli/commit/4022122025bad6ca5bca1d991d296b24e3d8de34))
+
 ## [0.42.6] - 2026-10-06
 
 ### 🐛 Bug Fixes
