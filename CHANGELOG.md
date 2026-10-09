@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.43.1] - 2026-10-09
+
+### 🐛 Bug Fixes
+
+- **release:** restore static linux builds ([784782b](https://github.com/ONREZA/nrz-cli/commit/784782ba17fc0f88098230e3dd79395ffa135e04))
+
 ## [0.43.0] - 2026-10-09
 
 ### ♻️ Changed
