@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
-import { gitEnvironment } from "../../scripts/git-environment";
+import { gitEnvironment } from "../../scripts/git-environment.ts";
 
 export interface GitCommitMetadata {
   hash: string;
