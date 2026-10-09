@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.43.2] - 2026-10-09
+
+### 🐛 Bug Fixes
+
+- **release:** resolve node script imports ([b45f56b](https://github.com/ONREZA/nrz-cli/commit/b45f56b5ce20c814e73f2bc9f901d0526890a896))
+- **release:** isolate git subprocess routing ([590475a](https://github.com/ONREZA/nrz-cli/commit/590475a7a7b6e2f746b6f1d5b55527f0c3daeadc))
+- **deploy:** align build and preview flows ([f586cac](https://github.com/ONREZA/nrz-cli/commit/f586cac0f08604656ce2e14130608c6a47fd7600))
+
 ## [0.43.1] - 2026-10-09
 
 ### 🐛 Bug Fixes
