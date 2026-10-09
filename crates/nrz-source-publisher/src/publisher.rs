@@ -1,5 +1,6 @@
 use std::future::Future;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 use bytes::Bytes;
 use nrz_api::{
@@ -28,10 +29,10 @@ use uuid::Uuid;
 use crate::bundle::{CLI_PROTOCOL_VERSION, SOURCE_BUNDLE_FORMAT};
 use crate::{PreparedSourceBundle, SourcePublicationError, StructuredControlPlaneError};
 
-const PREPARE_BUDGET: Duration = Duration::from_secs(10 * 60);
-const COMPLETION_BUDGET: Duration = Duration::from_secs(30 * 60);
-const FAILURE_REPORT_BUDGET: Duration = Duration::from_secs(5 * 60);
-const DURABLE_READBACK_BUDGET: Duration = Duration::from_secs(30 * 60);
+const PREPARE_BUDGET: Duration = Duration::from_secs(600);
+const COMPLETION_BUDGET: Duration = Duration::from_secs(1800);
+const FAILURE_REPORT_BUDGET: Duration = Duration::from_secs(300);
+const DURABLE_READBACK_BUDGET: Duration = Duration::from_secs(1800);
 const INITIAL_RETRY_DELAY: Duration = Duration::from_millis(500);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 const SOURCE_UPLOAD_PUT_FAILED: &str = "SOURCE_UPLOAD_PUT_FAILED";
@@ -345,7 +346,93 @@ where
             "prepare-upload returned a source artifact id that does not match the verified bundle",
         ));
     }
+    validate_upload_targets(request.bundle, &prepared)?;
     Ok(prepared)
+}
+
+pub(super) fn validate_upload_targets(
+    bundle: &PreparedSourceBundle,
+    prepared: &CliPrepareUploadResponse,
+) -> Result<(), SourcePublicationError> {
+    if prepared.kind != "source-upload" {
+        return Err(invalid_response("unexpected prepare-upload kind"));
+    }
+    if prepared.fast_path {
+        if prepared.presigned_put.is_some()
+            || prepared.multipart.is_some()
+            || prepared.required_complete != CliPrepareUploadRequiredComplete::UploadComplete
+        {
+            return Err(invalid_response(
+                "fast path returned upload targets or multipart completion",
+            ));
+        }
+        return Ok(());
+    }
+    match (&prepared.presigned_put, &prepared.multipart) {
+        (Some(target), None) => {
+            let expected_size = i64::try_from(bundle.source_size_bytes()).map_err(|_| {
+                invalid_response("verified source bundle size exceeds the upload contract")
+            })?;
+            if target.mode != "single"
+                || bundle.multipart().is_some()
+                || target.content_length != expected_size
+                || target.sha256 != bundle.source_sha256()
+                || prepared.required_complete != CliPrepareUploadRequiredComplete::UploadComplete
+            {
+                return Err(invalid_response(
+                    "single upload target does not match the verified source",
+                ));
+            }
+            if let Some(head) = &target.verify_head
+                && (head.content_length != target.content_length || head.sha256 != target.sha256)
+            {
+                return Err(invalid_response(
+                    "HEAD verification does not match the verified source",
+                ));
+            }
+        }
+        (None, Some(target)) => {
+            let descriptor = bundle
+                .multipart()
+                .ok_or_else(|| invalid_response("unexpected multipart upload target"))?;
+            if target.mode != "multipart"
+                || signed_size(target.chunk_size, "multipart chunk size")?
+                    != descriptor.part_size_bytes
+                || target.chunks.len() != descriptor.parts.len()
+                || prepared.required_complete
+                    != CliPrepareUploadRequiredComplete::MultipartCompleteUploadComplete
+            {
+                return Err(invalid_response(
+                    "multipart upload target does not match the verified source",
+                ));
+            }
+            let mut seen = std::collections::HashSet::new();
+            for chunk in &target.chunks {
+                let part_number = u32::try_from(chunk.part_number)
+                    .map_err(|_| invalid_response("multipart part number exceeds u32"))?;
+                let part = descriptor
+                    .parts
+                    .iter()
+                    .find(|part| part.part_number == part_number)
+                    .ok_or_else(|| invalid_response("unknown multipart source part"))?;
+                if !seen.insert(part_number)
+                    || signed_size(chunk.content_length, "multipart chunk contentLength")?
+                        != part.size_bytes
+                    || chunk.sha256 != part.sha256
+                {
+                    return Err(invalid_response(
+                        "multipart source part does not match the verified source",
+                    ));
+                }
+            }
+        }
+        _ => {
+            return Err(invalid_response(
+                "prepare-upload must return exactly one upload target",
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -368,18 +455,7 @@ where
     T: SourcePublicationTransport,
     O: PublicationObserver,
 {
-    if prepared.kind != "source-upload" {
-        return Err(SourcePublicationError::InvalidResponse(format!(
-            "unexpected prepare-upload kind: {}",
-            prepared.kind
-        )));
-    }
     if prepared.fast_path {
-        if prepared.presigned_put.is_some() || prepared.multipart.is_some() {
-            return Err(SourcePublicationError::InvalidResponse(
-                "fast path returned upload targets".to_string(),
-            ));
-        }
         return Ok(None);
     }
     request.observer.on_event(PublicationEvent::Uploading);
@@ -847,13 +923,8 @@ fn invalid_response(message: &str) -> SourcePublicationError {
 
 fn bounded_failure_log(error: &SourcePublicationError) -> String {
     let mut message = redact_urls(&error.to_string());
-    if message.len() > MAX_UPLOAD_FAILURE_LOG_LENGTH {
-        let mut end = MAX_UPLOAD_FAILURE_LOG_LENGTH;
-        while !message.is_char_boundary(end) {
-            end -= 1;
-        }
-        message.truncate(end);
-    }
+    let end = message.floor_char_boundary(MAX_UPLOAD_FAILURE_LOG_LENGTH);
+    message.truncate(end);
     message
 }
 

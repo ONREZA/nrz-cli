@@ -80,7 +80,7 @@ pub(crate) use runtime_artifact::{
     application_runtime_in_output, apply_application_runtime_manifest,
 };
 use runtime_packaging::*;
-pub(crate) use scan::hash_file_streaming;
+pub(crate) use scan::hash_open_file_streaming;
 #[cfg(test)]
 pub(crate) use scan::scan_dir;
 use scan::*;

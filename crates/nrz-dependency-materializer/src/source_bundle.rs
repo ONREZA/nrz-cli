@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -162,28 +162,15 @@ pub fn materialize_source_bundle_runtime(
         })?;
     }
 
-    let allowed_mount_points_by_layer = trees.iter().fold(
-        BTreeMap::<String, Vec<String>>::new(),
-        |mut by_layer, tree| {
-            by_layer
-                .entry(tree.layer_name.clone())
-                .or_default()
-                .push(tree.mount_point.clone());
-            by_layer
-        },
-    );
     let mut total_files = 0_u64;
     let mut total_bytes = 0_u64;
     let mut dependencies = Vec::with_capacity(trees.len());
-    for (index, tree) in trees.into_iter().enumerate() {
+    for (index, tree) in trees.iter().enumerate() {
         let kind = request.policy.kind.ok_or_else(|| {
             SourceBundleMaterializationError::UnexpectedDependencies {
                 source_root: tree.source_root.clone(),
             }
         })?;
-        let allowed_mount_points = allowed_mount_points_by_layer
-            .get(&tree.layer_name)
-            .expect("every dependency tree has an allowed mount set");
         let image_path = image_root.join(format!("dependency-{index}.erofs"));
         let output = toolchain.materialize(DependencyMaterializationRequest {
             source_tree: &tree.path,
@@ -193,7 +180,7 @@ pub fn materialize_source_bundle_runtime(
             limits: request.policy.tree_limits,
             symlink_scope: DependencySymlinkScope::RuntimeMounts {
                 mount_point: &tree.mount_point,
-                allowed_mount_points,
+                trees: &trees,
             },
         })?;
         total_files = total_files
@@ -208,8 +195,8 @@ pub fn materialize_source_bundle_runtime(
             return Err(SourceBundleMaterializationError::LimitExceeded);
         }
         dependencies.push(MaterializedRuntimeDependency {
-            layer_name: tree.layer_name,
-            mount_point: tree.mount_point,
+            layer_name: tree.layer_name.clone(),
+            mount_point: tree.mount_point.clone(),
             image_path: output.image_path,
             manifest: output.manifest,
         });

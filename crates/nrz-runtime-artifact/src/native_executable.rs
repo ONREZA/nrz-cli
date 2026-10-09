@@ -9,7 +9,7 @@ use std::{
     sync::OnceLock,
 };
 
-use crate::{RuntimeArtifactError, invariant};
+use crate::{ArtifactRoot, RuntimeArtifactError, invariant};
 
 pub const NATIVE_EXECUTION_TARGET: &str = "native-linux-x86_64-glibc";
 
@@ -172,21 +172,46 @@ impl NativeExecutableRequirements {
         executable_path: &Path,
         launch_cwd: &Path,
     ) -> Result<(Self, Vec<PathBuf>), RuntimeArtifactError> {
-        let root = std::fs::canonicalize(artifact_root).map_err(fs_error)?;
-        let cwd = std::fs::canonicalize(launch_cwd).map_err(fs_error)?;
-        if !cwd.starts_with(&root) || !cwd.is_dir() {
+        // Compatibility acquisition accepts the same ambient root/cwd aliases as before.
+        let root_path = std::fs::canonicalize(artifact_root).map_err(fs_error)?;
+        let cwd_path = std::fs::canonicalize(launch_cwd).map_err(fs_error)?;
+        if !cwd_path.starts_with(&root_path) || !cwd_path.is_dir() {
+            return invariant("native launch cwd escapes the artifact");
+        }
+        let entry = executable_path.strip_prefix(artifact_root).map_err(|_| {
+            RuntimeArtifactError::Invariant("native entry is outside the artifact".into())
+        })?;
+        let cwd = cwd_path.strip_prefix(&root_path).unwrap();
+        let root = ArtifactRoot::open(artifact_root).map_err(fs_error)?;
+        Self::verify_rooted_artifact_closure(&root, entry, cwd, |_, _| Ok(()))
+    }
+
+    /// Inspect native metadata using an already acquired artifact owner.
+    /// Check every actual object/provider read against the caller's frozen byte identity.
+    pub fn verify_rooted_artifact_closure<F>(
+        root: &ArtifactRoot,
+        executable_path: &Path,
+        launch_cwd: &Path,
+        mut check_bytes: F,
+    ) -> Result<(Self, Vec<PathBuf>), RuntimeArtifactError>
+    where
+        F: FnMut(&Path, &[u8]) -> Result<(), RuntimeArtifactError>,
+    {
+        let cwd = root.canonicalize(launch_cwd).map_err(fs_error)?;
+        if !root.file_type(&cwd, true).map_err(fs_error)?.is_dir() {
             return invariant("native launch cwd escapes the artifact");
         }
         let mut members = BTreeSet::new();
-        let entry_path = root.join(executable_path.strip_prefix(artifact_root).map_err(|_| {
-            RuntimeArtifactError::Invariant("native entry is outside the artifact".into())
-        })?);
-        resolve_artifact_path(&root, &entry_path, &mut members)?;
+        resolve_artifact_path(root, executable_path, &mut members)?;
         let mut visited = BTreeSet::new();
+        let mut reader = NativeArtifactReader {
+            root,
+            check_bytes: &mut check_bytes,
+        };
         let requirements = inspect_closure(
-            &root,
+            &mut reader,
             &cwd,
-            &entry_path,
+            executable_path,
             true,
             &[],
             &mut visited,
@@ -471,7 +496,7 @@ fn has_intermediate_parent(path: &Path) -> bool {
 }
 
 fn resolve_artifact_path(
-    root: &Path,
+    root: &ArtifactRoot,
     path: &Path,
     members: &mut BTreeSet<PathBuf>,
 ) -> Result<PathBuf, RuntimeArtifactError> {
@@ -482,13 +507,11 @@ fn resolve_artifact_path(
 // Search directories may be absent, but lexical bounds and every existing
 // symlink ancestor still have to be validated before the loader ignores them.
 fn resolved_library_path(
-    root: &Path,
+    root: &ArtifactRoot,
     path: &Path,
     members: &mut BTreeSet<PathBuf>,
 ) -> Result<Option<PathBuf>, RuntimeArtifactError> {
-    let relative = path.strip_prefix(root).map_err(|_| {
-        RuntimeArtifactError::Invariant("native library path escapes the artifact".into())
-    })?;
+    let relative = path;
     let mut depth = 0;
     for component in relative.components() {
         match component {
@@ -505,7 +528,7 @@ fn resolved_library_path(
         .components()
         .map(|part| part.as_os_str().to_owned())
         .collect::<VecDeque<_>>();
-    let mut prefix = root.to_path_buf();
+    let mut prefix = PathBuf::new();
     let mut links = 0;
     let mut aliases = BTreeSet::new();
     while let Some(part) = pending.pop_front() {
@@ -513,25 +536,25 @@ fn resolved_library_path(
             continue;
         }
         if part == ".." {
-            if prefix == root {
+            if prefix.as_os_str().is_empty() {
                 return invariant("native library path escapes the artifact");
             }
             prefix.pop();
             continue;
         }
         prefix.push(part);
-        let metadata = match std::fs::symlink_metadata(&prefix) {
+        let metadata = match root.file_type(&prefix, false) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(fs_error(error)),
         };
-        if metadata.file_type().is_symlink() {
+        if metadata.is_symlink() {
             links += 1;
             if links > 128 {
                 return invariant("native artifact library symlink chain exceeds its bound");
             }
-            aliases.insert(prefix.strip_prefix(root).unwrap().to_path_buf());
-            let target = std::fs::read_link(&prefix).map_err(fs_error)?;
+            aliases.insert(prefix.clone());
+            let target = root.read_link(&prefix).map_err(fs_error)?;
             if target.is_absolute() || has_intermediate_parent(&target) {
                 return invariant(
                     "native artifact library symlink requires a relative target without intermediate parent traversal",
@@ -545,10 +568,7 @@ fn resolved_library_path(
     }
     // Check the original path: normalizing before resolving symlinks changes OS
     // semantics and can conceal an escape through a link followed by `..`.
-    let canonical = std::fs::canonicalize(path).map_err(fs_error)?;
-    if !canonical.starts_with(root) {
-        return invariant("native library path escapes the artifact");
-    }
+    let canonical = root.canonicalize(path).map_err(fs_error)?;
     if prefix != canonical {
         return invariant("native artifact library path changed while resolving");
     }
@@ -557,7 +577,7 @@ fn resolved_library_path(
 }
 
 fn loader_paths(
-    root: &Path,
+    root: &ArtifactRoot,
     cwd: &Path,
     object: &Path,
     paths: &[&str],
@@ -605,7 +625,7 @@ fn loader_paths(
         if resolved_library_path(root, &candidate, members)?.is_none() {
             continue;
         }
-        if !candidate.is_dir() {
+        if !root.file_type(&candidate, true).map_err(fs_error)?.is_dir() {
             return invariant("native artifact library path is not a directory");
         }
         result.push(candidate);
@@ -613,24 +633,44 @@ fn loader_paths(
     Ok(result)
 }
 
-fn inspect_closure(
-    root: &Path,
+struct NativeArtifactReader<'a, F> {
+    root: &'a ArtifactRoot,
+    check_bytes: &'a mut F,
+}
+
+impl<F> NativeArtifactReader<'_, F>
+where
+    F: FnMut(&Path, &[u8]) -> Result<(), RuntimeArtifactError>,
+{
+    fn read(&mut self, path: &Path) -> Result<Vec<u8>, RuntimeArtifactError> {
+        let bytes = self.root.read(path).map_err(fs_error)?;
+        (self.check_bytes)(path, &bytes)?;
+        Ok(bytes)
+    }
+}
+
+fn inspect_closure<F>(
+    reader: &mut NativeArtifactReader<'_, F>,
     cwd: &Path,
     object: &Path,
     executable: bool,
     inherited_rpaths: &[PathBuf],
     visited: &mut BTreeSet<PathBuf>,
     members: &mut BTreeSet<PathBuf>,
-) -> Result<NativeExecutableRequirements, RuntimeArtifactError> {
+) -> Result<NativeExecutableRequirements, RuntimeArtifactError>
+where
+    F: FnMut(&Path, &[u8]) -> Result<(), RuntimeArtifactError>,
+{
+    let root = reader.root;
     if visited.len() >= 128 {
         return invariant("native library closure exceeds its object bound");
     }
     let canonical = resolve_artifact_path(root, object, members)?;
-    let metadata = std::fs::metadata(&canonical).map_err(fs_error)?;
+    let metadata = root.file_type(&canonical, true).map_err(fs_error)?;
     if !metadata.is_file() {
         return invariant("native library must be a regular file");
     }
-    let bytes = std::fs::read(&canonical).map_err(fs_error)?;
+    let bytes = reader.read(&canonical)?;
     let elf = Elf::parse(&bytes).map_err(|error| {
         RuntimeArtifactError::Invariant(format!("invalid native artifact ELF: {error}"))
     })?;
@@ -648,7 +688,7 @@ fn inspect_closure(
     }) {
         return invariant("native ELF uses unsupported audit/filter/nodefaultlib loading");
     }
-    members.insert(canonical.strip_prefix(root).unwrap().to_path_buf());
+    members.insert(canonical.clone());
     visited.insert(canonical);
     let rpaths = loader_paths(root, cwd, object, &elf.rpaths, members)?;
     let runpaths = loader_paths(root, cwd, object, &elf.runpaths, members)?;
@@ -667,7 +707,7 @@ fn inspect_closure(
         let mut resolved = None;
         for directory in &search {
             let candidate = directory.join(library);
-            match std::fs::symlink_metadata(&candidate) {
+            match root.file_type(&candidate, false) {
                 Ok(_) => {
                     let canonical = resolve_artifact_path(root, &candidate, members)?;
                     resolved = Some((candidate, canonical));
@@ -679,7 +719,7 @@ fn inspect_closure(
         }
         if let Some((loader_path, canonical)) = resolved {
             if let Some(required) = version_needs.get(library) {
-                let provider_bytes = std::fs::read(&canonical).map_err(fs_error)?;
+                let provider_bytes = reader.read(&canonical)?;
                 let provider = Elf::parse(&provider_bytes).map_err(|error| {
                     RuntimeArtifactError::Invariant(format!("invalid native library ELF: {error}"))
                 })?;
@@ -690,14 +730,22 @@ fn inspect_closure(
                 )?;
             }
             if !visited.contains(&canonical) {
-                inspect_closure(root, cwd, &loader_path, false, &inherited, visited, members)?;
+                inspect_closure(
+                    reader,
+                    cwd,
+                    &loader_path,
+                    false,
+                    &inherited,
+                    visited,
+                    members,
+                )?;
             }
         } else if !NativeExecutableRequirements::QUALIFIED_SYSTEM_LIBRARIES
             .contains(&library.as_str())
         {
             return invariant(format!(
                 "native artifact lacks required library '{library}' requested by {}",
-                object.strip_prefix(root).unwrap().display()
+                object.display()
             ));
         } else if let Some(required) = version_needs.get(library) {
             verify_versions(library, required, &qualified_versions()[library])?;

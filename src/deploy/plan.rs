@@ -1,11 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 use anyhow::Context;
 use serde::Serialize;
 
 use crate::artifact::source_bundle_v1::{
     RuntimeDependencyPackaging, RuntimeReadinessContract, SOURCE_BUNDLE_FORMAT, SourceBundlePlan,
-    build_source_bundle_plan_with_scan,
+    build_source_bundle_plan_with_root,
 };
 use crate::artifact::{
     ArtifactFileCollection, ArtifactRootScope, BuildArtifact, BuildManifestSource, FileEntry,
@@ -65,11 +67,28 @@ pub(super) fn clear_native_build_output(
     std::fs::remove_dir_all(&output).context("cannot remove stale native build output")
 }
 
+#[cfg(test)]
 pub(super) async fn scan_runtime_artifact_for_plan(
     root_dir: PathBuf,
     scan: RuntimeArtifactScan,
 ) -> anyhow::Result<Vec<FileEntry>> {
-    tokio::task::spawn_blocking(move || super::scan_runtime_artifact(&root_dir, &scan))
+    let owner = nrz_runtime_artifact::ArtifactRoot::open(&root_dir).map_err(|error| {
+        output::coded_error(
+            "UPLOAD_FAILED",
+            format!(
+                "failed to scan runtime artifact {}: cannot open root: {error}",
+                root_dir.display()
+            ),
+        )
+    })?;
+    scan_runtime_artifact_for_plan_rooted(owner, scan).await
+}
+
+async fn scan_runtime_artifact_for_plan_rooted(
+    owner: nrz_runtime_artifact::ArtifactRoot,
+    scan: RuntimeArtifactScan,
+) -> anyhow::Result<Vec<FileEntry>> {
+    tokio::task::spawn_blocking(move || super::scan::scan_runtime_artifact_rooted(&owner, &scan))
         .await
         .map_err(|error| {
             output::coded_error(
@@ -91,6 +110,7 @@ pub(super) async fn scan_runtime_artifact_for_plan(
 pub(super) struct ArtifactPlan {
     pub(super) build: BuildArtifact,
     pub(super) runtime: RuntimeArtifact,
+    pub(super) root: nrz_runtime_artifact::ArtifactRoot,
     pub(super) files: ArtifactFileCollection,
     pub(super) file_breakdown: RuntimeArtifactFileBreakdown,
 }
@@ -213,8 +233,8 @@ impl DeployPlan {
             "Validating SOURCE_BUNDLE_V1 archive...",
             output::Phase::Deploy,
         );
-        build_source_bundle_plan_with_scan(
-            &self.artifact.runtime.root_dir,
+        build_source_bundle_plan_with_root(
+            &self.artifact.root,
             &self.artifact.runtime.manifest,
             &self.files,
             &self.artifact.runtime.scan,
@@ -782,21 +802,49 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         "Scanning runtime artifact...",
         output::Phase::Deploy,
     );
-    let runtime_artifact_root_for_scan = runtime_artifact.root_dir.clone();
+    let requires_python_dependencies = super::requires_retained_python_runtime_dependencies(
+        project_dir,
+        &runtime_artifact,
+        &build_artifact.detection,
+    )?;
+    let has_compute_layer = super::manifest_has_compute_layer(&runtime_artifact.manifest);
+    let health_check = if has_compute_layer {
+        Some(super::resolve_health_check(
+            args.health_check_path.as_deref(),
+            &command.config,
+            project_dir,
+            &build_artifact.detection,
+            &build_artifact.output_dir,
+            json,
+        )?)
+    } else {
+        None
+    };
+    let root_scope = artifact_root_scope(&runtime_artifact.root_dir, project_dir);
+    let artifact_root = nrz_runtime_artifact::ArtifactRoot::open(&runtime_artifact.root_dir)
+        .map_err(|error| {
+            output::coded_error(
+                "UPLOAD_FAILED",
+                format!(
+                    "failed to scan runtime artifact {}: cannot open root: {error}",
+                    runtime_artifact.root_dir.display()
+                ),
+            )
+        })?;
     let runtime_artifact_scan = runtime_artifact.scan.clone();
     let scanned_files =
-        scan_runtime_artifact_for_plan(runtime_artifact_root_for_scan, runtime_artifact_scan)
-            .await?;
+        scan_runtime_artifact_for_plan_rooted(artifact_root.clone(), runtime_artifact_scan).await?;
 
     let scanned_files = if let Some(platform) = runtime_platform
         .as_ref()
         .filter(|_| compute != ComputeType::Static)
     {
-        let pruned = crate::artifact::native_dependencies::prune_optional_native_dependencies(
-            &runtime_artifact.root_dir,
-            scanned_files,
-            platform,
-        )?;
+        let pruned =
+            crate::artifact::native_dependencies::prune_optional_native_dependencies_rooted(
+                &artifact_root,
+                scanned_files,
+                platform,
+            )?;
         if pruned.packages > 0 {
             output::status(
                 json,
@@ -817,23 +865,25 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         &runtime_artifact.manifest,
         scanned_files,
         &build_artifact.detection,
-        artifact_root_scope(&runtime_artifact.root_dir, project_dir),
+        root_scope,
         &runtime_artifact.scan,
         json,
     );
     super::validate_retained_python_runtime_dependencies(
-        project_dir,
+        requires_python_dependencies,
         &runtime_artifact,
         &artifact_files,
         &build_artifact.detection,
     )?;
-    super::python_toolchain::validate_retained_python_native_platform(
+    super::python_toolchain::validate_retained_python_native_platform_rooted(
+        &artifact_root,
         &runtime_artifact,
         &artifact_files,
     )?;
     let files = artifact_files.deployable_entries();
     if authored_install_executed {
-        super::python_toolchain::validate_authored_python_dependency_output(
+        super::python_toolchain::validate_authored_python_dependency_output_rooted(
+            &artifact_root,
             &runtime_artifact,
             &artifact_files,
             if request.platform_runner {
@@ -844,7 +894,8 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         )?;
     }
     if build_executed && !request.platform_runner {
-        super::python_toolchain::validate_local_python_build_output(
+        super::python_toolchain::validate_local_python_build_output_rooted(
+            &artifact_root,
             &runtime_artifact,
             &artifact_files,
         )?;
@@ -858,8 +909,8 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             ),
         ));
     }
-    super::ensure_no_unresolved_lfs_pointers(
-        &runtime_artifact.root_dir,
+    super::scan::ensure_no_unresolved_lfs_pointers_rooted(
+        &artifact_root,
         &files,
         effective.git_lfs_enabled(),
     )?;
@@ -869,24 +920,12 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     let functions =
         super::build_functions_payload(effective.config(), project_dir, json, args.force_rules)
             .await?;
-    let has_compute_layer = super::manifest_has_compute_layer(&runtime_artifact.manifest);
-    let health_check = if has_compute_layer {
-        Some(super::resolve_health_check(
-            args.health_check_path.as_deref(),
-            &command.config,
-            project_dir,
-            &build_artifact.detection,
-            &build_artifact.output_dir,
-            json,
-        )?)
-    } else {
-        None
-    };
 
     Ok(DeployPlan {
         artifact: ArtifactPlan {
             build: build_artifact,
             runtime: runtime_artifact,
+            root: artifact_root,
             files: artifact_files,
             file_breakdown,
         },

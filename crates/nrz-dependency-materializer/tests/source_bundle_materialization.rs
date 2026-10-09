@@ -4,14 +4,15 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 
 use nrz_dependency_materializer::{
-    DependencyMaterializationKind, DependencyTreeLimits, ErofsToolchain,
+    DependencyMaterializationKind, DependencyMaterializationRequest, DependencyMaterializerError,
+    DependencySymlinkScope, DependencyTreeLimits, ErofsToolchain,
     SourceBundleMaterializationPolicy, SourceBundleMaterializationRequest,
     canonicalization_policy_digest, materialize_source_bundle_runtime,
 };
 use nrz_source_bundle::{
-    SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH, SOURCE_BUNDLE_V1_SCHEMA_VERSION, SourceLogicalManifest,
-    SourceLogicalManifestEntryType, SourceLogicalManifestFile, SourceLogicalManifestLayer,
-    compute_logical_manifest_sha256, sha256_hex,
+    DependencySourceTree, SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH, SOURCE_BUNDLE_V1_SCHEMA_VERSION,
+    SourceLogicalManifest, SourceLogicalManifestEntryType, SourceLogicalManifestFile,
+    SourceLogicalManifestLayer, compute_logical_manifest_sha256, sha256_hex,
 };
 use serde_json::json;
 use tempfile::TempDir;
@@ -811,6 +812,427 @@ fn source_manifest() -> SourceLogicalManifest {
     }
 }
 
+#[test]
+fn materialization_uses_actual_sibling_trees_for_physical_parent_traversal() {
+    let temp = TempDir::new().unwrap();
+    let mut manifest = source_manifest();
+    manifest.files.extend([
+        source_file("node_modules/pkg/real", DEPENDENCY_BODY, "dependency"),
+        source_file(
+            "node_modules/pkg/deeper/child/file",
+            DEPENDENCY_BODY,
+            "dependency",
+        ),
+        source_link("node_modules/alias", "pkg/deeper/child"),
+        source_link("node_modules/link", "alias/../../real"),
+        source_link(".next/node_modules/alias", "../../node_modules/alias"),
+        source_link(".next/node_modules/link", "alias/../../real"),
+    ]);
+    let source_path = temp.path().join("source.tar.zst");
+    write_source_bundle(&source_path, &manifest);
+    let source_bytes = fs::read(&source_path).unwrap();
+    let restored = temp.path().join("restored");
+    tar::Archive::new(zstd::stream::read::Decoder::new(File::open(&source_path).unwrap()).unwrap())
+        .unpack(&restored)
+        .unwrap();
+    assert_eq!(
+        fs::read(restored.join(".next/node_modules/link")).unwrap(),
+        DEPENDENCY_BODY
+    );
+    let output_root = temp.path().join("runtime-physical");
+    let materialized = materialize_source_bundle_runtime(
+        &fake_erofs_toolchain(temp.path()),
+        SourceBundleMaterializationRequest {
+            source_path: &source_path,
+            logical_manifest_sha256: &compute_logical_manifest_sha256(
+                &serde_json::to_value(&manifest).unwrap(),
+            ),
+            source_sha256: &sha256_hex(&source_bytes),
+            source_size_bytes: source_bytes.len() as u64,
+            manifest: &manifest,
+            output_root: &output_root,
+            policy: SourceBundleMaterializationPolicy {
+                kind: Some(DependencyMaterializationKind::JavaScriptNodeModules),
+                compatibility: compatibility(),
+                tree_limits: tree_limits(),
+                max_total_files: 10,
+                max_total_bytes: 1024,
+            },
+        },
+    )
+    .unwrap();
+    assert_eq!(materialized.dependencies.len(), 2);
+    let layout = temp.path().join("runtime-layout");
+    let layout_trees = temp.path().join("layout-trees");
+    fs::create_dir(&layout_trees).unwrap();
+    for tree in
+        nrz_source_bundle::extract_dependency_source_trees(&source_path, &manifest, &layout_trees)
+            .unwrap()
+    {
+        let mounted = layout.join(&tree.source_root);
+        fs::create_dir_all(mounted.parent().unwrap()).unwrap();
+        fs::rename(tree.path, mounted).unwrap();
+    }
+    assert_eq!(
+        fs::read(layout.join("node_modules/link")).unwrap(),
+        DEPENDENCY_BODY
+    );
+    assert_eq!(
+        fs::read(layout.join(".next/node_modules/link")).unwrap(),
+        DEPENDENCY_BODY
+    );
+    let next = materialized
+        .dependencies
+        .iter()
+        .find(|tree| tree.mount_point == "/output/.next/node_modules")
+        .unwrap();
+    assert_ne!(
+        next.manifest.wire().canonicalization_policy_digest.as_str(),
+        canonicalization_policy_digest()
+    );
+}
+
+#[test]
+fn runtime_mount_scope_requires_custody_of_intermediate_aliases_and_endpoints() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join("output/node_modules");
+    let sibling = temp.path().join("output/.next/node_modules");
+    fs::create_dir_all(root.join("pkg")).unwrap();
+    fs::create_dir_all(&sibling).unwrap();
+    fs::write(root.join("pkg/file"), b"real").unwrap();
+    fs::write(sibling.join("real"), b"sibling").unwrap();
+    std::os::unix::fs::symlink("../../node_modules/pkg", sibling.join("bridge")).unwrap();
+    std::os::unix::fs::symlink("../.next/node_modules/bridge/file", root.join("link")).unwrap();
+    assert_eq!(fs::read(root.join("link")).unwrap(), b"real");
+    let mut trees = vec![
+        runtime_tree(&root, "/output/node_modules", "server"),
+        runtime_tree(&sibling, "/output/.next/node_modules", "server"),
+    ];
+    let tools = fake_erofs_toolchain(temp.path());
+    let accepted =
+        materialize_runtime_tree(&tools, &trees, &root, &temp.path().join("same-layer.erofs"))
+            .unwrap();
+    assert_ne!(
+        accepted
+            .manifest
+            .wire()
+            .canonicalization_policy_digest
+            .as_str(),
+        canonicalization_policy_digest()
+    );
+    trees[1].layer_name = "worker".into();
+    assert!(matches!(
+        materialize_runtime_tree(
+            &tools,
+            &trees,
+            &root,
+            &temp.path().join("other-alias.erofs")
+        ),
+        Err(DependencyMaterializerError::UnsafeSymlink { .. })
+    ));
+    fs::remove_file(root.join("link")).unwrap();
+    std::os::unix::fs::symlink("../.next/node_modules/real", root.join("link")).unwrap();
+    assert_eq!(fs::read(root.join("link")).unwrap(), b"sibling");
+    assert!(matches!(
+        materialize_runtime_tree(
+            &tools,
+            &trees,
+            &root,
+            &temp.path().join("other-endpoint.erofs")
+        ),
+        Err(DependencyMaterializerError::UnsafeSymlink { .. })
+    ));
+    trees.truncate(1);
+    assert!(matches!(
+        materialize_runtime_tree(
+            &tools,
+            &trees,
+            &root,
+            &temp.path().join("missing-sibling.erofs")
+        ),
+        Err(DependencyMaterializerError::UnsafeSymlink { .. })
+    ));
+}
+
+#[test]
+fn runtime_mount_scope_assigns_ownership_to_projected_payloads_in_nested_source_trees() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join("tree");
+    let nested = root.join("subdir");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("file"), b"shared payload").unwrap();
+    std::os::unix::fs::symlink("subdir/file", root.join("link")).unwrap();
+    let trees = [
+        runtime_tree(&root, "/output/node_modules", "server"),
+        runtime_tree(&nested, "/output/worker", "worker"),
+    ];
+    assert_eq!(fs::read(root.join("link")).unwrap(), b"shared payload");
+    assert_eq!(
+        root.join("subdir/file").canonicalize().unwrap(),
+        trees[1].path.join("file").canonicalize().unwrap()
+    );
+    let tools = fake_erofs_toolchain(temp.path());
+    let own = materialize_runtime_tree(
+        &tools,
+        &trees,
+        &root,
+        &temp.path().join("own-payload.erofs"),
+    )
+    .unwrap();
+    assert_eq!(own.tree.regular_file_count, 1);
+    assert_eq!(own.tree.symlink_count, 1);
+    assert_eq!(
+        own.manifest.wire().canonicalization_policy_digest.as_str(),
+        canonicalization_policy_digest()
+    );
+    fs::remove_file(root.join("link")).unwrap();
+    std::os::unix::fs::symlink("../worker/file", root.join("link")).unwrap();
+    let image = temp.path().join("foreign-payload.erofs");
+    assert!(matches!(
+        materialize_runtime_tree(&tools, &trees, &root, &image),
+        Err(DependencyMaterializerError::UnsafeSymlink { .. })
+    ));
+    assert!(!image.exists());
+}
+
+#[test]
+fn runtime_mount_scope_keeps_linux_lookup_limit_and_unix_tree_semantics() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join("tree");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(root.join("empty")).unwrap();
+    fs::write(root.join("real"), b"real").unwrap();
+    fs::write(root.join("back\\slash"), b"unix-name").unwrap();
+    std::os::unix::fs::symlink("empty/../real", root.join("empty-link")).unwrap();
+    std::os::unix::fs::symlink(".", root.join("root")).unwrap();
+    std::os::unix::fs::symlink("back\\slash", root.join("unix-link")).unwrap();
+    for index in (0..40).rev() {
+        let target = if index == 39 {
+            "real".into()
+        } else {
+            format!("a{}", index + 1)
+        };
+        std::os::unix::fs::symlink(target, root.join(format!("a{index}"))).unwrap();
+    }
+    assert_eq!(fs::read(root.join("a0")).unwrap(), b"real");
+    assert_eq!(fs::read(root.join("root/real")).unwrap(), b"real");
+    assert_eq!(fs::read(root.join("empty-link")).unwrap(), b"real");
+    assert_eq!(fs::read(root.join("unix-link")).unwrap(), b"unix-name");
+    let tools = fake_erofs_toolchain(temp.path());
+    let trees = [runtime_tree(&root, "/output/node_modules", "server")];
+    let limits = DependencyTreeLimits {
+        max_files: 100,
+        max_symlinks: 100,
+        ..tree_limits()
+    };
+    let run = |image: &Path| {
+        tools.materialize(DependencyMaterializationRequest {
+            source_tree: &root,
+            output_image: image,
+            kind: DependencyMaterializationKind::JavaScriptNodeModules,
+            compatibility: compatibility(),
+            limits,
+            symlink_scope: DependencySymlinkScope::RuntimeMounts {
+                mount_point: "/output/node_modules",
+                trees: &trees,
+            },
+        })
+    };
+    let accepted = run(&temp.path().join("forty.erofs")).unwrap();
+    assert_eq!(
+        accepted
+            .manifest
+            .wire()
+            .canonicalization_policy_digest
+            .as_str(),
+        canonicalization_policy_digest()
+    );
+    std::os::unix::fs::symlink("a0", root.join("forty-one")).unwrap();
+    assert_eq!(
+        fs::read(root.join("forty-one")).unwrap_err().raw_os_error(),
+        Some(libc::ELOOP)
+    );
+    assert!(matches!(
+        run(&temp.path().join("forty-one.erofs")),
+        Err(DependencyMaterializerError::UnsafeSymlink { .. })
+    ));
+}
+
+#[test]
+fn closed_tree_cannot_reenter_the_synthetic_namespace_after_leaving_its_real_root() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join("selected");
+    let outside = temp.path().join("tree");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&outside).unwrap();
+    fs::write(root.join("real"), b"inside").unwrap();
+    fs::write(outside.join("real"), b"outside").unwrap();
+    std::os::unix::fs::symlink("../tree/real", root.join("link")).unwrap();
+    assert_eq!(fs::read(root.join("link")).unwrap(), b"outside");
+    let result = fake_erofs_toolchain(temp.path()).materialize(DependencyMaterializationRequest {
+        source_tree: &root,
+        output_image: &temp.path().join("closed.erofs"),
+        kind: DependencyMaterializationKind::JavaScriptNodeModules,
+        compatibility: compatibility(),
+        limits: tree_limits(),
+        symlink_scope: DependencySymlinkScope::ClosedTree,
+    });
+    assert!(matches!(
+        result,
+        Err(DependencyMaterializerError::UnsafeSymlink { .. })
+    ));
+    fs::remove_file(root.join("link")).unwrap();
+    fs::create_dir_all(root.join("pkg/deep/child")).unwrap();
+    fs::write(root.join("pkg/real"), b"internal").unwrap();
+    std::os::unix::fs::symlink("pkg/deep/child", root.join("alias")).unwrap();
+    std::os::unix::fs::symlink("alias/../../real", root.join("link")).unwrap();
+    assert_eq!(fs::read(root.join("link")).unwrap(), b"internal");
+    let accepted = fake_erofs_toolchain(temp.path())
+        .materialize(DependencyMaterializationRequest {
+            source_tree: &root,
+            output_image: &temp.path().join("internal.erofs"),
+            kind: DependencyMaterializationKind::JavaScriptNodeModules,
+            compatibility: compatibility(),
+            limits: tree_limits(),
+            symlink_scope: DependencySymlinkScope::ClosedTree,
+        })
+        .unwrap();
+    assert_eq!(
+        accepted
+            .manifest
+            .wire()
+            .canonicalization_policy_digest
+            .as_str(),
+        canonicalization_policy_digest()
+    );
+}
+
+#[test]
+fn runtime_mount_scope_preserves_v2_for_legacy_traversal_identity() {
+    for (target, physical_internal_alias) in [
+        ("../node_modules/real", false),
+        ("alias/../../node_modules/real", true),
+    ] {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("node_modules");
+        fs::create_dir(&root).unwrap();
+        let file = if physical_internal_alias {
+            fs::create_dir_all(root.join("pkg/deep")).unwrap();
+            fs::create_dir(root.join("node_modules")).unwrap();
+            std::os::unix::fs::symlink("pkg/deep", root.join("alias")).unwrap();
+            root.join("node_modules/real")
+        } else {
+            root.join("real")
+        };
+        fs::write(file, b"real").unwrap();
+        std::os::unix::fs::symlink(target, root.join("link")).unwrap();
+        assert_eq!(fs::read(root.join("link")).unwrap(), b"real", "{target}");
+        let trees = [runtime_tree(&root, "/output/node_modules", "server")];
+        let result = materialize_runtime_tree(
+            &fake_erofs_toolchain(temp.path()),
+            &trees,
+            &root,
+            &temp.path().join("runtime.erofs"),
+        )
+        .unwrap();
+        assert_ne!(
+            result
+                .manifest
+                .wire()
+                .canonicalization_policy_digest
+                .as_str(),
+            canonicalization_policy_digest(),
+            "{target}"
+        );
+    }
+}
+
+#[test]
+fn runtime_mount_scope_rejects_ambiguous_or_substituted_source_descriptors() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path().join("tree");
+    let sibling = temp.path().join("sibling");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&sibling).unwrap();
+    fs::write(root.join("real"), b"real").unwrap();
+    fs::write(sibling.join("real"), b"sibling").unwrap();
+    let tools = fake_erofs_toolchain(temp.path());
+    let selected = runtime_tree(&root, "/output/node_modules", "server");
+    let other = runtime_tree(&sibling, "/output/.next/node_modules", "server");
+    let mut wrong_source = selected.clone();
+    wrong_source.path = sibling.clone();
+    let mut duplicate_mount = other.clone();
+    duplicate_mount.mount_point = "/output/node_modules/".into();
+    let mut nested_mount = other.clone();
+    nested_mount.mount_point = "/output/node_modules/pkg".into();
+    let alias = temp.path().join("tree-alias");
+    std::os::unix::fs::symlink(&root, &alias).unwrap();
+    let mut duplicate_source = other.clone();
+    duplicate_source.path = alias;
+    let mut missing_owner = selected.clone();
+    missing_owner.layer_name.clear();
+    for (index, trees) in [
+        vec![wrong_source],
+        vec![other],
+        vec![selected.clone(), duplicate_mount],
+        vec![selected.clone(), nested_mount],
+        vec![selected, duplicate_source],
+        vec![missing_owner],
+    ]
+    .iter()
+    .enumerate()
+    {
+        let image = temp.path().join(format!("invalid-{index}.erofs"));
+        assert!(
+            matches!(
+                materialize_runtime_tree(&tools, trees, &root, &image),
+                Err(DependencyMaterializerError::Contract(_))
+            ),
+            "descriptor {index}"
+        );
+        assert!(!image.exists());
+    }
+}
+
+fn runtime_tree(path: &Path, mount_point: &str, layer_name: &str) -> DependencySourceTree {
+    DependencySourceTree {
+        source_root: mount_point.trim_start_matches("/output/").into(),
+        layer_name: layer_name.into(),
+        mount_point: mount_point.into(),
+        path: path.into(),
+        file_count: 0,
+        logical_bytes: 0,
+    }
+}
+
+fn materialize_runtime_tree(
+    tools: &ErofsToolchain,
+    trees: &[DependencySourceTree],
+    root: &Path,
+    image: &Path,
+) -> Result<nrz_dependency_materializer::DependencyMaterializationOutput, DependencyMaterializerError>
+{
+    tools.materialize(DependencyMaterializationRequest {
+        source_tree: root,
+        output_image: image,
+        kind: DependencyMaterializationKind::JavaScriptNodeModules,
+        compatibility: compatibility(),
+        limits: tree_limits(),
+        symlink_scope: DependencySymlinkScope::RuntimeMounts {
+            mount_point: "/output/node_modules",
+            trees,
+        },
+    })
+}
+
+fn source_link(path: &str, target: &str) -> SourceLogicalManifestFile {
+    let mut file = source_file(path, b"", "dependency");
+    file.entry_type = SourceLogicalManifestEntryType::Symlink;
+    file.link_target = Some(target.to_string());
+    file.sha256 = sha256_hex(target.as_bytes());
+    file
+}
+
 fn source_file(path: &str, body: &[u8], role: &str) -> SourceLogicalManifestFile {
     SourceLogicalManifestFile {
         path: path.to_string(),
@@ -834,6 +1256,10 @@ fn write_source_bundle(path: &Path, manifest: &SourceLogicalManifest) {
         &serde_json::to_vec(manifest).unwrap(),
     );
     for file in &manifest.files {
+        if let Some(target) = &file.link_target {
+            append_symlink(&mut archive, &file.path, target);
+            continue;
+        }
         append_file(
             &mut archive,
             &file.path,

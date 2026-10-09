@@ -361,7 +361,20 @@ fn is_native_python_payload_file(path: &Path) -> anyhow::Result<bool> {
 
 /// Validate target platform facts for every retained Python serving file,
 /// independently of installer/build execution and declared dependency evidence.
+#[cfg(test)]
 pub(super) fn validate_retained_python_native_platform(
+    artifact: &crate::artifact::RuntimeArtifact,
+    files: &crate::artifact::ArtifactFileCollection,
+) -> anyhow::Result<()> {
+    validate_retained_python_native_platform_rooted(
+        &nrz_runtime_artifact::ArtifactRoot::open(&artifact.root_dir)?,
+        artifact,
+        files,
+    )
+}
+
+pub(super) fn validate_retained_python_native_platform_rooted(
+    root: &nrz_runtime_artifact::ArtifactRoot,
     artifact: &crate::artifact::RuntimeArtifact,
     files: &crate::artifact::ArtifactFileCollection,
 ) -> anyhow::Result<()> {
@@ -369,19 +382,16 @@ pub(super) fn validate_retained_python_native_platform(
         if !is_python_compute_file(artifact, file) {
             continue;
         }
-        let path = artifact.root_dir.join(&file.path);
-        if !std::fs::metadata(&path)?.is_file() {
-            continue;
-        }
-        let mut payload = std::fs::File::open(&path)?;
-        nrz_runtime_artifact::verify_linux_x86_64_native_platform(&mut payload).map_err(|error| {
-            crate::output::coded_error(
-                "PYTHON_PLATFORM_UNSUPPORTED",
-                format!(
-                    "Retained Python native payload '{}' is incompatible with the managed Linux x86_64 runtime: {error}. Provide target-compatible prebuilt files or use ONREZA Cloud Builder for qualified Linux builds.",
-                    file.path,
-                ),
-            )
+        qualify_retained_python_file(root, file, files, |payload| {
+            nrz_runtime_artifact::verify_linux_x86_64_native_platform(payload).map_err(|error| {
+                crate::output::coded_error(
+                    "PYTHON_PLATFORM_UNSUPPORTED",
+                    format!(
+                        "Retained Python native payload '{}' is incompatible with the managed Linux x86_64 runtime: {error}. Provide target-compatible prebuilt files or use ONREZA Cloud Builder for qualified Linux builds.",
+                        file.path,
+                    ),
+                )
+            })
         })?;
     }
     Ok(())
@@ -389,7 +399,20 @@ pub(super) fn validate_retained_python_native_platform(
 
 /// The scan and classification already own custody, pruning and symlink bounds.
 /// Managed dependency wheels have their separate Linux target qualification.
+#[cfg(test)]
 pub(super) fn validate_local_python_build_output(
+    artifact: &crate::artifact::RuntimeArtifact,
+    files: &crate::artifact::ArtifactFileCollection,
+) -> anyhow::Result<()> {
+    validate_local_python_build_output_rooted(
+        &nrz_runtime_artifact::ArtifactRoot::open(&artifact.root_dir)?,
+        artifact,
+        files,
+    )
+}
+
+pub(super) fn validate_local_python_build_output_rooted(
+    root: &nrz_runtime_artifact::ArtifactRoot,
     artifact: &crate::artifact::RuntimeArtifact,
     files: &crate::artifact::ArtifactFileCollection,
 ) -> anyhow::Result<()> {
@@ -399,23 +422,42 @@ pub(super) fn validate_local_python_build_output(
         {
             continue;
         }
-        let path = artifact.root_dir.join(&file.path);
-        if std::fs::metadata(&path)?.is_file() && is_native_python_payload_file(&path)? {
-            return Err(crate::output::coded_error(
-                "PYTHON_PLATFORM_UNSUPPORTED",
-                format!(
-                    "Local Python application build contains native payload '{}'; use ONREZA Cloud Builder for qualified Linux builds, or deploy an explicitly qualified prebuilt artifact with --skip-build.",
-                    file.path,
-                ),
-            ));
-        }
+        qualify_retained_python_file(root, file, files, |payload| {
+            if has_native_python_extension(&file.path)
+                || nrz_runtime_artifact::has_native_payload_header(payload)?
+            {
+                return Err(crate::output::coded_error(
+                    "PYTHON_PLATFORM_UNSUPPORTED",
+                    format!(
+                        "Local Python application build contains native payload '{}'; use ONREZA Cloud Builder for qualified Linux builds, or deploy an explicitly qualified prebuilt artifact with --skip-build.",
+                        file.path,
+                    ),
+                ));
+            }
+            Ok(())
+        })?;
     }
     Ok(())
 }
 
 /// Authored installers do not supply the managed recipe's target-wheel evidence.
 /// Validate only retained dependency files owned by a frozen Python COMPUTE layer.
+#[cfg(test)]
 pub(super) fn validate_authored_python_dependency_output(
+    artifact: &crate::artifact::RuntimeArtifact,
+    files: &crate::artifact::ArtifactFileCollection,
+    mode: PythonInstallMode,
+) -> anyhow::Result<()> {
+    validate_authored_python_dependency_output_rooted(
+        &nrz_runtime_artifact::ArtifactRoot::open(&artifact.root_dir)?,
+        artifact,
+        files,
+        mode,
+    )
+}
+
+pub(super) fn validate_authored_python_dependency_output_rooted(
+    root: &nrz_runtime_artifact::ArtifactRoot,
     artifact: &crate::artifact::RuntimeArtifact,
     files: &crate::artifact::ArtifactFileCollection,
     mode: PythonInstallMode,
@@ -429,18 +471,59 @@ pub(super) fn validate_authored_python_dependency_output(
         {
             continue;
         }
-        let path = artifact.root_dir.join(&file.path);
-        if std::fs::metadata(&path)?.is_file() && is_native_python_payload_file(&path)? {
-            return Err(crate::output::coded_error(
-                "PYTHON_PLATFORM_UNSUPPORTED",
-                format!(
-                    "Authored Python install produced native payload '{}'; use ONREZA Cloud Builder for qualified Linux installs, or remove build.install_command to use the managed target-qualified dependency installer.",
-                    file.path,
-                ),
-            ));
-        }
+        qualify_retained_python_file(root, file, files, |payload| {
+            if has_native_python_extension(&file.path)
+                || nrz_runtime_artifact::has_native_payload_header(payload)?
+            {
+                return Err(crate::output::coded_error(
+                    "PYTHON_PLATFORM_UNSUPPORTED",
+                    format!(
+                        "Authored Python install produced native payload '{}'; use ONREZA Cloud Builder for qualified Linux installs, or remove build.install_command to use the managed target-qualified dependency installer.",
+                        file.path,
+                    ),
+                ));
+            }
+            Ok(())
+        })?;
     }
     Ok(())
+}
+
+fn qualify_retained_python_file(
+    root: &nrz_runtime_artifact::ArtifactRoot,
+    file: &crate::artifact::ArtifactFile,
+    files: &crate::artifact::ArtifactFileCollection,
+    qualify: impl FnOnce(&mut super::scan::ArtifactQualificationReader) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let path = Path::new(&file.path);
+    let relative = root.canonicalize(path)?;
+    let witness = if file.kind == crate::artifact::ArtifactFileKind::File {
+        file
+    } else {
+        anyhow::ensure!(
+            file.symlink_resolved_path.as_deref().map(Path::new) == Some(relative.as_path()),
+            "artifact symlink target changed after scanning: {}",
+            file.path,
+        );
+        match files.files.iter().find(|candidate| {
+            candidate.kind == crate::artifact::ArtifactFileKind::File
+                && Path::new(&candidate.path) == relative
+        }) {
+            Some(witness) => witness,
+            None if root.file_type(&relative, true)?.is_dir() => return Ok(()),
+            None => anyhow::bail!(
+                "Python payload target is absent from scanned files: {}",
+                file.path
+            ),
+        }
+    };
+    super::scan::qualify_scanned_artifact_file(
+        root.open_file(&relative)?,
+        &file.path,
+        witness.size,
+        &witness.content_hash,
+        qualify,
+    )
 }
 
 fn is_python_compute_file(

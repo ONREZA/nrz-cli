@@ -112,6 +112,10 @@ predicates = "3"
 # HTTP client for integration tests
 reqwest = { version = "0.13", features = ["json"] }
 
+[profile.dev.package.sha2]
+# Keep large artifact verification fast in dev and inherited test builds.
+opt-level = 3
+
 [profile.release]
 # Fast release builds with minimal size/perf trade-off
 # - thin LTO: ~2-3x faster than full LTO, ~5-10% larger binary

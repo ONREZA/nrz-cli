@@ -86,12 +86,12 @@ impl ApplicationRuntimeDeclaration {
             }
             crate::normalize_source_path(entry)?;
         }
-        self.intent().validate()
+        validate_arguments(&self.args)
     }
 
     pub fn validate_target(&self, target: Option<&str>) -> Result<(), String> {
         self.validate()?;
-        self.intent().validate_target(target)?;
+        validate_runtime_target(self.family, target)?;
         if self
             .python_version
             .is_some_and(|minor| Some(minor.target()) != target)
@@ -110,40 +110,50 @@ impl ApplicationRuntimeDeclaration {
 
 impl ApplicationRuntimeIntent {
     pub fn validate(&self) -> Result<(), String> {
-        if self.args.len() > 64
-            || self
-                .args
-                .iter()
-                .any(|arg| arg.len() > 4096 || arg.contains('\0'))
-        {
-            return Err("application runtime arguments exceed the launch contract".into());
-        }
-        Ok(())
+        validate_arguments(&self.args)
     }
 
     pub fn validate_target(&self, version: Option<&str>) -> Result<(), String> {
         self.validate()?;
-        let compatible = match (self.family, version) {
-            (ApplicationRuntimeFamily::Bun, None) => true,
-            (ApplicationRuntimeFamily::Bun, Some(version)) => supported_bun_build_target(version),
-            (ApplicationRuntimeFamily::Node, Some(version)) => {
-                matches!(version, "node-22" | "node-24" | "node-26")
-            }
-            (ApplicationRuntimeFamily::Node, None) => false,
-            (ApplicationRuntimeFamily::Python, Some(version)) => {
-                crate::PythonMinor::from_target(version).is_some()
-            }
-            (ApplicationRuntimeFamily::Executable, Some("native-linux-x86_64-glibc")) => true,
-            (ApplicationRuntimeFamily::Python | ApplicationRuntimeFamily::Executable, _) => false,
-        };
-        if !compatible {
-            return Err(format!(
-                "application runtime {:?} conflicts with admitted runtime target {:?}; select a compatible trusted runtime before building",
-                self.family, version
-            ));
-        }
-        Ok(())
+        validate_runtime_target(self.family, version)
     }
+}
+
+fn validate_arguments(args: &[String]) -> Result<(), String> {
+    if args.len() > 64
+        || args
+            .iter()
+            .any(|arg| arg.len() > 4096 || arg.contains('\0'))
+    {
+        return Err("application runtime arguments exceed the launch contract".into());
+    }
+    Ok(())
+}
+
+fn validate_runtime_target(
+    family: ApplicationRuntimeFamily,
+    version: Option<&str>,
+) -> Result<(), String> {
+    let compatible = match (family, version) {
+        (ApplicationRuntimeFamily::Bun, None) => true,
+        (ApplicationRuntimeFamily::Bun, Some(version)) => supported_bun_build_target(version),
+        (ApplicationRuntimeFamily::Node, Some(version)) => {
+            matches!(version, "node-22" | "node-24" | "node-26")
+        }
+        (ApplicationRuntimeFamily::Node, None) => false,
+        (ApplicationRuntimeFamily::Python, Some(version)) => {
+            crate::PythonMinor::from_target(version).is_some()
+        }
+        (ApplicationRuntimeFamily::Executable, Some("native-linux-x86_64-glibc")) => true,
+        (ApplicationRuntimeFamily::Python | ApplicationRuntimeFamily::Executable, _) => false,
+    };
+    if !compatible {
+        return Err(format!(
+            "application runtime {:?} conflicts with admitted runtime target {:?}; select a compatible trusted runtime before building",
+            family, version
+        ));
+    }
+    Ok(())
 }
 
 pub fn layer_application_runtime(

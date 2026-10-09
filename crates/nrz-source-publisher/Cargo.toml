@@ -31,5 +31,5 @@ uuid = { version = "1", features = ["v7"] }
 axum = "0.8"
 tar = "0.4"
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
 zstd = "0.14"

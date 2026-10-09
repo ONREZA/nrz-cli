@@ -12,8 +12,6 @@ mod native_dependencies_tests;
 #[cfg(test)]
 mod python_build_boundary_tests;
 pub(crate) mod source_bundle_v1;
-#[cfg(test)]
-mod source_bundle_v1_tests;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -390,6 +388,9 @@ pub(crate) struct FileEntry {
     pub(crate) kind: ArtifactFileKind,
     #[serde(skip)]
     pub(crate) symlink_resolved_path: Option<String>,
+    // Canonical endpoints omit aliases required to reconstruct the raw path.
+    #[serde(skip)]
+    pub(crate) symlink_target: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -415,6 +416,8 @@ pub(crate) struct ArtifactFile {
     pub(crate) layer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) symlink_resolved_path: Option<String>,
+    #[serde(skip)]
+    pub(crate) symlink_target: Option<String>,
     pub(crate) reason: String,
 }
 
@@ -450,6 +453,7 @@ impl ArtifactFileCollection {
                 content_hash: file.content_hash.clone(),
                 kind: file.kind,
                 symlink_resolved_path: file.symlink_resolved_path.clone(),
+                symlink_target: file.symlink_target.clone(),
             })
             .collect()
     }
@@ -495,6 +499,7 @@ pub(crate) fn classify_artifact_files(
             role,
             layer,
             symlink_resolved_path: file.symlink_resolved_path,
+            symlink_target: file.symlink_target,
             reason,
         });
     }
@@ -509,30 +514,119 @@ pub(crate) fn classify_artifact_files(
 }
 
 fn preserve_build_only_symlink_targets(files: &mut [ArtifactFile]) {
-    let mut preserved = HashMap::<String, String>::new();
-    for file in files
+    let mut pending = files
         .iter()
-        .filter(|file| file.kind == ArtifactFileKind::Symlink && deployable_role(file.role))
-    {
+        .enumerate()
+        .filter_map(|(index, file)| {
+            (file.kind == ArtifactFileKind::Symlink && deployable_role(file.role)).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    if pending.is_empty() {
+        return;
+    }
+    let graph = nrz_source_bundle::SourceArchivePathIndex::from_entries(
+        files
+            .iter()
+            .map(|file| (file.path.as_str(), file.symlink_target.as_deref())),
+    );
+    let paths = files
+        .iter()
+        .enumerate()
+        .map(|(index, file)| (file.path.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let mut build_only = files
+        .iter()
+        .enumerate()
+        .filter_map(|(index, file)| (file.role == ArtifactFileRole::BuildOnly).then_some(index))
+        .collect::<Vec<_>>();
+    build_only.sort_unstable_by(|left, right| files[*left].path.cmp(&files[*right].path));
+    let mut retained_directories = files
+        .iter()
+        .filter(|file| deployable_role(file.role))
+        .flat_map(|file| {
+            file.path
+                .match_indices('/')
+                .map(|(offset, _)| &file.path[..offset])
+        })
+        .collect::<HashSet<_>>();
+    let mut preserved = HashMap::<String, String>::new();
+    let mut visited = HashSet::new();
+    let mut expanded_targets = HashSet::new();
+    while let Some(index) = pending.pop() {
+        let file = &files[index];
+        if !visited.insert(index) {
+            continue;
+        }
         let Some(target) = file.symlink_resolved_path.as_deref() else {
             continue;
         };
-        for candidate in files.iter().filter(|candidate| {
-            candidate.role == ArtifactFileRole::BuildOnly
-                && (candidate.path == target || candidate.path.starts_with(&format!("{target}/")))
-        }) {
-            preserved
-                .entry(candidate.path.clone())
-                .or_insert_with(|| file.path.clone());
+        let mut required = Vec::new();
+        if expanded_targets.insert(target) {
+            if let Some(&index) = paths.get(target)
+                && files[index].role == ArtifactFileRole::BuildOnly
+            {
+                required.push(index);
+            }
+            required.extend(build_only_descendants(files, &build_only, target));
+        }
+        for index in &required {
+            for (offset, _) in files[*index].path.match_indices('/') {
+                retained_directories.insert(&files[*index].path[..offset]);
+            }
+        }
+        // Invalid input remains in the deployable set for the writer to reject.
+        if let Ok(graph) = &graph
+            && let Ok(mut dependencies) = graph.required_paths(&file.path)
+        {
+            dependencies.sort_by_key(|path| std::cmp::Reverse(path.len()));
+            for path in dependencies {
+                let witness = if let Some(&index) = paths.get(path) {
+                    (files[index].role == ArtifactFileRole::BuildOnly).then_some(index)
+                } else if retained_directories.contains(path) {
+                    None
+                } else {
+                    // An implicit directory only needs one retained descendant, including before '..'.
+                    build_only_descendants(files, &build_only, path).next()
+                };
+                if let Some(index) = witness {
+                    required.push(index);
+                    for (offset, _) in files[index].path.match_indices('/') {
+                        retained_directories.insert(&files[index].path[..offset]);
+                    }
+                }
+            }
+        }
+        for index in required {
+            let candidate = &files[index];
+            if let std::collections::hash_map::Entry::Vacant(slot) =
+                preserved.entry(candidate.path.clone())
+            {
+                slot.insert(file.path.clone());
+                if candidate.kind == ArtifactFileKind::Symlink {
+                    pending.push(index);
+                }
+            }
         }
     }
-
     for file in files {
         if let Some(symlink_path) = preserved.get(&file.path) {
             file.role = ArtifactFileRole::SymlinkTarget;
             file.reason = format!("required by deployable symlink '{symlink_path}'");
         }
     }
+}
+
+fn build_only_descendants<'a>(
+    files: &'a [ArtifactFile],
+    sorted: &'a [usize],
+    root: &str,
+) -> impl Iterator<Item = usize> + 'a {
+    let prefix = format!("{root}/");
+    let start = sorted.partition_point(|index| files[*index].path.as_str() < prefix.as_str());
+    sorted[start..]
+        .iter()
+        .copied()
+        .take_while(move |index| files[*index].path.starts_with(&prefix))
 }
 
 fn summarize_artifact_files(scanned_files: usize, files: &[ArtifactFile]) -> ArtifactFileSummary {

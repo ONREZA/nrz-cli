@@ -17,6 +17,42 @@ fn authored_server(family: &str, static_first: bool) -> Manifest {
         .unwrap()
 }
 
+fn authored_server_with_target(family: &str, static_first: bool, target: &str) -> Manifest {
+    let mut manifest = authored_server(family, static_first);
+    manifest
+        .layers
+        .iter_mut()
+        .find(|layer| layer.target == LayerTarget::Compute)
+        .unwrap()
+        .runtime
+        .as_mut()
+        .unwrap()
+        .build_runtime_version = Some(target.into());
+    manifest
+}
+
+fn selected_primary_cases() -> [(
+    nrz_source_bundle::ApplicationRuntimeFamily,
+    &'static str,
+    &'static str,
+); 4] {
+    use nrz_source_bundle::ApplicationRuntimeFamily;
+    [
+        (ApplicationRuntimeFamily::Node, "node-24", "selected.js"),
+        (ApplicationRuntimeFamily::Bun, "bun-1.3.11", "selected.ts"),
+        (
+            ApplicationRuntimeFamily::Python,
+            "python-3.14",
+            ".onreza/python/launch.py",
+        ),
+        (
+            ApplicationRuntimeFamily::Executable,
+            "native-linux-x86_64-glibc",
+            "bin/selected",
+        ),
+    ]
+}
+
 #[test]
 fn sole_compute_runtime_selection_ignores_static_layer_position() {
     let runtime = RuntimeInfo {
@@ -187,16 +223,7 @@ fn static_primary_keeps_a_typed_compute_owners_frozen_target() {
 
 #[test]
 fn a_same_family_sibling_keeps_its_own_frozen_launch_arguments() {
-    let mut manifest = authored_server("NODE", true);
-    manifest
-        .layers
-        .iter_mut()
-        .find(|layer| layer.target == LayerTarget::Compute)
-        .unwrap()
-        .runtime
-        .as_mut()
-        .unwrap()
-        .build_runtime_version = Some("node-24".into());
+    let mut manifest = authored_server_with_target("NODE", true, "node-24");
     manifest.layers.push(serde_json::from_value(serde_json::json!({
         "name": "api", "target": "COMPUTE", "directory": "api", "entry": "server.js",
         "runtime": {"applicationRuntime": {"family": "NODE", "args": ["--api"]}, "buildRuntimeVersion": "node-24"}
@@ -246,16 +273,7 @@ fn typed_same_family_sibling_launch_requires_its_own_target() {
         entry: Some("server.js".into()),
         args: vec!["$(id)".into(), "two words".into()],
     };
-    let mut manifest = authored_server("NODE", true);
-    manifest
-        .layers
-        .iter_mut()
-        .find(|layer| layer.target == LayerTarget::Compute)
-        .unwrap()
-        .runtime
-        .as_mut()
-        .unwrap()
-        .build_runtime_version = Some("node-24".into());
+    let mut manifest = authored_server_with_target("NODE", true, "node-24");
     manifest.layers.push(
         serde_json::from_value(serde_json::json!({
             "name": "api", "target": "COMPUTE", "directory": "api", "entry": "server.js",
@@ -324,16 +342,7 @@ fn identical_intent_typed_siblings_cannot_inherit_the_primary_target() {
             entry: primary_entry.map(str::to_owned),
             args: vec!["$(id)".into(), "two words".into()],
         };
-        let mut manifest = authored_server("NODE", true);
-        manifest
-            .layers
-            .iter_mut()
-            .find(|layer| layer.target == LayerTarget::Compute)
-            .unwrap()
-            .runtime
-            .as_mut()
-            .unwrap()
-            .build_runtime_version = Some("node-24".into());
+        let mut manifest = authored_server_with_target("NODE", true, "node-24");
         manifest.layers.push(
             serde_json::from_value(serde_json::json!({
                 "name": "api", "target": "COMPUTE", "directory": "api", "entry": "index.js",
@@ -694,20 +703,7 @@ fn declaration_without_entry_keeps_compatible_owners_and_independent_siblings() 
 #[test]
 fn untyped_manifest_cannot_bind_a_different_frozen_primary_entry() {
     use nrz_source_bundle::{ApplicationRuntimeDeclaration, ApplicationRuntimeFamily, PythonMinor};
-    for (family, target, entry) in [
-        (ApplicationRuntimeFamily::Node, "node-24", "selected.js"),
-        (ApplicationRuntimeFamily::Bun, "bun-1.3.11", "selected.ts"),
-        (
-            ApplicationRuntimeFamily::Python,
-            "python-3.14",
-            ".onreza/python/launch.py",
-        ),
-        (
-            ApplicationRuntimeFamily::Executable,
-            "native-linux-x86_64-glibc",
-            "bin/selected",
-        ),
-    ] {
+    for (family, target, entry) in selected_primary_cases() {
         let declaration = ApplicationRuntimeDeclaration {
             family,
             python_version: (family == ApplicationRuntimeFamily::Python)
@@ -739,20 +735,7 @@ fn untyped_manifest_cannot_bind_a_different_frozen_primary_entry() {
 #[test]
 fn typed_siblings_cannot_replace_a_declared_primary_entry() {
     use nrz_source_bundle::{ApplicationRuntimeDeclaration, ApplicationRuntimeFamily, PythonMinor};
-    for (family, target, entry) in [
-        (ApplicationRuntimeFamily::Node, "node-24", "selected.js"),
-        (ApplicationRuntimeFamily::Bun, "bun-1.3.11", "selected.ts"),
-        (
-            ApplicationRuntimeFamily::Python,
-            "python-3.14",
-            ".onreza/python/launch.py",
-        ),
-        (
-            ApplicationRuntimeFamily::Executable,
-            "native-linux-x86_64-glibc",
-            "bin/selected",
-        ),
-    ] {
+    for (family, target, entry) in selected_primary_cases() {
         let declaration = ApplicationRuntimeDeclaration {
             family,
             python_version: (family == ApplicationRuntimeFamily::Python)

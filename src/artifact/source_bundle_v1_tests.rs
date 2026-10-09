@@ -8,8 +8,8 @@ use tempfile::tempdir;
 use crate::deploy::hash::sha256_hex;
 use crate::deploy::scan_dir;
 
-use super::source_bundle_v1::*;
 use super::*;
+use crate::artifact::*;
 
 fn static_manifest() -> crate::build::manifest::Manifest {
     serde_json::from_value(serde_json::json!({
@@ -33,47 +33,76 @@ fn compute_manifest() -> crate::build::manifest::Manifest {
     .unwrap()
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+fn provided_manifest_config(
+    directory: &std::path::Path,
+    manifest: &impl serde::Serialize,
+) -> nrz::config::EffectiveProjectConfig {
+    fs::write(
+        directory.join(".onreza/manifest.json"),
+        serde_json::to_vec(manifest).unwrap(),
+    )
+    .unwrap();
+    let mut config = nrz::config::ProjectConfig::default();
+    config.build.output_dirs = Some(vec![".".into()]);
+    nrz::config::EffectiveProjectConfig::from_project_config(directory.to_owned(), config)
+}
+
+// File-backed ELF fixtures exercise the SDK closure verifier without a host compiler.
+fn native_elf_fixture(runpath: Option<&str>) -> Vec<u8> {
+    let mut bytes = vec![0u8; 1024];
+    bytes[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
+    bytes[16..18].copy_from_slice(&(if runpath.is_some() { 2u16 } else { 3u16 }).to_le_bytes());
+    bytes[18..20].copy_from_slice(&62u16.to_le_bytes());
+    bytes[20..24].copy_from_slice(&1u32.to_le_bytes());
+    if runpath.is_some() {
+        bytes[24..32].copy_from_slice(&0x400180u64.to_le_bytes());
+    }
+    bytes[32..40].copy_from_slice(&64u64.to_le_bytes());
+    bytes[52..54].copy_from_slice(&64u16.to_le_bytes());
+    bytes[54..56].copy_from_slice(&56u16.to_le_bytes());
+    bytes[56..58].copy_from_slice(&(if runpath.is_some() { 3u16 } else { 1u16 }).to_le_bytes());
+    bytes[64..68].copy_from_slice(&1u32.to_le_bytes()); // PT_LOAD
+    bytes[68..72].copy_from_slice(&5u32.to_le_bytes());
+    bytes[80..88].copy_from_slice(&0x400000u64.to_le_bytes());
+    bytes[96..104].copy_from_slice(&1024u64.to_le_bytes());
+    bytes[104..112].copy_from_slice(&1024u64.to_le_bytes());
+    if let Some(runpath) = runpath {
+        bytes[120..124].copy_from_slice(&2u32.to_le_bytes()); // PT_DYNAMIC
+        bytes[128..136].copy_from_slice(&256u64.to_le_bytes());
+        bytes[136..144].copy_from_slice(&0x400100u64.to_le_bytes());
+        bytes[152..160].copy_from_slice(&80u64.to_le_bytes());
+        bytes[160..168].copy_from_slice(&80u64.to_le_bytes());
+        for (index, (tag, value)) in [(5u64, 0x400200u64), (10, 128), (1, 1), (29, 32)]
+            .iter()
+            .enumerate()
+        {
+            let offset = 256 + index * 16;
+            bytes[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+            bytes[offset + 8..offset + 16].copy_from_slice(&value.to_le_bytes());
+        }
+        bytes[513..522].copy_from_slice(b"libfoo.so");
+        bytes[544..544 + runpath.len()].copy_from_slice(runpath.as_bytes());
+        let interpreter = b"/lib64/ld-linux-x86-64.so.2\0";
+        bytes[176..180].copy_from_slice(&3u32.to_le_bytes()); // PT_INTERP
+        bytes[184..192].copy_from_slice(&640u64.to_le_bytes());
+        bytes[192..200].copy_from_slice(&0x400280u64.to_le_bytes());
+        bytes[208..216].copy_from_slice(&(interpreter.len() as u64).to_le_bytes());
+        bytes[216..224].copy_from_slice(&(interpreter.len() as u64).to_le_bytes());
+        bytes[640..640 + interpreter.len()].copy_from_slice(interpreter);
+    }
+    bytes
+}
+
 #[test]
-#[ignore = "requires a C compiler; verifies generic typed-native publication custody"]
 fn native_source_bundle_requires_archived_libraries_owned_by_its_compute_layer() {
     let dir = tempdir().unwrap();
     fs::create_dir(dir.path().join("lib")).unwrap();
-    fs::write(dir.path().join("foo.c"), "int foo(void) { return 42; }").unwrap();
+    fs::write(dir.path().join("lib/libfoo.so"), native_elf_fixture(None)).unwrap();
     fs::write(
-        dir.path().join("main.c"),
-        "int foo(void); int main(void) { return foo() == 42 ? 0 : 1; }",
+        dir.path().join("server"),
+        native_elf_fixture(Some("$ORIGIN/lib")),
     )
     .unwrap();
-    for args in [
-        vec![
-            "-shared",
-            "-fPIC",
-            "foo.c",
-            "-Wl,-soname,libfoo.so",
-            "-o",
-            "lib/libfoo.so",
-        ],
-        vec![
-            "main.c",
-            "-Llib",
-            "-lfoo",
-            "-Wl,-rpath,$ORIGIN/lib",
-            "-o",
-            "server",
-        ],
-    ] {
-        let result = std::process::Command::new("cc")
-            .args(args)
-            .current_dir(dir.path())
-            .output()
-            .unwrap();
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-    }
     let mut manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({"version":1,"layers":[{"name":"native","target":"COMPUTE","directory":".","entry":"server","runtime":{"applicationRuntime":{"family":"EXECUTABLE","args":[]},"buildRuntimeVersion":"native-linux-x86_64-glibc"}}],"routes":[]})).unwrap();
     let files = scan_dir(dir.path()).unwrap();
     build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
@@ -102,23 +131,11 @@ fn native_source_bundle_requires_archived_libraries_owned_by_its_compute_layer()
     manifest.layers.remove(0);
     manifest.layers[0].directory = "bin".into();
     fs::create_dir(dir.path().join("bin")).unwrap();
-    let compiled = std::process::Command::new("cc")
-        .args([
-            "main.c",
-            "-Llib",
-            "-lfoo",
-            "-Wl,-rpath,$ORIGIN/../lib",
-            "-o",
-            "bin/server",
-        ])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
-    assert!(
-        compiled.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compiled.stderr)
-    );
+    fs::write(
+        dir.path().join("bin/server"),
+        native_elf_fixture(Some("$ORIGIN/../lib")),
+    )
+    .unwrap();
     let files = scan_dir(dir.path()).unwrap();
     let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
     let library = plan
@@ -611,17 +628,7 @@ async fn admitted_node_build_preserves_code_only_sibling_target() {
              "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}}
         ]
     });
-    fs::write(
-        directory.path().join(".onreza/manifest.json"),
-        serde_json::to_vec(&manifest).unwrap(),
-    )
-    .unwrap();
-    let mut config = nrz::config::ProjectConfig::default();
-    config.build.output_dirs = Some(vec![".".into()]);
-    let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
-        directory.path().to_owned(),
-        config,
-    );
+    let mut effective = provided_manifest_config(directory.path(), &manifest);
     effective.bind_admitted_node_version("NODE_24").unwrap();
     let built = crate::build::run_with_effective_config(
         crate::cli::BuildArgs {
@@ -723,17 +730,7 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
                 build_runtime_version: witness.map(str::to_owned),
                 ..Default::default()
             });
-            fs::write(
-                directory.path().join(".onreza/manifest.json"),
-                serde_json::to_vec(&manifest).unwrap(),
-            )
-            .unwrap();
-            let mut config = nrz::config::ProjectConfig::default();
-            config.build.output_dirs = Some(vec![".".into()]);
-            let mut effective = nrz::config::EffectiveProjectConfig::from_project_config(
-                directory.path().to_owned(),
-                config,
-            );
+            let mut effective = provided_manifest_config(directory.path(), &manifest);
             if admitted {
                 effective.bind_admitted_node_version("NODE_24").unwrap();
             }
@@ -786,17 +783,7 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
             }),
             ..Default::default()
         });
-        fs::write(
-            directory.path().join(".onreza/manifest.json"),
-            serde_json::to_vec(&manifest).unwrap(),
-        )
-        .unwrap();
-        let mut config = nrz::config::ProjectConfig::default();
-        config.build.output_dirs = Some(vec![".".into()]);
-        let effective = nrz::config::EffectiveProjectConfig::from_project_config(
-            directory.path().to_owned(),
-            config,
-        );
+        let effective = provided_manifest_config(directory.path(), &manifest);
         let built = crate::build::run_with_effective_config(
             crate::cli::BuildArgs {
                 dir: directory.path().to_string_lossy().into_owned(),
@@ -1153,12 +1140,7 @@ async fn source_bundle_projects_workspace_packages_into_dependency_root() {
         .unwrap();
     assert_eq!(bin.link_target.as_deref(), Some("../pkg/bin.js"));
 
-    let compressed = tokio::fs::read(plan.source_path()).await.unwrap();
-    let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
-    let extracted = tempdir().unwrap();
-    tar::Archive::new(Cursor::new(tar_bytes))
-        .unpack(extracted.path())
-        .unwrap();
+    let extracted = crate::test_support::unpack_source_bundle(&plan);
     assert_eq!(
         fs::read_to_string(extracted.path().join("node_modules/.bin/pkg")).unwrap(),
         "console.log('pkg')"
@@ -1192,29 +1174,52 @@ async fn source_bundle_embeds_canonical_logical_manifest_first() {
 }
 
 #[test]
-fn source_bundle_treats_header_and_redirect_files_as_static_content() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("_headers"), b"plain user file").unwrap();
-    fs::write(dir.path().join("_redirects"), b"plain user file").unwrap();
-    let manifest = static_manifest();
-    let files = scan_dir(dir.path()).unwrap();
-
-    let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
-
-    let headers = plan
-        .logical_manifest
-        .files
-        .iter()
-        .find(|file| file.path == "_headers")
-        .unwrap();
-    let redirects = plan
-        .logical_manifest
-        .files
-        .iter()
-        .find(|file| file.path == "_redirects")
-        .unwrap();
-    assert_eq!(headers.role, SourceLogicalManifestFileRole::Static);
-    assert_eq!(redirects.role, SourceLogicalManifestFileRole::Static);
+fn source_bundle_retains_static_file_roles_and_content_types() {
+    let directory = tempdir().unwrap();
+    let expected = [
+        ("index.html", Some("text/html; charset=utf-8")),
+        ("legacy.htm", Some("text/html; charset=utf-8")),
+        ("style.CSS", Some("text/css; charset=utf-8")),
+        ("client.js", Some("application/javascript; charset=utf-8")),
+        ("module.mjs", Some("application/javascript; charset=utf-8")),
+        ("server.cjs", Some("application/javascript; charset=utf-8")),
+        ("data.json", Some("application/json; charset=utf-8")),
+        ("client.js.map", Some("application/json; charset=utf-8")),
+        ("readme.txt", Some("text/plain; charset=utf-8")),
+        ("feed.xml", Some("application/xml; charset=utf-8")),
+        ("icon.svg", Some("image/svg+xml")),
+        ("image.png", Some("image/png")),
+        ("image.jpg", Some("image/jpeg")),
+        ("image.jpeg", Some("image/jpeg")),
+        ("image.gif", Some("image/gif")),
+        ("image.webp", Some("image/webp")),
+        ("image.avif", Some("image/avif")),
+        ("favicon.ico", Some("image/x-icon")),
+        ("module.wasm", Some("application/wasm")),
+        ("font.woff", Some("font/woff")),
+        ("font.woff2", Some("font/woff2")),
+        ("font.ttf", Some("font/ttf")),
+        ("font.otf", Some("font/otf")),
+        ("document.pdf", Some("application/pdf")),
+        ("_headers", None),
+        ("_redirects", None),
+        ("unknown.data", None),
+    ];
+    for (path, _) in expected {
+        fs::write(directory.path().join(path), b"static content").unwrap();
+    }
+    let plan = static_source_bundle(directory.path());
+    assert_eq!(plan.logical_manifest.files.len(), expected.len());
+    for (path, content_type) in expected {
+        let file = plan
+            .logical_manifest
+            .files
+            .iter()
+            .find(|file| file.path == path)
+            .unwrap();
+        assert_eq!(file.role, SourceLogicalManifestFileRole::Static);
+        assert_eq!(file.content_type.as_deref(), content_type, "{path}");
+    }
 }
 
 #[test]
@@ -1616,12 +1621,7 @@ async fn source_bundle_plan_accepts_symlink_chain_through_archive_prefix() {
 
     let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
 
-    let compressed = tokio::fs::read(plan.source_path()).await.unwrap();
-    let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
-    let extracted = tempdir().unwrap();
-    tar::Archive::new(Cursor::new(tar_bytes))
-        .unpack(extracted.path())
-        .unwrap();
+    let extracted = crate::test_support::unpack_source_bundle(&plan);
     assert_eq!(
         fs::read_to_string(extracted.path().join("node_modules/.bin/foo")).unwrap(),
         "console.log('foo')"
@@ -1630,20 +1630,24 @@ async fn source_bundle_plan_accepts_symlink_chain_through_archive_prefix() {
 
 #[cfg(unix)]
 #[test]
-fn source_bundle_plan_rejects_symlink_to_empty_directory() {
-    let dir = tempdir().unwrap();
-    fs::create_dir(dir.path().join("empty")).unwrap();
-    std::os::unix::fs::symlink("empty", dir.path().join("empty-link")).unwrap();
-    let manifest = static_manifest();
-    let files = scan_dir(dir.path()).unwrap();
-
-    let err = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap_err();
-
-    assert!(
-        err.to_string()
-            .contains("target is not included in archive"),
-        "{err}"
-    );
+fn source_bundle_plan_rejects_unarchived_symlink_targets() {
+    for target in ["empty", "cache/data.txt"] {
+        let directory = tempdir().unwrap();
+        fs::create_dir(directory.path().join("empty")).unwrap();
+        fs::create_dir(directory.path().join("cache")).unwrap();
+        fs::write(directory.path().join("cache/data.txt"), b"cache").unwrap();
+        std::os::unix::fs::symlink(target, directory.path().join("alias")).unwrap();
+        let mut files = scan_dir(directory.path()).unwrap();
+        files.retain(|file| file.path != "cache/data.txt");
+        let error =
+            build_source_bundle_plan(directory.path(), &static_manifest(), &files).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("target is not included in archive"),
+            "{target}: {error}"
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -1694,35 +1698,10 @@ async fn source_bundle_plan_accepts_symlink_to_directory_with_symlink_only_desce
 
     let plan = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
 
-    let compressed = tokio::fs::read(plan.source_path()).await.unwrap();
-    let tar_bytes = zstd::stream::decode_all(Cursor::new(compressed)).unwrap();
-    let extracted = tempdir().unwrap();
-    tar::Archive::new(Cursor::new(tar_bytes))
-        .unpack(extracted.path())
-        .unwrap();
+    let extracted = crate::test_support::unpack_source_bundle(&plan);
     assert_eq!(
         fs::read_to_string(extracted.path().join("alias/link")).unwrap(),
         "real"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn source_bundle_plan_rejects_symlink_to_filtered_file() {
-    let dir = tempdir().unwrap();
-    fs::create_dir(dir.path().join("cache")).unwrap();
-    fs::write(dir.path().join("cache/data.txt"), b"cache").unwrap();
-    std::os::unix::fs::symlink("cache/data.txt", dir.path().join("cache-link")).unwrap();
-    let manifest = static_manifest();
-    let mut files = scan_dir(dir.path()).unwrap();
-    files.retain(|file| file.path != "cache/data.txt");
-
-    let err = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap_err();
-
-    assert!(
-        err.to_string()
-            .contains("target is not included in archive"),
-        "{err}"
     );
 }
 
@@ -1739,6 +1718,7 @@ fn source_bundle_plan_rejects_overlong_symlink_target() {
         content_hash: sha256_hex(target.as_bytes()),
         kind: crate::artifact::ArtifactFileKind::Symlink,
         symlink_resolved_path: None,
+        symlink_target: None,
     }];
 
     let err = build_source_bundle_plan(dir.path(), &manifest, &files).unwrap_err();
@@ -1949,4 +1929,665 @@ async fn frozen_compiler_probes_static_and_different_serving_families() {
             );
         }
     }
+}
+
+#[test]
+fn source_bundle_writer_rejects_same_size_rewrite() {
+    let directory = tempdir().unwrap();
+    fs::write(directory.path().join("index.html"), b"before").unwrap();
+    let entries = source_entries(
+        directory.path(),
+        &scan_dir(directory.path()).unwrap(),
+        &RuntimeArtifactScan::All,
+    )
+    .unwrap();
+    fs::write(directory.path().join("index.html"), b"after!").unwrap();
+    let archive = directory.path().join("source.tar.zst");
+    let error = write_source_bundle(&archive, b"{}", &entries).unwrap_err();
+    assert!(
+        error.to_string().contains("changed during packaging"),
+        "{error}"
+    );
+    assert!(!archive.exists());
+}
+
+#[test]
+fn source_bundle_writer_preserves_existing_destination() {
+    let directory = tempdir().unwrap();
+    let archive = directory.path().join("source.tar.zst");
+    fs::write(&archive, b"existing archive").unwrap();
+    assert!(write_source_bundle(&archive, b"{}", &[]).is_err());
+    assert_eq!(fs::read(&archive).unwrap(), b"existing archive");
+}
+
+#[test]
+fn source_bundle_rejects_stale_scanned_content_and_size() {
+    for replacement in [b"after!".as_slice(), b"larger than before", b"tiny"] {
+        let directory = tempdir().unwrap();
+        let file = directory.path().join("index.html");
+        fs::write(&file, b"before").unwrap();
+        let files = scan_dir(directory.path()).unwrap();
+        fs::write(&file, replacement).unwrap();
+        let error =
+            build_source_bundle_plan(directory.path(), &static_manifest(), &files).unwrap_err();
+        assert!(
+            error.to_string().contains("file changed during packaging"),
+            "{error}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_rejects_stale_scanned_symlink_identity() {
+    for changed_size in [false, true] {
+        let directory = tempdir().unwrap();
+        fs::write(directory.path().join("one.txt"), b"one").unwrap();
+        fs::write(directory.path().join("two.txt"), b"two").unwrap();
+        let link = directory.path().join("alias");
+        std::os::unix::fs::symlink("one.txt", &link).unwrap();
+        let mut files = scan_dir(directory.path()).unwrap();
+        if changed_size {
+            files
+                .iter_mut()
+                .find(|file| file.path == "alias")
+                .unwrap()
+                .size = 1;
+        } else {
+            fs::remove_file(&link).unwrap();
+            std::os::unix::fs::symlink("two.txt", &link).unwrap();
+        }
+        let error =
+            build_source_bundle_plan(directory.path(), &static_manifest(), &files).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("symlink changed during packaging"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn source_bundle_rejects_noncanonical_scanned_paths() {
+    let directory = tempdir().unwrap();
+    for path in [
+        "",
+        "/absolute",
+        "back\\slash",
+        "nul\0name",
+        ".",
+        "..",
+        "a//b",
+        "a/./b",
+        "a/../b",
+    ] {
+        let files = [FileEntry {
+            path: path.into(),
+            size: 0,
+            content_hash: sha256_hex(b""),
+            kind: crate::artifact::ArtifactFileKind::File,
+            symlink_resolved_path: None,
+            symlink_target: None,
+        }];
+        let error =
+            build_source_bundle_plan(directory.path(), &static_manifest(), &files).unwrap_err();
+        assert!(
+            error.to_string().contains("SOURCE_BUNDLE_V1 path"),
+            "{path:?}: {error}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn source_bundle_archive_preserves_empty_padded_and_large_file_contents() {
+    let directory = tempdir().unwrap();
+    let expected = [0, 511, 512, 513, 131_073].map(|size| {
+        let path = format!("size-{size}.bin");
+        let bytes = (0..size)
+            .map(|index| (index % 251) as u8)
+            .collect::<Vec<_>>();
+        fs::write(directory.path().join(&path), &bytes).unwrap();
+        (path, bytes)
+    });
+    let (plan, extracted) = verified_static_bundle(directory.path()).await;
+    for (path, bytes) in expected {
+        assert_eq!(fs::read(extracted.path().join(&path)).unwrap(), bytes);
+        let file = plan
+            .logical_manifest
+            .files
+            .iter()
+            .find(|file| file.path == path)
+            .unwrap();
+        assert_eq!(file.size, bytes.len() as u64);
+        assert_eq!(file.sha256, sha256_hex(&bytes));
+    }
+    let archive_path = plan.source_path().to_owned();
+    drop(plan);
+    assert!(!archive_path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_archive_preserves_executable_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = tempdir().unwrap();
+    for (name, mode) in [
+        ("exec", 0o100),
+        ("group-exec", 0o010),
+        ("other-exec", 0o001),
+        ("data", 0o640),
+    ] {
+        let path = directory.path().join(name);
+        fs::write(&path, b"content").unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(mode | 0o600)).unwrap();
+    }
+    let plan = static_source_bundle(directory.path());
+    let extracted = crate::test_support::unpack_source_bundle(&plan);
+    for file in &plan.logical_manifest.files {
+        assert_eq!(file.executable, file.path != "data");
+        assert_eq!(
+            fs::metadata(extracted.path().join(&file.path))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            if file.path == "data" { 0o644 } else { 0o755 }
+        );
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn source_bundle_projects_cross_package_links_in_each_dependency_root() {
+    let directory = tempdir().unwrap();
+    for path in [
+        "packages/a/lib",
+        "packages/b",
+        "node_modules/.bin",
+        "vendor/node_modules/.bin",
+    ] {
+        fs::create_dir_all(directory.path().join(path)).unwrap();
+    }
+    fs::write(directory.path().join("server.js"), b"require('a')").unwrap();
+    fs::write(
+        directory.path().join("packages/a/lib/value.txt"),
+        b"internal",
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("packages/b/index.js"),
+        b"cross-package",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        "lib/value.txt",
+        directory.path().join("packages/a/internal"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink("../b/index.js", directory.path().join("packages/a/cross")).unwrap();
+    for (root, prefix) in [("node_modules", "../"), ("vendor/node_modules", "../../")] {
+        for package in ["a", "b"] {
+            std::os::unix::fs::symlink(
+                format!("{prefix}packages/{package}"),
+                directory.path().join(format!("{root}/{package}")),
+            )
+            .unwrap();
+        }
+        std::os::unix::fs::symlink(
+            format!("../{prefix}packages/a/lib/value.txt"),
+            directory.path().join(format!("{root}/.bin/value")),
+        )
+        .unwrap();
+    }
+    let scan = RuntimeArtifactScan::Selected {
+        roots: vec![
+            RuntimeArtifactScanRoot {
+                path: ".".into(),
+                kind: RuntimeArtifactScanRootKind::BuildOutput,
+            },
+            RuntimeArtifactScanRoot {
+                path: "node_modules".into(),
+                kind: RuntimeArtifactScanRootKind::NodeModules,
+            },
+            RuntimeArtifactScanRoot {
+                path: "vendor/node_modules".into(),
+                kind: RuntimeArtifactScanRootKind::NodeModules,
+            },
+        ],
+        symlink_roots: vec!["packages/a".into(), "packages/b".into()],
+    };
+    let plan = build_source_bundle_plan_with_scan(
+        directory.path(),
+        &compute_manifest(),
+        &scan_dir(directory.path()).unwrap(),
+        &scan,
+        RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap();
+    let logical = crate::test_support::validated_source_bundle_manifest(&plan);
+    crate::test_support::verify_source_bundle(&plan, &logical).await;
+    let extracted = crate::test_support::unpack_source_bundle(&plan);
+    for root in ["node_modules", "vendor/node_modules"] {
+        for (suffix, target, content) in [
+            ("a/internal", "lib/value.txt", "internal"),
+            ("a/cross", "../b/index.js", "cross-package"),
+            (".bin/value", "../a/lib/value.txt", "internal"),
+        ] {
+            let path = format!("{root}/{suffix}");
+            assert_eq!(
+                fs::read_to_string(extracted.path().join(&path)).unwrap(),
+                content
+            );
+            let file = plan
+                .logical_manifest
+                .files
+                .iter()
+                .find(|file| file.path == path)
+                .unwrap();
+            assert_eq!(file.link_target.as_deref(), Some(target));
+            assert_eq!(file.sha256, sha256_hex(target.as_bytes()));
+            assert_eq!(file.role, SourceLogicalManifestFileRole::Dependency);
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn source_bundle_archive_preserves_long_unicode_paths_and_link_targets() {
+    let directory = tempdir().unwrap();
+    let long_directory = "д".repeat(60);
+    let target = format!("{long_directory}/payload.txt");
+    fs::create_dir(directory.path().join(&long_directory)).unwrap();
+    fs::write(directory.path().join(&target), b"unicode payload").unwrap();
+    let alias = format!("{}/alias", "a".repeat(100));
+    fs::create_dir(directory.path().join("a".repeat(100))).unwrap();
+    std::os::unix::fs::symlink(format!("../{target}"), directory.path().join(&alias)).unwrap();
+    let (_plan, extracted) = verified_static_bundle(directory.path()).await;
+    assert_eq!(
+        fs::read(extracted.path().join(&target)).unwrap(),
+        b"unicode payload"
+    );
+    assert_eq!(
+        fs::read(extracted.path().join(&alias)).unwrap(),
+        b"unicode payload"
+    );
+    assert_eq!(
+        fs::read_link(extracted.path().join(alias)).unwrap(),
+        PathBuf::from(format!("../{target}"))
+    );
+}
+
+#[test]
+fn source_bundle_symlink_limits_count_utf16_units_and_reject_unsafe_targets() {
+    let at_limit = "😀".repeat(256);
+    validate_source_symlink_target("alias", &at_limit).unwrap();
+    assert!(validate_source_symlink_target("alias", &format!("{at_limit}x")).is_err());
+    for target in ["", "/absolute", "back\\slash", "nul\0name"] {
+        assert!(
+            validate_source_symlink_target("alias", target).is_err(),
+            "{target:?}"
+        );
+    }
+    validate_source_symlink_target("nested/alias", "./../file.txt").unwrap();
+}
+
+#[test]
+fn source_bundle_writer_rejects_changed_length_and_removes_partial_destination() {
+    for (replacement, reason) in [
+        (b"tiny".as_slice(), "truncated"),
+        (b"longer than before".as_slice(), "grew"),
+    ] {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("payload");
+        fs::write(&path, b"before").unwrap();
+        let entries = source_entries(
+            directory.path(),
+            &scan_dir(directory.path()).unwrap(),
+            &RuntimeArtifactScan::All,
+        )
+        .unwrap();
+        fs::write(&path, replacement).unwrap();
+        let archive = directory.path().join("source.tar.zst");
+        let error = write_source_bundle(&archive, b"{}", &entries).unwrap_err();
+        assert!(error.to_string().contains(reason), "{error}");
+        assert!(!archive.exists());
+    }
+}
+
+#[test]
+fn source_bundle_rejects_duplicate_archive_paths() {
+    let directory = tempdir().unwrap();
+    fs::write(directory.path().join("file.txt"), b"file").unwrap();
+    let mut files = scan_dir(directory.path()).unwrap();
+    files.push(files[0].clone());
+    let error = build_source_bundle_plan(directory.path(), &static_manifest(), &files).unwrap_err();
+    assert!(
+        error.to_string().contains("duplicate archive path"),
+        "{error}"
+    );
+}
+
+#[test]
+fn native_bundle_does_not_reassign_trusted_dependency_library_custody() {
+    let directory = tempdir().unwrap();
+    fs::create_dir(directory.path().join("bin")).unwrap();
+    fs::create_dir_all(directory.path().join("node_modules/pkg")).unwrap();
+    fs::write(
+        directory.path().join("node_modules/pkg/libfoo.so"),
+        native_elf_fixture(None),
+    )
+    .unwrap();
+    fs::write(
+        directory.path().join("bin/server"),
+        native_elf_fixture(Some("$ORIGIN/../node_modules/pkg")),
+    )
+    .unwrap();
+    let mut manifest = compute_manifest();
+    manifest.layers[0].entry = Some("bin/server".into());
+    manifest.layers[0].runtime = Some(serde_json::from_value(serde_json::json!({"applicationRuntime":{"family":"EXECUTABLE","args":[]},"buildRuntimeVersion":"native-linux-x86_64-glibc"})).unwrap());
+    let error = build_source_bundle_plan_with_scan(
+        directory.path(),
+        &manifest,
+        &scan_dir(directory.path()).unwrap(),
+        &RuntimeArtifactScan::NodeRuntimeRoot,
+        RuntimeDependencyPackaging::TrustedMaterialization,
+        None,
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("not archived by its owning compute layer"),
+        "{error}"
+    );
+}
+
+#[test]
+fn source_bundle_assigns_unmatched_files_to_static_fallback_without_prefix_collision() {
+    let directory = tempdir().unwrap();
+    for path in ["server", "public", "serverish"] {
+        fs::create_dir(directory.path().join(path)).unwrap();
+    }
+    for path in [
+        "server/main.js",
+        "public/index.html",
+        "serverish/file.txt",
+        "loose.txt",
+    ] {
+        fs::write(directory.path().join(path), b"content").unwrap();
+    }
+    let manifest = serde_json::from_value(serde_json::json!({"version":1,"routes":[],"layers":[
+        {"name":"compute","target":"COMPUTE","directory":"server","entry":"main.js"},
+        {"name":"static","target":"STATIC","directory":"public"}
+    ]}))
+    .unwrap();
+    let plan = build_source_bundle_plan(
+        directory.path(),
+        &manifest,
+        &scan_dir(directory.path()).unwrap(),
+    )
+    .unwrap();
+    for file in &plan.logical_manifest.files {
+        let compute = file.path == "server/main.js";
+        assert_eq!(
+            file.role,
+            if compute {
+                SourceLogicalManifestFileRole::Compute
+            } else {
+                SourceLogicalManifestFileRole::Static
+            }
+        );
+        assert_eq!(
+            file.layer_name.as_deref(),
+            Some(if compute { "compute" } else { "static" })
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_rejects_symlink_chain_after_scanned_directory_escapes_output() {
+    let directory = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    fs::create_dir(directory.path().join("bridge")).unwrap();
+    fs::write(directory.path().join("bridge/file.txt"), b"unchanged").unwrap();
+    fs::write(outside.path().join("file.txt"), b"unchanged").unwrap();
+    std::os::unix::fs::symlink("bridge/file.txt", directory.path().join("alias")).unwrap();
+    let files = scan_dir(directory.path()).unwrap();
+    fs::remove_dir_all(directory.path().join("bridge")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), directory.path().join("bridge")).unwrap();
+    let error = build_source_bundle_plan(directory.path(), &static_manifest(), &files).unwrap_err();
+    assert!(
+        error.to_string().contains("symlink escapes build output"),
+        "{error}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_rejects_filtered_target_beneath_an_archived_symlink_prefix() {
+    let directory = tempdir().unwrap();
+    fs::create_dir(directory.path().join("package")).unwrap();
+    fs::write(directory.path().join("package/keep.txt"), b"kept").unwrap();
+    fs::write(directory.path().join("package/filtered.txt"), b"filtered").unwrap();
+    std::os::unix::fs::symlink("package", directory.path().join("package-link")).unwrap();
+    std::os::unix::fs::symlink("package-link/filtered.txt", directory.path().join("alias"))
+        .unwrap();
+    let mut files = scan_dir(directory.path()).unwrap();
+    files.retain(|file| file.path != "package/filtered.txt");
+    let error = build_source_bundle_plan(directory.path(), &static_manifest(), &files).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("target is not included in archive"),
+        "{error}"
+    );
+}
+
+async fn verified_static_bundle(
+    directory: &std::path::Path,
+) -> (SourceBundlePlan, tempfile::TempDir) {
+    let plan = static_source_bundle(directory);
+    let logical = crate::test_support::validated_source_bundle_manifest(&plan);
+    crate::test_support::verify_source_bundle(&plan, &logical).await;
+    let extracted = crate::test_support::unpack_source_bundle(&plan);
+    (plan, extracted)
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_archives_pax_only_after_header_field_boundary() {
+    let directory = tempdir().unwrap();
+    let short = "p".repeat(100);
+    let long = "p".repeat(101);
+    for (name, alias) in [(&short, "link-100"), (&long, "link-101")] {
+        fs::write(directory.path().join(name), b"payload").unwrap();
+        std::os::unix::fs::symlink(name, directory.path().join(alias)).unwrap();
+    }
+    let plan = static_source_bundle(directory.path());
+    let decoder =
+        zstd::stream::read::Decoder::new(fs::File::open(plan.source_path()).unwrap()).unwrap();
+    let mut archive = tar::Archive::new(decoder);
+    let mut extensions = Vec::new();
+    let mut entry_count = 0;
+    for entry in archive.entries().unwrap().raw(true) {
+        let mut entry = entry.unwrap();
+        assert_eq!(entry.header().uid().unwrap(), 0);
+        assert_eq!(entry.header().gid().unwrap(), 0);
+        assert_eq!(entry.header().mtime().unwrap(), 0);
+        entry_count += 1;
+        if entry.header().entry_type().is_pax_local_extensions() {
+            let mut body = String::new();
+            std::io::Read::read_to_string(&mut entry, &mut body).unwrap();
+            extensions.push(body);
+        }
+    }
+    assert_eq!(entry_count, 7);
+    assert_eq!(
+        extensions,
+        [
+            format!("115 linkpath={long}\n"),
+            format!("111 path={long}\n")
+        ]
+    );
+}
+
+fn static_source_bundle(directory: &std::path::Path) -> SourceBundlePlan {
+    build_source_bundle_plan(directory, &static_manifest(), &scan_dir(directory).unwrap()).unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_rejects_parent_target_through_an_unarchived_empty_directory() {
+    let directory = tempdir().unwrap();
+    fs::create_dir(directory.path().join("emptydir")).unwrap();
+    fs::write(directory.path().join("real.txt"), b"real").unwrap();
+    std::os::unix::fs::symlink("emptydir/../real.txt", directory.path().join("alias")).unwrap();
+    let files = scan_dir(directory.path()).unwrap();
+    let result = build_source_bundle_plan(directory.path(), &static_manifest(), &files);
+    assert!(
+        result.is_err(),
+        "empty directory omitted from archive made an unresolved physical symlink appear valid"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_preserves_physical_parent_targets_through_archived_directories() {
+    let directory = tempdir().unwrap();
+    fs::create_dir_all(directory.path().join("sub/nested")).unwrap();
+    fs::write(
+        directory.path().join("sub/nested/keep.txt"),
+        b"directory witness",
+    )
+    .unwrap();
+    fs::write(directory.path().join("sub/parent.txt"), b"physical parent").unwrap();
+    fs::write(directory.path().join("parent.txt"), b"lexical parent").unwrap();
+    fs::write(directory.path().join("real.txt"), b"real").unwrap();
+    std::os::unix::fs::symlink("sub/nested", directory.path().join("dir-alias")).unwrap();
+    std::os::unix::fs::symlink("dir-alias/../parent.txt", directory.path().join("physical"))
+        .unwrap();
+    std::os::unix::fs::symlink("sub/../real.txt", directory.path().join("relative")).unwrap();
+    let plan = static_source_bundle(directory.path());
+    let extracted = crate::test_support::unpack_source_bundle(&plan);
+    assert_eq!(
+        fs::read(extracted.path().join("relative")).unwrap(),
+        b"real"
+    );
+    assert_eq!(
+        fs::read(extracted.path().join("physical")).unwrap(),
+        b"physical parent"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_accepts_physical_parents_beyond_the_lexical_alias_depth() {
+    let directory = tempdir().unwrap();
+    fs::create_dir_all(directory.path().join("dir/deeper/child")).unwrap();
+    let records = [
+        ("dir/deeper/child/file", "directory witness", false),
+        ("dir/real", "physical parent", false),
+        ("directory-alias", "dir/deeper/child", true),
+        ("alias", "directory-alias/../../real", true),
+    ];
+    let files = records.map(|(path, body, link)| {
+        if link {
+            std::os::unix::fs::symlink(body, directory.path().join(path)).unwrap();
+        } else {
+            fs::write(directory.path().join(path), body).unwrap();
+        }
+        FileEntry {
+            path: path.into(),
+            size: if link { 0 } else { body.len() as u64 },
+            content_hash: sha256_hex(body.as_bytes()),
+            kind: if link {
+                ArtifactFileKind::Symlink
+            } else {
+                ArtifactFileKind::File
+            },
+            symlink_resolved_path: None,
+            symlink_target: None,
+        }
+    });
+    let plan = build_source_bundle_plan(directory.path(), &static_manifest(), &files).unwrap();
+    let extracted = crate::test_support::unpack_source_bundle(&plan);
+    assert_eq!(
+        fs::read(extracted.path().join("alias")).unwrap(),
+        b"physical parent"
+    );
+    assert_eq!(
+        fs::read_link(extracted.path().join("alias")).unwrap(),
+        PathBuf::from("directory-alias/../../real")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_rejects_regular_file_parent_swapped_outside_root() {
+    for after_planning in [false, true] {
+        let directory = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::create_dir(directory.path().join("bridge")).unwrap();
+        fs::write(directory.path().join("bridge/file.txt"), b"same bytes").unwrap();
+        fs::write(outside.path().join("file.txt"), b"same bytes").unwrap();
+        let files = scan_dir(directory.path()).unwrap();
+        let planned = after_planning
+            .then(|| source_entries(directory.path(), &files, &RuntimeArtifactScan::All).unwrap());
+        fs::remove_dir_all(directory.path().join("bridge")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), directory.path().join("bridge")).unwrap();
+        if let Some(entries) = planned {
+            let archive = directory.path().join("source.tar.zst");
+            assert!(write_source_bundle(&archive, b"{}", &entries).is_err());
+            assert!(!archive.exists(), "rejected input left a partial archive");
+        } else {
+            let result = build_source_bundle_plan(directory.path(), &static_manifest(), &files);
+            assert!(
+                result.is_err(),
+                "identical bytes outside the source root were accepted after an ancestor replacement"
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn source_bundle_packages_many_files_with_a_small_descriptor_budget() {
+    const CHILD: &str = "NRZ_TEST_SOURCE_ROOT_DESCRIPTOR_BUDGET";
+    if std::env::var_os(CHILD).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "artifact::source_bundle_v1::tests::source_bundle_packages_many_files_with_a_small_descriptor_budget", "--nocapture"])
+            .env(CHILD, "1")
+            .output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let directory = tempdir().unwrap();
+    for index in 0..256 {
+        fs::write(
+            directory.path().join(format!("file-{index:03}.txt")),
+            b"payload",
+        )
+        .unwrap();
+    }
+    // The child isolates the process-wide limit from parallel unit tests.
+    unsafe {
+        let mut limit = std::mem::zeroed::<libc::rlimit>();
+        assert_eq!(libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit), 0);
+        limit.rlim_cur = limit.rlim_cur.min(64);
+        assert_eq!(libc::setrlimit(libc::RLIMIT_NOFILE, &limit), 0);
+    }
+    let plan = static_source_bundle(directory.path());
+    assert_eq!(plan.logical_manifest.files.len(), 256);
+    let restored = crate::test_support::unpack_source_bundle(&plan);
+    assert_eq!(
+        fs::read(restored.path().join("file-255.txt")).unwrap(),
+        b"payload"
+    );
 }

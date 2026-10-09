@@ -1,8 +1,10 @@
-use super::FileEntry;
+use super::{ArtifactFileKind, FileEntry};
+use crate::deploy::hash::sha256_hex;
 use anyhow::{Context, bail, ensure};
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -78,23 +80,55 @@ pub(crate) struct PrunedDependencies {
     pub(crate) bytes: u64,
 }
 
+#[cfg(test)]
 pub(crate) fn prune_optional_native_dependencies(
     root: &Path,
     files: Vec<FileEntry>,
     target: &RuntimePlatform,
 ) -> anyhow::Result<PrunedDependencies> {
-    let root = root.canonicalize()?;
+    prune_optional_native_dependencies_rooted(
+        &nrz_runtime_artifact::ArtifactRoot::open(root)?,
+        files,
+        target,
+    )
+}
+
+pub(crate) fn prune_optional_native_dependencies_rooted(
+    owner: &nrz_runtime_artifact::ArtifactRoot,
+    files: Vec<FileEntry>,
+    target: &RuntimePlatform,
+) -> anyhow::Result<PrunedDependencies> {
     let mut packages = BTreeMap::<PathBuf, Value>::new();
+    let scanned_files: BTreeMap<_, _> = files
+        .iter()
+        .filter(|file| file.kind == ArtifactFileKind::File)
+        .map(|file| (file.path.as_str(), file))
+        .collect();
     for file in &files {
         let path = Path::new(&file.path);
         if file.size <= 1024 * 1024 && path.file_name().is_some_and(|name| name == "package.json") {
-            let full = root.join(path).canonicalize()?;
+            let full = owner.canonicalize(path)?;
+            let witness = if file.kind == ArtifactFileKind::File {
+                file
+            } else {
+                file.symlink_resolved_path
+                    .as_deref()
+                    .filter(|target| Path::new(target) == full)
+                    .and_then(|target| scanned_files.get(target).copied())
+                    .context("runtime package metadata target is absent from scanned files")?
+            };
+            let mut bytes = Vec::new();
+            owner
+                .open_file(&full)?
+                .take(witness.size.saturating_add(1))
+                .read_to_end(&mut bytes)?;
             ensure!(
-                full.starts_with(&root),
-                "package metadata escaped the runtime artifact"
+                bytes.len() as u64 == witness.size && sha256_hex(&bytes) == witness.content_hash,
+                "runtime package metadata changed after scanning: {}",
+                file.path
             );
             // Invalid/non-package JSON is not evidence authorizing removal.
-            if let Ok(value) = serde_json::from_slice::<Value>(&std::fs::read(&full)?) {
+            if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
                 packages.insert(
                     full.parent()
                         .context("package directory missing")?
@@ -107,10 +141,9 @@ pub(crate) fn prune_optional_native_dependencies(
     let incompatible: BTreeSet<_> = packages
         .iter()
         .filter(|(path, package)| {
-            path.strip_prefix(&root).is_ok_and(|path| {
-                path.components()
-                    .any(|part| part.as_os_str() == "node_modules")
-            }) && !target.accepts(package)
+            path.components()
+                .any(|part| part.as_os_str() == "node_modules")
+                && !target.accepts(package)
         })
         .map(|(path, _)| path.clone())
         .collect();
@@ -136,7 +169,7 @@ pub(crate) fn prune_optional_native_dependencies(
                             .and_then(|meta| meta.get("optional"))
                             .and_then(Value::as_bool)
                             == Some(true));
-                let Some(dependency) = resolve_dependency(&root, parent, name, &packages)? else {
+                let Some(dependency) = resolve_dependency(owner, parent, name, &packages)? else {
                     continue;
                 };
                 if is_optional {
@@ -152,7 +185,7 @@ pub(crate) fn prune_optional_native_dependencies(
             "RUNTIME_DEPENDENCY_INCOMPATIBLE",
             format!(
                 "required runtime dependency {} is incompatible with {}/{}/{}",
-                path.strip_prefix(&root)?.display(),
+                path.display(),
                 target.os,
                 target.cpu,
                 target.libc
@@ -181,8 +214,8 @@ pub(crate) fn prune_optional_native_dependencies(
     let mut retained = Vec::with_capacity(files.len());
     let mut bytes = 0_u64;
     for file in files {
-        let path = root.join(&file.path);
-        let canonical = path.canonicalize()?;
+        let path = Path::new(&file.path);
+        let canonical = owner.canonicalize(path)?;
         let remove = removed
             .iter()
             .any(|removed| path.starts_with(removed) || canonical.starts_with(removed));
@@ -212,7 +245,7 @@ pub(crate) fn prune_optional_native_dependencies(
 }
 
 fn resolve_dependency(
-    root: &Path,
+    owner: &nrz_runtime_artifact::ArtifactRoot,
     parent: &Path,
     name: &str,
     packages: &BTreeMap<PathBuf, Value>,
@@ -225,7 +258,7 @@ fn resolve_dependency(
     {
         return Ok(None);
     }
-    for ancestor in parent.ancestors().take_while(|path| path.starts_with(root)) {
+    for ancestor in parent.ancestors() {
         if ancestor
             .file_name()
             .is_some_and(|name| name == "node_modules")
@@ -233,16 +266,16 @@ fn resolve_dependency(
             continue;
         }
         let candidate = ancestor.join("node_modules").join(name);
-        if let Ok(canonical) = candidate.canonicalize() {
-            ensure!(
-                canonical.starts_with(root),
-                "runtime dependency escaped the artifact"
-            );
-            if packages.contains_key(&canonical) {
-                return Ok(Some(canonical));
+        match owner.canonicalize(&candidate) {
+            Ok(canonical) => {
+                if packages.contains_key(&canonical) {
+                    return Ok(Some(canonical));
+                }
+                // A present but untraced dependency shadows higher ancestors.
+                return Ok(None);
             }
-            // A present but untraced dependency shadows higher ancestors.
-            return Ok(None);
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("runtime dependency resolution failed"),
         }
     }
     Ok(None)

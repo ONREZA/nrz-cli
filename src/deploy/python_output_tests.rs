@@ -161,6 +161,141 @@ fn python_output_guard_uses_retained_layer_and_dependency_custody() {
     }
 }
 
+fn scanned_python_output(
+    project_dir: &std::path::Path,
+) -> (
+    crate::artifact::RuntimeArtifact,
+    nrz_runtime_artifact::ArtifactRoot,
+    crate::artifact::ArtifactFileCollection,
+) {
+    let artifact = crate::artifact::RuntimeArtifact {
+        root_dir: project_dir.to_owned(),
+        manifest: serde_json::from_value(serde_json::json!({
+            "version":1,"routes":[],"layers":[{
+                "name":"python","target":"COMPUTE","directory":".","entry":"main.py",
+                "runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}
+            }]
+        })).unwrap(),
+        scan: crate::artifact::RuntimeArtifactScan::PythonRuntimeRoot(PythonMinor::default()),
+    };
+    let root = nrz_runtime_artifact::ArtifactRoot::open(project_dir).unwrap();
+    let files = crate::artifact::classify_artifact_files(
+        &artifact.manifest,
+        super::super::scan::scan_runtime_artifact_rooted(&root, &artifact.scan).unwrap(),
+        &crate::detect::detect(project_dir),
+        crate::artifact::ArtifactRootScope::ProjectRoot,
+        &artifact.scan,
+    );
+    (artifact, root, files)
+}
+
+#[test]
+fn python_qualification_rejects_changed_bytes_before_native_payload_is_restored() {
+    let mut admitted = Vec::new();
+    for guard in ["platform", "local", "authored"] {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("main.py"), "print('PYTHON')\n").unwrap();
+        let relative = if guard == "authored" {
+            format!(
+                "{}/demo/native.data",
+                PythonMinor::default().site_packages_root()
+            )
+        } else {
+            "native.data".to_owned()
+        };
+        let path = project.path().join(&relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut original = b"\xcf\xfa\xed\xfeMACH_O".to_vec();
+        original.resize(96, 0);
+        std::fs::write(&path, &original).unwrap();
+        let (artifact, root, files) = scanned_python_output(project.path());
+        std::fs::write(&path, vec![b'p'; original.len()]).unwrap();
+        let qualification = match guard {
+            "platform" => validate_retained_python_native_platform_rooted(&root, &artifact, &files),
+            "local" => validate_local_python_build_output_rooted(&root, &artifact, &files),
+            "authored" => validate_authored_python_dependency_output_rooted(
+                &root,
+                &artifact,
+                &files,
+                PythonInstallMode::ManagedLocal,
+            ),
+            _ => unreachable!(),
+        };
+        std::fs::write(&path, &original).unwrap();
+        if let Err(error) = qualification {
+            assert!(
+                error.to_string().contains("changed after scanning"),
+                "{guard}"
+            );
+        } else {
+            let plan = crate::artifact::source_bundle_v1::build_source_bundle_plan_with_root(
+                &root,
+                &artifact.manifest,
+                &files.deployable_entries(),
+                &artifact.scan,
+                crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::Embedded,
+                None,
+            )
+            .unwrap();
+            let restored = crate::test_support::unpack_source_bundle(&plan);
+            assert_eq!(
+                std::fs::read(restored.path().join(&relative)).unwrap(),
+                original
+            );
+            admitted.push(guard);
+        }
+    }
+    assert!(
+        admitted.is_empty(),
+        "{admitted:?} archived a native payload after qualifying different bytes"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn python_qualification_preserves_scanned_file_and_directory_aliases() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("main.py"), "print('PYTHON')\n").unwrap();
+    std::os::unix::fs::symlink("main.py", project.path().join("alias.py")).unwrap();
+    let stage = project
+        .path()
+        .join(PythonMinor::default().site_packages_root());
+    std::fs::create_dir_all(stage.join("resources")).unwrap();
+    std::fs::write(stage.join("resources/pure.py"), "RESOURCE = 1\n").unwrap();
+    std::os::unix::fs::symlink("resources/pure.py", stage.join("alias.py")).unwrap();
+    std::os::unix::fs::symlink("resources", stage.join("folder.so")).unwrap();
+    std::os::unix::fs::symlink(
+        PythonMinor::default().site_packages_root(),
+        project.path().join("folder.so"),
+    )
+    .unwrap();
+    let (artifact, root, files) = scanned_python_output(project.path());
+    validate_retained_python_native_platform_rooted(&root, &artifact, &files).unwrap();
+    validate_local_python_build_output_rooted(&root, &artifact, &files).unwrap();
+    validate_authored_python_dependency_output_rooted(
+        &root,
+        &artifact,
+        &files,
+        PythonInstallMode::ManagedLocal,
+    )
+    .unwrap();
+    let alias = files
+        .files
+        .iter()
+        .find(|file| file.path == "alias.py")
+        .unwrap();
+    std::fs::write(project.path().join("main.py"), "print('CHANGED')\n").unwrap();
+    let error = qualify_retained_python_file(&root, alias, &files, |reader| {
+        nrz_runtime_artifact::verify_linux_x86_64_native_platform(reader)?;
+        Ok(())
+    })
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("changed after scanning"),
+        "{error}"
+    );
+}
+
 #[test]
 fn pure_python_and_java_stage_resources_remain_portable_on_non_linux_hosts() {
     let project = tempfile::tempdir().unwrap();

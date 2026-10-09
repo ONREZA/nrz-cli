@@ -23,6 +23,7 @@ fn fe(path: &str, size: u64, content_hash: &str) -> FileEntry {
         content_hash: content_hash.into(),
         kind: crate::artifact::ArtifactFileKind::File,
         symlink_resolved_path: None,
+        symlink_target: None,
     }
 }
 

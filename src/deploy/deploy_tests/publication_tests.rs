@@ -450,6 +450,7 @@ fn file_entry_serializes_with_camel_case_content_hash() {
         content_hash: "abc123".into(),
         kind: crate::artifact::ArtifactFileKind::File,
         symlink_resolved_path: None,
+        symlink_target: None,
     };
     let json = serde_json::to_value(&entry).unwrap();
     assert_eq!(json["contentHash"], "abc123");

@@ -1,4 +1,191 @@
 use super::*;
+use source_bundle_v1::RuntimeDependencyPackaging;
+use source_bundle_v1::RuntimeDependencyPackaging::{Embedded, TrustedMaterialization};
+
+fn install_workspace_test_package(root: &Path, package: &str) {
+    let directory = root.join("node_modules").join(package);
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("index.js"), "module.exports = {}").unwrap();
+}
+
+fn resolve_workspace_runtime(
+    root: &Path,
+    project: &Path,
+    manifest: build_manifest::Manifest,
+    detection: &crate::detect::types::DetectionResult,
+) -> crate::artifact::RuntimeArtifact {
+    resolve_runtime_artifact(
+        root,
+        project,
+        project.join("dist"),
+        manifest,
+        detection,
+        true,
+    )
+    .unwrap()
+}
+
+fn workspace_bundle(
+    artifact: &crate::artifact::RuntimeArtifact,
+    files: Vec<FileEntry>,
+    detection: &crate::detect::types::DetectionResult,
+    packaging: RuntimeDependencyPackaging,
+) -> source_bundle_v1::SourceBundlePlan {
+    let files = crate::artifact::classify_artifact_files(
+        &artifact.manifest,
+        files,
+        detection,
+        crate::artifact::ArtifactRootScope::ProjectRoot,
+        &artifact.scan,
+    )
+    .deployable_entries();
+    source_bundle_v1::build_source_bundle_plan_with_scan(
+        &artifact.root_dir,
+        &artifact.manifest,
+        &files,
+        &artifact.scan,
+        packaging,
+        None,
+    )
+    .unwrap()
+}
+
+fn scan_node_workspace(
+    root: &Path,
+    app: &Path,
+) -> (
+    crate::artifact::RuntimeArtifact,
+    crate::detect::types::DetectionResult,
+    Vec<FileEntry>,
+    crate::artifact::RuntimeArtifactFileBreakdown,
+) {
+    let detection = crate::detect::detect_with_framework_override(app, None);
+    let artifact = resolve_workspace_runtime(
+        root,
+        app,
+        build_manifest::generate_compute_manifest("src/main.js"),
+        &detection,
+    );
+    let files = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let breakdown = artifact.scan.file_breakdown(&files);
+    (artifact, detection, files, breakdown)
+}
+
+#[cfg(unix)]
+fn producer_audit_workspace(
+    with_bin: bool,
+) -> (
+    tempfile::TempDir,
+    crate::artifact::RuntimeArtifact,
+    crate::detect::types::DetectionResult,
+) {
+    let workspace = tempdir().unwrap();
+    fs::write(
+        workspace.path().join("package.json"),
+        r#"{"private":true,"workspaces":["apps/*","packages/*"]}"#,
+    )
+    .unwrap();
+    let app = workspace.path().join("apps/api");
+    fs::create_dir_all(app.join("dist/src")).unwrap();
+    fs::write(
+        app.join("package.json"),
+        r#"{"dependencies":{"@nestjs/core":"10.0.0","shared":"workspace:*"}}"#,
+    )
+    .unwrap();
+    fs::write(app.join("dist/src/main.js"), b"require('shared')").unwrap();
+    let shared = workspace.path().join("packages/shared");
+    fs::create_dir_all(&shared).unwrap();
+    fs::write(
+        shared.join("package.json"),
+        r#"{"main":"index.js","bin":"tool.js"}"#,
+    )
+    .unwrap();
+    fs::write(shared.join("index.js"), b"module.exports = 1").unwrap();
+    fs::write(shared.join("tool.js"), b"console.log('tool')").unwrap();
+    // Install .bin first so the scanner cannot rely on encountering the package alias first.
+    fs::create_dir_all(workspace.path().join("node_modules/.bin")).unwrap();
+    if with_bin {
+        std::os::unix::fs::symlink(
+            "../shared/tool.js",
+            workspace.path().join("node_modules/.bin/shared"),
+        )
+        .unwrap();
+    }
+    std::os::unix::fs::symlink(
+        "../packages/shared",
+        workspace.path().join("node_modules/shared"),
+    )
+    .unwrap();
+    fs::create_dir_all(workspace.path().join("node_modules/@nestjs/core")).unwrap();
+    fs::write(
+        workspace.path().join("node_modules/@nestjs/core/index.js"),
+        b"module.exports = {}",
+    )
+    .unwrap();
+    let detection = crate::detect::detect_with_framework_override(&app, None);
+    let artifact = resolve_workspace_runtime(
+        workspace.path(),
+        &app,
+        build_manifest::generate_compute_manifest("src/main.js"),
+        &detection,
+    );
+    (workspace, artifact, detection)
+}
+
+#[cfg(unix)]
+#[test]
+fn producer_audit_scans_workspace_bin_before_package_alias() {
+    let (_workspace, artifact, _) = producer_audit_workspace(true);
+    // These selected roots are the same producer scanner, with an explicit traversal order.
+    let selected = RuntimeArtifactScan::Selected {
+        roots: vec![
+            crate::artifact::RuntimeArtifactScanRoot {
+                path: "node_modules/.bin".into(),
+                kind: crate::artifact::RuntimeArtifactScanRootKind::NodeModules,
+            },
+            crate::artifact::RuntimeArtifactScanRoot {
+                path: "node_modules/shared".into(),
+                kind: crate::artifact::RuntimeArtifactScanRootKind::NodeModules,
+            },
+        ],
+        symlink_roots: artifact.scan.symlink_roots().unwrap().to_vec(),
+    };
+    let files = scan_runtime_artifact(&artifact.root_dir, &selected).unwrap();
+    assert!(
+        files
+            .iter()
+            .any(|file| file.path == "packages/shared/tool.js")
+    );
+    scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn producer_audit_projects_dependencies_without_dropping_application_output() {
+    let (_workspace, artifact, detection) = producer_audit_workspace(false);
+    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    let plan = workspace_bundle(&artifact, scanned, &detection, TrustedMaterialization);
+    let restored = crate::test_support::unpack_source_bundle(&plan);
+    assert_eq!(
+        fs::read(restored.path().join("apps/api/dist/src/main.js")).unwrap(),
+        b"require('shared')"
+    );
+    assert_eq!(
+        fs::read(restored.path().join("node_modules/shared/index.js")).unwrap(),
+        b"module.exports = 1"
+    );
+    let entry = plan
+        .logical_manifest
+        .files
+        .iter()
+        .find(|file| file.path == "apps/api/dist/src/main.js")
+        .unwrap();
+    assert_eq!(
+        entry.role,
+        source_bundle_v1::SourceLogicalManifestFileRole::Compute
+    );
+    assert_eq!(entry.layer_name.as_deref(), Some("server"));
+}
 
 #[test]
 fn relocated_compute_entrypoint_keeps_compute_ownership_under_static_output() {
@@ -38,15 +225,7 @@ fn relocated_compute_entrypoint_keeps_compute_ownership_under_static_output() {
         ]
     }))
     .unwrap();
-    let artifact = resolve_runtime_artifact(
-        project.path(),
-        project.path(),
-        project.path().join("dist"),
-        manifest,
-        &detection,
-        true,
-    )
-    .unwrap();
+    let artifact = resolve_workspace_runtime(project.path(), project.path(), manifest, &detection);
     let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
     let classified = crate::artifact::classify_artifact_files(
         &artifact.manifest,
@@ -78,7 +257,7 @@ fn relocated_compute_entrypoint_keeps_compute_ownership_under_static_output() {
         &artifact.manifest,
         &files,
         &artifact.scan,
-        source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
+        TrustedMaterialization,
         None,
     )
     .unwrap();
@@ -173,15 +352,7 @@ fn node_process_runtime_artifact_prefers_workspace_root_for_hoisted_app_symlink(
         let manifest = build_manifest::generate_compute_manifest("src/main.js");
 
         detection.metadata.runtime.runtime_type = runtime_type;
-        let artifact = resolve_runtime_artifact(
-            workspace.path(),
-            &app,
-            app.join("dist"),
-            manifest,
-            &detection,
-            true,
-        )
-        .unwrap();
+        let artifact = resolve_workspace_runtime(workspace.path(), &app, manifest, &detection);
 
         assert_eq!(artifact.root_dir, workspace.path());
         let compute_layer = artifact
@@ -212,14 +383,7 @@ fn node_process_runtime_artifact_prefers_workspace_root_for_hoisted_app_symlink(
         assert!(paths.contains(&"apps/api/node_modules/@nestjs/core"));
         assert!(paths.contains(&"node_modules/@nestjs/core/index.js"));
 
-        let deployable =
-            prepare_deploy_files(&artifact.manifest, scanned, &detection, true).unwrap();
-        let plan = source_bundle_v1::build_source_bundle_plan(
-            &artifact.root_dir,
-            &artifact.manifest,
-            &deployable,
-        )
-        .unwrap();
+        let plan = workspace_bundle(&artifact, scanned, &detection, Embedded);
         let symlink = plan
             .logical_manifest
             .files
@@ -258,36 +422,12 @@ fn node_process_runtime_artifact_includes_workspace_hoisted_deps_with_app_node_m
     )
     .unwrap();
 
-    fs::create_dir_all(workspace.path().join("node_modules/@nestjs/core")).unwrap();
-    fs::write(
-        workspace.path().join("node_modules/@nestjs/core/index.js"),
-        "module.exports = {}",
-    )
-    .unwrap();
-    fs::create_dir_all(app.join("node_modules/local-only")).unwrap();
-    fs::write(
-        app.join("node_modules/local-only/index.js"),
-        "module.exports = {}",
-    )
-    .unwrap();
+    install_workspace_test_package(workspace.path(), "@nestjs/core");
+    install_workspace_test_package(&app, "local-only");
 
-    let detection = crate::detect::detect_with_framework_override(&app, None);
+    let (artifact, detection, scanned, breakdown) = scan_node_workspace(workspace.path(), &app);
     assert_eq!(detection.framework, "nestjs");
-    let manifest = build_manifest::generate_compute_manifest("src/main.js");
-
-    let artifact = resolve_runtime_artifact(
-        workspace.path(),
-        &app,
-        app.join("dist"),
-        manifest,
-        &detection,
-        true,
-    )
-    .unwrap();
-
     assert_eq!(artifact.root_dir, workspace.path());
-    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
-    let breakdown = artifact.scan.file_breakdown(&scanned);
     assert_eq!(breakdown.total, scanned.len());
     assert_eq!(breakdown.workspace_packages, 0);
     let paths = scanned
@@ -297,13 +437,7 @@ fn node_process_runtime_artifact_includes_workspace_hoisted_deps_with_app_node_m
     assert!(paths.contains(&"node_modules/@nestjs/core/index.js"));
     assert!(paths.contains(&"apps/api/node_modules/local-only/index.js"));
 
-    let deployable = prepare_deploy_files(&artifact.manifest, scanned, &detection, true).unwrap();
-    let plan = source_bundle_v1::build_source_bundle_plan(
-        &artifact.root_dir,
-        &artifact.manifest,
-        &deployable,
-    )
-    .unwrap();
+    let plan = workspace_bundle(&artifact, scanned, &detection, Embedded);
     assert_eq!(
         plan.logical_manifest.entrypoints,
         vec!["apps/api/dist/src/main.js"]
@@ -341,12 +475,7 @@ fn node_process_runtime_artifact_includes_workspace_package_symlink_targets() {
     fs::write(shared.join("package.json"), r#"{"main":"index.js"}"#).unwrap();
     fs::write(shared.join("index.js"), "module.exports = {}").unwrap();
 
-    fs::create_dir_all(workspace.path().join("node_modules/@nestjs/core")).unwrap();
-    fs::write(
-        workspace.path().join("node_modules/@nestjs/core/index.js"),
-        "module.exports = {}",
-    )
-    .unwrap();
+    install_workspace_test_package(workspace.path(), "@nestjs/core");
     fs::create_dir_all(workspace.path().join("node_modules/@scope")).unwrap();
     std::os::unix::fs::symlink(
         "../../packages/group/shared",
@@ -354,23 +483,9 @@ fn node_process_runtime_artifact_includes_workspace_package_symlink_targets() {
     )
     .unwrap();
 
-    let detection = crate::detect::detect_with_framework_override(&app, None);
+    let (artifact, detection, scanned, breakdown) = scan_node_workspace(workspace.path(), &app);
     assert_eq!(detection.framework, "nestjs");
-    let manifest = build_manifest::generate_compute_manifest("src/main.js");
-
-    let artifact = resolve_runtime_artifact(
-        workspace.path(),
-        &app,
-        app.join("dist"),
-        manifest,
-        &detection,
-        true,
-    )
-    .unwrap();
-
     assert_eq!(artifact.root_dir, workspace.path());
-    let scanned = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
-    let breakdown = artifact.scan.file_breakdown(&scanned);
     assert_eq!(breakdown.total, scanned.len());
     assert!(breakdown.workspace_packages > 0);
     let paths = scanned
@@ -380,18 +495,12 @@ fn node_process_runtime_artifact_includes_workspace_package_symlink_targets() {
     assert!(paths.contains(&"node_modules/@scope/shared"));
     assert!(paths.contains(&"packages/group/shared/index.js"));
 
-    let deployable = prepare_deploy_files(&artifact.manifest, scanned, &detection, true).unwrap();
-    let plan = source_bundle_v1::build_source_bundle_plan(
-        &artifact.root_dir,
-        &artifact.manifest,
-        &deployable,
-    )
-    .unwrap();
+    let plan = workspace_bundle(&artifact, scanned, &detection, Embedded);
     let shared_runtime = plan
         .logical_manifest
         .files
         .iter()
-        .find(|file| file.path == "packages/group/shared/index.js")
+        .find(|file| file.path == "node_modules/@scope/shared/index.js")
         .unwrap();
     assert_eq!(
         shared_runtime.role,
@@ -425,23 +534,10 @@ fn node_process_runtime_artifact_rejects_unlisted_symlink_target() {
 
     let detection = crate::detect::detect_with_framework_override(project.path(), None);
     let manifest = build_manifest::generate_compute_manifest("server.js");
-    let artifact = resolve_runtime_artifact(
-        project.path(),
-        project.path(),
-        project.path().join("dist"),
-        manifest,
-        &detection,
-        true,
-    )
-    .unwrap();
+    let artifact = resolve_workspace_runtime(project.path(), project.path(), manifest, &detection);
 
     let error = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("does not resolve to a declared workspace package root"),
-        "{error}"
-    );
+    expect_code(&error, "INVALID_BUILD_OUTPUT");
 }
 
 #[cfg(unix)]
@@ -462,12 +558,7 @@ fn node_process_runtime_artifact_rejects_workspace_package_file_symlink_target()
     .unwrap();
     fs::write(app.join("dist/server.js"), "require('express')").unwrap();
     fs::write(app.join(".env"), "SECRET=value").unwrap();
-    fs::create_dir_all(workspace.path().join("node_modules/express")).unwrap();
-    fs::write(
-        workspace.path().join("node_modules/express/index.js"),
-        "module.exports = {}",
-    )
-    .unwrap();
+    install_workspace_test_package(workspace.path(), "express");
     std::os::unix::fs::symlink(
         "../../apps/api/.env",
         workspace.path().join("node_modules/express/leak"),
@@ -476,23 +567,10 @@ fn node_process_runtime_artifact_rejects_workspace_package_file_symlink_target()
 
     let detection = crate::detect::detect_with_framework_override(&app, None);
     let manifest = build_manifest::generate_compute_manifest("server.js");
-    let artifact = resolve_runtime_artifact(
-        workspace.path(),
-        &app,
-        app.join("dist"),
-        manifest,
-        &detection,
-        true,
-    )
-    .unwrap();
+    let artifact = resolve_workspace_runtime(workspace.path(), &app, manifest, &detection);
 
     let error = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("does not resolve to a declared workspace package root"),
-        "{error}"
-    );
+    expect_code(&error, "INVALID_BUILD_OUTPUT");
 }
 
 #[test]

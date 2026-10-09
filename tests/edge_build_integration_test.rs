@@ -157,6 +157,79 @@ fn spawn_edge_build_handoff_mock_with_build(
     (support::api_mock::spawn(app), requests)
 }
 
+fn edge_build_command(
+    project: &std::path::Path,
+    output: &std::path::Path,
+    api_url: &str,
+    deployment_id: &str,
+    json_mode: bool,
+) -> assert_cmd::Command {
+    let mut command = nrz();
+    if json_mode {
+        command.arg("--json");
+    }
+    command
+        .current_dir(project)
+        .env("NRZ_API_URL", api_url)
+        .env("NRZ_RUNNER", "PLATFORM")
+        .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
+        .env("ONREZA_BUILD_RUNTIME_VERSION", "node-24")
+        .env_remove("ONREZA_BUILD_NODE_MAJOR")
+        .env("ONREZA_RUNTIME_OS", "linux")
+        .env("ONREZA_RUNTIME_ARCH", "x86_64")
+        .env("ONREZA_RUNTIME_LIBC", "glibc")
+        .env("NRZ_EDGE_BUILD_HANDOFF", "V1")
+        .env("NRZ_LOG_UPLOAD", "0")
+        .env("ONREZA_OUTPUT_DIR", output)
+        .args([
+            "--token",
+            "runner-token",
+            "deploy",
+            project.to_str().unwrap(),
+            "--resume-deployment",
+            deployment_id,
+        ]);
+    command
+}
+
+fn successful_handoff(
+    output: &std::process::Output,
+    scenario: &str,
+) -> nrz_source_bundle::EdgeBuildHandoffV1 {
+    assert!(
+        output.status.success(),
+        "{scenario} stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let handoff: nrz_source_bundle::EdgeBuildHandoffV1 =
+        serde_json::from_value(stdout_json(output)).unwrap();
+    handoff.validate().unwrap();
+    handoff
+}
+
+fn source_bundle_manifest(
+    output: &std::path::Path,
+    cli_output: &std::process::Output,
+    scenario: &str,
+) -> nrz_source_bundle::SourceLogicalManifest {
+    let handoff = successful_handoff(cli_output, scenario);
+    let decoder =
+        zstd::Decoder::new(fs::File::open(output.join(&handoff.source_bundle.path)).unwrap())
+            .unwrap();
+    let mut archive = tar::Archive::new(decoder);
+    archive
+        .entries()
+        .unwrap()
+        .map(Result::unwrap)
+        .find(|entry| {
+            entry.path().unwrap().as_ref()
+                == std::path::Path::new(nrz_source_bundle::SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH)
+        })
+        .map(|entry| serde_json::from_reader(entry).unwrap())
+        .unwrap()
+}
+
 #[test]
 fn changed_source_runtime_is_rejected_before_the_installer_executes() {
     let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
@@ -176,31 +249,16 @@ fn changed_source_runtime_is_rejected_before_the_installer_executes() {
         "Bun.serve({fetch:()=>new Response('ok')})",
     )
     .unwrap();
-    let output = nrz()
-        .current_dir(project.path())
-        .env("NRZ_API_URL", api_url)
-        .env("NRZ_RUNNER", "PLATFORM")
-        .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
-        .env("ONREZA_BUILD_RUNTIME_VERSION", "node-24")
-        .env_remove("ONREZA_BUILD_NODE_MAJOR")
-        .env("ONREZA_RUNTIME_OS", "linux")
-        .env("ONREZA_RUNTIME_ARCH", "x86_64")
-        .env("ONREZA_RUNTIME_LIBC", "glibc")
-        .env("ONREZA_RUNTIME_VERSION", "bun-1.4.2")
-        .env("NRZ_EDGE_BUILD_HANDOFF", "V1")
-        .env("NRZ_LOG_UPLOAD", "0")
-        .env("ONREZA_OUTPUT_DIR", output_dir.path())
-        .args([
-            "--json",
-            "--token",
-            "runner-token",
-            "deploy",
-            project.path().to_str().unwrap(),
-            "--resume-deployment",
-            deployment_id,
-        ])
-        .output()
-        .unwrap();
+    let output = edge_build_command(
+        project.path(),
+        output_dir.path(),
+        &api_url,
+        deployment_id,
+        true,
+    )
+    .env("ONREZA_RUNTIME_VERSION", "bun-1.4.2")
+    .output()
+    .unwrap();
     assert!(!output.status.success());
     let result = stdout_json(&output);
     assert_eq!(result["code"], "APPLICATION_RUNTIME_INVALID");
@@ -222,39 +280,17 @@ fn edge_build_publishes_local_handoff_without_legacy_source_mutations() {
     let output_dir = tempfile::tempdir().unwrap();
     fs::write(project.path().join("index.html"), "<h1>Edge build</h1>").unwrap();
 
-    let output = nrz()
-        .current_dir(project.path())
-        .env("NRZ_API_URL", api_url)
-        .env("NRZ_RUNNER", "PLATFORM")
-        .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
-        .env("ONREZA_BUILD_RUNTIME_VERSION", "node-24")
-        .env_remove("ONREZA_BUILD_NODE_MAJOR")
-        .env("ONREZA_RUNTIME_OS", "linux")
-        .env("ONREZA_RUNTIME_ARCH", "x86_64")
-        .env("ONREZA_RUNTIME_LIBC", "glibc")
-        .env("NRZ_EDGE_BUILD_HANDOFF", "V1")
-        .env("NRZ_LOG_UPLOAD", "0")
-        .env("ONREZA_OUTPUT_DIR", output_dir.path())
-        .args([
-            "--token",
-            "runner-token",
-            "deploy",
-            project.path().to_str().unwrap(),
-            "--resume-deployment",
-            deployment_id,
-        ])
-        .output()
-        .unwrap();
+    let output = edge_build_command(
+        project.path(),
+        output_dir.path(),
+        &api_url,
+        deployment_id,
+        false,
+    )
+    .output()
+    .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let handoff: nrz_source_bundle::EdgeBuildHandoffV1 =
-        serde_json::from_value(stdout_json(&output)).unwrap();
-    handoff.validate().unwrap();
+    successful_handoff(&output, "static handoff");
     assert_eq!(
         fs::read(output_dir.path().join("edge-build-handoff-v1.json")).unwrap(),
         output.stdout
@@ -315,56 +351,18 @@ fn edge_build_handoff_preserves_python_and_native_serving_under_node_compiler() 
             // Package a real host ELF; this test does not claim runtime execution.
             fs::copy("/usr/bin/true", project.path().join(entry)).unwrap();
         }
-        let output = nrz()
-            .current_dir(project.path())
-            .env("NRZ_API_URL", api_url)
-            .env("NRZ_RUNNER", "PLATFORM")
-            .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
-            .env("ONREZA_BUILD_RUNTIME_VERSION", "node-24")
-            .env_remove("ONREZA_BUILD_NODE_MAJOR")
-            .env("ONREZA_RUNTIME_FAMILY", "javascript")
-            .env("ONREZA_RUNTIME_VERSION", "node-24")
-            .env("ONREZA_RUNTIME_OS", "linux")
-            .env("ONREZA_RUNTIME_ARCH", "x86_64")
-            .env("ONREZA_RUNTIME_LIBC", "glibc")
-            .env("NRZ_EDGE_BUILD_HANDOFF", "V1")
-            .env("NRZ_LOG_UPLOAD", "0")
-            .env("ONREZA_OUTPUT_DIR", output_dir.path())
-            .args([
-                "--json",
-                "--token",
-                "runner-token",
-                "deploy",
-                project.path().to_str().unwrap(),
-                "--resume-deployment",
-                deployment_id,
-            ])
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{target} stdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let handoff: nrz_source_bundle::EdgeBuildHandoffV1 =
-            serde_json::from_value(stdout_json(&output)).unwrap();
-        handoff.validate().unwrap();
-        let decoder = zstd::Decoder::new(
-            fs::File::open(output_dir.path().join(&handoff.source_bundle.path)).unwrap(),
+        let output = edge_build_command(
+            project.path(),
+            output_dir.path(),
+            &api_url,
+            deployment_id,
+            true,
         )
+        .env("ONREZA_RUNTIME_FAMILY", "javascript")
+        .env("ONREZA_RUNTIME_VERSION", "node-24")
+        .output()
         .unwrap();
-        let mut archive = tar::Archive::new(decoder);
-        let manifest: nrz_source_bundle::SourceLogicalManifest = archive
-            .entries()
-            .unwrap()
-            .map(Result::unwrap)
-            .find(|entry| {
-                entry.path().unwrap().as_ref()
-                    == std::path::Path::new(nrz_source_bundle::SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH)
-            })
-            .map(|entry| serde_json::from_reader(entry).unwrap())
-            .unwrap();
+        let manifest = source_bundle_manifest(output_dir.path(), &output, target);
         assert_eq!(manifest.layers.len(), 1);
         let layer = &manifest.layers[0];
         assert_eq!(layer.target, "COMPUTE");
@@ -464,55 +462,17 @@ fn build_generated_package_infers_process_without_changing_frozen_runtime() {
         } else {
             "bun-1.4.2"
         };
-        let output = nrz()
-            .current_dir(project.path())
-            .env("NRZ_API_URL", api_url)
-            .env("NRZ_RUNNER", "PLATFORM")
-            .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
-            .env("ONREZA_BUILD_RUNTIME_VERSION", "node-24")
-            .env_remove("ONREZA_BUILD_NODE_MAJOR")
-            .env("ONREZA_RUNTIME_OS", "linux")
-            .env("ONREZA_RUNTIME_ARCH", "x86_64")
-            .env("ONREZA_RUNTIME_LIBC", "glibc")
-            .env("ONREZA_RUNTIME_VERSION", target)
-            .env("NRZ_EDGE_BUILD_HANDOFF", "V1")
-            .env("NRZ_LOG_UPLOAD", "0")
-            .env("ONREZA_OUTPUT_DIR", output_dir.path())
-            .args([
-                "--json",
-                "--token",
-                "runner-token",
-                "deploy",
-                project.path().to_str().unwrap(),
-                "--resume-deployment",
-                deployment_id,
-            ])
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "stdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let handoff: nrz_source_bundle::EdgeBuildHandoffV1 =
-            serde_json::from_value(stdout_json(&output)).unwrap();
-        handoff.validate().unwrap();
-        let decoder = zstd::Decoder::new(
-            fs::File::open(output_dir.path().join(&handoff.source_bundle.path)).unwrap(),
+        let output = edge_build_command(
+            project.path(),
+            output_dir.path(),
+            &api_url,
+            deployment_id,
+            true,
         )
+        .env("ONREZA_RUNTIME_VERSION", target)
+        .output()
         .unwrap();
-        let mut archive = tar::Archive::new(decoder);
-        let manifest: nrz_source_bundle::SourceLogicalManifest = archive
-            .entries()
-            .unwrap()
-            .map(Result::unwrap)
-            .find(|entry| {
-                entry.path().unwrap().as_ref()
-                    == std::path::Path::new(nrz_source_bundle::SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH)
-            })
-            .map(|entry| serde_json::from_reader(entry).unwrap())
-            .unwrap();
+        let manifest = source_bundle_manifest(output_dir.path(), &output, target);
         assert_eq!(manifest.layers.len(), 1);
         let layer = &manifest.layers[0];
         assert_eq!(layer.target, "COMPUTE");
@@ -593,40 +553,18 @@ fn build_generated_elysia_rejects_node_and_keeps_explicit_static_before_source_h
         )
         .unwrap();
         fs::write(project.path().join("server.js"), "console.log('server')").unwrap();
-        let output = nrz()
-            .current_dir(project.path())
-            .env("NRZ_API_URL", api_url)
-            .env("NRZ_RUNNER", "PLATFORM")
-            .env("ONREZA_BUILD_RUNTIME_FAMILY", "javascript")
-            .env("ONREZA_BUILD_RUNTIME_VERSION", "node-24")
-            .env_remove("ONREZA_BUILD_NODE_MAJOR")
-            .env("ONREZA_RUNTIME_OS", "linux")
-            .env("ONREZA_RUNTIME_ARCH", "x86_64")
-            .env("ONREZA_RUNTIME_LIBC", "glibc")
-            .env("ONREZA_RUNTIME_VERSION", "node-24")
-            .env("NRZ_EDGE_BUILD_HANDOFF", "V1")
-            .env("NRZ_LOG_UPLOAD", "0")
-            .env("ONREZA_OUTPUT_DIR", output_dir.path())
-            .args([
-                "--json",
-                "--token",
-                "runner-token",
-                "deploy",
-                project.path().to_str().unwrap(),
-                "--resume-deployment",
-                deployment_id,
-            ])
-            .output()
-            .unwrap();
+        let output = edge_build_command(
+            project.path(),
+            output_dir.path(),
+            &api_url,
+            deployment_id,
+            true,
+        )
+        .env("ONREZA_RUNTIME_VERSION", "node-24")
+        .output()
+        .unwrap();
         if explicit_static {
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stdout)
-            );
-            let handoff: nrz_source_bundle::EdgeBuildHandoffV1 =
-                serde_json::from_value(stdout_json(&output)).unwrap();
-            handoff.validate().unwrap();
+            successful_handoff(&output, "explicit static elysia");
             assert!(output_dir.path().join("source-bundle-v1.tar.zst").exists());
             continue;
         }

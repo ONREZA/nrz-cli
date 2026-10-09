@@ -4,10 +4,15 @@ pub mod application_runtime;
 pub mod dependency;
 pub mod handoff;
 pub mod manifest;
+mod path_graph;
+mod pax;
 pub mod python;
 pub use python::{PythonMinor, PythonToolchainVersions, python_toolchain_versions};
 pub mod source_build_context;
 pub mod verifier;
+
+pub use path_graph::{SourceArchivePathIndex, SourcePathGraphError};
+pub use pax::encode_pax_record;
 
 pub use source_build_context::{
     BuildToolchainDeclaration, BuildToolchainFamily, SOURCE_BUILD_CONTEXT_SCHEMA_VERSION,

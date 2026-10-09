@@ -1,4 +1,5 @@
 use super::*;
+use nrz_runtime_artifact::{ArtifactFileType, ArtifactRoot};
 
 #[cfg(test)]
 #[path = "scan_python_tests.rs"]
@@ -9,7 +10,7 @@ mod python_tests;
 /// Read buffer for streaming SHA-256. Sized to match a single page-cache
 /// readahead window — small enough to stay in L2 cache, large enough that the
 /// per-file read overhead doesn't dominate hashing throughput on big assets.
-pub(super) const SCAN_HASH_CHUNK_BYTES: usize = 64 * 1024;
+pub(super) const SCAN_HASH_CHUNK_BYTES: usize = 65_536;
 
 /// Recursively scan `dir` and return a sorted list of `FileEntry { path, size, content_hash }`.
 ///
@@ -19,47 +20,55 @@ pub(super) const SCAN_HASH_CHUNK_BYTES: usize = 64 * 1024;
 /// second read on any reasonable build host).
 ///
 /// Safe relative symlinks are preserved as SOURCE_BUNDLE_V1 logical entries.
+#[cfg(test)]
 pub(crate) fn scan_dir(dir: &Path) -> anyhow::Result<Vec<FileEntry>> {
-    let mut files = Vec::new();
-    let canonical_base = std::fs::canonicalize(dir)
-        .with_context(|| format!("failed to canonicalize {}", dir.display()))?;
-    let mut symlink_targets = Vec::new();
-    scan_dir_recursive(
-        dir,
-        dir,
-        dir,
-        &canonical_base,
-        &mut files,
-        &mut symlink_targets,
-    )?;
-    files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
-    Ok(files)
+    scan_runtime_artifact_rooted(&ArtifactRoot::open(dir)?, &RuntimeArtifactScan::All)
 }
 
+#[cfg(test)]
 pub(super) fn scan_runtime_artifact(
     root_dir: &Path,
     scan: &RuntimeArtifactScan,
 ) -> anyhow::Result<Vec<FileEntry>> {
+    scan_runtime_artifact_rooted(&ArtifactRoot::open(root_dir)?, scan)
+}
+
+pub(super) fn scan_runtime_artifact_rooted(
+    owner: &ArtifactRoot,
+    scan: &RuntimeArtifactScan,
+) -> anyhow::Result<Vec<FileEntry>> {
     match scan {
-        RuntimeArtifactScan::All | RuntimeArtifactScan::NodeRuntimeRoot => scan_dir(root_dir),
-        RuntimeArtifactScan::PythonRuntimeRoot(minor) => scan_python_root(root_dir, *minor, None),
+        RuntimeArtifactScan::All | RuntimeArtifactScan::NodeRuntimeRoot => {
+            let mut files = Vec::new();
+            scan_dir_recursive(
+                Path::new(""),
+                Path::new(""),
+                Path::new(""),
+                owner,
+                &mut files,
+                &mut Vec::new(),
+            )?;
+            files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+            Ok(files)
+        }
+        RuntimeArtifactScan::PythonRuntimeRoot(minor) => scan_python_root(owner, *minor, None),
         RuntimeArtifactScan::Relocated { base, ownership } => match base.as_ref() {
             RuntimeArtifactScan::PythonRuntimeRoot(minor) => scan_python_root(
-                root_dir,
+                owner,
                 *minor,
                 Some(Path::new(&ownership.build_output_prefix)),
             ),
-            _ => scan_runtime_artifact(root_dir, base),
+            _ => scan_runtime_artifact_rooted(owner, base),
         },
         RuntimeArtifactScan::Selected {
             roots,
             symlink_roots,
-        } => scan_selected_runtime_roots(root_dir, roots, symlink_roots),
+        } => scan_selected_runtime_roots_rooted(owner, roots, symlink_roots),
     }
 }
 
 fn scan_python_root(
-    root: &Path,
+    owner: &ArtifactRoot,
     minor: nrz_source_bundle::PythonMinor,
     build_output: Option<&Path>,
 ) -> anyhow::Result<Vec<FileEntry>> {
@@ -72,17 +81,15 @@ fn scan_python_root(
     fn visit(
         base: &Path,
         current: &Path,
-        canonical: &Path,
+        owner: &ArtifactRoot,
         files: &mut Vec<FileEntry>,
         pruning: &Pruning<'_>,
         inherited_project_build_only: bool,
     ) -> anyhow::Result<()> {
-        for entry in std::fs::read_dir(current)? {
-            let entry = entry?;
-            let path = entry.path();
-            let name = entry.file_name();
+        for name in owner.read_dir(current)? {
+            let path = current.join(&name);
             let name = name.to_string_lossy();
-            let ft = entry.file_type()?;
+            let ft = owner.file_type(&path, false)?;
             let relative = path.strip_prefix(base)?;
             let staged_dependency = relative.starts_with(pruning.minor.site_packages_root());
             if is_python_installer_staging_path(base, &path) {
@@ -116,7 +123,10 @@ fn scan_python_root(
                             | ".nox"
                             | "node_modules"
                     )
-                    || (ft.is_dir() && path.join("pyvenv.cfg").is_file()));
+                    || (ft.is_dir()
+                        && owner
+                            .file_type(&path.join("pyvenv.cfg"), true)
+                            .is_ok_and(|kind| kind.is_file())));
             // The planner's selected output is authoritative, including when a
             // packaging backend uses the same directory name. Traverse its
             // ancestors, but keep their unrelated cache children excluded.
@@ -132,26 +142,17 @@ fn scan_python_root(
                 continue;
             }
             if ft.is_dir() {
-                visit(base, &path, canonical, files, pruning, project_build_only)?;
+                visit(base, &path, owner, files, pruning, project_build_only)?;
             } else {
-                scan_runtime_path_with_type(
-                    base,
-                    base,
-                    &path,
-                    ft,
-                    canonical,
-                    files,
-                    &mut Vec::new(),
-                )?;
+                scan_runtime_path_with_type(base, base, &path, ft, owner, files, &mut Vec::new())?;
             }
         }
         Ok(())
     }
-    let canonical = std::fs::canonicalize(root)?;
+    let root = Path::new("");
     let mut files = Vec::new();
-    let project_package =
-        crate::detect::python::dependency_plan(&crate::detect::fs::LocalFs::new(root))?
-            .is_some_and(|plan| plan.install_project);
+    let project_package = crate::detect::python::dependency_plan(&RootedPythonFs(owner))?
+        .is_some_and(|plan| plan.install_project);
     let pruning = Pruning {
         project_package,
         minor,
@@ -159,19 +160,18 @@ fn scan_python_root(
         // Only a distinct selected subtree overrides project filename heuristics.
         build_output: build_output.filter(|path| *path != Path::new(".")),
     };
-    visit(root, root, &canonical, &mut files, &pruning, false)?;
+    visit(root, Path::new(""), owner, &mut files, &pruning, false)?;
     files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
 }
 
-pub(super) fn scan_selected_runtime_roots(
-    root_dir: &Path,
+fn scan_selected_runtime_roots_rooted(
+    owner: &ArtifactRoot,
     roots: &[crate::artifact::RuntimeArtifactScanRoot],
     symlink_roots: &[String],
 ) -> anyhow::Result<Vec<FileEntry>> {
+    let root_dir = Path::new("");
     let mut files = Vec::new();
-    let canonical_base = std::fs::canonicalize(root_dir)
-        .with_context(|| format!("failed to canonicalize {}", root_dir.display()))?;
 
     let mut queued_roots = roots
         .iter()
@@ -179,14 +179,17 @@ pub(super) fn scan_selected_runtime_roots(
         .collect::<anyhow::Result<VecDeque<_>>>()?;
     let mut scheduled_roots = queued_roots.iter().cloned().collect::<HashSet<_>>();
     let mut scanned_roots = HashSet::new();
+    let mut discovered_targets = Vec::new();
 
     while let Some(root) = queued_roots.pop_front() {
         if !scanned_roots.insert(root.clone()) {
             continue;
         }
         let path = root_dir.join(&root);
-        if !path.exists() {
-            continue;
+        match owner.file_type(&path, false) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
         }
         // Selected output can be project-relative beneath a workspace archive
         // root. Installer state belongs to that output root, while file paths
@@ -205,24 +208,26 @@ pub(super) fn scan_selected_runtime_roots(
             root_dir,
             installer_root,
             &path,
-            &canonical_base,
+            owner,
             &mut files,
             &mut symlink_targets,
         )?;
         for target in symlink_targets {
-            if runtime_scan_path_is_covered(&target, scheduled_roots.iter().map(String::as_str)) {
-                continue;
+            if symlink_roots.contains(&target) && scheduled_roots.insert(target.clone()) {
+                queued_roots.push_back(target.clone());
             }
-            if !symlink_roots.iter().any(|root| root == &target) {
-                return Err(output::coded_error(
-                    "INVALID_BUILD_OUTPUT",
-                    format!(
-                        "runtime dependency symlink does not resolve to a declared workspace package root: {target}"
-                    ),
-                ));
-            }
-            scheduled_roots.insert(target.clone());
-            queued_roots.push_back(target);
+            discovered_targets.push(target);
+        }
+    }
+    // A .bin link can precede the package alias that establishes its workspace root.
+    for target in discovered_targets {
+        if !runtime_scan_path_is_covered(&target, scheduled_roots.iter().map(String::as_str)) {
+            return Err(output::coded_error(
+                "INVALID_BUILD_OUTPUT",
+                format!(
+                    "runtime dependency symlink does not resolve to a declared workspace package root: {target}"
+                ),
+            ));
         }
     }
     files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
@@ -295,8 +300,17 @@ pub(super) fn prepare_artifact_files(
     collection
 }
 
+#[cfg(test)]
 pub(super) fn ensure_no_unresolved_lfs_pointers(
     root_dir: &Path,
+    files: &[FileEntry],
+    git_lfs_enabled: bool,
+) -> anyhow::Result<()> {
+    ensure_no_unresolved_lfs_pointers_rooted(&ArtifactRoot::open(root_dir)?, files, git_lfs_enabled)
+}
+
+pub(super) fn ensure_no_unresolved_lfs_pointers_rooted(
+    owner: &ArtifactRoot,
     files: &[FileEntry],
     git_lfs_enabled: bool,
 ) -> anyhow::Result<()> {
@@ -304,8 +318,14 @@ pub(super) fn ensure_no_unresolved_lfs_pointers(
         if file.size == 0 || file.size > GIT_LFS_POINTER_MAX_BYTES {
             continue;
         }
-        let path = root_dir.join(&file.path);
-        if is_git_lfs_pointer_file(&path)? {
+        let is_pointer = qualify_scanned_artifact_file(
+            owner.open_file(Path::new(&file.path))?,
+            &file.path,
+            file.size,
+            &file.content_hash,
+            |reader| is_git_lfs_pointer_reader(reader),
+        )?;
+        if is_pointer {
             let (code, message) = if git_lfs_enabled {
                 (
                     "GIT_LFS_UNRESOLVED",
@@ -334,23 +354,17 @@ pub(super) fn ensure_no_unresolved_lfs_pointers(
 
 pub(super) const GIT_LFS_POINTER_MAX_BYTES: u64 = 1024;
 
+#[cfg(test)]
 pub(super) fn is_git_lfs_pointer_file(path: &Path) -> anyhow::Result<bool> {
-    let mut file = std::fs::File::open(path).with_context(|| {
-        format!(
-            "failed to open {} while checking Git LFS pointer",
-            path.display()
-        )
-    })?;
+    is_git_lfs_pointer_reader(std::fs::File::open(path)?)
+}
+
+fn is_git_lfs_pointer_reader(mut file: impl Read) -> anyhow::Result<bool> {
     let mut buf = Vec::new();
     file.by_ref()
         .take(GIT_LFS_POINTER_MAX_BYTES)
         .read_to_end(&mut buf)
-        .with_context(|| {
-            format!(
-                "failed to read {} while checking Git LFS pointer",
-                path.display()
-            )
-        })?;
+        .context("failed to read opened artifact while checking Git LFS pointer")?;
     let content = String::from_utf8_lossy(&buf);
 
     Ok(
@@ -391,19 +405,17 @@ pub(super) fn scan_dir_recursive(
     base: &Path,
     installer_root: &Path,
     current: &Path,
-    canonical_base: &Path,
+    owner: &ArtifactRoot,
     files: &mut Vec<FileEntry>,
     symlink_targets: &mut Vec<String>,
 ) -> anyhow::Result<()> {
-    let entries = std::fs::read_dir(current)
+    let entries = owner
+        .read_dir(current)
         .with_context(|| format!("failed to read directory {}", current.display()))?;
-
-    for entry in entries {
-        let entry =
-            entry.with_context(|| format!("failed to read entry under {}", current.display()))?;
-        let path = entry.path();
-        let ft = entry
-            .file_type()
+    for name in entries {
+        let path = current.join(name);
+        let ft = owner
+            .file_type(&path, false)
             .with_context(|| format!("failed to stat {}", path.display()))?;
 
         scan_runtime_path_with_type(
@@ -411,7 +423,7 @@ pub(super) fn scan_dir_recursive(
             installer_root,
             &path,
             ft,
-            canonical_base,
+            owner,
             files,
             symlink_targets,
         )?;
@@ -424,19 +436,19 @@ pub(super) fn scan_runtime_path(
     base: &Path,
     installer_root: &Path,
     path: &Path,
-    canonical_base: &Path,
+    owner: &ArtifactRoot,
     files: &mut Vec<FileEntry>,
     symlink_targets: &mut Vec<String>,
 ) -> anyhow::Result<()> {
-    let ft = std::fs::symlink_metadata(path)
-        .with_context(|| format!("failed to stat {}", path.display()))?
-        .file_type();
+    let ft = owner
+        .file_type(path, false)
+        .with_context(|| format!("failed to stat {}", path.display()))?;
     scan_runtime_path_with_type(
         base,
         installer_root,
         path,
         ft,
-        canonical_base,
+        owner,
         files,
         symlink_targets,
     )
@@ -446,8 +458,8 @@ pub(super) fn scan_runtime_path_with_type(
     base: &Path,
     installer_root: &Path,
     path: &Path,
-    ft: std::fs::FileType,
-    canonical_base: &Path,
+    ft: ArtifactFileType,
+    owner: &ArtifactRoot,
     files: &mut Vec<FileEntry>,
     symlink_targets: &mut Vec<String>,
 ) -> anyhow::Result<()> {
@@ -461,40 +473,35 @@ pub(super) fn scan_runtime_path_with_type(
             .context("failed to compute relative path")?
             .to_string_lossy()
             .replace('\\', "/");
-        let symlink = read_deploy_symlink_target(path, &rel, canonical_base)?;
+        let symlink = read_deploy_symlink_target(owner, path, &rel)?;
         files.push(FileEntry {
             path: rel,
             size: 0,
             content_hash: sha256_hex(symlink.link_target.as_bytes()),
             kind: crate::artifact::ArtifactFileKind::Symlink,
             symlink_resolved_path: Some(symlink.resolved_path.clone()),
+            symlink_target: Some(symlink.link_target),
         });
         symlink_targets.push(symlink.resolved_path);
         return Ok(());
     }
 
     if ft.is_dir() {
-        scan_dir_recursive(
-            base,
-            installer_root,
-            path,
-            canonical_base,
-            files,
-            symlink_targets,
-        )?;
+        scan_dir_recursive(base, installer_root, path, owner, files, symlink_targets)?;
     } else if ft.is_file() {
         let rel = path
             .strip_prefix(base)
             .context("failed to compute relative path")?;
         let rel_str = rel.to_string_lossy().replace('\\', "/");
-        let (size, content_hash) =
-            hash_file_streaming(path).with_context(|| format!("failed to hash {}", rel_str))?;
+        let (size, content_hash) = hash_open_file_streaming(owner.open_file(path)?)
+            .with_context(|| format!("failed to hash {}", rel_str))?;
         files.push(FileEntry {
             path: rel_str,
             size,
             content_hash,
             kind: crate::artifact::ArtifactFileKind::File,
             symlink_resolved_path: None,
+            symlink_target: None,
         });
     }
 
@@ -519,11 +526,12 @@ pub(super) fn is_vcs_internal_path(base: &Path, path: &Path) -> bool {
 }
 
 pub(super) fn read_deploy_symlink_target(
+    owner: &ArtifactRoot,
     path: &Path,
     rel: &str,
-    canonical_base: &Path,
 ) -> anyhow::Result<DeploySymlinkTarget> {
-    let target = std::fs::read_link(path)
+    let target = owner
+        .read_link(path)
         .with_context(|| format!("failed to read SOURCE_BUNDLE_V1 symlink {}", path.display()))?;
     let target = target.to_str().ok_or_else(|| {
         output::coded_error(
@@ -534,27 +542,31 @@ pub(super) fn read_deploy_symlink_target(
             ),
         )
     })?;
-    let resolved_path = resolve_deploy_symlink_target(rel, target)?;
-    match std::fs::canonicalize(path) {
-        Ok(canonical) if canonical.starts_with(canonical_base) => Ok(DeploySymlinkTarget {
-            link_target: target.to_string(),
-            resolved_path,
-        }),
-        Ok(canonical) => Err(output::coded_error(
+    validate_deploy_symlink_target(rel, target)?;
+    let relative = owner.canonicalize(path).map_err(|error| {
+        let reason = if error.kind() == std::io::ErrorKind::PermissionDenied {
+            "symlink escapes build output"
+        } else {
+            "broken symlink in build output"
+        };
+        output::coded_error(
             "INVALID_BUILD_OUTPUT",
-            format!(
-                "SOURCE_BUNDLE_V1 symlink escapes build output: {rel} -> {target} resolved to {}",
-                canonical.display()
-            ),
-        )),
-        Err(error) => Err(output::coded_error(
+            format!("SOURCE_BUNDLE_V1 {reason}: {rel} -> {target} ({error})"),
+        )
+    })?;
+    if relative.as_os_str().is_empty() {
+        return Err(output::coded_error(
             "INVALID_BUILD_OUTPUT",
-            format!("SOURCE_BUNDLE_V1 broken symlink in build output: {rel} -> {target} ({error})"),
-        )),
+            format!("unsafe SOURCE_BUNDLE_V1 symlink target: {rel} -> {target}"),
+        ));
     }
+    Ok(DeploySymlinkTarget {
+        link_target: target.to_string(),
+        resolved_path: path_to_runtime_artifact_string(&relative)?,
+    })
 }
 
-pub(super) fn resolve_deploy_symlink_target(rel: &str, target: &str) -> anyhow::Result<String> {
+fn validate_deploy_symlink_target(rel: &str, target: &str) -> anyhow::Result<()> {
     if target.is_empty() || target.contains('\\') || target.contains('\0') {
         return Err(output::coded_error(
             "INVALID_BUILD_OUTPUT",
@@ -577,57 +589,124 @@ pub(super) fn resolve_deploy_symlink_target(rel: &str, target: &str) -> anyhow::
         ));
     }
 
-    let mut resolved = PathBuf::new();
-    if let Some(parent) = Path::new(rel).parent()
-        && !parent.as_os_str().is_empty()
-    {
-        resolved.push(parent);
-    }
-    for component in target_path.components() {
-        match component {
-            Component::Normal(part) => resolved.push(part),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if !resolved.pop() {
-                    return Err(output::coded_error(
-                        "INVALID_BUILD_OUTPUT",
-                        format!("SOURCE_BUNDLE_V1 symlink escapes build output: {rel} -> {target}"),
-                    ));
-                }
-            }
-            Component::RootDir | Component::Prefix(_) => {
-                return Err(output::coded_error(
-                    "INVALID_BUILD_OUTPUT",
-                    format!("unsafe SOURCE_BUNDLE_V1 symlink target: {rel} -> {target}"),
-                ));
-            }
-        }
-    }
-    if resolved.as_os_str().is_empty() {
-        return Err(output::coded_error(
-            "INVALID_BUILD_OUTPUT",
-            format!("unsafe SOURCE_BUNDLE_V1 symlink target: {rel} -> {target}"),
-        ));
-    }
-    path_to_runtime_artifact_string(&resolved)
+    Ok(())
 }
 
-/// Streaming SHA-256 + size for a single file. Returns `(size, lowercase_hex_sha256)`.
-pub(crate) fn hash_file_streaming(path: &Path) -> anyhow::Result<(u64, String)> {
-    let mut file =
-        std::fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; SCAN_HASH_CHUNK_BYTES];
-    let mut size: u64 = 0;
-    loop {
-        let n = file
-            .read(&mut buf)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        if n == 0 {
-            break;
+/// Streaming size and SHA-256 from the same opened artifact file.
+pub(crate) fn hash_open_file_streaming(file: std::fs::File) -> anyhow::Result<(u64, String)> {
+    struct HashWriter(Sha256);
+
+    impl std::io::Write for HashWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
         }
-        hasher.update(&buf[..n]);
-        size += n as u64;
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
-    Ok((size, sha256_finalize_hex(hasher)))
+
+    let mut input = std::io::BufReader::with_capacity(SCAN_HASH_CHUNK_BYTES, file);
+    let mut hasher = HashWriter(Sha256::new());
+    let size =
+        std::io::copy(&mut input, &mut hasher).context("failed to read opened artifact file")?;
+    Ok((size, sha256_finalize_hex(hasher.0)))
+}
+
+pub(super) struct ArtifactQualificationReader {
+    input: std::io::BufReader<std::io::Take<std::fs::File>>,
+    hasher: Sha256,
+    bytes: u64,
+}
+
+impl ArtifactQualificationReader {
+    fn new(file: std::fs::File, limit: u64) -> Self {
+        Self {
+            input: std::io::BufReader::with_capacity(
+                limit.min(SCAN_HASH_CHUNK_BYTES as u64) as usize,
+                file.take(limit),
+            ),
+            hasher: Sha256::new(),
+            bytes: 0,
+        }
+    }
+
+    fn finish(self) -> (u64, String) {
+        (self.bytes, sha256_finalize_hex(self.hasher))
+    }
+}
+
+impl Read for ArtifactQualificationReader {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.input.read(buffer)?;
+        self.hasher.update(&buffer[..read]);
+        self.bytes += read as u64;
+        Ok(read)
+    }
+}
+
+/// Attest the exact bytes consumed by qualification, then stream the remaining bytes once.
+pub(super) fn qualify_scanned_artifact_file<T>(
+    file: std::fs::File,
+    path: &str,
+    expected_size: u64,
+    expected_hash: &str,
+    qualify: impl FnOnce(&mut ArtifactQualificationReader) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    let mut reader = ArtifactQualificationReader::new(file, expected_size.saturating_add(1));
+    let result = qualify(&mut reader)?;
+    std::io::copy(
+        &mut reader.by_ref().take(expected_size.saturating_add(1)),
+        &mut std::io::sink(),
+    )
+    .with_context(|| format!("failed to read artifact qualification bytes: {path}"))?;
+    let (size, hash) = reader.finish();
+    anyhow::ensure!(
+        size == expected_size && hash == expected_hash,
+        "artifact changed after scanning: {path}"
+    );
+    Ok(result)
+}
+
+// Detection reads used by Python pruning share the same artifact owner as scanning.
+struct RootedPythonFs<'a>(&'a ArtifactRoot);
+
+impl crate::detect::fs::Fs for RootedPythonFs<'_> {
+    fn exists(&self, path: &str) -> bool {
+        self.0.file_type(Path::new(path), true).is_ok()
+    }
+
+    fn is_dir(&self, path: &str) -> bool {
+        self.0
+            .file_type(Path::new(path), true)
+            .is_ok_and(|kind| kind.is_dir())
+    }
+
+    fn is_file(&self, path: &str) -> bool {
+        self.0
+            .file_type(Path::new(path), true)
+            .is_ok_and(|kind| kind.is_file())
+    }
+
+    fn read_file(&self, path: &str) -> Option<String> {
+        const MAX_BYTES: u64 = 512 * 1024;
+        let relative = self.0.canonicalize(Path::new(path)).ok()?;
+        let file = self.0.open_file(&relative).ok()?;
+        let mut content = String::new();
+        file.take(MAX_BYTES + 1).read_to_string(&mut content).ok()?;
+        (content.len() as u64 <= MAX_BYTES).then_some(content)
+    }
+
+    fn list_dir(&self, path: &str) -> Vec<String> {
+        let mut names = self
+            .0
+            .read_dir(Path::new(if path.is_empty() { "." } else { path }))
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|name| name.to_str().map(str::to_owned))
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
 }

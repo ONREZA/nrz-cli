@@ -1,8 +1,12 @@
 use super::{
     NativeExecutableRequirements, qualified_system_path, qualified_versions, version_definitions,
 };
+use crate::ArtifactRoot;
 use goblin::elf::{Elf, dynamic, program_header};
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 #[test]
 fn qualified_system_paths_use_unix_loader_components() {
@@ -51,6 +55,108 @@ impl Drop for Artifact {
     fn drop(&mut self) {
         std::fs::remove_dir_all(&self.0).unwrap();
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn native_closure_retains_the_acquired_root_after_parent_swap() {
+    use std::os::unix::fs::symlink;
+    let temp = tempfile::tempdir().unwrap();
+    let parent = temp.path().join("parent");
+    let original = parent.join("artifact");
+    let foreign = temp.path().join("foreign");
+    let server = versioned_elf(
+        Some(("libfoo.so", "FOO_1")),
+        None,
+        Some("$ORIGIN/lib"),
+        true,
+    );
+    let provider = versioned_elf(None, Some("FOO_1"), None, false);
+    for (path, library) in [
+        (&original, provider.clone()),
+        (
+            &foreign.join("artifact"),
+            versioned_elf(None, Some("FOO_2"), None, false),
+        ),
+    ] {
+        std::fs::create_dir_all(path.join("lib")).unwrap();
+        std::fs::write(path.join("server"), &server).unwrap();
+        std::fs::write(path.join("lib/libfoo.so"), library).unwrap();
+    }
+    let root = ArtifactRoot::open(&original).unwrap();
+    std::fs::rename(&parent, temp.path().join("retained")).unwrap();
+    symlink(&foreign, &parent).unwrap();
+    assert!(
+        NativeExecutableRequirements::verify_artifact_closure(
+            &original,
+            &original.join("server"),
+            &original
+        )
+        .is_err()
+    );
+    let (_, members) = NativeExecutableRequirements::verify_rooted_artifact_closure(
+        &root,
+        Path::new("server"),
+        Path::new(""),
+        |path, bytes| {
+            let expected = if path == Path::new("server") {
+                &server
+            } else {
+                &provider
+            };
+            assert_eq!(bytes, expected);
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(members, [Path::new("lib/libfoo.so"), Path::new("server")]);
+}
+
+#[test]
+fn native_closure_rejects_changed_provider_bytes_even_with_identical_elf_metadata() {
+    let artifact = Artifact::new();
+    let server = versioned_elf(
+        Some(("libfoo.so", "FOO_1")),
+        None,
+        Some("$ORIGIN/lib"),
+        true,
+    );
+    let provider = versioned_elf(None, Some("FOO_1"), None, false);
+    let mut replacement = provider.clone();
+    *replacement.last_mut().unwrap() ^= 1;
+    std::fs::create_dir(artifact.0.join("lib")).unwrap();
+    std::fs::write(artifact.0.join("server"), &server).unwrap();
+    std::fs::write(artifact.0.join("lib/libfoo.so"), &provider).unwrap();
+    let root = ArtifactRoot::open(&artifact.0).unwrap();
+    let error = NativeExecutableRequirements::verify_rooted_artifact_closure(
+        &root,
+        Path::new("server"),
+        Path::new(""),
+        |path, bytes| {
+            let expected = if path == Path::new("server") {
+                &server
+            } else {
+                &provider
+            };
+            if bytes != expected {
+                return Err(crate::RuntimeArtifactError::Invariant(
+                    "native source bytes changed after scanning".into(),
+                ));
+            }
+            if path == Path::new("server") {
+                std::fs::write(artifact.0.join("lib/libfoo.so"), &replacement).unwrap();
+            }
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("native source bytes changed after scanning")
+    );
+    // The replacement's ELF/version metadata alone still meets the native contract.
+    artifact.check().unwrap();
 }
 
 // Valid file-backed ELF metadata without section headers, as permitted by the

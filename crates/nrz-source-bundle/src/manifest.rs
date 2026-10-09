@@ -276,7 +276,7 @@ pub fn summarize_logical_manifest(manifest: &SourceLogicalManifest) -> SourceBun
 }
 
 pub fn normalize_source_path(path: &str) -> Result<String, String> {
-    if path.is_empty() || path.starts_with('/') || path.contains('\0') || path.contains('\\') {
+    if path.contains('\0') || path.contains('\\') {
         return Err(format!("Invalid archive path: {path}"));
     }
     if path
@@ -330,82 +330,5 @@ fn stable_stringify_object(entries: &Map<String, Value>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn normalizes_safe_relative_paths_only() {
-        assert_eq!(
-            normalize_source_path("dist/index.html").unwrap(),
-            "dist/index.html"
-        );
-        assert!(normalize_source_path("").is_err());
-        assert!(normalize_source_path("/dist/index.html").is_err());
-        assert!(normalize_source_path("dist/../secret").is_err());
-        assert!(normalize_source_path("dist//index.html").is_err());
-        assert!(normalize_source_path("dist\\index.html").is_err());
-    }
-
-    #[test]
-    fn resolves_one_immutable_readiness_contract_for_compute_layers() {
-        let manifest = SourceLogicalManifest {
-            schema_version: SOURCE_BUNDLE_V1_SCHEMA_VERSION.to_string(),
-            capabilities: Vec::new(),
-            files: Vec::new(),
-            layers: vec![SourceLogicalManifestLayer {
-                name: "server".to_string(),
-                target: "COMPUTE".to_string(),
-                root_path: None,
-                entrypoint: Some("main.py".to_string()),
-                runtime_config: Some(serde_json::json!({
-                    "readiness": { "protocol": "HTTP", "path": "/healthz" },
-                    "runtimeFamily": "PYTHON"
-                })),
-            }],
-            routes: Vec::new(),
-            entrypoints: Vec::new(),
-        };
-
-        assert_eq!(
-            source_runtime_readiness(&manifest).unwrap(),
-            Some(SourceRuntimeReadiness::Http {
-                path: "/healthz".to_string()
-            })
-        );
-    }
-
-    #[test]
-    fn rejects_ambiguous_or_invalid_runtime_readiness() {
-        let layer = |name: &str, readiness: Option<Value>| SourceLogicalManifestLayer {
-            name: name.to_string(),
-            target: "COMPUTE".to_string(),
-            root_path: None,
-            entrypoint: Some("main.py".to_string()),
-            runtime_config: readiness
-                .map(|readiness| serde_json::json!({ "readiness": readiness })),
-        };
-        let manifest = |layers| SourceLogicalManifest {
-            schema_version: SOURCE_BUNDLE_V1_SCHEMA_VERSION.to_string(),
-            capabilities: Vec::new(),
-            files: Vec::new(),
-            layers,
-            routes: Vec::new(),
-            entrypoints: Vec::new(),
-        };
-
-        assert!(
-            source_runtime_readiness(&manifest(vec![
-                layer("one", Some(serde_json::json!({ "protocol": "TCP" }))),
-                layer("two", None),
-            ]))
-            .is_err()
-        );
-        assert!(
-            source_runtime_readiness(&manifest(vec![layer(
-                "server",
-                Some(serde_json::json!({ "protocol": "HTTP", "path": "health" })),
-            )]))
-            .is_err()
-        );
-    }
-}
+#[path = "manifest_tests.rs"]
+mod tests;

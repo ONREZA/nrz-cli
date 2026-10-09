@@ -98,6 +98,76 @@ fn prunes_only_incompatible_optional_packages_before_manifest_identity_and_size(
 }
 
 #[test]
+fn rejects_optional_package_metadata_changed_after_scan() {
+    for replacement in ["win32", "darwin"] {
+        let dir = tempfile::tempdir().unwrap();
+        package(
+            dir.path(),
+            "",
+            json!({"optionalDependencies":{"native":"1"}}),
+        );
+        package(dir.path(), "node_modules/native", json!({"os":"linux"}));
+        let root = nrz_runtime_artifact::ArtifactRoot::open(dir.path()).unwrap();
+        let files = scan_dir(dir.path()).unwrap();
+        fs::write(
+            dir.path().join("node_modules/native/package.json"),
+            serde_json::to_vec(&json!({"os":replacement})).unwrap(),
+        )
+        .unwrap();
+        let error = prune_optional_native_dependencies_rooted(&root, files, &target())
+            .err()
+            .expect("changed metadata authorized pruning away its own scanned witness");
+        assert!(
+            error
+                .to_string()
+                .contains("metadata changed after scanning"),
+            "{error}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn package_metadata_symlinks_use_the_scanned_target_identity() {
+    for changed in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        package(
+            dir.path(),
+            "",
+            json!({"optionalDependencies":{"native":"1"}}),
+        );
+        package(dir.path(), "node_modules/native", json!({"os":"win32"}));
+        let package_dir = dir.path().join("node_modules/native");
+        fs::rename(
+            package_dir.join("package.json"),
+            package_dir.join("metadata.json"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink("metadata.json", package_dir.join("package.json")).unwrap();
+        let files = scan_dir(dir.path()).unwrap();
+        if changed {
+            fs::write(
+                package_dir.join("metadata.json"),
+                serde_json::to_vec(&json!({"os":"linux"})).unwrap(),
+            )
+            .unwrap();
+        }
+        let result = prune_optional_native_dependencies(dir.path(), files, &target());
+        if changed {
+            let error = result.err().expect("changed symlink target was trusted");
+            assert!(
+                error
+                    .to_string()
+                    .contains("metadata changed after scanning"),
+                "{error}"
+            );
+        } else {
+            assert_eq!(result.unwrap().packages, 1);
+        }
+    }
+}
+
+#[test]
 fn required_and_optional_override_edges_match_npm_semantics() {
     for (metadata, should_fail) in [
         (json!({"dependencies":{"native":"1"}}), true),

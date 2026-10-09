@@ -303,16 +303,23 @@ fn requires_authored_python_dependencies(
 
 /// Required dependencies must survive the plan's actual scan and retention.
 /// Directory presence and symlinks without retained targets are not evidence.
-pub(super) fn validate_retained_python_runtime_dependencies(
+pub(super) fn requires_retained_python_runtime_dependencies(
     project_dir: &Path,
+    artifact: &RuntimeArtifact,
+    detection: &crate::detect::types::DetectionResult,
+) -> anyhow::Result<bool> {
+    Ok(manifest_has_compute_layer(&artifact.manifest)
+        && has_python_runtime(&artifact.manifest, detection)
+        && requires_authored_python_dependencies(project_dir, detection)?)
+}
+
+pub(super) fn validate_retained_python_runtime_dependencies(
+    required: bool,
     artifact: &RuntimeArtifact,
     files: &crate::artifact::ArtifactFileCollection,
     detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<()> {
-    if !manifest_has_compute_layer(&artifact.manifest)
-        || !has_python_runtime(&artifact.manifest, detection)
-        || !requires_authored_python_dependencies(project_dir, detection)?
-    {
+    if !required {
         return Ok(());
     }
     let minor = selected_python_runtime_minor(detection);

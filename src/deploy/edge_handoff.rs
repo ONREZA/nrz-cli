@@ -20,7 +20,7 @@ pub(super) const EDGE_BUILD_HANDOFF_MODE_V1: &str = "V1";
 const OUTPUT_DIRECTORY_ENV: &str = "ONREZA_OUTPUT_DIR";
 const PLATFORM_RUNNER_ENV: &str = "NRZ_RUNNER";
 const PLATFORM_RUNNER_VALUE: &str = "PLATFORM";
-const COPY_BUFFER_BYTES: usize = 64 * 1024;
+const COPY_BUFFER_BYTES: usize = 65_536;
 
 pub(super) struct EdgeBuildHandoffOutput {
     root: PathBuf,
@@ -131,10 +131,8 @@ impl EdgeBuildHandoffOutput {
             &descriptor_temp,
             &final_descriptor,
         );
-        if result.is_err() {
-            let _ = fs::remove_file(&archive_temp);
-            let _ = fs::remove_file(&descriptor_temp);
-        }
+        let _ = fs::remove_file(&archive_temp);
+        let _ = fs::remove_file(&descriptor_temp);
         result
     }
 
@@ -172,7 +170,7 @@ impl EdgeBuildHandoffOutput {
         }))
     }
 
-    fn publish_inner(
+    pub(super) fn publish_inner(
         &self,
         source_bundle: &SourceBundlePlan,
         root: &Path,
@@ -181,8 +179,11 @@ impl EdgeBuildHandoffOutput {
         descriptor_temp: &Path,
         final_descriptor: &Path,
     ) -> anyhow::Result<EdgeBuildHandoffV1> {
-        let (copied_size, copied_sha256) =
-            copy_and_hash(source_bundle.source_path(), archive_temp)?;
+        let (copied_size, copied_sha256) = copy_and_hash(
+            source_bundle.source_path(),
+            archive_temp,
+            source_bundle.source_size_bytes,
+        )?;
         ensure!(
             copied_size == source_bundle.source_size_bytes,
             "Edge build handoff source bundle size changed during publication"
@@ -191,10 +192,6 @@ impl EdgeBuildHandoffOutput {
             copied_sha256 == source_bundle.source_sha256,
             "Edge build handoff source bundle digest changed during publication"
         );
-        fs::rename(archive_temp, final_archive)
-            .context("failed to publish Edge build source bundle")?;
-        sync_directory(root)?;
-
         let handoff = EdgeBuildHandoffV1 {
             schema_version: EDGE_BUILD_HANDOFF_V1_SCHEMA_VERSION.to_string(),
             source_bundle: EdgeBuildSourceBundleV1 {
@@ -211,16 +208,58 @@ impl EdgeBuildHandoffOutput {
             .context("failed to serialize Edge build handoff descriptor")?;
         descriptor.push(b'\n');
         write_new_synced_file(descriptor_temp, &descriptor)?;
-        fs::rename(descriptor_temp, final_descriptor)
-            .context("failed to publish Edge build handoff descriptor")?;
+        publish_new_file(archive_temp, final_archive)
+            .context("failed to publish Edge build source bundle")?;
+        if let Err(error) = publish_new_file(descriptor_temp, final_descriptor) {
+            fs::remove_file(final_archive).with_context(|| {
+                format!(
+                    "failed to release owned archive after descriptor publication failed: {error}"
+                )
+            })?;
+            sync_directory(root).context("failed to sync rolled-back Edge build handoff")?;
+            return Err(error).context("failed to publish Edge build handoff descriptor");
+        }
         sync_directory(root)?;
         Ok(handoff)
     }
 }
 
-fn copy_and_hash(source: &Path, destination: &Path) -> anyhow::Result<(u64, String)> {
+fn publish_new_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStrExt as _;
+        let source = std::ffi::CString::new(source.as_os_str().as_bytes())?;
+        let destination = std::ffi::CString::new(destination.as_os_str().as_bytes())?;
+        // Both C strings remain alive; RENAME_NOREPLACE atomically claims an absent final name.
+        if unsafe {
+            libc::renameat2(
+                libc::AT_FDCWD,
+                source.as_ptr(),
+                libc::AT_FDCWD,
+                destination.as_ptr(),
+                libc::RENAME_NOREPLACE,
+            )
+        } == 0
+        {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        fs::hard_link(source, destination)
+    }
+}
+
+fn copy_and_hash(
+    source: &Path,
+    destination: &Path,
+    expected_size: u64,
+) -> anyhow::Result<(u64, String)> {
     let mut input = File::open(source)
-        .with_context(|| format!("failed to open source bundle {}", source.display()))?;
+        .with_context(|| format!("failed to open source bundle {}", source.display()))?
+        .take(expected_size.saturating_add(1));
     let mut output = new_file(destination)?;
     let mut hasher = Sha256::new();
     let mut size = 0_u64;

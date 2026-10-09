@@ -1,8 +1,9 @@
 //! Trusted canonical EROFS materialization for final runtime dependency trees.
 //!
 //! The caller must stop the untrusted build cell and transfer the staging tree
-//! to a trusted, private ownership boundary before invoking this crate. This
-//! crate validates the closed tree, normalizes filesystem metadata, generates a
+//! to a trusted, private ownership boundary before invoking this crate. All
+//! sibling trees supplied through RuntimeMounts must remain in that boundary
+//! throughout materialization. This crate validates the closed tree, normalizes filesystem metadata, generates a
 //! self-contained image with a pinned `erofs-utils` toolchain, scans all image
 //! data with `fsck.erofs`, and emits the shared runtime artifact contract.
 
@@ -18,6 +19,7 @@ pub use tool_executor::{
     ErofsToolExecutionError, ErofsToolExecutor, ErofsToolInvocation, ErofsToolKind, ErofsToolOutput,
 };
 
+use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, Metadata, Permissions};
 use std::io::{Read, Seek, SeekFrom};
@@ -31,6 +33,7 @@ use nrz_runtime_artifact::{
     VerifiedDependencyMaterializationManifest, verify_dependency_materialization_manifest,
     verify_linux_x86_64_native_platform,
 };
+use nrz_source_bundle::{DependencySourceTree, SourceArchivePathIndex};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -141,7 +144,10 @@ pub enum DependencySymlinkScope<'a> {
     ClosedTree,
     RuntimeMounts {
         mount_point: &'a str,
-        allowed_mount_points: &'a [String],
+        /// All real dependency trees held in the caller's immutable private custody.
+        /// Layer ownership governs projected runtime paths, not physical file identity:
+        /// nested source directories contribute independent payloads at their mounts.
+        trees: &'a [DependencySourceTree],
     },
 }
 
@@ -447,6 +453,18 @@ fn inspect_dependency_tree_with_scope(
     let mut entries = Vec::new();
     collect_entries(&root, &root, limits, &mut entries)?;
     entries.sort_by(|left, right| left.relative.as_bytes().cmp(right.relative.as_bytes()));
+    let context = physical_path_context(&root, &entries, limits, symlink_scope)?;
+    let index = SourceArchivePathIndex::from_filesystem_entries(
+        context
+            .paths
+            .entries
+            .iter()
+            .map(|(path, target)| (path.as_str(), target.as_deref())),
+        context.paths.directories.iter().map(String::as_str),
+    )
+    .map_err(|error| {
+        DependencyMaterializerError::Contract(format!("invalid dependency path graph: {error}"))
+    })?;
 
     let mut hasher = Sha256::new();
     hasher.update(b"ONREZA_DEPENDENCY_LOGICAL_TREE_V1\0");
@@ -505,8 +523,13 @@ fn inspect_dependency_tree_with_scope(
                         source,
                     }
                 })?;
-                uses_runtime_mount_symlink |=
-                    validate_symlink(&entry.relative, &target, &entry.path, symlink_scope)?;
+                let physical_mount_transition =
+                    validate_symlink(&entry.relative, &target, &entry.path, &context, &index)?;
+                // V2 identity historically marks syntactic exits too. Preserve
+                // those accepted tree identities; this grants no path authority.
+                uses_runtime_mount_symlink |= physical_mount_transition
+                    || (matches!(symlink_scope, DependencySymlinkScope::RuntimeMounts { .. })
+                        && legacy_runtime_mount_transition(&entry.relative, &target));
                 update_field(&mut hasher, target.as_os_str().as_bytes());
                 summary.symlink_count = summary.symlink_count.saturating_add(1);
                 summary.expanded_file_count = summary.expanded_file_count.saturating_add(1);
@@ -535,6 +558,134 @@ enum EntryKind {
     Directory,
     Regular,
     Symlink,
+}
+
+struct LogicalTreePaths {
+    entries: Vec<(String, Option<String>)>,
+    directories: Vec<String>,
+}
+
+struct PhysicalPathContext {
+    paths: LogicalTreePaths,
+    prefix: String,
+    boundary: &'static str,
+    allowed_roots: Vec<String>,
+}
+
+fn physical_path_context(
+    root: &Path,
+    entries: &[TreeEntry],
+    limits: DependencyTreeLimits,
+    scope: DependencySymlinkScope<'_>,
+) -> Result<PhysicalPathContext, DependencyMaterializerError> {
+    let DependencySymlinkScope::RuntimeMounts { mount_point, trees } = scope else {
+        return Ok(PhysicalPathContext {
+            paths: logical_tree_paths(entries, "tree")?,
+            prefix: "tree".into(),
+            boundary: "tree",
+            allowed_roots: vec!["tree".into()],
+        });
+    };
+    let failure = |reason| {
+        DependencyMaterializerError::Contract(format!("invalid runtime mount context: {reason}"))
+    };
+    let selected = canonical_absolute_path(mount_point)
+        .ok_or_else(|| failure("invalid selected mount point"))?;
+    let mut seen_roots = HashSet::new();
+    let mut mounts = Vec::new();
+    for tree in trees {
+        if tree.layer_name.is_empty() {
+            return Err(failure("missing layer ownership"));
+        }
+        let point = canonical_absolute_path(&tree.mount_point)
+            .ok_or_else(|| failure("invalid mount point"))?;
+        if mounts
+            .iter()
+            .any(|(_, previous): &(&DependencySourceTree, PathBuf)| {
+                point.starts_with(previous) || previous.starts_with(&point)
+            })
+        {
+            return Err(failure("overlapping or duplicate mount points"));
+        }
+        let path = canonical_source_tree(&tree.path)?;
+        if !seen_roots.insert(path.clone()) {
+            return Err(failure("duplicate canonical source trees"));
+        }
+        mounts.push((tree, point));
+    }
+    let selected_tree = mounts
+        .iter()
+        .find(|(_, point)| *point == selected)
+        .map(|(tree, _)| *tree)
+        .ok_or_else(|| failure("selected mount is not present"))?;
+    if canonical_source_tree(&selected_tree.path)? != root {
+        return Err(failure(
+            "selected mount does not own the requested source tree",
+        ));
+    }
+    let prefix = |point: &Path| format!("runtime{}", point.to_string_lossy().trim_end_matches('/'));
+    let mut paths = LogicalTreePaths {
+        entries: Vec::new(),
+        directories: vec!["runtime".into()],
+    };
+    let mut allowed_roots = Vec::new();
+    for (tree, point) in mounts {
+        let logical_root = prefix(&point);
+        let mut sibling_entries = Vec::new();
+        let mut projected = if point == selected {
+            logical_tree_paths(entries, &logical_root)?
+        } else {
+            let sibling_root = canonical_source_tree(&tree.path)?;
+            collect_entries(&sibling_root, &sibling_root, limits, &mut sibling_entries)?;
+            logical_tree_paths(&sibling_entries, &logical_root)?
+        };
+        paths.entries.append(&mut projected.entries);
+        paths.directories.append(&mut projected.directories);
+        if tree.layer_name == selected_tree.layer_name {
+            allowed_roots.push(logical_root);
+        }
+    }
+    Ok(PhysicalPathContext {
+        paths,
+        prefix: prefix(&selected),
+        boundary: "runtime",
+        allowed_roots,
+    })
+}
+
+fn logical_tree_paths(
+    entries: &[TreeEntry],
+    prefix: &str,
+) -> Result<LogicalTreePaths, DependencyMaterializerError> {
+    let mut paths = LogicalTreePaths {
+        entries: Vec::new(),
+        directories: vec![prefix.to_string()],
+    };
+    for entry in entries {
+        let path = format!("{prefix}/{}", entry.relative);
+        match entry.kind {
+            EntryKind::Directory => paths.directories.push(path),
+            EntryKind::Regular => paths.entries.push((path, None)),
+            EntryKind::Symlink => {
+                let target = fs::read_link(&entry.path).map_err(|source| {
+                    DependencyMaterializerError::Io {
+                        operation: "read dependency symlink",
+                        path: entry.path.clone(),
+                        source,
+                    }
+                })?;
+                let target_text =
+                    target
+                        .to_str()
+                        .ok_or_else(|| DependencyMaterializerError::UnsafeSymlink {
+                            path: entry.path.clone(),
+                            target: target.clone(),
+                        })?;
+                paths.entries.push((path, Some(target_text.to_string())));
+            }
+        }
+    }
+    Ok(paths)
 }
 
 fn collect_entries(
@@ -635,39 +786,60 @@ fn validate_symlink(
     relative: &str,
     target: &Path,
     source_path: &Path,
-    scope: DependencySymlinkScope<'_>,
+    context: &PhysicalPathContext,
+    index: &SourceArchivePathIndex<'_>,
 ) -> Result<bool, DependencyMaterializerError> {
-    if target.as_os_str().is_empty() || target.to_str().is_none() || target.is_absolute() {
-        return Err(DependencyMaterializerError::UnsafeSymlink {
-            path: source_path.to_path_buf(),
-            target: target.to_path_buf(),
-        });
+    let failure = || DependencyMaterializerError::UnsafeSymlink {
+        path: source_path.to_path_buf(),
+        target: target.to_path_buf(),
+    };
+    let (required, resolved) = index
+        .resolve_symlink_within(
+            &format!("{}/{}", context.prefix, relative),
+            context.boundary,
+        )
+        .map_err(|_| failure())?;
+    if !context
+        .allowed_roots
+        .iter()
+        .any(|root| logical_path_is_within(&resolved, root))
+        || required.iter().any(|path| {
+            !context.allowed_roots.iter().any(|root| {
+                logical_path_is_within(path, root) || logical_path_is_within(root, path)
+            })
+        })
+    {
+        return Err(failure());
     }
+    Ok(required
+        .iter()
+        .any(|path| !logical_path_is_within(path, &context.prefix)))
+}
+
+fn legacy_runtime_mount_transition(relative: &str, target: &Path) -> bool {
     let mut depth = Path::new(relative)
         .parent()
         .map_or(0, |parent| parent.components().count());
-    let mut stays_within_tree = true;
     for component in target.components() {
         match component {
-            Component::CurDir => {}
             Component::Normal(_) => depth = depth.saturating_add(1),
-            Component::ParentDir if depth > 0 => depth -= 1,
-            Component::ParentDir => stays_within_tree = false,
-            Component::RootDir | Component::Prefix(_) => {
-                unreachable!("absolute targets rejected above")
+            Component::ParentDir => {
+                let Some(parent_depth) = depth.checked_sub(1) else {
+                    return true;
+                };
+                depth = parent_depth;
             }
+            _ => {}
         }
     }
-    if stays_within_tree {
-        return Ok(false);
-    }
-    if runtime_symlink_target_is_allowed(relative, target, scope) {
-        return Ok(true);
-    }
-    Err(DependencyMaterializerError::UnsafeSymlink {
-        path: source_path.to_path_buf(),
-        target: target.to_path_buf(),
-    })
+    false
+}
+
+fn logical_path_is_within(path: &str, root: &str) -> bool {
+    path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 fn canonicalization_policy_digest_for(uses_runtime_mount_symlink: bool) -> String {
@@ -677,38 +849,6 @@ fn canonicalization_policy_digest_for(uses_runtime_mount_symlink: bool) -> Strin
         DEPENDENCY_EROFS_CANONICALIZATION_POLICY_V1
     };
     sha256_prefixed(descriptor.as_bytes())
-}
-
-fn runtime_symlink_target_is_allowed(
-    relative: &str,
-    target: &Path,
-    scope: DependencySymlinkScope<'_>,
-) -> bool {
-    let DependencySymlinkScope::RuntimeMounts {
-        mount_point,
-        allowed_mount_points,
-    } = scope
-    else {
-        return false;
-    };
-    let Some(mut resolved) = canonical_absolute_path(mount_point) else {
-        return false;
-    };
-    if let Some(parent) = Path::new(relative).parent() {
-        resolved.push(parent);
-    }
-    for component in target.components() {
-        match component {
-            Component::CurDir => {}
-            Component::Normal(part) => resolved.push(part),
-            Component::ParentDir if resolved.pop() => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return false,
-        }
-    }
-    allowed_mount_points.iter().any(|allowed| {
-        canonical_absolute_path(allowed)
-            .is_some_and(|allowed| resolved == allowed || resolved.starts_with(allowed))
-    })
 }
 
 fn canonical_absolute_path(path: &str) -> Option<PathBuf> {
@@ -930,148 +1070,5 @@ impl Drop for PartialImage {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::os::unix::fs::symlink;
-    use std::time::{Duration, SystemTime};
-
-    const LIMITS: DependencyTreeLimits = DependencyTreeLimits {
-        max_files: 100,
-        max_expanded_bytes: 1024 * 1024,
-        max_path_bytes: 512,
-        max_symlinks: 10,
-    };
-
-    #[test]
-    fn logical_tree_identity_ignores_mtime_and_non_executable_mode_noise() {
-        let root = tempfile::tempdir().unwrap();
-        let package = root.path().join("node_modules/example");
-        fs::create_dir_all(&package).unwrap();
-        let file = package.join("index.js");
-        fs::write(&file, "export const value = 1;\n").unwrap();
-        symlink(
-            "../example/index.js",
-            root.path().join("node_modules/link.js"),
-        )
-        .unwrap();
-
-        normalize_tree(root.path(), LIMITS).unwrap();
-        let first = inspect_dependency_tree(root.path(), LIMITS).unwrap();
-        fs::set_permissions(&file, Permissions::from_mode(0o600)).unwrap();
-        let opened = File::options().write(true).open(&file).unwrap();
-        opened
-            .set_times(
-                std::fs::FileTimes::new()
-                    .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(9_999)),
-            )
-            .unwrap();
-        let second = inspect_dependency_tree(root.path(), LIMITS).unwrap();
-
-        assert_eq!(first, second);
-        assert_eq!(first.expanded_file_count, 2);
-        assert_eq!(first.regular_file_count, 1);
-        assert_eq!(first.symlink_count, 1);
-    }
-
-    #[test]
-    fn logical_tree_identity_includes_executable_semantics() {
-        let root = tempfile::tempdir().unwrap();
-        let helper = root.path().join("helper");
-        fs::write(&helper, "#!/bin/sh\n").unwrap();
-        let regular = inspect_dependency_tree(root.path(), LIMITS).unwrap();
-
-        fs::set_permissions(&helper, Permissions::from_mode(0o755)).unwrap();
-        let executable = inspect_dependency_tree(root.path(), LIMITS).unwrap();
-
-        assert_ne!(regular.logical_tree_digest, executable.logical_tree_digest);
-    }
-
-    #[test]
-    fn unsafe_symlink_and_special_entry_are_rejected() {
-        let root = tempfile::tempdir().unwrap();
-        symlink("../../outside", root.path().join("escape")).unwrap();
-        assert!(matches!(
-            inspect_dependency_tree(root.path(), LIMITS),
-            Err(DependencyMaterializerError::UnsafeSymlink { .. })
-        ));
-
-        fs::remove_file(root.path().join("escape")).unwrap();
-        let fifo = root.path().join("pipe");
-        let fifo_path = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
-        // SAFETY: fifo_path is a live NUL-terminated path and mode is passed by value.
-        assert_eq!(unsafe { libc::mkfifo(fifo_path.as_ptr(), 0o600) }, 0);
-        assert!(matches!(
-            inspect_dependency_tree(root.path(), LIMITS),
-            Err(DependencyMaterializerError::UnsupportedEntry(_))
-        ));
-    }
-
-    #[test]
-    fn manifest_owned_runtime_mount_scope_allows_a_cross_tree_symlink() {
-        let root = tempfile::tempdir().unwrap();
-        let prisma = root.path().join("@prisma");
-        fs::create_dir(&prisma).unwrap();
-        symlink(
-            "../../../node_modules/@prisma/client",
-            prisma.join("client-generated"),
-        )
-        .unwrap();
-        let allowed_mount_points = vec![
-            "/output/.next/node_modules".to_string(),
-            "/output/node_modules".to_string(),
-        ];
-
-        let tree = inspect_dependency_tree_with_scope(
-            root.path(),
-            LIMITS,
-            DependencySymlinkScope::RuntimeMounts {
-                mount_point: "/output/.next/node_modules",
-                allowed_mount_points: &allowed_mount_points,
-            },
-            false,
-        )
-        .unwrap();
-
-        assert_eq!(tree.summary.symlink_count, 1);
-        assert!(tree.uses_runtime_mount_symlink);
-        assert_eq!(
-            canonicalization_policy_digest_for(tree.uses_runtime_mount_symlink),
-            sha256_prefixed(DEPENDENCY_EROFS_CANONICALIZATION_POLICY_V2.as_bytes())
-        );
-        assert!(matches!(
-            inspect_dependency_tree(root.path(), LIMITS),
-            Err(DependencyMaterializerError::UnsafeSymlink { .. })
-        ));
-    }
-
-    #[test]
-    fn expanded_limits_fail_before_image_generation() {
-        let root = tempfile::tempdir().unwrap();
-        fs::write(root.path().join("large"), vec![0u8; 32]).unwrap();
-        let limits = DependencyTreeLimits {
-            max_expanded_bytes: 16,
-            ..LIMITS
-        };
-
-        assert!(matches!(
-            inspect_dependency_tree(root.path(), limits),
-            Err(DependencyMaterializerError::Limit {
-                limit_name: "max_expanded_bytes",
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn policy_digest_is_stable_and_prefixed() {
-        let digest = canonicalization_policy_digest();
-        assert!(digest.starts_with("sha256:"));
-        assert_eq!(digest.len(), "sha256:".len() + 64);
-        assert_eq!(
-            digest,
-            canonicalization_policy_digest_for(false),
-            "ordinary dependency trees must retain the V1 immutable identity"
-        );
-        assert_ne!(digest, canonicalization_policy_digest_for(true));
-    }
-}
+#[path = "lib_tests.rs"]
+mod tests;

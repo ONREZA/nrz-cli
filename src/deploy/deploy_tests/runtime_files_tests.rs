@@ -529,6 +529,96 @@ fn prepare_deploy_files_preserves_build_only_target_for_deployable_symlink() {
     source_bundle_v1::build_source_bundle_plan(dir.path(), &manifest, &deployable).unwrap();
 }
 
+#[cfg(unix)]
+fn producer_audit_static_bundle(root: &Path) -> source_bundle_v1::SourceBundlePlan {
+    let manifest = build_manifest::generate_static_manifest();
+    let scanned = scan_runtime_artifact(root, &RuntimeArtifactScan::All).unwrap();
+    let files = prepare_deploy_files(
+        &manifest,
+        scanned,
+        &make_detection("static-html", None),
+        true,
+    )
+    .unwrap();
+    source_bundle_v1::build_source_bundle_plan(root, &manifest, &files).unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn producer_audit_preserves_intermediate_build_only_alias() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("assets")).unwrap();
+    fs::write(dir.path().join("payload.json"), b"{\"runtime\":true}").unwrap();
+    std::os::unix::fs::symlink("payload.json", dir.path().join("package.json")).unwrap();
+    std::os::unix::fs::symlink("../package.json", dir.path().join("assets/pkg")).unwrap();
+    let plan = producer_audit_static_bundle(dir.path());
+    let restored = crate::test_support::unpack_source_bundle(&plan);
+    assert_eq!(
+        fs::read(restored.path().join("assets/pkg")).unwrap(),
+        b"{\"runtime\":true}"
+    );
+    assert_eq!(
+        fs::read_link(restored.path().join("assets/pkg")).unwrap(),
+        std::path::Path::new("../package.json")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn producer_audit_retains_only_a_witness_for_an_intermediate_pruned_directory() {
+    let dir = tempdir().unwrap();
+    fs::create_dir(dir.path().join("assets")).unwrap();
+    fs::create_dir_all(dir.path().join("node_modules/unused")).unwrap();
+    fs::create_dir_all(dir.path().join("node_modules/other")).unwrap();
+    fs::create_dir_all(dir.path().join("node_modules/keep-whole")).unwrap();
+    for (name, bytes) in [("first", b"first"), ("other", b"other")] {
+        fs::write(dir.path().join("node_modules/keep-whole").join(name), bytes).unwrap();
+    }
+    fs::write(dir.path().join("node_modules/unused/a-witness"), b"witness").unwrap();
+    fs::write(
+        dir.path().join("node_modules/unused/z-unneeded"),
+        b"unneeded",
+    )
+    .unwrap();
+    fs::write(dir.path().join("node_modules/other/unneeded"), b"unneeded").unwrap();
+    fs::write(dir.path().join("payload.json"), b"runtime").unwrap();
+    std::os::unix::fs::symlink(
+        "../node_modules/unused/../../payload.json",
+        dir.path().join("assets/pkg"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        "../node_modules/keep-whole",
+        dir.path().join("assets/package"),
+    )
+    .unwrap();
+    let plan = producer_audit_static_bundle(dir.path());
+    let restored = crate::test_support::unpack_source_bundle(&plan);
+    assert_eq!(
+        fs::read(restored.path().join("assets/pkg")).unwrap(),
+        b"runtime"
+    );
+    assert_eq!(
+        fs::read(restored.path().join("node_modules/unused/a-witness")).unwrap(),
+        b"witness"
+    );
+    assert!(
+        !restored
+            .path()
+            .join("node_modules/unused/z-unneeded")
+            .exists()
+    );
+    assert!(!restored.path().join("node_modules/other").exists());
+    assert_eq!(
+        fs::read(restored.path().join("assets/package/first")).unwrap(),
+        b"first"
+    );
+    assert_eq!(
+        fs::read(restored.path().join("assets/package/other")).unwrap(),
+        b"other"
+    );
+}
+
 #[test]
 fn prepare_deploy_files_keeps_package_json_for_compute_runtime() {
     let manifest = build_manifest::generate_compute_manifest("server.js");

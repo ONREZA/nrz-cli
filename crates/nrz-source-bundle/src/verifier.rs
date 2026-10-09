@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io;
-use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use async_compression::tokio::bufread::ZstdDecoder;
@@ -11,6 +10,9 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio_util::io::StreamReader;
+
+use crate::path_graph::{SourceArchivePathIndex, SourcePathGraphError};
+use crate::pax::encode_pax_record;
 
 use crate::manifest::{
     SOURCE_BUNDLE_V1_SCHEMA_VERSION, SourceBundleSummary, SourceLogicalManifest,
@@ -136,19 +138,24 @@ where
                 .update(&bytes);
             Ok::<Bytes, io::Error>(bytes)
         }
-        Err(error) => Err(io::Error::other(error.to_string())),
+        // Zstd errors also use Other; distinguish failures of the source stream.
+        Err(error) => Err(io::Error::new(
+            io::ErrorKind::ConnectionAborted,
+            error.to_string(),
+        )),
     });
     let reader = StreamReader::new(stream);
     let mut decoder = ZstdDecoder::new(BufReader::new(reader));
+    decoder.multiple_members(true);
     let mut tar_verifier = StreamingTarVerifier::new(input.clone());
-    let mut buffer = vec![0_u8; 64 * 1024];
+    let mut buffer = vec![0_u8; 65_536];
 
     loop {
         match decoder.read(&mut buffer).await {
             Ok(0) => break,
             Ok(n) => tar_verifier.push(&buffer[..n])?,
             Err(error) => {
-                if error.kind() == io::ErrorKind::Other {
+                if error.kind() == io::ErrorKind::ConnectionAborted {
                     return Err(failure(
                         "SOURCE_OBJECT_READ_FAILED",
                         "SOURCE_BUNDLE_V1 source object stream failed during verification",
@@ -329,8 +336,6 @@ fn validate_manifest_entry(
                     format!("Symlink manifest entry must have size 0: {path}"),
                 ));
             }
-            validate_symlink_target(path, link_target)
-                .map_err(|message| failure("SOURCE_MANIFEST_LINK_TARGET_UNSAFE", message))?;
             if sha256_hex(link_target.as_bytes()) != file.sha256 {
                 return Err(failure(
                     "SOURCE_MANIFEST_LINK_SHA_MISMATCH",
@@ -355,14 +360,14 @@ fn tar_structural_overhead_bytes(expected: &HashMap<String, SourceLogicalManifes
                 .as_ref()
                 .is_some_and(|target| target.len() > TAR_LINKNAME_LENGTH);
         if needs_pax_path || needs_pax_link_path {
-            let mut pax_body_bytes = 0_u64;
+            let mut fields = Vec::new();
             if needs_pax_path {
-                pax_body_bytes = pax_body_bytes.saturating_add(pax_record_byte_len("path", path));
+                fields.push(("path", path.as_str()));
             }
             if needs_pax_link_path && let Some(link_target) = file.link_target.as_deref() {
-                pax_body_bytes =
-                    pax_body_bytes.saturating_add(pax_record_byte_len("linkpath", link_target));
+                fields.push(("linkpath", link_target));
             }
+            let pax_body_bytes = encode_pax_record(&fields).len() as u64;
             overhead = overhead
                 .saturating_add(TAR_BLOCK_SIZE as u64)
                 .saturating_add(pax_body_bytes)
@@ -382,241 +387,38 @@ fn tar_padding_bytes(size: u64) -> u64 {
     }
 }
 
-fn pax_record_byte_len(key: &str, value: &str) -> u64 {
-    let body = format!("{key}={value}\n");
-    let mut length = format!("0 {body}").len();
-    loop {
-        let record = format!("{length} {body}");
-        let byte_length = record.len();
-        if byte_length == length {
-            return u64::try_from(byte_length).unwrap_or(u64::MAX);
-        }
-        length = byte_length;
-    }
-}
-
 fn validate_manifest_symlinks(
     expected: &HashMap<String, SourceLogicalManifestFile>,
 ) -> Result<(), SourceBundleVerificationFailure> {
+    let index = SourceArchivePathIndex::from_entries(
+        expected
+            .iter()
+            .map(|(path, file)| (path.as_str(), file.link_target.as_deref())),
+    )
+    .map_err(manifest_graph_failure)?;
     for (path, file) in expected {
-        if file.entry_type != SourceLogicalManifestEntryType::Symlink {
-            continue;
-        }
-        let link_target = file.link_target.as_deref().ok_or_else(|| {
-            failure(
-                "SOURCE_MANIFEST_LINK_INVALID",
-                format!("Symlink manifest entry missing linkTarget: {path}"),
-            )
-        })?;
-        let resolved = resolve_symlink_target(path, link_target)
-            .map_err(|message| failure("SOURCE_MANIFEST_LINK_TARGET_UNSAFE", message))?;
-        validate_raw_symlink_target_semantics(expected, path, link_target)?;
-        if !manifest_resolves_to_file(expected, &resolved, &mut HashSet::from([path.clone()])) {
-            return Err(failure(
-                "SOURCE_MANIFEST_LINK_TARGET_MISSING",
-                format!("Symlink target is not present in manifest: {path}"),
-            ));
-        }
-        let nested_prefix = format!("{path}/");
-        if expected
-            .keys()
-            .any(|candidate| candidate.starts_with(&nested_prefix))
-        {
-            return Err(failure(
-                "SOURCE_MANIFEST_LINK_NESTED_ENTRY",
-                format!("Symlink path contains nested logical entry: {path}"),
-            ));
+        if file.entry_type == SourceLogicalManifestEntryType::Symlink {
+            index
+                .validate_symlink(path)
+                .map_err(manifest_graph_failure)?;
         }
     }
     Ok(())
 }
 
-fn manifest_resolves_to_file(
-    expected: &HashMap<String, SourceLogicalManifestFile>,
-    path: &str,
-    seen_symlinks: &mut HashSet<String>,
-) -> bool {
-    if let Some(file) = expected.get(path) {
-        return match file.entry_type {
-            SourceLogicalManifestEntryType::File => true,
-            SourceLogicalManifestEntryType::Symlink => {
-                let Some(link_target) = file.link_target.as_deref() else {
-                    return false;
-                };
-                if !seen_symlinks.insert(path.to_string()) {
-                    return false;
-                }
-                let Ok(resolved) = resolve_symlink_target(path, link_target) else {
-                    return false;
-                };
-                manifest_resolves_to_file(expected, &resolved, seen_symlinks)
-            }
-        };
-    }
-
-    for prefix in path_prefixes_from_deepest(path) {
-        let Some(file) = expected.get(&prefix) else {
-            continue;
-        };
-        if file.entry_type != SourceLogicalManifestEntryType::Symlink {
-            continue;
+fn manifest_graph_failure(error: SourcePathGraphError) -> SourceBundleVerificationFailure {
+    let code = match &error {
+        SourcePathGraphError::InvalidPath(_) | SourcePathGraphError::FileAncestor(_) => {
+            "SOURCE_MANIFEST_PATH_INVALID"
         }
-        let Some(link_target) = file.link_target.as_deref() else {
-            return false;
-        };
-        if !seen_symlinks.insert(prefix.clone()) {
-            return false;
+        SourcePathGraphError::DuplicatePath(_) => "SOURCE_MANIFEST_DUPLICATE_PATH",
+        SourcePathGraphError::SymlinkAncestor(_) => "SOURCE_MANIFEST_LINK_NESTED_ENTRY",
+        SourcePathGraphError::UnsafeTarget(_) => "SOURCE_MANIFEST_LINK_TARGET_UNSAFE",
+        SourcePathGraphError::MissingTarget(_) | SourcePathGraphError::Cycle(_) => {
+            "SOURCE_MANIFEST_LINK_TARGET_MISSING"
         }
-        let Ok(resolved) = resolve_symlink_target(&prefix, link_target) else {
-            return false;
-        };
-        let suffix = &path[(prefix.len() + 1)..];
-        return manifest_resolves_to_file(expected, &format!("{resolved}/{suffix}"), seen_symlinks);
-    }
-
-    expected.keys().any(|candidate| {
-        candidate
-            .strip_prefix(path)
-            .is_some_and(|suffix| suffix.starts_with('/'))
-            && manifest_resolves_to_file(expected, candidate, &mut seen_symlinks.clone())
-    })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ManifestPathKind {
-    File,
-    Directory,
-    Missing,
-}
-
-fn validate_raw_symlink_target_semantics(
-    expected: &HashMap<String, SourceLogicalManifestFile>,
-    path: &str,
-    link_target: &str,
-) -> Result<(), SourceBundleVerificationFailure> {
-    let mut parts: Vec<&str> = path.rsplit_once('/').map_or(Vec::new(), |(parent, _)| {
-        parent
-            .split('/')
-            .filter(|segment| !segment.is_empty())
-            .collect()
-    });
-
-    for segment in link_target.split('/') {
-        let current_path = parts.join("/");
-        if !current_path.is_empty()
-            && manifest_path_kind(
-                expected,
-                &current_path,
-                &mut HashSet::from([path.to_string()]),
-            ) == ManifestPathKind::File
-        {
-            return Err(failure(
-                "SOURCE_MANIFEST_LINK_TARGET_UNSAFE",
-                format!("Symlink target traverses through a regular file: {path} -> {link_target}"),
-            ));
-        }
-        match segment {
-            "" | "." => {}
-            ".." => {
-                if parts.pop().is_none() {
-                    return Err(failure(
-                        "SOURCE_MANIFEST_LINK_TARGET_UNSAFE",
-                        format!("Symlink target escapes archive root: {path} -> {link_target}"),
-                    ));
-                }
-            }
-            normal => parts.push(normal),
-        }
-    }
-    Ok(())
-}
-
-fn manifest_path_kind(
-    expected: &HashMap<String, SourceLogicalManifestFile>,
-    path: &str,
-    seen_symlinks: &mut HashSet<String>,
-) -> ManifestPathKind {
-    if let Some(file) = expected.get(path) {
-        return match file.entry_type {
-            SourceLogicalManifestEntryType::File => ManifestPathKind::File,
-            SourceLogicalManifestEntryType::Symlink => {
-                let Some(link_target) = file.link_target.as_deref() else {
-                    return ManifestPathKind::Missing;
-                };
-                if !seen_symlinks.insert(path.to_string()) {
-                    return ManifestPathKind::Missing;
-                }
-                let Ok(resolved) = resolve_symlink_target(path, link_target) else {
-                    return ManifestPathKind::Missing;
-                };
-                manifest_path_kind(expected, &resolved, seen_symlinks)
-            }
-        };
-    }
-
-    if expected.keys().any(|candidate| {
-        candidate
-            .strip_prefix(path)
-            .is_some_and(|suffix| suffix.starts_with('/'))
-            && manifest_resolves_to_file(expected, candidate, &mut seen_symlinks.clone())
-    }) {
-        ManifestPathKind::Directory
-    } else {
-        ManifestPathKind::Missing
-    }
-}
-
-fn path_prefixes_from_deepest(path: &str) -> Vec<String> {
-    let mut prefixes = Vec::new();
-    let mut end = path.len();
-    while let Some(index) = path[..end].rfind('/') {
-        if index == 0 {
-            break;
-        }
-        prefixes.push(path[..index].to_string());
-        end = index;
-    }
-    prefixes
-}
-
-fn validate_symlink_target(path: &str, link_target: &str) -> Result<(), String> {
-    resolve_symlink_target(path, link_target).map(|_| ())
-}
-
-fn resolve_symlink_target(path: &str, link_target: &str) -> Result<String, String> {
-    if link_target.is_empty() || link_target.contains('\\') || link_target.contains('\0') {
-        return Err(format!("Invalid symlink target for {path}: {link_target}"));
-    }
-    let target = Path::new(link_target);
-    if target.is_absolute() {
-        return Err(format!("Invalid symlink target for {path}: {link_target}"));
-    }
-
-    let mut resolved = PathBuf::new();
-    if let Some(parent) = Path::new(path).parent()
-        && !parent.as_os_str().is_empty()
-    {
-        resolved.push(parent);
-    }
-    for component in target.components() {
-        match component {
-            Component::Normal(part) => resolved.push(part),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if !resolved.pop() {
-                    return Err(format!(
-                        "Symlink target escapes archive root: {path} -> {link_target}"
-                    ));
-                }
-            }
-            Component::RootDir | Component::Prefix(_) => {
-                return Err(format!("Invalid symlink target for {path}: {link_target}"));
-            }
-        }
-    }
-
-    let resolved = resolved.to_string_lossy().replace('\\', "/");
-    normalize_source_path(&resolved)
+    };
+    failure(code, error.to_string())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -650,8 +452,7 @@ struct StreamingTarVerifier {
     state: TarState,
     buffer: BytesMut,
     entry: Option<StreamingEntry>,
-    pending_pax_path: Option<String>,
-    pending_pax_link_path: Option<String>,
+    pending_pax: Option<PaxHeaders>,
     decompressed_bytes: u64,
     seen: HashSet<String>,
     prepared: Option<PreparedVerification>,
@@ -665,8 +466,7 @@ impl StreamingTarVerifier {
             state: TarState::Header,
             buffer: BytesMut::new(),
             entry: None,
-            pending_pax_path: None,
-            pending_pax_link_path: None,
+            pending_pax: None,
             decompressed_bytes: 0,
             seen: HashSet::new(),
             prepared: None,
@@ -682,9 +482,7 @@ impl StreamingTarVerifier {
             .prepared
             .as_ref()
             .map(|prepared| prepared.max_expanded_bytes)
-            .unwrap_or_else(|| {
-                MAX_LOGICAL_MANIFEST_BYTES.saturating_add((TAR_BLOCK_SIZE as u64) * 2)
-            });
+            .unwrap_or_else(|| MAX_LOGICAL_MANIFEST_BYTES.saturating_add(1024));
         if self.decompressed_bytes > max_expanded_bytes {
             return Err(failure(
                 "SOURCE_EXPANSION_LIMIT",
@@ -748,15 +546,44 @@ impl StreamingTarVerifier {
                     }
                     let header = self.buffer.split_to(TAR_BLOCK_SIZE).freeze();
                     if is_zero_block(&header) {
+                        if self.pending_pax.is_some() {
+                            return Err(failure(
+                                "SOURCE_TAR_PAX_INVALID",
+                                "PAX header has no following archive entry",
+                            ));
+                        }
                         self.state = TarState::Done;
                         continue;
                     }
                     self.start_entry(&header)?;
                 }
                 TarState::Body => {
-                    self.consume_body()?;
-                    if self.state == TarState::Body {
-                        return Ok(());
+                    let entry = self.entry.as_mut().ok_or_else(|| {
+                        failure(
+                            "SOURCE_TAR_HEADER_INVALID",
+                            "Tar parser lost current entry state",
+                        )
+                    })?;
+                    let take = entry.remaining.min(self.buffer.len());
+                    let body = self.buffer.split_to(take);
+                    entry.remaining -= take;
+                    match entry.kind {
+                        EntryKind::File => {
+                            if let Some(hasher) = &mut entry.hasher {
+                                hasher.update(&body);
+                            }
+                        }
+                        EntryKind::Pax | EntryKind::LogicalManifest => {
+                            entry.pax_body.extend_from_slice(&body)
+                        }
+                        EntryKind::Metadata => {}
+                    }
+                    match entry.remaining {
+                        0 => {
+                            self.state = TarState::Padding;
+                            self.finish_entry()?;
+                        }
+                        _ => return Ok(()),
                     }
                 }
                 TarState::Padding => {
@@ -770,7 +597,7 @@ impl StreamingTarVerifier {
                             )
                         })?
                         .padding_remaining;
-                    if self.buffer.len() < padding_remaining {
+                    if self.buffer.get(..padding_remaining).is_none() {
                         return Ok(());
                     }
                     let _ = self.buffer.split_to(padding_remaining);
@@ -782,6 +609,21 @@ impl StreamingTarVerifier {
     }
 
     fn start_entry(&mut self, header: &[u8]) -> Result<(), SourceBundleVerificationFailure> {
+        let tar_header = tar::Header::from_byte_slice(header);
+        let checksum = tar_header.cksum().map_err(|error| {
+            failure(
+                "SOURCE_TAR_HEADER_INVALID",
+                format!("Invalid TAR checksum: {error}"),
+            )
+        })?;
+        let mut computed_header = tar_header.clone();
+        computed_header.set_cksum();
+        if computed_header.cksum().expect("computed TAR checksum") != checksum {
+            return Err(failure(
+                "SOURCE_TAR_HEADER_INVALID",
+                "TAR header checksum mismatch",
+            ));
+        }
         let type_flag = header.get(TAR_TYPEFLAG_OFFSET).copied().unwrap_or(0);
         let size = parse_octal(header, TAR_SIZE_OFFSET, TAR_SIZE_LENGTH).ok_or_else(|| {
             failure(
@@ -805,6 +647,12 @@ impl StreamingTarVerifier {
                     "SOURCE_BUNDLE_V1 logical manifest metadata must be the first archive entry",
                 ));
             }
+            if self.pending_pax.is_some() {
+                return Err(failure(
+                    "SOURCE_TAR_PAX_INVALID",
+                    "Consecutive PAX headers describe the same archive entry",
+                ));
+            }
             self.entry = Some(StreamingEntry {
                 kind: EntryKind::Pax,
                 path: String::new(),
@@ -815,6 +663,7 @@ impl StreamingTarVerifier {
                 expected_sha256: None,
             });
             if size == 0 {
+                self.state = TarState::Padding;
                 self.finish_entry()?;
             } else {
                 self.state = TarState::Body;
@@ -823,27 +672,32 @@ impl StreamingTarVerifier {
         }
 
         if type_flag != b'0' && type_flag != 0 && type_flag != b'2' {
-            let label = if type_flag == 0 {
-                "NUL".to_string()
-            } else {
-                char::from(type_flag).to_string()
-            };
+            let label = char::from(type_flag);
             return Err(failure(
                 "SOURCE_TAR_ENTRY_UNSUPPORTED",
                 format!("Unsupported tar entry type: {label}"),
             ));
         }
 
-        let raw_path = self
-            .pending_pax_path
-            .take()
-            .unwrap_or_else(|| read_tar_path(header));
-        let raw_link_target = self
-            .pending_pax_link_path
-            .take()
-            .unwrap_or_else(|| read_tar_link_name(header));
+        let pax = self.pending_pax.take().unwrap_or_default();
+        let raw_path = pax
+            .path
+            .map(Ok)
+            .unwrap_or_else(|| read_tar_path(header))
+            .map_err(|_| {
+                failure(
+                    "SOURCE_TAR_PATH_INVALID",
+                    "Tar entry path is not valid UTF-8",
+                )
+            })?;
         let normalized = normalize_source_path(&raw_path)
             .map_err(|message| failure("SOURCE_TAR_PATH_INVALID", message))?;
+        if normalized.starts_with(METADATA_PREFIX) && type_flag == b'2' {
+            return Err(failure(
+                "SOURCE_TAR_ENTRY_UNSUPPORTED",
+                "SOURCE_BUNDLE_V1 metadata entries must be regular files",
+            ));
+        }
         if normalized == SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH {
             require_tar_mode(mode, TAR_FILE_MODE, "logical manifest")?;
             if self.manifest_seen {
@@ -869,6 +723,7 @@ impl StreamingTarVerifier {
                 expected_sha256: None,
             });
             if size == 0 {
+                self.state = TarState::Padding;
                 self.finish_entry()?;
             } else {
                 self.state = TarState::Body;
@@ -893,6 +748,7 @@ impl StreamingTarVerifier {
                 expected_sha256: None,
             });
             if size == 0 {
+                self.state = TarState::Padding;
                 self.finish_entry()?;
             } else {
                 self.state = TarState::Body;
@@ -919,6 +775,16 @@ impl StreamingTarVerifier {
             ));
         }
         if type_flag == b'2' {
+            let raw_link_target = pax
+                .link_path
+                .map(Ok)
+                .unwrap_or_else(|| read_tar_link_name(header))
+                .map_err(|_| {
+                    failure(
+                        "SOURCE_TAR_LINK_TARGET_UNSAFE",
+                        "Tar symlink target is not valid UTF-8",
+                    )
+                })?;
             require_tar_mode(mode, TAR_SYMLINK_MODE, &normalized)?;
             if file.entry_type != SourceLogicalManifestEntryType::Symlink {
                 return Err(failure(
@@ -926,26 +792,20 @@ impl StreamingTarVerifier {
                     format!("Archive entry type mismatch: {normalized}"),
                 ));
             }
-            if size != 0 || file.size != 0 {
+            if size != 0 {
                 return Err(failure(
                     "SOURCE_TAR_SYMLINK_INVALID",
                     format!("Symlink entry must have size 0: {normalized}"),
                 ));
             }
-            validate_symlink_target(&normalized, &raw_link_target)
-                .map_err(|message| failure("SOURCE_TAR_LINK_TARGET_UNSAFE", message))?;
             if Some(raw_link_target.as_str()) != file.link_target.as_deref() {
                 return Err(failure(
                     "SOURCE_ARCHIVE_LINK_TARGET_MISMATCH",
                     format!("Archive symlink target mismatch: {normalized}"),
                 ));
             }
-            if sha256_hex(raw_link_target.as_bytes()) != file.sha256 {
-                return Err(failure(
-                    "SOURCE_ARCHIVE_LINK_SHA_MISMATCH",
-                    format!("Archive symlink target SHA-256 mismatch: {normalized}"),
-                ));
-            }
+            // The admitted manifest graph already checked safety and SHA-256;
+            // exact raw-target equality transfers those checks to this entry.
             self.seen.insert(normalized);
             return Ok(());
         }
@@ -981,38 +841,10 @@ impl StreamingTarVerifier {
             expected_sha256: Some(file.sha256.clone()),
         });
         if size == 0 {
+            self.state = TarState::Padding;
             self.finish_entry()?;
         } else {
             self.state = TarState::Body;
-        }
-        Ok(())
-    }
-
-    fn consume_body(&mut self) -> Result<(), SourceBundleVerificationFailure> {
-        let entry = self.entry.as_mut().ok_or_else(|| {
-            failure(
-                "SOURCE_TAR_HEADER_INVALID",
-                "Tar parser lost current entry state",
-            )
-        })?;
-        if self.buffer.is_empty() {
-            return Ok(());
-        }
-
-        let take = entry.remaining.min(self.buffer.len());
-        let body = self.buffer.split_to(take);
-        entry.remaining -= take;
-        match entry.kind {
-            EntryKind::File => {
-                if let Some(hasher) = &mut entry.hasher {
-                    hasher.update(&body);
-                }
-            }
-            EntryKind::Pax | EntryKind::LogicalManifest => entry.pax_body.extend_from_slice(&body),
-            EntryKind::Metadata => {}
-        }
-        if entry.remaining == 0 {
-            self.finish_entry()?;
         }
         Ok(())
     }
@@ -1026,9 +858,7 @@ impl StreamingTarVerifier {
         })?;
         match entry.kind {
             EntryKind::Pax => {
-                let pax = parse_pax(&entry.pax_body)?;
-                self.pending_pax_path = pax.path;
-                self.pending_pax_link_path = pax.link_path;
+                self.pending_pax = Some(parse_pax(&entry.pax_body)?);
             }
             EntryKind::LogicalManifest => {
                 let logical_manifest: Value =
@@ -1069,12 +899,6 @@ impl StreamingTarVerifier {
             EntryKind::Metadata => {}
         }
 
-        if entry.padding_remaining > 0 {
-            self.state = TarState::Padding;
-        } else {
-            self.entry = None;
-            self.state = TarState::Header;
-        }
         Ok(())
     }
 }
@@ -1093,49 +917,36 @@ fn require_tar_mode(
     Ok(())
 }
 
+#[derive(Default)]
 struct PaxHeaders {
     path: Option<String>,
     link_path: Option<String>,
 }
 
-fn parse_pax(body: &[u8]) -> Result<PaxHeaders, SourceBundleVerificationFailure> {
-    let mut cursor = 0;
+fn parse_pax(mut remaining: &[u8]) -> Result<PaxHeaders, SourceBundleVerificationFailure> {
     let mut path = None;
     let mut link_path = None;
 
-    while cursor < body.len() {
-        let relative_space = body[cursor..].iter().position(|byte| *byte == b' ');
-        let space = relative_space
-            .map(|offset| cursor + offset)
+    while !remaining.is_empty() {
+        let space = remaining
+            .iter()
+            .position(|byte| *byte == b' ')
             .ok_or_else(|| failure("SOURCE_TAR_PAX_INVALID", "Invalid PAX record length"))?;
-        if space <= cursor {
-            return Err(failure(
-                "SOURCE_TAR_PAX_INVALID",
-                "Invalid PAX record length",
-            ));
-        }
-        let length_text = std::str::from_utf8(&body[cursor..space])
+        let length_text = std::str::from_utf8(&remaining[..space])
             .ok()
             .filter(|text| text.bytes().all(|byte| byte.is_ascii_digit()))
             .ok_or_else(|| failure("SOURCE_TAR_PAX_INVALID", "Invalid PAX record length"))?;
         let length = length_text
             .parse::<usize>()
             .map_err(|_| failure("SOURCE_TAR_PAX_INVALID", "Invalid PAX record length"))?;
-        let end = cursor.saturating_add(length);
-        if length == 0 || end > body.len() || end <= space + 1 {
-            return Err(failure(
-                "SOURCE_TAR_PAX_INVALID",
-                "Invalid PAX record length",
-            ));
-        }
-        if body[end - 1] != b'\n' {
-            return Err(failure(
-                "SOURCE_TAR_PAX_INVALID",
-                "PAX record missing newline",
-            ));
-        }
-
-        let record = &body[(space + 1)..(end - 1)];
+        let (framed, next) = remaining
+            .split_at_checked(length)
+            .ok_or_else(|| failure("SOURCE_TAR_PAX_INVALID", "Invalid PAX record length"))?;
+        let record = framed
+            .get(space + 1..)
+            .ok_or_else(|| failure("SOURCE_TAR_PAX_INVALID", "Invalid PAX record length"))?
+            .strip_suffix(b"\n")
+            .ok_or_else(|| failure("SOURCE_TAR_PAX_INVALID", "PAX record missing newline"))?;
         let equals = record
             .iter()
             .position(|byte| *byte == b'=')
@@ -1159,8 +970,19 @@ fn parse_pax(body: &[u8]) -> Result<PaxHeaders, SourceBundleVerificationFailure>
             )
         })?;
         match key {
-            "path" => path = Some(value.to_string()),
-            "linkpath" => link_path = Some(value.to_string()),
+            "path" | "linkpath" => {
+                let field = if key == "path" {
+                    &mut path
+                } else {
+                    &mut link_path
+                };
+                if field.replace(value.to_string()).is_some() {
+                    return Err(failure(
+                        "SOURCE_TAR_PAX_INVALID",
+                        format!("Duplicate PAX key: {key}"),
+                    ));
+                }
+            }
             _ => {
                 return Err(failure(
                     "SOURCE_TAR_PAX_UNSUPPORTED",
@@ -1168,47 +990,53 @@ fn parse_pax(body: &[u8]) -> Result<PaxHeaders, SourceBundleVerificationFailure>
                 ));
             }
         }
-        cursor = end;
+        remaining = next;
     }
 
     Ok(PaxHeaders { path, link_path })
 }
 
-fn read_tar_path(header: &[u8]) -> String {
-    let name = read_null_terminated(header, 0, TAR_NAME_LENGTH);
-    let prefix = read_null_terminated(header, TAR_PREFIX_OFFSET, TAR_PREFIX_LENGTH);
-    if prefix.is_empty() {
+fn read_tar_path(header: &[u8]) -> Result<String, std::str::Utf8Error> {
+    let name = read_null_terminated(header, 0, TAR_NAME_LENGTH)?;
+    // GNU and old TAR headers use this region for other fields or padding.
+    // Read the raw USTAR prefix without the consumer's backslash normalization.
+    let prefix = if tar::Header::from_byte_slice(header).as_ustar().is_some() {
+        read_null_terminated(header, TAR_PREFIX_OFFSET, TAR_PREFIX_LENGTH)?
+    } else {
+        String::new()
+    };
+    Ok(if prefix.is_empty() {
         name
     } else {
         format!("{prefix}/{name}")
-    }
+    })
 }
 
-fn read_tar_link_name(header: &[u8]) -> String {
+fn read_tar_link_name(header: &[u8]) -> Result<String, std::str::Utf8Error> {
     read_null_terminated(header, TAR_LINKNAME_OFFSET, TAR_LINKNAME_LENGTH)
 }
 
-fn read_null_terminated(bytes: &[u8], offset: usize, length: usize) -> String {
+fn read_null_terminated(
+    bytes: &[u8],
+    offset: usize,
+    length: usize,
+) -> Result<String, std::str::Utf8Error> {
     let end = (offset + length).min(bytes.len());
     let slice = &bytes[offset..end];
     let nul = slice
         .iter()
         .position(|byte| *byte == 0)
         .unwrap_or(slice.len());
-    String::from_utf8_lossy(&slice[..nul]).to_string()
+    std::str::from_utf8(&slice[..nul]).map(str::to_string)
 }
 
 fn parse_octal(bytes: &[u8], offset: usize, length: usize) -> Option<usize> {
-    let raw = read_null_terminated(bytes, offset, length);
+    let raw = read_null_terminated(bytes, offset, length).ok()?;
     let trimmed = raw.trim();
     if !trimmed.bytes().all(|byte| (b'0'..=b'7').contains(&byte)) {
         return None;
     }
-    if trimmed.is_empty() {
-        Some(0)
-    } else {
-        usize::from_str_radix(trimmed, 8).ok()
-    }
+    usize::from_str_radix(trimmed, 8).ok()
 }
 
 fn is_zero_block(block: &[u8]) -> bool {
