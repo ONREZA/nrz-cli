@@ -4707,6 +4707,7 @@ pub enum GetV1environmentsByIdServingResponse {
     ///default: Unknown response
     Unknown,
 }
+#[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
@@ -4716,6 +4717,9 @@ pub struct ActivateReleaseRequestBody {
     #[serde(rename = "expectedGeneration")]
     #[validate(regex(path = "REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION"))]
     pub expected_generation: String,
+    #[serde(rename = "finishObservationEarly")]
+    #[default(Some(false))]
+    pub finish_observation_early: Option<bool>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -16395,6 +16399,62 @@ pub struct Serving200ResponseAddress {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Serving200ResponseDesiredPendingReasonCodeEnum {
+    #[serde(rename = "RUNTIME_APPLICATION_UNQUALIFIED")]
+    #[default]
+    RuntimeApplicationUnqualified,
+    #[serde(rename = "RUNTIME_POLICY_UNINITIALIZED")]
+    RuntimePolicyUninitialized,
+}
+impl core::fmt::Display for Serving200ResponseDesiredPendingReasonCodeEnum {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::RuntimeApplicationUnqualified => {
+                write!(f, "RUNTIME_APPLICATION_UNQUALIFIED")
+            }
+            Self::RuntimePolicyUninitialized => write!(f, "RUNTIME_POLICY_UNINITIALIZED"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum Serving200ResponseDesiredPendingReasonCode {
+    #[default]
+    Enum(Serving200ResponseDesiredPendingReasonCodeEnum),
+    #[serde(rename = "RELEASE_MATERIALIZATION_PENDING")]
+    ReleaseMaterializationPending,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Serving200ResponseDesiredPendingReasonLayer {
+    #[serde(rename = "layerName")]
+    pub layer_name: String,
+    #[serde(deserialize_with = "Option::deserialize", rename = "lineageKey")]
+    #[serialize_always]
+    pub lineage_key: Option<String>,
+    pub code: Serving200ResponseDesiredPendingReasonCodeEnum,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Serving200ResponseDesiredPendingReason {
+    #[serde(rename = "operationId")]
+    pub operation_id: uuid::Uuid,
+    #[serde(rename = "requestedAt")]
+    pub requested_at: chrono::DateTime<chrono::Utc>,
+    pub code: Serving200ResponseDesiredPendingReasonCode,
+    #[validate(length(max = 10u64))]
+    pub layers: Vec<Serving200ResponseDesiredPendingReasonLayer>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
@@ -16414,6 +16474,13 @@ pub struct Serving200ResponseDesired {
     pub result: Option<String>,
     #[serde(rename = "activeEverywhere")]
     pub active_everywhere: bool,
+    #[serde(
+        default,
+        with = "serde_with::rust::double_option",
+        rename = "pendingReason"
+    )]
+    #[validate(nested)]
+    pub pending_reason: Option<Option<Serving200ResponseDesiredPendingReason>>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]

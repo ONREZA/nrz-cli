@@ -209,6 +209,10 @@ pub struct RollbackArgs {
     #[arg(long)]
     pub list: bool,
 
+    /// Finish the current rollout's final observation early before activating the release
+    #[arg(long, conflicts_with = "list")]
+    pub finish_observation_early: bool,
+
     /// Platform environment ID or exact name
     #[arg(long)]
     pub environment: Option<String>,

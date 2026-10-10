@@ -3610,6 +3610,81 @@
                         },
                         "activeEverywhere": {
                           "type": "boolean"
+                        },
+                        "pendingReason": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "operationId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "requestedAt": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "code": {
+                                  "anyOf": [
+                                    {
+                                      "enum": [
+                                        "RUNTIME_APPLICATION_UNQUALIFIED",
+                                        "RUNTIME_POLICY_UNINITIALIZED"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    {
+                                      "const": "RELEASE_MATERIALIZATION_PENDING",
+                                      "type": "string"
+                                    }
+                                  ]
+                                },
+                                "layers": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "layerName": {
+                                        "type": "string"
+                                      },
+                                      "lineageKey": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "null"
+                                          }
+                                        ]
+                                      },
+                                      "code": {
+                                        "enum": [
+                                          "RUNTIME_APPLICATION_UNQUALIFIED",
+                                          "RUNTIME_POLICY_UNINITIALIZED"
+                                        ],
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "layerName",
+                                      "lineageKey",
+                                      "code"
+                                    ]
+                                  },
+                                  "maxItems": 10
+                                }
+                              },
+                              "required": [
+                                "operationId",
+                                "requestedAt",
+                                "code",
+                                "layers"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       },
                       "required": [
@@ -3857,6 +3932,10 @@
                   "expectedGeneration": {
                     "type": "string",
                     "pattern": "^(0|[1-9][0-9]*)$"
+                  },
+                  "finishObservationEarly": {
+                    "type": "boolean",
+                    "default": false
                   }
                 },
                 "required": [

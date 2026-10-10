@@ -128,6 +128,9 @@ the value is `null` with a warning; the deployment remains live.
 `nrz rollback --environment production --release-id <release-id>` requests a
 new activation of the selected immutable release. The request reports an
 operation ID and desired generation; Edge receipt determines when it is live.
+By default, activation waits for the current rollout's final observation.
+Add `--finish-observation-early` to finish that observation early for this
+activation; process grace and connection draining remain unchanged.
 
 `nrz deploy --wait-timeout 600` waits up to 600 seconds for activation after
 source publication (default: 1800 seconds, or 30 minutes, to allow queued

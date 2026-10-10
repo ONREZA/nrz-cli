@@ -5,6 +5,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     routing::{get, post},
 };
+use clap::Parser;
 use serde_json::{Value, json};
 
 const ENVIRONMENT: &str = "00000000-0000-4000-8000-000000000001";
@@ -25,17 +26,24 @@ fn serving(environment: &str) -> Value {
 
 #[tokio::test]
 async fn rollback_activates_exact_retained_release_with_generation_and_idempotency() {
-    let app = Router::new()
+    for finish_observation_early in [false, true] {
+        let mut arguments = vec!["rollback", "--release-id", RELEASE];
+        if finish_observation_early {
+            arguments.push("--finish-observation-early");
+        }
+        let args = crate::cli::RollbackArgs::try_parse_from(arguments).unwrap();
+        assert_eq!(args.finish_observation_early, finish_observation_early);
+        let app = Router::new()
         .route(
             "/v1/environments/{id}/serving",
             get(|| async { Json(serving(ENVIRONMENT)) }),
         )
         .route(
             "/v1/environments/{id}/actions/activate-release",
-            post(|headers: HeaderMap, Json(body): Json<Value>| async move {
+            post(move |headers: HeaderMap, Json(body): Json<Value>| async move {
                 assert_eq!(
                     body,
-                    json!({"releaseId": RELEASE, "expectedGeneration": "7"})
+                    json!({"releaseId": RELEASE, "expectedGeneration": "7", "finishObservationEarly": finish_observation_early})
                 );
                 let key = headers.get("idempotency-key").unwrap().to_str().unwrap();
                 let key_id = uuid::Uuid::parse_str(key).unwrap();
@@ -50,14 +58,16 @@ async fn rollback_activates_exact_retained_release_with_generation_and_idempoten
                 )
             }),
         );
-    let (client, server) = serve_api(app).await;
-    let response = activate_release(&client, ENVIRONMENT, RELEASE)
-        .await
-        .unwrap();
-    assert_eq!(response.operation_id.to_string(), OPERATION);
-    assert_eq!(response.release_id.to_string(), RELEASE);
-    assert_eq!(response.desired_generation, "8");
-    server.abort();
+        let (client, server) = serve_api(app).await;
+        let response =
+            activate_release(&client, ENVIRONMENT, RELEASE, args.finish_observation_early)
+                .await
+                .unwrap();
+        assert_eq!(response.operation_id.to_string(), OPERATION);
+        assert_eq!(response.release_id.to_string(), RELEASE);
+        assert_eq!(response.desired_generation, "8");
+        server.abort();
+    }
 }
 
 #[tokio::test]
@@ -109,7 +119,7 @@ async fn rollback_rejects_serving_state_from_another_environment_before_mutation
         );
     let (client, server) = serve_api(app).await;
     assert!(
-        activate_release(&client, ENVIRONMENT, RELEASE)
+        activate_release(&client, ENVIRONMENT, RELEASE, false)
             .await
             .unwrap_err()
             .to_string()

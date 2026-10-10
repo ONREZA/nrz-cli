@@ -20,6 +20,7 @@ struct ActivationOutput {
     release_id: String,
     desired_generation: String,
     status: String,
+    finish_observation_early: bool,
 }
 
 pub async fn run(
@@ -81,13 +82,20 @@ pub async fn run(
     }
 
     let release_id = args.release_id.context("missing --release-id")?;
-    let activation = activate_release(&client, &environment_id, &release_id).await?;
+    let activation = activate_release(
+        &client,
+        &environment_id,
+        &release_id,
+        args.finish_observation_early,
+    )
+    .await?;
     let output_row = ActivationOutput {
         environment_id,
         operation_id: activation.operation_id.to_string(),
         release_id: activation.release_id.to_string(),
         desired_generation: activation.desired_generation,
         status: activation.status,
+        finish_observation_early: args.finish_observation_early,
     };
     if json {
         output::json_output(&output_row);
@@ -111,6 +119,7 @@ pub(crate) async fn activate_release(
     client: &ApiClient,
     environment_id: &str,
     release_id: &str,
+    finish_observation_early: bool,
 ) -> anyhow::Result<nrz_api::ActivateRelease202Response> {
     let expected_environment: uuid::Uuid =
         environment_id.parse().context("invalid environment ID")?;
@@ -126,6 +135,7 @@ pub(crate) async fn activate_release(
             release_id,
             serving.desired.generation,
             uuid::Uuid::now_v7().to_string(),
+            finish_observation_early,
         )
         .await
         .context("failed to request environment release activation")?;

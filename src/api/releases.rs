@@ -52,6 +52,7 @@ impl ApiClient {
         release_id: &str,
         expected_generation: String,
         idempotency_key: String,
+        finish_observation_early: bool,
     ) -> anyhow::Result<ActivateRelease202Response> {
         let response = self
             .platform()?
@@ -66,6 +67,7 @@ impl ApiClient {
                     body: ActivateReleaseRequestBody {
                         release_id: release_id.parse().context("invalid release ID")?,
                         expected_generation,
+                        finish_observation_early: Some(finish_observation_early),
                         additional_properties: Default::default(),
                     },
                 },
