@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.44.0] - 2026-10-10
+
+### ✨ Features
+
+- **deploy:** opt in to early observation finish ([b02ebd5](https://github.com/ONREZA/nrz-cli/commit/b02ebd5d6c0383fac6cf01e2cde82c31449ab994))
+
 ## [0.43.2] - 2026-10-09
 
 ### 🐛 Bug Fixes
