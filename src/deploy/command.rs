@@ -398,7 +398,13 @@ fn build_log_phase(phase: output::Phase) -> BuildLogPhase {
     }
 }
 
-/// Return true only when a nonempty authored install command completed.
+/// Track completed dependency installation separately from authored commands.
+#[derive(Debug, Default)]
+pub(super) struct InstallExecution {
+    pub(super) executed: bool,
+    pub(super) authored: bool,
+}
+
 pub(super) async fn run_install_step(
     project_dir: &Path,
     json: bool,
@@ -406,7 +412,7 @@ pub(super) async fn run_install_step(
     execution_env: &[(String, String)],
     build_logs: Option<&BuildLogEmitter>,
     platform_runner: bool,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<InstallExecution> {
     let detection =
         crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
     if uses_native_recipe(project_dir, effective)
@@ -414,7 +420,7 @@ pub(super) async fn run_install_step(
         && super::native_build::default_command(None, effective.install_command())
     {
         let Some(mut command) = super::native_build::install_command(project_dir, recipe)? else {
-            return Ok(false);
+            return Ok(InstallExecution::default());
         };
         super::native_build::validate_compiler_before_execution(
             recipe,
@@ -467,7 +473,10 @@ pub(super) async fn run_install_step(
             super::native_build::ensure_no_native_hooks(project_dir)?;
         }
         output::success(json, "Dependencies installed", output::Phase::Deploy);
-        return Ok(false);
+        return Ok(InstallExecution {
+            executed: true,
+            authored: false,
+        });
     }
     let build_toolchain = selected_build_toolchain(project_dir, effective)?;
     let python_recipe = build_toolchain.family == nrz_source_bundle::BuildToolchainFamily::Python;
@@ -512,7 +521,7 @@ pub(super) async fn run_install_step(
             )
         })?;
         if installs.is_empty() {
-            return Ok(false);
+            return Ok(InstallExecution::default());
         }
         let uv = super::python_toolchain::resolve_for(mode)
             .await
@@ -565,11 +574,14 @@ pub(super) async fn run_install_step(
         if let Some(build_logs) = build_logs {
             build_logs.info(BuildLogPhase::Install, "Dependencies installed");
         }
-        return Ok(false);
+        return Ok(InstallExecution {
+            executed: true,
+            authored: false,
+        });
     }
 
     let Some(cmd) = resolve_install_command(project_dir, effective) else {
-        return Ok(false);
+        return Ok(InstallExecution::default());
     };
     if is_recursive_deploy_command(&cmd) {
         return Err(output::coded_error(
@@ -613,7 +625,10 @@ pub(super) async fn run_install_step(
     if let Some(build_logs) = build_logs {
         build_logs.info(BuildLogPhase::Install, "Dependencies installed");
     }
-    Ok(authored_install_setting(effective).is_some())
+    Ok(InstallExecution {
+        executed: true,
+        authored: authored_install_setting(effective).is_some(),
+    })
 }
 
 pub(super) fn merge_command_environment(

@@ -128,6 +128,8 @@ pub(super) struct DeployPlan {
     pub(super) has_compute_layer: bool,
     pub(super) health_check: Option<super::ResolvedHealthCheck>,
     pub(super) warnings: Vec<String>,
+    runtime_policy_lineage: Option<(String, String)>,
+    retained_platform_output: bool,
 }
 
 impl DeployPlan {
@@ -166,10 +168,11 @@ impl DeployPlan {
                     .and_then(nrz_source_bundle::PythonMinor::from_version)
                     .map(|minor| minor.exact_version().to_string()),
             },
-            source_build_context: detection
-                .metadata
-                .source_build_context
-                .clone()
+            source_build_context: command
+                .effective
+                .platform_source_build_context()
+                .cloned()
+                .or_else(|| detection.metadata.source_build_context.clone())
                 .expect("resolved deploy context"),
             build: BuildPlanExplain {
                 command: self.build_command.clone(),
@@ -238,13 +241,22 @@ impl DeployPlan {
             &self.artifact.runtime.manifest,
             &self.files,
             &self.artifact.runtime.scan,
-            dependency_packaging,
+            if self.retained_platform_output {
+                // Retained dependencies are authenticated artifact bytes, not
+                // receipts from a new installation under the admitted target.
+                RuntimeDependencyPackaging::Embedded
+            } else {
+                dependency_packaging
+            },
             self.health_check.as_ref().map(|health_check| {
                 health_check.path.as_deref().map_or(
                     RuntimeReadinessContract::Tcp,
                     RuntimeReadinessContract::Http,
                 )
             }),
+            self.runtime_policy_lineage
+                .as_ref()
+                .map(|(layer, lineage)| (layer.as_str(), lineage.as_str())),
         )
         .context("failed to prepare SOURCE_BUNDLE_V1 upload plan")
     }
@@ -345,6 +357,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     let command = request.command;
     let json = command.json;
     let project_dir = &command.project_dir;
+    let mut resolved_effective = command.effective.clone();
     let effective = &command.effective;
     let mut warnings = Vec::new();
     let production = request.target_production;
@@ -357,7 +370,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
 
     let mut detection =
         crate::detect::detect_with_framework_override(project_dir, effective.framework_override());
-    let source_build_context =
+    let mut source_build_context =
         crate::detect::application_runtime::resolve_and_bind_source_build_context(
             &crate::detect::fs::LocalFs::new(project_dir),
             &mut detection,
@@ -392,7 +405,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
             recipe.output_directory(),
         );
     }
-    super::validate_application_runtime_before_build(
+    let resolved = super::validate_application_runtime_before_build(
         &source_build_context,
         effective,
         request.platform_runner,
@@ -400,8 +413,27 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         request.execution_env,
     )
     .await?;
-    validate_python_dependency_context(project_dir, &source_build_context, false)?;
-    let authored_install_executed = if !args.skip_build && !args.skip_install {
+    if request.platform_runner {
+        resolved_effective.bind_resolved_platform_context(
+            resolved.context.clone(),
+            resolved.application_target,
+            resolved.node_version,
+        );
+        source_build_context = resolved.context;
+        crate::detect::application_runtime::bind_source_build_context(
+            &crate::detect::fs::LocalFs::new(project_dir),
+            &mut detection,
+            &source_build_context,
+            resolved_effective.config(),
+            resolved_effective.framework_override(),
+            request.explicit_compute,
+        )?;
+    } else {
+        resolved_effective.bind_application_runtime_target(resolved.application_target);
+    }
+    let effective = &resolved_effective;
+    let retained_context = command.effective.platform_source_build_context();
+    let install = if !args.skip_build && !args.skip_install {
         super::run_install_step(
             project_dir,
             json,
@@ -412,10 +444,9 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         )
         .await?
     } else {
-        false
+        super::InstallExecution::default()
     };
-
-    validate_python_dependency_context(project_dir, &source_build_context, true)?;
+    let authored_install_executed = install.authored;
 
     let build_preparation = if native_recipe.is_some() {
         crate::frameworks::BuildPreparation::default()
@@ -454,10 +485,19 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         super::resolve_build_command(args.build_command.as_deref(), project_dir, effective)
             .filter(|command| native_recipe.is_none() || !command.trim().is_empty())
     };
-    if !args.skip_build
+    let actual_build_planned = !args.skip_build
         && build_command
             .as_ref()
-            .is_some_and(|command| !command.trim().is_empty())
+            .is_some_and(|command| !command.trim().is_empty());
+    validate_python_dependency_context(
+        project_dir,
+        if install.executed || actual_build_planned {
+            &source_build_context
+        } else {
+            retained_context.unwrap_or(&source_build_context)
+        },
+    )?;
+    if actual_build_planned
         && let Some(minor) = source_build_context.build_toolchain.resolved_python_minor()
     {
         let mode = if request.platform_runner {
@@ -491,28 +531,37 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         build_executed = true;
     }
 
-    if let Some(declaration) = detection
-        .metadata
-        .application_runtime()
-        .filter(|declaration| {
-            declaration.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
-        })
+    if !build_executed
+        && !install.executed
+        && let Some(original) = retained_context
+    {
+        source_build_context = original.clone();
+    }
+    if let Some(declaration) =
+        source_build_context
+            .application_runtime
+            .as_ref()
+            .filter(|declaration| {
+                declaration.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+            })
     {
         let entry = declaration
             .entry
             .clone()
             .context("Python launch entry is absent")?;
-        super::python_launch::materialize_python_entry(
-            project_dir,
-            &crate::detect::python_launch::PythonLaunch {
-                entry,
-                args: declaration.args.clone(),
-            },
-            declaration.python_version.unwrap_or_default(),
-        )
-        .map_err(|error| {
-            output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
-        })?;
+        if build_executed || install.executed || !project_dir.join(&entry).is_file() {
+            super::python_launch::materialize_python_entry(
+                project_dir,
+                &crate::detect::python_launch::PythonLaunch {
+                    entry,
+                    args: declaration.args.clone(),
+                },
+                declaration.python_version.unwrap_or_default(),
+            )
+            .map_err(|error| {
+                output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
+            })?;
+        }
     }
 
     detection =
@@ -533,6 +582,11 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         "Validating build output...",
         output::Phase::Deploy,
     );
+    let mut publication_effective = effective.clone();
+    if build_executed || install.executed {
+        publication_effective.mark_primary_runtime_rebuilt();
+    }
+    let effective = &publication_effective;
     let build_result = build::run_with_effective_config(
         BuildArgs {
             dir: project_dir.to_string_lossy().into_owned(),
@@ -719,21 +773,20 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         match entry {
             Some(entry) => {
                 let mut auto = build_manifest::generate_compute_manifest(&entry);
-                let target = super::canonical_build_runtime_target(
-                    &build_artifact.detection.metadata.runtime,
-                    request.platform_runner,
-                    Some(&auto),
-                    build_artifact.detection.metadata.application_runtime(),
-                    effective.node_version(),
-                    effective.config().build.toolchain.is_none()
-                        && effective.config().build.python_version.is_none(),
-                )?;
                 let application_runtime = super::application_runtime_in_output(
                     build_artifact.detection.metadata.application_runtime(),
                     project_dir,
                     process_entry_root,
                     effective.deploy_entry().is_some(),
                 );
+                let target = super::manifest_build_runtime_target(
+                    &build_artifact.detection.metadata.runtime,
+                    effective,
+                    &auto,
+                    application_runtime.as_ref(),
+                    request.execution_env,
+                )
+                .await?;
                 super::apply_application_runtime_manifest(
                     &mut auto,
                     application_runtime.as_ref(),
@@ -921,6 +974,57 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         super::build_functions_payload(effective.config(), project_dir, json, args.force_rules)
             .await?;
 
+    let runtime_policy_lineage = if effective.primary_runtime_rebuilt() {
+        if let Some(original) = command
+            .effective
+            .platform_source_build_context()
+            .and_then(|context| context.application_runtime.as_ref())
+        {
+            let lineage = match original.family {
+                nrz_source_bundle::ApplicationRuntimeFamily::Bun => Some("BUN:CURRENT".to_string()),
+                nrz_source_bundle::ApplicationRuntimeFamily::Node => Some(format!(
+                    "NODE:{}",
+                    command
+                        .effective
+                        .node_version()
+                        .context("original Node lineage is missing")?
+                        .strip_prefix("NODE_")
+                        .context("original Node lineage is invalid")?
+                )),
+                nrz_source_bundle::ApplicationRuntimeFamily::Python => Some(format!(
+                    "PYTHON:{}",
+                    original
+                        .python_version
+                        .context("original Python lineage is missing")?
+                        .version()
+                )),
+                nrz_source_bundle::ApplicationRuntimeFamily::Executable => None,
+            };
+            if let Some(lineage) = lineage {
+                let declaration = super::application_runtime_in_output(
+                    Some(original),
+                    project_dir,
+                    &runtime_artifact.root_dir,
+                    effective.deploy_entry().is_some(),
+                );
+                let index = super::select_application_runtime_primary(
+                    &runtime_artifact.manifest,
+                    declaration.as_ref().unwrap(),
+                )?
+                .context("runtime policy primary layer is missing")?;
+                Some((
+                    runtime_artifact.manifest.layers[index].name.clone(),
+                    lineage,
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     Ok(DeployPlan {
         artifact: ArtifactPlan {
             build: build_artifact,
@@ -940,6 +1044,8 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         has_compute_layer,
         health_check,
         warnings,
+        runtime_policy_lineage,
+        retained_platform_output: request.platform_runner && !build_executed && !install.executed,
     })
 }
 
@@ -1021,7 +1127,6 @@ fn artifact_root_scope(runtime_root: &Path, project_dir: &Path) -> ArtifactRootS
 fn validate_python_dependency_context(
     project_dir: &Path,
     context: &nrz_source_bundle::SourceBuildContext,
-    staged: bool,
 ) -> anyhow::Result<()> {
     let Some(serving) = context
         .application_runtime
@@ -1039,13 +1144,12 @@ fn validate_python_dependency_context(
         &fs,
         serving.python_version.unwrap_or_default(),
     )?;
-    let staged_dependencies = staged
-        && serving.python_version.is_some_and(|minor| {
-            project_dir
-                .join(minor.site_packages_root())
-                .read_dir()
-                .is_ok_and(|mut entries| entries.next().is_some())
-        });
+    let staged_dependencies = serving.python_version.is_some_and(|minor| {
+        project_dir
+            .join(minor.site_packages_root())
+            .read_dir()
+            .is_ok_and(|mut entries| entries.next().is_some())
+    });
     if authored_dependencies || staged_dependencies {
         return Err(output::coded_error(
             "APPLICATION_RUNTIME_INVALID",

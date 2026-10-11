@@ -568,6 +568,72 @@ pub(crate) fn application_runtime_in_output(
     })
 }
 
+pub(crate) fn select_application_runtime_primary(
+    manifest: &crate::build::manifest::Manifest,
+    declaration: &nrz_source_bundle::ApplicationRuntimeDeclaration,
+) -> anyhow::Result<Option<usize>> {
+    let declared_entry = declaration
+        .entry
+        .as_deref()
+        .map(normalize_runtime_artifact_path)
+        .transpose()?;
+    let mut candidates = manifest.layers.iter().enumerate().filter(|(_, layer)| {
+        if layer.target != crate::build::manifest::LayerTarget::Compute || layer.entry.is_none() {
+            return false;
+        }
+        if let Some(entry) = declared_entry.as_deref() {
+            return join_runtime_artifact_paths(&layer.directory, layer.entry.as_deref().unwrap())
+                .is_ok_and(|path| path == entry);
+        }
+        layer
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.application_runtime.as_ref())
+            .is_none_or(|intent| {
+                intent.family == declaration.family
+                    && (declaration.args.is_empty() || intent.args == declaration.args)
+            })
+    });
+    let primary = candidates.next().map(|(index, _)| index);
+    if candidates.next().is_some() {
+        return Err(output::coded_error(
+            "APPLICATION_RUNTIME_INVALID",
+            "runtime policy primary layer is ambiguous; declare its entry",
+        ));
+    }
+    Ok(primary)
+}
+
+pub(crate) fn apply_rebuilt_application_runtime_manifest(
+    manifest: &mut crate::build::manifest::Manifest,
+    declaration: Option<&nrz_source_bundle::ApplicationRuntimeDeclaration>,
+    target: Option<&str>,
+    framework: &str,
+) -> anyhow::Result<()> {
+    let original_layers = manifest.layers.clone();
+    if let (Some(declaration), Some(target)) = (declaration, target)
+        && let Some(index) = select_application_runtime_primary(manifest, declaration)?
+    {
+        let layer = &mut manifest.layers[index];
+        if layer
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.application_runtime.as_ref())
+            .is_none_or(|intent| intent.family == declaration.family)
+        {
+            layer
+                .runtime
+                .get_or_insert_with(Default::default)
+                .build_runtime_version = Some(target.into());
+        }
+    }
+    let result = apply_application_runtime_manifest(manifest, declaration, target, framework);
+    if result.is_err() {
+        manifest.layers = original_layers;
+    }
+    result
+}
+
 pub(crate) fn apply_application_runtime_manifest(
     manifest: &mut crate::build::manifest::Manifest,
     declaration: Option<&nrz_source_bundle::ApplicationRuntimeDeclaration>,

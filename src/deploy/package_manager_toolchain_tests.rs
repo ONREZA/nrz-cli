@@ -132,3 +132,55 @@ fn platform_yarn_uses_the_selected_apps_nearest_workspace_generation() {
         )]
     );
 }
+
+#[test]
+fn platform_installer_path_uses_admitted_node_instead_of_requested_line() {
+    const CASE: &str = "NRZ_RUNTIME_POLICY_INSTALLER_PATH_TEST";
+    let Ok(case) = std::env::var(CASE) else {
+        for (case, compiler, ancillary) in [
+            ("compiler", "node-26", None),
+            ("ancillary", "bun-1.4.3", Some("26")),
+            (
+                "non_node",
+                nrz_runtime_artifact::NATIVE_EXECUTION_TARGET,
+                None,
+            ),
+        ] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "deploy::package_manager_toolchain_tests::platform_installer_path_uses_admitted_node_instead_of_requested_line"])
+                .env(CASE, case).env("ONREZA_BUILD_RUNTIME_VERSION", compiler).env("PATH", "/base/bin");
+            if let Some(major) = ancillary {
+                child.env("ONREZA_BUILD_NODE_MAJOR", major);
+            } else {
+                child.env_remove("ONREZA_BUILD_NODE_MAJOR");
+            }
+            let output = child.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{case}: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        return;
+    };
+    let project = tempdir().unwrap();
+    let environment = super::package_manager_toolchain::environment_from_process(
+        "NPM",
+        project.path(),
+        project.path(),
+    )
+    .unwrap();
+    assert_eq!(
+        environment.as_slice(),
+        [(
+            "PATH".into(),
+            if case == "non_node" {
+                "/base/bin"
+            } else {
+                "/opt/node/26/bin:/base/bin"
+            }
+            .into()
+        )]
+    );
+}

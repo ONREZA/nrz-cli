@@ -404,6 +404,109 @@ fn independent_code_only_serving_layers_keep_their_own_frozen_targets() {
 }
 
 #[test]
+fn retained_embedded_dependencies_keep_their_target_without_new_policy_attestation() {
+    let temp = TempDir::new().unwrap();
+    let toolchain = fake_erofs_toolchain(temp.path());
+    for (typed, role) in [true, false]
+        .into_iter()
+        .flat_map(|typed| ["compute", "dependency"].map(move |role| (typed, role)))
+    {
+        let mut manifest = source_manifest();
+        manifest.layers[0].runtime_config = Some(json!({
+            "applicationRuntime":{"family":"NODE","args":[]},
+            "buildRuntimeVersion":"node-24"
+        }));
+        if !typed {
+            manifest.layers[0]
+                .runtime_config
+                .as_mut()
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove("applicationRuntime");
+        }
+        manifest.files[1] = source_file(
+            "node_modules/pkg/index.js",
+            if role == "compute" {
+                SERVER_BODY
+            } else {
+                DEPENDENCY_BODY
+            },
+            role,
+        );
+        let source_path = temp.path().join(format!("source-{typed}-{role}.tar.zst"));
+        write_source_bundle(&source_path, &manifest);
+        let source_bytes = fs::read(&source_path).unwrap();
+        let source_sha256 = sha256_hex(&source_bytes);
+        let logical_manifest_sha256 =
+            compute_logical_manifest_sha256(&serde_json::to_value(&manifest).unwrap());
+        let output_root = temp.path().join(format!("runtime-{typed}-{role}"));
+        let mut current_policy = compatibility();
+        current_policy["runtimeFamily"] = json!("javascript");
+        current_policy["runtimeVersion"] = json!("node-26");
+        let result = materialize_source_bundle_runtime(
+            &toolchain,
+            SourceBundleMaterializationRequest {
+                source_path: &source_path,
+                logical_manifest_sha256: &logical_manifest_sha256,
+                source_sha256: &source_sha256,
+                source_size_bytes: source_bytes.len() as u64,
+                manifest: &manifest,
+                output_root: &output_root,
+                policy: SourceBundleMaterializationPolicy {
+                    kind: Some(DependencyMaterializationKind::JavaScriptNodeModules),
+                    compatibility: current_policy,
+                    tree_limits: tree_limits(),
+                    max_total_files: 10,
+                    max_total_bytes: 1024,
+                },
+            },
+        );
+        if role == "dependency" {
+            let error = result
+                .err()
+                .expect("new policy cannot attest old dependencies");
+            assert!(
+                error
+                    .to_string()
+                    .contains("sibling dependencies require their own frozen build policy")
+            );
+            assert!(!output_root.exists());
+            continue;
+        }
+
+        let result = result.unwrap();
+        assert!(result.dependencies.is_empty());
+        assert!(!output_root.join("images").exists());
+        let graph = result.graph.wire();
+        assert!(graph.dependencies.is_empty());
+        assert_eq!(graph.runtime_layers.len(), 1);
+        assert!(
+            graph.runtime_layers[0]
+                .dependency_materialization_ids
+                .is_empty()
+        );
+        assert_eq!(
+            graph.runtime_layers[0]
+                .launch
+                .as_ref()
+                .unwrap()
+                .profile
+                .to_string(),
+            "NODE_24"
+        );
+        assert_eq!(
+            graph.application.blob_descriptor.digest.as_str(),
+            format!("sha256:{source_sha256}")
+        );
+        assert_eq!(
+            graph.application.manifest_digest.as_str(),
+            logical_manifest_sha256
+        );
+    }
+}
+
+#[test]
 fn primary_dependencies_keep_their_build_target_while_siblings_use_their_frozen_declarations() {
     for (primary_family, primary_version, primary_profile, config, expected_profile) in [
         (

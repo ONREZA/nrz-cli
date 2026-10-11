@@ -123,6 +123,7 @@ fn lfs_qualification_rejects_changed_bytes_before_the_pointer_is_restored() {
             &RuntimeArtifactScan::All,
             source_bundle_v1::RuntimeDependencyPackaging::Embedded,
             None,
+            None,
         )
         .unwrap();
         let restored = crate::test_support::unpack_source_bundle(&plan);
@@ -647,6 +648,7 @@ fn runtime_scan_and_bundle_keep_the_owned_root_after_path_replacement() {
         &files,
         &RuntimeArtifactScan::All,
         source_bundle_v1::RuntimeDependencyPackaging::Embedded,
+        None,
         None,
     )
     .unwrap();

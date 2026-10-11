@@ -103,6 +103,61 @@ async fn publishes_only_missing_verified_dependency_images() {
 }
 
 #[tokio::test]
+async fn publication_response_preserves_verified_runtime_policy_lineage() {
+    let mut manifest = source_manifest_without_dependency();
+    manifest.layers[0].runtime_config = Some(json!({
+        "memoryMb": 256,
+        "applicationRuntime": {"family":"NODE","args":[]},
+        "buildRuntimeVersion": "node-26",
+        "runtimePolicyLineage": "NODE:24"
+    }));
+    let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph_for_target(
+        &"a".repeat(64),
+        &"b".repeat(64),
+        1024,
+        &manifest,
+        &[],
+        Some("node-26"),
+    )
+    .unwrap();
+    let deployment_id = Uuid::now_v7();
+    // Decode the HTTP response through the generated API contract before the
+    // publisher verifies that the server returned the expected graph.
+    let prepare = serde_json::from_value::<RuntimePublicationPrepareResponse>(json!({
+        "deploymentId": deployment_id,
+        "runtimeArtifactGraphDigest": graph.graph_digest(),
+        "runtimeArtifactGraph": graph.wire(),
+        "uploads": []
+    }))
+    .unwrap();
+    let complete = complete_response(deployment_id, &graph);
+    let transport = FakeRuntimeTransport::new(prepare, complete);
+    let published = publish_runtime_artifacts(RuntimeArtifactPublicationRequest {
+        transport: &transport,
+        observer: &NoopPublicationObserver,
+        deployment_id,
+        workspace_id: Uuid::now_v7(),
+        dependencies: &[],
+        expected_graph: &graph,
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        published.runtime_artifact_graph_digest,
+        graph.graph_digest()
+    );
+    let wire = serde_json::to_value(&published.runtime_artifact_graph).unwrap();
+    assert_eq!(
+        wire["runtimeLayers"][0]["runtimeConfig"]["runtimePolicyLineage"],
+        "NODE:24"
+    );
+    let state = transport.state.lock().unwrap();
+    assert_eq!(state.prepare_requests.len(), 1);
+    assert_eq!(state.complete_requests.len(), 1);
+    assert!(state.uploads.is_empty());
+}
+
+#[tokio::test]
 async fn rejects_a_server_selected_runtime_graph() {
     let manifest = source_manifest_without_dependency();
     let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph(

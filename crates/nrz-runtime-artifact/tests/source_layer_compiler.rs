@@ -332,3 +332,37 @@ fn typed_mixed_layers_keep_independent_frozen_targets_and_literal_arguments() {
         .is_err()
     );
 }
+
+#[test]
+fn requested_runtime_lineage_survives_compilation_and_changes_graph_identity() {
+    let mut digests = Vec::new();
+    for lineage in ["NODE:24", "NODE:26"] {
+        let source = manifest(json!({
+            "applicationRuntime":{"family":"NODE","args":[]},
+            "buildRuntimeVersion":"node-26", "runtimePolicyLineage":lineage,
+        }));
+        let graph = finalize_source_bundle_runtime_graph_for_target(
+            &"1".repeat(64),
+            &"2".repeat(64),
+            1,
+            &source,
+            &[],
+            Some("node-26"),
+        )
+        .unwrap();
+        let runtime = &graph.wire().runtime_layers[0];
+        assert_eq!(
+            serde_json::to_value(runtime).unwrap()["runtimeConfig"]["runtimePolicyLineage"],
+            lineage
+        );
+        verify_source_runtime_layer_for_target(&source.layers[0], runtime, Some("node-26"))
+            .unwrap();
+        let mut tampered = source.layers[0].clone();
+        tampered.runtime_config.as_mut().unwrap()["runtimePolicyLineage"] = json!("NODE:22");
+        assert!(
+            verify_source_runtime_layer_for_target(&tampered, runtime, Some("node-26")).is_err()
+        );
+        digests.push(graph.graph_digest().to_string());
+    }
+    assert_ne!(digests[0], digests[1]);
+}

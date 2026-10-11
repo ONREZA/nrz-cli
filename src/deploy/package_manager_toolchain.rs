@@ -18,21 +18,28 @@ pub(super) struct YarnToolchainPaths<'a> {
 
 pub(super) fn environment_from_process(
     package_manager: &str,
-    node_version: Option<&str>,
     project_dir: &Path,
     source_root: &Path,
 ) -> anyhow::Result<Vec<(String, String)>> {
     if package_manager == "PIP" {
         return Ok(Vec::new());
     }
-    let node_bin = match node_version {
-        Some("NODE_22") => "/usr/local/bin",
-        Some("NODE_24") => "/opt/node/24/bin",
-        Some("NODE_26") => "/opt/node/26/bin",
-        _ => bail!("platform installer requires the frozen Node version"),
+    let compiler_target = std::env::var("ONREZA_BUILD_RUNTIME_VERSION").ok();
+    let ancillary_node = std::env::var("ONREZA_BUILD_NODE_MAJOR").ok();
+    let node_major = ancillary_node.as_deref().or_else(|| {
+        compiler_target
+            .as_deref()
+            .and_then(|target| target.strip_prefix("node-"))
+    });
+    let node_bin = match node_major {
+        Some("22") => Some("/usr/local/bin"),
+        Some("24") => Some("/opt/node/24/bin"),
+        Some("26") => Some("/opt/node/26/bin"),
+        None => None,
+        _ => bail!("platform installer has an unsupported admitted Node target"),
     };
     let base_path = std::env::var("PATH").context("PATH is not configured")?;
-    let base_path = format!("{node_bin}:{base_path}");
+    let base_path = node_bin.map_or_else(|| base_path.clone(), |bin| format!("{bin}:{base_path}"));
     if package_manager != YARN_PACKAGE_MANAGER {
         return Ok(vec![("PATH".to_string(), base_path)]);
     }

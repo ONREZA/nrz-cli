@@ -244,6 +244,7 @@ pub(crate) fn build_source_bundle_plan_with_scan(
         scan,
         dependency_packaging,
         readiness,
+        None,
     )
 }
 
@@ -254,6 +255,7 @@ pub(crate) fn build_source_bundle_plan_with_root(
     scan: &RuntimeArtifactScan,
     dependency_packaging: RuntimeDependencyPackaging,
     readiness: Option<RuntimeReadinessContract<'_>>,
+    runtime_policy_lineage: Option<(&str, &str)>,
 ) -> anyhow::Result<SourceBundlePlan> {
     let mut entries = source_entries_rooted(root, files, scan)?;
     let mut native_files = HashMap::new();
@@ -333,6 +335,20 @@ pub(crate) fn build_source_bundle_plan_with_root(
     }
     let mut logical_manifest =
         build_logical_manifest(manifest, &entries, scan, dependency_packaging, readiness)?;
+    if let Some((layer_name, lineage)) = runtime_policy_lineage {
+        let layer = logical_manifest
+            .layers
+            .iter_mut()
+            .find(|layer| layer.name == layer_name)
+            .context("runtime policy primary layer is missing")?;
+        let config = layer
+            .runtime_config
+            .get_or_insert_with(|| serde_json::json!({}));
+        config
+            .as_object_mut()
+            .context("runtime configuration is not an object")?
+            .insert("runtimePolicyLineage".into(), serde_json::json!(lineage));
+    }
     let mut native_owners = HashMap::new();
     for (layer, closure) in native_closures {
         for path in closure {

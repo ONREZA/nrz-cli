@@ -1242,7 +1242,15 @@ async fn nextjs_standalone_run_with_hint_generates_manifest() {
         .runtime
         .as_ref()
         .expect("managed SSR build declaration");
-    assert_eq!(runtime.build_runtime_version.as_deref(), Some("bun-1.4.2"));
+    assert_eq!(
+        runtime.build_runtime_version.as_deref(),
+        Some(
+            crate::deploy::measured_bun_target(&[])
+                .await
+                .unwrap()
+                .as_str()
+        )
+    );
     assert!(runtime.application_runtime.is_none());
     assert!(
         manifest.layers[..2]

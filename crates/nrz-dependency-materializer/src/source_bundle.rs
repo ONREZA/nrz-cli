@@ -325,13 +325,12 @@ fn freeze_layer_targets(
                 }
                 _ => false,
             });
-        let foreign_build_target = (actual == "PYTHON" || intent.is_some())
-            && layer
-                .runtime_config
-                .as_ref()
-                .and_then(|config| config.get("buildRuntimeVersion"))
-                .and_then(Value::as_str)
-                .is_some_and(|target| target != primary_target);
+        let foreign_build_target = layer
+            .runtime_config
+            .as_ref()
+            .and_then(|config| config.get("buildRuntimeVersion"))
+            .and_then(Value::as_str)
+            .is_some_and(|target| target != primary_target);
         if actual == expected && !foreign_javascript_interpreter && !foreign_build_target {
             targets.insert(layer.name.clone(), primary_target.to_owned());
         } else if matches!(actual.as_str(), "JAVASCRIPT" | "PYTHON") {
@@ -345,19 +344,14 @@ fn freeze_layer_targets(
         }
     }
     if targets.is_empty()
-        && let Some((layer, actual)) = siblings.iter().find(|(layer, _)| {
-            // Untyped legacy layers still depend on their primary policy for
-            // interpreter selection. Independent serving requires typed intent.
-            nrz_source_bundle::layer_application_runtime(layer.runtime_config.as_ref())
-                .is_ok_and(|intent| intent.is_none())
+        && let Some((layer, actual)) = siblings.iter().find(|(layer, actual)| {
+            // An explicit retained target selects its interpreter within the
+            // policy family. Cross-family serving still requires typed intent.
+            *actual != expected
+                && nrz_source_bundle::layer_application_runtime(layer.runtime_config.as_ref())
+                    .is_ok_and(|intent| intent.is_none())
         })
     {
-        if actual == expected {
-            return Err(RuntimeArtifactError::Invariant(
-                "application runtime conflicts with the admitted primary build target".into(),
-            )
-            .into());
-        }
         return Err(SourceBundleMaterializationError::RuntimeFamilyMismatch {
             layer_name: layer.name.clone(),
             expected,

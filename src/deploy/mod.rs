@@ -18,8 +18,10 @@ mod workflow;
 pub use workflow::run;
 
 mod application_runtime;
+#[cfg(test)]
+pub(crate) use application_runtime::{canonical_build_runtime_target, measured_bun_target};
 pub(crate) use application_runtime::{
-    canonical_build_runtime_target, validate_application_runtime_before_build,
+    manifest_build_runtime_target, validate_application_runtime_before_build,
 };
 mod build_logs;
 #[cfg(test)]
@@ -79,6 +81,7 @@ use ignored_build::{IgnoredBuildOutcome, IgnoredBuildRequest};
 use runtime_artifact::*;
 pub(crate) use runtime_artifact::{
     application_runtime_in_output, apply_application_runtime_manifest,
+    apply_rebuilt_application_runtime_manifest,
 };
 use runtime_packaging::*;
 pub(crate) use scan::hash_open_file_streaming;

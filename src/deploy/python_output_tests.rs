@@ -239,6 +239,7 @@ fn python_qualification_rejects_changed_bytes_before_native_payload_is_restored(
                 &artifact.scan,
                 crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::Embedded,
                 None,
+                None,
             )
             .unwrap();
             let restored = crate::test_support::unpack_source_bundle(&plan);

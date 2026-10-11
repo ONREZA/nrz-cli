@@ -772,6 +772,9 @@ pub struct EffectiveConfigExplanation {
 pub struct EffectiveProjectConfig {
     node_version: Option<String>,
     source_build_context: Option<nrz_source_bundle::SourceBuildContext>,
+    application_runtime_target: Option<String>,
+    requested_source_build_context: Option<(nrz_source_bundle::SourceBuildContext, Option<String>)>,
+    primary_runtime_rebuilt: bool,
     project_dir: PathBuf,
     config: ProjectConfig,
     project_id: Option<String>,
@@ -814,6 +817,9 @@ impl EffectiveProjectConfig {
         Self {
             node_version: None,
             source_build_context: None,
+            application_runtime_target: None,
+            requested_source_build_context: None,
+            primary_runtime_rebuilt: false,
             project_dir,
             config,
             project_id,
@@ -919,6 +925,12 @@ impl EffectiveProjectConfig {
     }
 
     pub fn apply_platform_runner_settings(&mut self, settings: &ProjectBuildSettings) {
+        self.application_runtime_target = None;
+        self.primary_runtime_rebuilt = false;
+        self.requested_source_build_context = settings
+            .source_build_context
+            .clone()
+            .map(|context| (context, settings.node_version.clone()));
         self.node_version.clone_from(&settings.node_version);
         self.source_build_context
             .clone_from(&settings.source_build_context);
@@ -962,6 +974,51 @@ impl EffectiveProjectConfig {
 
     pub fn platform_source_build_context(&self) -> Option<&nrz_source_bundle::SourceBuildContext> {
         self.source_build_context.as_ref()
+    }
+
+    pub fn bind_resolved_platform_context(
+        &mut self,
+        context: nrz_source_bundle::SourceBuildContext,
+        application_target: Option<String>,
+        node_version: Option<String>,
+    ) {
+        if self.requested_source_build_context.is_none() {
+            self.requested_source_build_context = self
+                .source_build_context
+                .clone()
+                .map(|context| (context, self.node_version.clone()));
+        }
+        self.source_build_context = Some(context);
+        self.application_runtime_target = application_target;
+        self.node_version = node_version;
+    }
+
+    pub fn requested_source_build_context(&self) -> Option<&nrz_source_bundle::SourceBuildContext> {
+        self.requested_source_build_context
+            .as_ref()
+            .map(|(context, _)| context)
+    }
+
+    pub fn requested_node_version(&self) -> Option<&str> {
+        self.requested_source_build_context
+            .as_ref()
+            .and_then(|(_, node)| node.as_deref())
+    }
+
+    pub fn application_runtime_target(&self) -> Option<&str> {
+        self.application_runtime_target.as_deref()
+    }
+
+    pub fn bind_application_runtime_target(&mut self, target: Option<String>) {
+        self.application_runtime_target = target;
+    }
+
+    pub fn mark_primary_runtime_rebuilt(&mut self) {
+        self.primary_runtime_rebuilt = true;
+    }
+
+    pub fn primary_runtime_rebuilt(&self) -> bool {
+        self.primary_runtime_rebuilt
     }
 
     pub fn config(&self) -> &ProjectConfig {

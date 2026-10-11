@@ -74,6 +74,14 @@ static REGEX_SOURCE_PATH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLoc
 static REGEX_STATUS200RESPONSE_RUNTIME_ARTIFACT_GRAPH_APPLICATION_BLOB_DESCRIPTOR_DIGEST:
     std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^sha256:[0-9a-f]{64}$").expect("invalid regex"));
+static REGEX_STATUS200RESPONSE_RUNTIME_ARTIFACT_GRAPH_RUNTIME_LAYER_RUNTIME_CONFIG_RUNTIME_POLICY_LINEAGE: std::sync::LazyLock<
+    regex::Regex,
+> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(
+            "^(BUN:CURRENT|NODE:[1-9][0-9]{0,8}|PYTHON:[1-9][0-9]{0,8}\\.(0|[1-9][0-9]{0,8}))$",
+        )
+        .expect("invalid regex")
+});
 static REGEX_STEP_KIND_OBJECT_R_USE: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| {
         regex::Regex::new("^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$").expect("invalid regex")
@@ -20348,6 +20356,11 @@ pub struct Status200ResponseRuntimeArtifactGraphRuntimeLayerRuntimeConfig {
         range(min = -9_007_199_254_740_991i64, max = 100i64, exclusive_min = 0i64)
     )]
     pub max_concurrency: Option<i64>,
+    #[serde(rename = "runtimePolicyLineage")]
+    #[validate(regex(
+        path = "REGEX_STATUS200RESPONSE_RUNTIME_ARTIFACT_GRAPH_RUNTIME_LAYER_RUNTIME_CONFIG_RUNTIME_POLICY_LINEAGE"
+    ))]
+    pub runtime_policy_lineage: Option<String>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(

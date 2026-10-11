@@ -336,7 +336,6 @@ pub async fn run(
     if let Some(runner) = &runner_context {
         let toolchain_environment = package_manager_toolchain::environment_from_process(
             &runner.settings.package_manager,
-            runner.settings.node_version.as_deref(),
             &command_context.project_dir,
             &command_context.root_dir,
         )

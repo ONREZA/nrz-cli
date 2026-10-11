@@ -175,7 +175,15 @@ pub(crate) async fn run_with_effective_config(
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))
         })?,
     };
-    let application_runtime = source_build_context.application_runtime.as_ref();
+    let application_runtime = if effective.primary_runtime_rebuilt() {
+        source_build_context.application_runtime.as_ref()
+    } else {
+        effective
+            .requested_source_build_context()
+            .unwrap_or(&source_build_context)
+            .application_runtime
+            .as_ref()
+    };
     let detection = &detection;
     let configured_compute = effective
         .deploy_compute()
@@ -314,32 +322,37 @@ pub(crate) async fn run_with_effective_config(
     };
 
     if let Some(manifest) = &mut loaded_manifest {
-        let target = if manifest
-            .layers
-            .iter()
-            .any(|layer| layer.target == manifest::LayerTarget::Compute)
-        {
-            crate::deploy::canonical_build_runtime_target(
-                &detection.metadata.runtime,
-                effective.platform_source_build_context().is_some(),
-                Some(manifest),
-                application_runtime,
-                effective.node_version(),
-                effective.config().build.toolchain.is_none()
-                    && effective.config().build.python_version.is_none(),
-            )?
-        } else {
-            None
-        };
         let application_runtime = crate::deploy::application_runtime_in_output(
             application_runtime,
             project_dir,
             &output_dir,
             effective.deploy_entry().is_some(),
         );
-        crate::deploy::apply_application_runtime_manifest(
+        let application_runtime = application_runtime.as_ref();
+        let target = if manifest
+            .layers
+            .iter()
+            .any(|layer| layer.target == manifest::LayerTarget::Compute)
+        {
+            crate::deploy::manifest_build_runtime_target(
+                &detection.metadata.runtime,
+                effective,
+                manifest,
+                application_runtime,
+                &[],
+            )
+            .await?
+        } else {
+            None
+        };
+        let bind_manifest = if effective.primary_runtime_rebuilt() {
+            crate::deploy::apply_rebuilt_application_runtime_manifest
+        } else {
+            crate::deploy::apply_application_runtime_manifest
+        };
+        bind_manifest(
             manifest,
-            application_runtime.as_ref(),
+            application_runtime,
             target.as_deref(),
             crate::detect::application_runtime::serving_framework(
                 effective.config(),

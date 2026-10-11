@@ -20,6 +20,8 @@ struct EdgeBuildApiState {
     requests: Arc<Mutex<Vec<String>>>,
     application_runtime: serde_json::Value,
     build_command: Option<String>,
+    install_command: Option<String>,
+    build_toolchain: serde_json::Value,
 }
 
 impl EdgeBuildApiState {
@@ -69,12 +71,12 @@ async fn edge_build_runner_context(
         },
         "settings": {
             "nodeVersion": "NODE_24",
-            "sourceBuildContext": {"schemaVersion":1,"buildToolchain":{"family":"NODE"},"applicationRuntime": state.application_runtime},
+            "sourceBuildContext": {"schemaVersion":1,"buildToolchain":state.build_toolchain,"applicationRuntime": state.application_runtime},
             "frameworkPreset": null,
             "rootDirectory": ".",
             "gitLfsEnabled": false,
             "packageManager": "NPM",
-            "installCommand": if state.build_command.is_some() {Some("true")} else if state.application_runtime.is_null() {None} else {Some("touch installer-started")},
+            "installCommand": state.install_command,
             "installCommandSource": if state.build_command.is_some() || !state.application_runtime.is_null() {"USER"} else {"PRESET"},
             "buildCommand": state.build_command,
             "buildCommandSource": if state.build_command.is_some() {"USER"} else {"PRESET"},
@@ -136,12 +138,42 @@ fn spawn_edge_build_handoff_mock_with_build(
     application_runtime: serde_json::Value,
     build_command: Option<String>,
 ) -> (String, Arc<Mutex<Vec<String>>>) {
+    let install_command = if build_command
+        .as_ref()
+        .is_some_and(|command| command.is_empty())
+    {
+        Some(String::new())
+    } else if build_command.is_some() {
+        Some("true".into())
+    } else if application_runtime.is_null() {
+        None
+    } else {
+        Some("touch installer-started".into())
+    };
+    spawn_edge_build_handoff_mock_with_commands(
+        deployment_id,
+        application_runtime,
+        json!({"family":"NODE"}),
+        install_command,
+        build_command,
+    )
+}
+
+fn spawn_edge_build_handoff_mock_with_commands(
+    deployment_id: &str,
+    application_runtime: serde_json::Value,
+    build_toolchain: serde_json::Value,
+    install_command: Option<String>,
+    build_command: Option<String>,
+) -> (String, Arc<Mutex<Vec<String>>>) {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let state = EdgeBuildApiState {
         deployment_id: deployment_id.to_string(),
         requests: Arc::clone(&requests),
         application_runtime,
         build_command,
+        install_command,
+        build_toolchain,
     };
     let app = Router::new()
         .route(
@@ -311,6 +343,10 @@ fn edge_build_handoff_preserves_python_and_native_serving_under_node_compiler() 
     let targets = nrz_source_bundle::PythonMinor::ALL
         .into_iter()
         .map(|minor| (Some(minor), minor.target()))
+        .chain([(
+            Some(nrz_source_bundle::PythonMinor::Python312),
+            "python-3.14",
+        )])
         .chain([(None, nrz_runtime_artifact::NATIVE_EXECUTION_TARGET)]);
     for (minor, target) in targets {
         let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
@@ -351,24 +387,25 @@ fn edge_build_handoff_preserves_python_and_native_serving_under_node_compiler() 
             // Package a real host ELF; this test does not claim runtime execution.
             fs::copy("/usr/bin/true", project.path().join(entry)).unwrap();
         }
-        let output = edge_build_command(
+        let manifest = admitted_source_manifest(
             project.path(),
             output_dir.path(),
             &api_url,
             deployment_id,
-            true,
-        )
-        .env("ONREZA_RUNTIME_FAMILY", "javascript")
-        .env("ONREZA_RUNTIME_VERSION", "node-24")
-        .output()
-        .unwrap();
-        let manifest = source_bundle_manifest(output_dir.path(), &output, target);
+            target,
+        );
         assert_eq!(manifest.layers.len(), 1);
         let layer = &manifest.layers[0];
         assert_eq!(layer.target, "COMPUTE");
         assert_eq!(layer.entrypoint.as_deref(), Some(entry));
         let runtime = layer.runtime_config.as_ref().unwrap();
         assert_eq!(runtime["buildRuntimeVersion"], target);
+        assert_eq!(
+            runtime.get("runtimePolicyLineage"),
+            minor
+                .map(|minor| json!(format!("PYTHON:{}", minor.version())))
+                .as_ref()
+        );
         declaration.as_object_mut().unwrap().remove("entry");
         declaration.as_object_mut().unwrap().remove("pythonVersion");
         assert_eq!(runtime["applicationRuntime"], declaration);
@@ -377,7 +414,8 @@ fn edge_build_handoff_preserves_python_and_native_serving_under_node_compiler() 
                 .unwrap()
                 .profile
                 .to_string(),
-            minor.map_or("EXECUTABLE", |minor| minor.profile_name())
+            nrz_source_bundle::PythonMinor::from_target(target)
+                .map_or("EXECUTABLE", |minor| minor.profile_name())
         );
         assert!(
             nrz_runtime_artifact::source_layer_launch_for_target(Some(runtime), Some("node-24"))
@@ -460,25 +498,27 @@ fn build_generated_package_infers_process_without_changing_frozen_runtime() {
         let target = if frozen_runtime.is_null() {
             "node-24"
         } else {
-            "bun-1.4.2"
+            "bun-1.4.3"
         };
-        let output = edge_build_command(
+        let manifest = admitted_source_manifest(
             project.path(),
             output_dir.path(),
             &api_url,
             deployment_id,
-            true,
-        )
-        .env("ONREZA_RUNTIME_VERSION", target)
-        .output()
-        .unwrap();
-        let manifest = source_bundle_manifest(output_dir.path(), &output, target);
+            target,
+        );
         assert_eq!(manifest.layers.len(), 1);
         let layer = &manifest.layers[0];
         assert_eq!(layer.target, "COMPUTE");
         assert_eq!(layer.entrypoint.as_deref(), Some("server.js"));
         let runtime = layer.runtime_config.as_ref().unwrap();
         assert_eq!(runtime["buildRuntimeVersion"], target);
+        assert_eq!(
+            runtime.get("runtimePolicyLineage"),
+            (!frozen_runtime.is_null())
+                .then(|| json!("BUN:CURRENT"))
+                .as_ref()
+        );
         let expected_intent = if frozen_runtime.is_null() {
             serde_json::Value::Null
         } else {
@@ -588,4 +628,234 @@ fn build_generated_elysia_rejects_node_and_keeps_explicit_static_before_source_h
                 .exists()
         );
     }
+}
+
+#[test]
+fn retained_platform_handoff_preserves_authored_targets_without_new_build_facts() {
+    for (family, old_target, admitted_target, minor, declared_target, typed) in [
+        ("BUN", "bun-1.4.2", "bun-1.4.3", None, true, true),
+        ("NODE", "node-24", "node-26", None, true, true),
+        ("NODE", "node-24", "node-26", None, false, true),
+        ("NODE", "node-24", "node-26", None, true, false),
+        ("NODE", "node-24", "node-26", None, false, false),
+        (
+            "PYTHON",
+            "python-3.12",
+            "python-3.14",
+            Some("3.12"),
+            true,
+            true,
+        ),
+        (
+            "PYTHON",
+            "python-3.12",
+            "python-3.14",
+            Some("3.12"),
+            false,
+            true,
+        ),
+    ] {
+        let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
+        let mut declaration = json!({"family":family,"entry":"server.js","args":[]});
+        if let Some(minor) = minor {
+            declaration["pythonVersion"] = json!(minor);
+        }
+        if !typed {
+            declaration = serde_json::Value::Null;
+        }
+        let (api_url, _) = spawn_edge_build_handoff_mock_with_build(
+            deployment_id,
+            declaration,
+            Some(String::new()),
+        );
+        let project = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        let minor_config = minor
+            .map(|minor| format!("python_version='{minor}'\n"))
+            .unwrap_or_default();
+        let config = if typed {
+            format!(
+                "[build]\ntoolchain='node'\n[deploy]\nruntime='{}'\n{minor_config}entry='server.js'\n",
+                family.to_ascii_lowercase()
+            )
+        } else {
+            "[build]\ntoolchain='node'\n".into()
+        };
+        fs::write(project.path().join("onreza.toml"), config).unwrap();
+        fs::write(project.path().join("server.js"), "// retained source bytes").unwrap();
+        if family != "PYTHON" {
+            fs::write(
+                project.path().join("package.json"),
+                r#"{"name":"retained","dependencies":{"retained-dep":"1.0.0"}}"#,
+            )
+            .unwrap();
+            fs::create_dir_all(project.path().join("node_modules/retained-dep")).unwrap();
+            fs::write(
+                project
+                    .path()
+                    .join("node_modules/retained-dep/package.json"),
+                r#"{"name":"retained-dep","version":"1.0.0","main":"index.js"}"#,
+            )
+            .unwrap();
+            fs::write(
+                project.path().join("node_modules/retained-dep/index.js"),
+                "module.exports = 'retained dependency'",
+            )
+            .unwrap();
+        }
+        fs::create_dir(project.path().join(".onreza")).unwrap();
+        let mut authored_manifest = json!({
+            "version":1,"routes":[{"pattern":"^/.*$","layer":"primary"}],"layers":[
+                {"name":"primary","target":"COMPUTE","directory":".","entry":"server.js",
+                 "runtime":{"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":old_target}}
+            ]
+        });
+        if !typed {
+            authored_manifest["layers"][0]["runtime"]
+                .as_object_mut()
+                .unwrap()
+                .remove("applicationRuntime");
+        }
+        if !declared_target {
+            authored_manifest["layers"][0]["runtime"]
+                .as_object_mut()
+                .unwrap()
+                .remove("buildRuntimeVersion");
+        }
+        fs::write(
+            project.path().join(".onreza/manifest.json"),
+            serde_json::to_vec(&authored_manifest).unwrap(),
+        )
+        .unwrap();
+        let result =
+            edge_build_command(project.path(), output.path(), &api_url, deployment_id, true)
+                .env("ONREZA_RUNTIME_VERSION", admitted_target)
+                .output()
+                .unwrap();
+        if !typed && !declared_target {
+            assert!(!result.status.success());
+            let result = stdout_json(&result);
+            assert_eq!(result["code"], "APPLICATION_RUNTIME_INVALID");
+            assert!(
+                result["error"].as_str().unwrap().contains(
+                    "retained COMPUTE output requires an application runtime and frozen target"
+                ),
+                "{result}"
+            );
+            assert!(!output.path().join("source-bundle-v1.tar.zst").exists());
+            continue;
+        }
+        let manifest = source_bundle_manifest(output.path(), &result, old_target);
+        let runtime = manifest.layers[0].runtime_config.as_ref().unwrap();
+        assert_eq!(runtime["buildRuntimeVersion"], old_target);
+        assert!(runtime.get("runtimePolicyLineage").is_none());
+        if family != "PYTHON" {
+            let dependency = manifest
+                .files
+                .iter()
+                .find(|file| file.path == "node_modules/retained-dep/index.js")
+                .expect("retained dependency bytes must be packaged");
+            assert_eq!(dependency.role, "compute");
+        }
+        assert!(!project.path().join("installer-started").exists());
+        assert!(!project.path().join(".onreza/python/launch.py").exists());
+        assert_eq!(
+            fs::read_to_string(project.path().join("server.js")).unwrap(),
+            "// retained source bytes"
+        );
+    }
+}
+
+#[test]
+fn fresh_python_dependencies_use_resolved_minors_without_rejecting_requested_lines() {
+    for (fresh_install, fresh_build) in [(true, false), (false, true), (false, false)] {
+        let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
+        let (api_url, _) = spawn_edge_build_handoff_mock_with_commands(
+            deployment_id,
+            json!({"family":"PYTHON","pythonVersion":"3.13","entry":"main.py","args":[]}),
+            json!({"family":"PYTHON","pythonVersion":"3.12"}),
+            Some(if fresh_install { "true" } else { "" }.into()),
+            Some(if fresh_build { "true" } else { "" }.into()),
+        );
+        let project = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        fs::write(project.path().join("onreza.toml"), "[build]\ntoolchain='python'\npython_version='3.12'\n[deploy]\nruntime='python'\npython_version='3.13'\nentry='main.py'\n").unwrap();
+        fs::write(project.path().join("main.py"), "print('retained code')").unwrap();
+        fs::write(
+            project.path().join("requirements.txt"),
+            "retained-dep==1.0\n",
+        )
+        .unwrap();
+        let dependency_root = project.path().join(".onreza/python/3.14/site-packages");
+        fs::create_dir_all(&dependency_root).unwrap();
+        fs::write(dependency_root.join("retained_dep.py"), "VALUE = 1").unwrap();
+        let old_dependency_root = project.path().join(".onreza/python/3.13/site-packages");
+        fs::create_dir_all(&old_dependency_root).unwrap();
+        fs::write(old_dependency_root.join("old_dep.py"), "OLD_ABI_BYTES = 1").unwrap();
+        let result =
+            edge_build_command(project.path(), output.path(), &api_url, deployment_id, true)
+                .env("ONREZA_BUILD_RUNTIME_FAMILY", "python")
+                .env("ONREZA_BUILD_RUNTIME_VERSION", "python-3.14")
+                .env("ONREZA_RUNTIME_VERSION", "python-3.14")
+                .output()
+                .unwrap();
+        if !fresh_install && !fresh_build {
+            assert!(!result.status.success());
+            let result = stdout_json(&result);
+            assert_eq!(result["code"], "APPLICATION_RUNTIME_INVALID");
+            assert!(
+                result["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("matching build and serving Python minors"),
+                "{result}"
+            );
+            assert!(!output.path().join("source-bundle-v1.tar.zst").exists());
+            continue;
+        }
+        if fresh_build && !result.status.success() {
+            // A development host can lack the qualified Builder interpreter.
+            // The actual compiler guard must remain authoritative after the
+            // obsolete source minors stop rejecting an admitted fresh build.
+            let result = stdout_json(&result);
+            let error = result["error"].as_str().unwrap();
+            assert!(
+                error.contains("selected Python compiler is unavailable")
+                    || error.contains("Python build compiler does not match selected CPython"),
+                "{result}"
+            );
+            assert!(!output.path().join("source-bundle-v1.tar.zst").exists());
+            continue;
+        }
+        let manifest = source_bundle_manifest(output.path(), &result, "python-3.14");
+        assert!(
+            manifest
+                .files
+                .iter()
+                .all(|file| !file.path.ends_with("old_dep.py"))
+        );
+        let runtime = manifest.layers[0].runtime_config.as_ref().unwrap();
+        assert_eq!(runtime["buildRuntimeVersion"], "python-3.14");
+        assert_eq!(runtime["runtimePolicyLineage"], "PYTHON:3.13");
+        assert!(
+            manifest
+                .files
+                .iter()
+                .any(|file| file.path.ends_with("retained_dep.py") && file.role == "dependency")
+        );
+    }
+}
+
+fn admitted_source_manifest(
+    project: &std::path::Path,
+    output: &std::path::Path,
+    api_url: &str,
+    deployment_id: &str,
+    target: &str,
+) -> nrz_source_bundle::SourceLogicalManifest {
+    let result = edge_build_command(project, output, api_url, deployment_id, true)
+        .env("ONREZA_RUNTIME_VERSION", target)
+        .output()
+        .unwrap();
+    source_bundle_manifest(output, &result, target)
 }

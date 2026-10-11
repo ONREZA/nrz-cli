@@ -65,6 +65,7 @@ fn sole_compute_runtime_selection_ignores_static_layer_position() {
             let target = crate::deploy::canonical_build_runtime_target(
                 &runtime,
                 false,
+                Some("bun-1.4.2"),
                 Some(&manifest),
                 None,
                 Some("NODE_24"),
@@ -207,6 +208,7 @@ fn static_primary_keeps_a_typed_compute_owners_frozen_target() {
                 crate::deploy::canonical_build_runtime_target(
                     &runtime,
                     false,
+                    Some("bun-1.4.2"),
                     Some(&manifest),
                     None,
                     Some("NODE_24"),
@@ -420,6 +422,7 @@ fn static_serving_intent_retains_frozen_targets_without_static_output_files() {
             let selected = crate::deploy::canonical_build_runtime_target(
                 &runtime,
                 false,
+                Some("bun-1.4.2"),
                 Some(&manifest),
                 None,
                 Some("NODE_24"),
@@ -502,6 +505,7 @@ fn selected_javascript_primary_rejects_admitted_target_mismatch_with_either_layo
             let selected = crate::deploy::canonical_build_runtime_target(
                 &runtime,
                 false,
+                Some("bun-1.4.2"),
                 Some(&manifest),
                 Some(&declaration),
                 Some("NODE_24"),
@@ -904,4 +908,137 @@ async fn inferred_source_entry_uses_process_output_mapping_before_manifest_bindi
         result.manifest.unwrap().layers[0].entry.as_deref(),
         Some("server.js")
     );
+}
+
+#[test]
+fn freshly_rebuilt_primary_uses_admission_and_preserves_independent_siblings() {
+    for (family, original_target, selected_target, entry, minor) in [
+        ("NODE", "node-24", "node-26", "server.js", None),
+        ("BUN", "bun-1.4.2", "bun-1.4.3", "server.js", None),
+        (
+            "PYTHON",
+            "python-3.12",
+            "python-3.14",
+            "main.py",
+            Some(nrz_source_bundle::PythonMinor::Python314),
+        ),
+    ] {
+        let mut manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "version":1, "routes":[], "layers":[
+                {"name":"primary", "target":"COMPUTE", "directory":".", "entry":entry,
+                    "runtime":{"applicationRuntime":{"family":family,"args":[]}, "buildRuntimeVersion":original_target}},
+                {"name":"sibling", "target":"COMPUTE", "directory":"sibling", "entry":"main.js",
+                    "runtime":{"applicationRuntime":{"family":"NODE","args":["two words"]}, "buildRuntimeVersion":"node-22"}}
+            ]
+        })).unwrap();
+        let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
+            family: manifest.layers[0]
+                .runtime
+                .as_ref()
+                .unwrap()
+                .application_runtime
+                .as_ref()
+                .unwrap()
+                .family,
+            python_version: minor,
+            entry: Some(entry.into()),
+            args: vec![],
+        };
+        let before = serde_json::to_value(&manifest).unwrap();
+        assert!(
+            apply_application_runtime_manifest(
+                &mut manifest,
+                Some(&declaration),
+                Some(selected_target),
+                "other"
+            )
+            .is_err()
+        );
+        assert_eq!(serde_json::to_value(&manifest).unwrap(), before);
+        super::apply_rebuilt_application_runtime_manifest(
+            &mut manifest,
+            Some(&declaration),
+            Some(selected_target),
+            "other",
+        )
+        .unwrap();
+        assert_eq!(
+            manifest.layers[0]
+                .runtime
+                .as_ref()
+                .unwrap()
+                .build_runtime_version
+                .as_deref(),
+            Some(selected_target)
+        );
+        assert_eq!(
+            serde_json::to_value(&manifest).unwrap()["layers"][1],
+            before["layers"][1]
+        );
+    }
+}
+
+#[test]
+fn fresh_runtime_only_primary_is_unique_among_independent_siblings() {
+    let mut manifest: Manifest = serde_json::from_value(serde_json::json!({
+        "version":1, "routes":[], "layers":[
+            {"name":"primary","target":"COMPUTE","directory":".","entry":"server.js",
+             "runtime":{"applicationRuntime":{"family":"NODE","args":["literal argument"]},"buildRuntimeVersion":"node-24"}},
+            {"name":"python","target":"COMPUTE","directory":"python","entry":"main.py",
+             "runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}}
+        ]
+    })).unwrap();
+    let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
+        family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
+        python_version: None,
+        entry: None,
+        args: vec![],
+    };
+    let sibling = serde_json::to_value(&manifest.layers[1]).unwrap();
+    assert_eq!(
+        super::select_application_runtime_primary(&manifest, &declaration).unwrap(),
+        Some(0)
+    );
+    super::apply_rebuilt_application_runtime_manifest(
+        &mut manifest,
+        Some(&declaration),
+        Some("node-26"),
+        "other",
+    )
+    .unwrap();
+    assert_eq!(
+        manifest.layers[0]
+            .runtime
+            .as_ref()
+            .unwrap()
+            .build_runtime_version
+            .as_deref(),
+        Some("node-26")
+    );
+    assert_eq!(
+        manifest.layers[0]
+            .runtime
+            .as_ref()
+            .unwrap()
+            .application_runtime
+            .as_ref()
+            .unwrap()
+            .args,
+        ["literal argument"]
+    );
+    assert_eq!(serde_json::to_value(&manifest.layers[1]).unwrap(), sibling);
+    let mut second_primary = manifest.layers[0].clone();
+    second_primary.name = "ambiguous".into();
+    manifest.layers.push(second_primary);
+    let before = serde_json::to_value(&manifest).unwrap();
+    assert!(
+        super::apply_rebuilt_application_runtime_manifest(
+            &mut manifest,
+            Some(&declaration),
+            Some("node-26"),
+            "other"
+        )
+        .is_err()
+    );
+    assert_eq!(serde_json::to_value(&manifest).unwrap(), before);
 }

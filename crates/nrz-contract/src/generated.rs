@@ -7492,6 +7492,13 @@ pub mod runtime_artifact_graph {
             OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimeFamily,
         >,
         #[serde(
+            rename = "runtimePolicyLineage",
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub runtime_policy_lineage: ::std::option::Option<
+            OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimePolicyLineage,
+        >,
+        #[serde(
             rename = "timeoutMs",
             skip_serializing_if = "::std::option::Option::is_none"
         )]
@@ -7555,6 +7562,81 @@ pub mod runtime_artifact_graph {
             value: ::std::string::String,
         ) -> ::std::result::Result<Self, self::error::ConversionError> {
             value.parse()
+        }
+    }
+    ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimePolicyLineage`
+    #[derive(::serde::Serialize, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[serde(transparent)]
+    pub struct OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimePolicyLineage(
+        ::std::string::String,
+    );
+    impl ::std::ops::Deref
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimePolicyLineage {
+        type Target = ::std::string::String;
+        fn deref(&self) -> &::std::string::String {
+            &self.0
+        }
+    }
+    impl ::std::convert::From<
+        OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimePolicyLineage,
+    > for ::std::string::String {
+        fn from(
+            value: OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimePolicyLineage,
+        ) -> Self {
+            value.0
+        }
+    }
+    impl ::std::str::FromStr
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimePolicyLineage {
+        type Err = self::error::ConversionError;
+        fn from_str(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+            {
+                ::regress::Regex::new(
+                        "^(BUN:CURRENT|NODE:[1-9][0-9]{0,8}|PYTHON:[1-9][0-9]{0,8}\\.(0|[1-9][0-9]{0,8}))$",
+                    )
+                    .unwrap()
+            });
+            if PATTERN.find(value).is_none() {
+                return Err(
+                    "doesn't match pattern \"^(BUN:CURRENT|NODE:[1-9][0-9]{0,8}|PYTHON:[1-9][0-9]{0,8}\\.(0|[1-9][0-9]{0,8}))$\""
+                        .into(),
+                );
+            }
+            Ok(Self(value.to_string()))
+        }
+    }
+    impl ::std::convert::TryFrom<&str>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimePolicyLineage {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: &str,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl ::std::convert::TryFrom<::std::string::String>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimePolicyLineage {
+        type Error = self::error::ConversionError;
+        fn try_from(
+            value: ::std::string::String,
+        ) -> ::std::result::Result<Self, self::error::ConversionError> {
+            value.parse()
+        }
+    }
+    impl<'de> ::serde::Deserialize<'de>
+    for OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphRuntimeLayersItemRuntimeConfigRuntimePolicyLineage {
+        fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+        where
+            D: ::serde::Deserializer<'de>,
+        {
+            ::std::string::String::deserialize(deserializer)?
+                .parse()
+                .map_err(|e: self::error::ConversionError| {
+                    <D::Error as ::serde::de::Error>::custom(e.to_string())
+                })
         }
     }
     ///`OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphSchemaVersion`
