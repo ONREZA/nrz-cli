@@ -1305,14 +1305,7 @@
                       ]
                     },
                     "previewProtectionEnabled": {
-                      "anyOf": [
-                        {
-                          "type": "boolean"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
+                      "type": "boolean"
                     },
                     "detectedFramework": {
                       "anyOf": [
@@ -4564,6 +4557,17 @@
                       "type": "string",
                       "format": "uuid"
                     },
+                    "serviceId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "projectId": {
                       "type": "string",
                       "format": "uuid"
@@ -5159,12 +5163,19 @@
                           ]
                         },
                         "nodeVersion": {
-                          "enum": [
-                            "NODE_22",
-                            "NODE_24",
-                            "NODE_26"
-                          ],
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "NODE_22",
+                                "NODE_24",
+                                "NODE_26"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "installCommand": {
                           "anyOf": [
@@ -5177,12 +5188,19 @@
                           ]
                         },
                         "installCommandSource": {
-                          "enum": [
-                            "PRESET",
-                            "DETECTED",
-                            "USER"
-                          ],
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "PRESET",
+                                "DETECTED",
+                                "USER"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "buildCommand": {
                           "anyOf": [
@@ -5195,12 +5213,19 @@
                           ]
                         },
                         "buildCommandSource": {
-                          "enum": [
-                            "PRESET",
-                            "DETECTED",
-                            "USER"
-                          ],
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "PRESET",
+                                "DETECTED",
+                                "USER"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "outputDirectory": {
                           "anyOf": [
@@ -5213,15 +5238,29 @@
                           ]
                         },
                         "outputDirectorySource": {
-                          "enum": [
-                            "PRESET",
-                            "DETECTED",
-                            "USER"
-                          ],
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "PRESET",
+                                "DETECTED",
+                                "USER"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "rootDirectory": {
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "buildTimeoutMinutes": {
                           "anyOf": [
@@ -5236,10 +5275,24 @@
                           ]
                         },
                         "concurrentBuildsEnabled": {
-                          "type": "boolean"
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "prioritizeProductionBuilds": {
-                          "type": "boolean"
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "previewProtectionEnabled": {
                           "type": "boolean"
@@ -5267,6 +5320,7 @@
                   },
                   "required": [
                     "id",
+                    "serviceId",
                     "projectId",
                     "environmentId",
                     "isPreview",

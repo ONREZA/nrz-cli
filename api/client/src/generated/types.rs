@@ -16182,12 +16182,8 @@ pub struct Project200Response3 {
     )]
     #[serialize_always]
     pub prioritize_production_builds: Option<bool>,
-    #[serde(
-        deserialize_with = "Option::deserialize",
-        rename = "previewProtectionEnabled"
-    )]
-    #[serialize_always]
-    pub preview_protection_enabled: Option<bool>,
+    #[serde(rename = "previewProtectionEnabled")]
+    pub preview_protection_enabled: bool,
     #[serde(deserialize_with = "Option::deserialize", rename = "detectedFramework")]
     #[serialize_always]
     pub detected_framework: Option<String>,
@@ -16967,35 +16963,57 @@ pub struct Deployment200ResponseProject {
     #[serde(deserialize_with = "Option::deserialize", rename = "detectedFramework")]
     #[serialize_always]
     pub detected_framework: Option<String>,
-    #[serde(rename = "nodeVersion")]
-    pub node_version: Project200Response3NodeVersion,
+    #[serde(deserialize_with = "Option::deserialize", rename = "nodeVersion")]
+    #[serialize_always]
+    pub node_version: Option<Project200Response3NodeVersion>,
     #[serde(deserialize_with = "Option::deserialize", rename = "installCommand")]
     #[serialize_always]
     pub install_command: Option<String>,
-    #[serde(rename = "installCommandSource")]
-    pub install_command_source: ProjectRequestBodyInstallCommandSource,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "installCommandSource"
+    )]
+    #[serialize_always]
+    pub install_command_source: Option<ProjectRequestBodyInstallCommandSource>,
     #[serde(deserialize_with = "Option::deserialize", rename = "buildCommand")]
     #[serialize_always]
     pub build_command: Option<String>,
-    #[serde(rename = "buildCommandSource")]
-    pub build_command_source: ProjectRequestBodyInstallCommandSource,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "buildCommandSource"
+    )]
+    #[serialize_always]
+    pub build_command_source: Option<ProjectRequestBodyInstallCommandSource>,
     #[serde(deserialize_with = "Option::deserialize", rename = "outputDirectory")]
     #[serialize_always]
     pub output_directory: Option<String>,
-    #[serde(rename = "outputDirectorySource")]
-    pub output_directory_source: ProjectRequestBodyInstallCommandSource,
-    #[serde(rename = "rootDirectory")]
-    pub root_directory: String,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "outputDirectorySource"
+    )]
+    #[serialize_always]
+    pub output_directory_source: Option<ProjectRequestBodyInstallCommandSource>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "rootDirectory")]
+    #[serialize_always]
+    pub root_directory: Option<String>,
     #[serde(
         deserialize_with = "Option::deserialize",
         rename = "buildTimeoutMinutes"
     )]
     #[serialize_always]
     pub build_timeout_minutes: Option<i64>,
-    #[serde(rename = "concurrentBuildsEnabled")]
-    pub concurrent_builds_enabled: bool,
-    #[serde(rename = "prioritizeProductionBuilds")]
-    pub prioritize_production_builds: bool,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "concurrentBuildsEnabled"
+    )]
+    #[serialize_always]
+    pub concurrent_builds_enabled: Option<bool>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "prioritizeProductionBuilds"
+    )]
+    #[serialize_always]
+    pub prioritize_production_builds: Option<bool>,
     #[serde(rename = "previewProtectionEnabled")]
     pub preview_protection_enabled: bool,
     /// Additional properties not defined in the schema.
@@ -17009,6 +17027,9 @@ pub struct Deployment200ResponseProject {
 )]
 pub struct Deployment200Response {
     pub id: uuid::Uuid,
+    #[serde(deserialize_with = "Option::deserialize", rename = "serviceId")]
+    #[serialize_always]
+    pub service_id: Option<uuid::Uuid>,
     #[serde(rename = "projectId")]
     pub project_id: uuid::Uuid,
     #[serde(deserialize_with = "Option::deserialize", rename = "environmentId")]
