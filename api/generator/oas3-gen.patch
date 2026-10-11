@@ -1496,10 +1496,10 @@ index e841598..66e42f5 100644
  pub enum ImageSizePreset {
 diff --git a/crates/oas3-gen/fixtures/wire_semantics.json b/crates/oas3-gen/fixtures/wire_semantics.json
 new file mode 100644
-index 0000000..0e0a1c8
+index 0000000..e270db0
 --- /dev/null
 +++ b/crates/oas3-gen/fixtures/wire_semantics.json
-@@ -0,0 +1,392 @@
+@@ -0,0 +1,402 @@
 +{
 +  "openapi": "3.1.0",
 +  "info": {
@@ -1888,6 +1888,16 @@ index 0000000..0e0a1c8
 +            }
 +          }
 +        ]
++      },
++      "ScalarLiteralUnion": {
++        "anyOf": [
++          {"type": "string", "const": "ready"},
++          {"type": "boolean", "const": true},
++          {"type": "integer", "const": 1},
++          {"type": "integer", "const": 9007199254740992},
++          {"type": "integer", "const": 9007199254740993},
++          {"type": "number", "const": 1.5}
++        ]
 +      }
 +    }
 +  }
@@ -2041,10 +2051,10 @@ index 0000000..718765d
 +pub use types::*;
 diff --git a/crates/oas3-gen/fixtures/wire_semantics/types.rs b/crates/oas3-gen/fixtures/wire_semantics/types.rs
 new file mode 100644
-index 0000000..3cde182
+index 0000000..edfa80f
 --- /dev/null
 +++ b/crates/oas3-gen/fixtures/wire_semantics/types.rs
-@@ -0,0 +1,486 @@
+@@ -0,0 +1,631 @@
 +//!
 +//! AUTO-GENERATED CODE - DO NOT EDIT!
 +//!
@@ -2344,6 +2354,151 @@ index 0000000..3cde182
 +    })
 +  }
 +}
++#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
++#[serde(untagged)]
++pub enum ScalarLiteralUnion {
++  #[serde(rename = "ready")]
++  #[serde(deserialize_with = "ScalarLiteralUnion::deserialize_const_ready")]
++  #[serde(serialize_with = "ScalarLiteralUnion::serialize_const_ready")]
++  #[default]
++  Ready,
++  #[serde(rename = "true")]
++  #[serde(deserialize_with = "ScalarLiteralUnion::deserialize_const_true")]
++  #[serde(serialize_with = "ScalarLiteralUnion::serialize_const_true")]
++  True,
++  #[serde(rename = "1")]
++  #[serde(deserialize_with = "ScalarLiteralUnion::deserialize_const_value1")]
++  #[serde(serialize_with = "ScalarLiteralUnion::serialize_const_value1")]
++  Value1,
++  #[serde(rename = "9007199254740992")]
++  #[serde(deserialize_with = "ScalarLiteralUnion::deserialize_const_value9007199254740992")]
++  #[serde(serialize_with = "ScalarLiteralUnion::serialize_const_value9007199254740992")]
++  Value9007199254740992,
++  #[serde(rename = "9007199254740993")]
++  #[serde(deserialize_with = "ScalarLiteralUnion::deserialize_const_value9007199254740993")]
++  #[serde(serialize_with = "ScalarLiteralUnion::serialize_const_value9007199254740993")]
++  Value9007199254740993,
++  #[serde(rename = "1.5")]
++  #[serde(deserialize_with = "ScalarLiteralUnion::deserialize_const_value1_5")]
++  #[serde(serialize_with = "ScalarLiteralUnion::serialize_const_value1_5")]
++  Value1_5,
++}
++impl ScalarLiteralUnion {
++  #[allow(clippy::float_cmp, reason = "schema numeric constants require exact equality")]
++  fn deserialize_const_ready<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
++    let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
++    let expected: serde_json::Value = serde_json::from_str("\"ready\"").map_err(serde::de::Error::custom)?;
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(())
++  }
++  fn serialize_const_ready<S: serde::Serializer>(serializer: S) -> Result<S::Ok, S::Error> {
++    let value: serde_json::Value = serde_json::from_str("\"ready\"").map_err(serde::ser::Error::custom)?;
++    serde::Serialize::serialize(&value, serializer)
++  }
++}
++impl ScalarLiteralUnion {
++  #[allow(clippy::float_cmp, reason = "schema numeric constants require exact equality")]
++  fn deserialize_const_true<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
++    let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
++    let expected: serde_json::Value = serde_json::from_str("true").map_err(serde::de::Error::custom)?;
++    if value != expected {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(())
++  }
++  fn serialize_const_true<S: serde::Serializer>(serializer: S) -> Result<S::Ok, S::Error> {
++    let value: serde_json::Value = serde_json::from_str("true").map_err(serde::ser::Error::custom)?;
++    serde::Serialize::serialize(&value, serializer)
++  }
++}
++impl ScalarLiteralUnion {
++  #[allow(clippy::float_cmp, reason = "schema numeric constants require exact equality")]
++  fn deserialize_const_value1<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
++    let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
++    if !(value.as_number().is_some_and(|value| {
++      value.as_i64() == Some(1i64)
++        || (value.is_f64()
++          && value
++            .as_f64()
++            .is_some_and(|v| v.fract() == 0.0 && v as i128 == i128::from(1i64)))
++    })) {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(())
++  }
++  fn serialize_const_value1<S: serde::Serializer>(serializer: S) -> Result<S::Ok, S::Error> {
++    let value: serde_json::Value = serde_json::from_str("1").map_err(serde::ser::Error::custom)?;
++    serde::Serialize::serialize(&value, serializer)
++  }
++}
++impl ScalarLiteralUnion {
++  #[allow(clippy::float_cmp, reason = "schema numeric constants require exact equality")]
++  fn deserialize_const_value9007199254740992<'de, D: serde::Deserializer<'de>>(
++    deserializer: D,
++  ) -> Result<(), D::Error> {
++    let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
++    if !(value.as_number().is_some_and(|value| {
++      value.as_i64() == Some(9007199254740992i64)
++        || (value.is_f64()
++          && value
++            .as_f64()
++            .is_some_and(|v| v.fract() == 0.0 && v as i128 == i128::from(9007199254740992i64)))
++    })) {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(())
++  }
++  fn serialize_const_value9007199254740992<S: serde::Serializer>(serializer: S) -> Result<S::Ok, S::Error> {
++    let value: serde_json::Value = serde_json::from_str("9007199254740992").map_err(serde::ser::Error::custom)?;
++    serde::Serialize::serialize(&value, serializer)
++  }
++}
++impl ScalarLiteralUnion {
++  #[allow(clippy::float_cmp, reason = "schema numeric constants require exact equality")]
++  fn deserialize_const_value9007199254740993<'de, D: serde::Deserializer<'de>>(
++    deserializer: D,
++  ) -> Result<(), D::Error> {
++    let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
++    if !(value.as_number().is_some_and(|value| {
++      value.as_i64() == Some(9007199254740993i64)
++        || (value.is_f64()
++          && value
++            .as_f64()
++            .is_some_and(|v| v.fract() == 0.0 && v as i128 == i128::from(9007199254740993i64)))
++    })) {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(())
++  }
++  fn serialize_const_value9007199254740993<S: serde::Serializer>(serializer: S) -> Result<S::Ok, S::Error> {
++    let value: serde_json::Value = serde_json::from_str("9007199254740993").map_err(serde::ser::Error::custom)?;
++    serde::Serialize::serialize(&value, serializer)
++  }
++}
++impl ScalarLiteralUnion {
++  #[allow(clippy::float_cmp, reason = "schema numeric constants require exact equality")]
++  fn deserialize_const_value1_5<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
++    let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
++    if !(value.as_number().is_some_and(|value| {
++      if let Some(v) = value.as_i64() {
++        1.5f64.fract() == 0.0 && i128::from(v) == 1.5f64 as i128
++      } else if let Some(v) = value.as_u64() {
++        1.5f64.fract() == 0.0 && i128::from(v) == 1.5f64 as i128
++      } else {
++        value.as_f64() == Some(1.5f64)
++      }
++    })) {
++      return Err(serde::de::Error::custom("value does not match schema const"));
++    }
++    Ok(())
++  }
++  fn serialize_const_value1_5<S: serde::Serializer>(serializer: S) -> Result<S::Ok, S::Error> {
++    let value: serde_json::Value = serde_json::from_str("1.5").map_err(serde::ser::Error::custom)?;
++    serde::Serialize::serialize(&value, serializer)
++  }
++}
 +#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 +pub struct SerializationRequest {
 +  pub body: RequestOnly,
@@ -2367,7 +2522,7 @@ index 0000000..3cde182
 +      return Ok(SerializationResponse::Ok(data));
 +    }
 +    let _ = req.bytes().await?;
-+    Ok(SerializationResponse::Unknown)
++    return Ok(SerializationResponse::Unknown);
 +  }
 +}
 +/// Response types for serialization
@@ -2410,7 +2565,7 @@ index 0000000..3cde182
 +      return Ok(UpdateItemResponse::Ok(data));
 +    }
 +    let _ = req.bytes().await?;
-+    Ok(UpdateItemResponse::Unknown)
++    return Ok(UpdateItemResponse::Unknown);
 +  }
 +}
 +/// Response types for updateItem
@@ -2615,7 +2770,7 @@ index 4c904e7..b38a987 100644
          LintAllow::ClippyStructFieldNames,
          LintAllow::ClippyTooManyLines,
 diff --git a/crates/oas3-gen/src/generator/ast/mod.rs b/crates/oas3-gen/src/generator/ast/mod.rs
-index d792088..91c5e19 100644
+index d792088..b3a735e 100644
 --- a/crates/oas3-gen/src/generator/ast/mod.rs
 +++ b/crates/oas3-gen/src/generator/ast/mod.rs
 @@ -497,8 +497,13 @@ impl StructDef {
@@ -2633,6 +2788,15 @@ index d792088..91c5e19 100644
    }
  }
 
+@@ -641,6 +646,8 @@ pub struct EnumDefaultValue {
+ #[derive(Debug, Clone, Default, PartialEq, Eq, bon::Builder)]
+ pub struct VariantDef {
+   pub name: EnumVariantToken,
++  /// A scalar schema const represented by this unit variant.
++  pub const_value: Option<serde_json::Value>,
+   #[builder(default)]
+   pub docs: Documentation,
+   pub content: VariantContent,
 diff --git a/crates/oas3-gen/src/generator/ast/outer_attrs.rs b/crates/oas3-gen/src/generator/ast/outer_attrs.rs
 index 1846edc..794244c 100644
 --- a/crates/oas3-gen/src/generator/ast/outer_attrs.rs
@@ -2866,6 +3030,77 @@ index 0582f65..6ee42b2 100644
    if matches!(value, serde_json::Value::Null) {
      return quote! { None };
    }
+diff --git a/crates/oas3-gen/src/generator/codegen/enums.rs b/crates/oas3-gen/src/generator/codegen/enums.rs
+index dcb629b..1529baa 100644
+--- a/crates/oas3-gen/src/generator/codegen/enums.rs
++++ b/crates/oas3-gen/src/generator/codegen/enums.rs
+@@ -5,6 +5,7 @@ use super::{
+   Visibility,
+   attributes::{generate_deprecated_attr, generate_outer_attrs, generate_serde_attrs},
+   coercion,
++  literal_variants::LiteralVariantFragment,
+ };
+ use crate::generator::{
+   ast::{
+@@ -217,10 +218,16 @@ pub(crate) struct EnumValueVariantFragment<'a> {
+ }
+
+ impl<'a> EnumValueVariantFragment<'a> {
+-  pub(crate) fn new(variant: &'a VariantDef, is_default: bool, has_serde_derive: bool) -> Self {
++  pub(crate) fn new(variant: &'a VariantDef, is_default: bool, parent: &'a EnumDef) -> Self {
++    let has_serde_derive = parent
++      .derives()
++      .iter()
++      .any(|d| matches!(d, DeriveTrait::Serialize | DeriveTrait::Deserialize));
+     let docs = variant.docs.to_token_stream();
+     let serde_attrs = if has_serde_derive {
+-      generate_serde_attrs(&variant.serde_attrs)
++      let attrs = generate_serde_attrs(&variant.serde_attrs);
++      let literal = LiteralVariantFragment::new(variant, parent).attributes();
++      quote! { #attrs #literal }
+     } else {
+       quote! {}
+     };
+@@ -629,10 +636,6 @@ impl ToTokens for EnumFragment<'_> {
+     let docs = &self.def.docs;
+
+     let derive_traits = self.def.derives();
+-    let has_serde_derive = derive_traits
+-      .iter()
+-      .any(|d| matches!(d, DeriveTrait::Serialize | DeriveTrait::Deserialize));
+-
+     let derives = DeriveAttribute::new(derive_traits);
+     let outer_attrs = generate_outer_attrs(&self.def.outer_attrs);
+     let serde_attrs = generate_serde_attrs(&self.def.serde_attrs);
+@@ -646,7 +649,7 @@ impl ToTokens for EnumFragment<'_> {
+       .variants
+       .iter()
+       .enumerate()
+-      .map(|(idx, v)| EnumValueVariantFragment::new(v, Some(idx) == default_idx, has_serde_derive))
++      .map(|(idx, v)| EnumValueVariantFragment::new(v, Some(idx) == default_idx, self.def))
+       .collect();
+     let variants = EnumVariants::new(variants);
+
+@@ -662,6 +665,11 @@ impl ToTokens for EnumFragment<'_> {
+       EnumDefault::Derive | EnumDefault::None => None,
+     };
+
++    let literal_variants = self
++      .def
++      .variants
++      .iter()
++      .map(|v| LiteralVariantFragment::new(v, self.def));
+     let vis = &self.vis;
+     let enum_def = quote! {
+       #docs
+@@ -673,6 +681,7 @@ impl ToTokens for EnumFragment<'_> {
+       }
+       #default_impl
+       #methods
++      #(#literal_variants)*
+     };
+
+     let display_impl = if self.def.generate_display {
 diff --git a/crates/oas3-gen/src/generator/codegen/literal_fields.rs b/crates/oas3-gen/src/generator/codegen/literal_fields.rs
 new file mode 100644
 index 0000000..e0dc5c1
@@ -2984,15 +3219,133 @@ index 0000000..e0dc5c1
 +    }
 +  }
 +}
+diff --git a/crates/oas3-gen/src/generator/codegen/literal_variants.rs b/crates/oas3-gen/src/generator/codegen/literal_variants.rs
+new file mode 100644
+index 0000000..825da79
+--- /dev/null
++++ b/crates/oas3-gen/src/generator/codegen/literal_variants.rs
+@@ -0,0 +1,111 @@
++use proc_macro2::TokenStream;
++use quote::{ToTokens, format_ident, quote};
++
++use crate::generator::{
++  ast::{DeriveTrait, DerivesProvider, EnumDef, VariantDef},
++  naming::identifiers::to_rust_field_name,
++};
++
++/// Serde's untagged unit variants otherwise accept and emit null, ignoring rename.
++pub(crate) struct LiteralVariantFragment<'a> {
++  variant: &'a VariantDef,
++  parent: &'a EnumDef,
++}
++
++impl<'a> LiteralVariantFragment<'a> {
++  pub(crate) fn new(variant: &'a VariantDef, parent: &'a EnumDef) -> Self {
++    Self { variant, parent }
++  }
++
++  fn method(&self, prefix: &str) -> proc_macro2::Ident {
++    format_ident!(
++      "{}",
++      to_rust_field_name(&format!("{prefix}_const_{}", self.variant.name))
++    )
++  }
++
++  pub(crate) fn attributes(&self) -> TokenStream {
++    if self.variant.const_value.is_none() {
++      return TokenStream::new();
++    }
++    let derives = self.parent.derives();
++    let mut tokens = TokenStream::new();
++    for (direction, derive) in [
++      ("deserialize", DeriveTrait::Deserialize),
++      ("serialize", DeriveTrait::Serialize),
++    ] {
++      if derives.contains(&derive) {
++        let key = format_ident!("{}_with", direction);
++        let path = format!("{}::{}", self.parent.name, self.method(direction));
++        tokens.extend(quote! { #[serde(#key = #path)] });
++      }
++    }
++    tokens
++  }
++}
++
++impl ToTokens for LiteralVariantFragment<'_> {
++  fn to_tokens(&self, tokens: &mut TokenStream) {
++    let Some(value) = &self.variant.const_value else {
++      return;
++    };
++    let literal = value.to_string();
++    // JSON Schema numeric equality includes 1 == 1.0. Do not round integer
++    // inputs through f64: adjacent large integers must remain distinguishable.
++    let matches = match value {
++      serde_json::Value::Number(number) => {
++        let comparison = if let Some(expected) = number.as_i64() {
++          quote! { value.as_i64() == Some(#expected) || (value.is_f64() && value.as_f64().is_some_and(|v| v.fract() == 0.0 && v as i128 == i128::from(#expected))) }
++        } else if let Some(expected) = number.as_u64() {
++          quote! { value.as_u64() == Some(#expected) || (value.is_f64() && value.as_f64().is_some_and(|v| v.fract() == 0.0 && v as i128 == i128::from(#expected))) }
++        } else {
++          let expected = number.as_f64().expect("JSON number");
++          quote! {
++            if let Some(v) = value.as_i64() { #expected.fract() == 0.0 && i128::from(v) == #expected as i128 }
++            else if let Some(v) = value.as_u64() { #expected.fract() == 0.0 && i128::from(v) == #expected as i128 }
++            else { value.as_f64() == Some(#expected) }
++          }
++        };
++        quote! { value.as_number().is_some_and(|value| { #comparison }) }
++      }
++      _ => quote! { value == expected },
++    };
++    let expected = if value.is_number() {
++      TokenStream::new()
++    } else {
++      quote! { let expected: serde_json::Value = serde_json::from_str(#literal).map_err(serde::de::Error::custom)?; }
++    };
++    let mismatch = if value.is_number() {
++      quote! { !(#matches) }
++    } else {
++      quote! { value != expected }
++    };
++    let parent = &self.parent.name;
++    let derives = self.parent.derives();
++    let mut methods = TokenStream::new();
++    if derives.contains(&DeriveTrait::Deserialize) {
++      let name = self.method("deserialize");
++      methods.extend(quote! {
++        #[allow(clippy::float_cmp, reason = "schema numeric constants require exact equality")]
++        fn #name<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
++          let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
++          #expected
++          if #mismatch { return Err(serde::de::Error::custom("value does not match schema const")); }
++          Ok(())
++        }
++      });
++    }
++    if derives.contains(&DeriveTrait::Serialize) {
++      let name = self.method("serialize");
++      methods.extend(quote! {
++        fn #name<S: serde::Serializer>(serializer: S) -> Result<S::Ok, S::Error> {
++          let value: serde_json::Value = serde_json::from_str(#literal).map_err(serde::ser::Error::custom)?;
++          serde::Serialize::serialize(&value, serializer)
++        }
++      });
++    }
++    if !methods.is_empty() {
++      tokens.extend(quote! { impl #parent { #methods } });
++    }
++  }
++}
 diff --git a/crates/oas3-gen/src/generator/codegen/mod.rs b/crates/oas3-gen/src/generator/codegen/mod.rs
-index fc94d09..26b9ebf 100644
+index fc94d09..802e8d8 100644
 --- a/crates/oas3-gen/src/generator/codegen/mod.rs
 +++ b/crates/oas3-gen/src/generator/codegen/mod.rs
-@@ -29,6 +29,7 @@ pub mod constants;
+@@ -29,6 +29,8 @@ pub mod constants;
  pub mod enums;
  pub(crate) mod headers;
  pub mod http;
 +mod literal_fields;
++mod literal_variants;
  pub mod methods;
  pub mod mod_file;
  pub mod server;
@@ -3539,6 +3892,44 @@ index 1cfaafa..ff5fce0 100644
    fn collect_union_variant_specs(&self, variants_src: &[Schema]) -> anyhow::Result<(Vec<UnionVariantSpec>, bool)> {
      let mut specs = vec![];
      let mut seen_names = BTreeSet::new();
+diff --git a/crates/oas3-gen/src/generator/converter/variants.rs b/crates/oas3-gen/src/generator/converter/variants.rs
+index db0e020..0cb2566 100644
+--- a/crates/oas3-gen/src/generator/converter/variants.rs
++++ b/crates/oas3-gen/src/generator/converter/variants.rs
+@@ -80,7 +80,7 @@ impl VariantBuilder {
+   /// Builds an enum variant from an inline schema definition.
+   ///
+   /// Analyzes the schema structure to determine the appropriate variant representation:
+-  /// - Schemas with `const` values become unit variants with serde rename attributes
++  /// - Schemas with `const` values become unit variants with literal serde codecs
+   /// - Schemas with `properties` generate inline struct types wrapped in a tuple variant
+   /// - Array schemas produce tuple variants wrapping `Vec<T>`
+   /// - Union schemas (nested oneOf/anyOf) produce tuple variants wrapping nested enums
+@@ -133,13 +133,12 @@ impl VariantBuilder {
+
+   /// Builds a unit variant for schemas that define a constant value.
+   ///
+-  /// For schemas like `{ "const": "active" }`, this produces a unit variant with a
+-  /// `#[serde(rename = "active")]` attribute. The variant name is derived from the
+-  /// `variant_name` parameter, while the actual serialized value comes from the const.
++  /// For schemas like `{ "const": "active" }`, this preserves the literal on the unit
++  /// variant so code generation can enforce its scalar wire value in untagged enums.
+   ///
+   /// Returns `None` if the schema has no `const_value`, allowing callers to fall through
+   /// to other variant-building strategies. Returns an error if the const value type
+-  /// is not supported (e.g., non-string constants).
++  /// is not supported (objects, arrays, and null).
+   fn build_const_content(
+     resolved_schema: &ObjectSchema,
+     variant_name: &EnumVariantToken,
+@@ -156,6 +155,7 @@ impl VariantBuilder {
+       .docs(Documentation::from_optional(resolved_schema.description.as_ref()))
+       .content(VariantContent::Unit)
+       .serde_attrs(vec![SerdeAttribute::Rename(normalized.rename_value)])
++      .const_value(const_value.clone())
+       .deprecated(resolved_schema.deprecated.unwrap_or(false))
+       .build();
+
 diff --git a/crates/oas3-gen/src/generator/orchestrator.rs b/crates/oas3-gen/src/generator/orchestrator.rs
 index 4a183e3..c5602e2 100644
 --- a/crates/oas3-gen/src/generator/orchestrator.rs
@@ -3923,10 +4314,10 @@ index 044f841..f9d9619 100644
        },
 diff --git a/crates/oas3-gen/src/tests/wire_semantics.rs b/crates/oas3-gen/src/tests/wire_semantics.rs
 new file mode 100644
-index 0000000..f22a84b
+index 0000000..4391aa8
 --- /dev/null
 +++ b/crates/oas3-gen/src/tests/wire_semantics.rs
-@@ -0,0 +1,291 @@
+@@ -0,0 +1,321 @@
 +use std::{
 +  io::{Read, Write},
 +  net::TcpListener,
@@ -4216,6 +4607,36 @@ index 0000000..f22a84b
 +  }
 +  assert!(serde_json::from_value::<LiteralUnion>(json!({"kind":"unknown","id":1})).is_err());
 +  assert!(serde_json::from_value::<LiteralUnion>(json!({"id":1})).is_err());
++  Ok(())
++}
++
++#[test]
++fn untagged_scalar_constants_preserve_literals_and_reject_other_values() -> anyhow::Result<()> {
++  for value in [
++    json!("ready"),
++    json!(true),
++    json!(1),
++    json!(9007199254740992_i64),
++    json!(9007199254740993_i64),
++    json!(1.5),
++  ] {
++    let parsed: ScalarLiteralUnion = serde_json::from_value(value.clone())?;
++    assert_eq!(serde_json::to_value(parsed)?, value);
++  }
++  let parsed: ScalarLiteralUnion = serde_json::from_value(json!(1.0))?;
++  assert_eq!(serde_json::to_value(parsed)?, json!(1));
++  for value in [
++    json!("other"),
++    json!("1"),
++    json!(false),
++    json!(2),
++    json!(9007199254740994_i64),
++    json!(null),
++    json!([]),
++    json!({}),
++  ] {
++    assert!(serde_json::from_value::<ScalarLiteralUnion>(value).is_err());
++  }
 +  Ok(())
 +}
 diff --git a/crates/oas3-gen/src/ui/cli.rs b/crates/oas3-gen/src/ui/cli.rs

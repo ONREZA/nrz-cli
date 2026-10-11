@@ -2,6 +2,58 @@ use nrz_api::{ProjectRequestBody2, Token200Response, User200Response};
 use serde_json::json;
 
 #[test]
+fn serving_pending_reason_codes_preserve_the_wire_contract() {
+    let mut response = json!({
+        "generation": "1", "operationId": null, "releaseId": null,
+        "phase": "PENDING", "result": null, "activeEverywhere": false
+    });
+    let parsed: nrz_api::Serving200ResponseDesired =
+        serde_json::from_value(response.clone()).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), response);
+
+    response["pendingReason"] = json!(null);
+    let parsed: nrz_api::Serving200ResponseDesired =
+        serde_json::from_value(response.clone()).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), response);
+
+    response["pendingReason"] = json!({
+        "operationId": "00000000-0000-0000-0000-000000000001",
+        "requestedAt": "2026-10-11T00:00:00Z", "layers": []
+    });
+    for code in [
+        "RELEASE_MATERIALIZATION_PENDING",
+        "RUNTIME_APPLICATION_UNQUALIFIED",
+        "RUNTIME_POLICY_UNINITIALIZED",
+    ] {
+        response["pendingReason"]["code"] = json!(code);
+        let parsed: nrz_api::Serving200ResponseDesired =
+            serde_json::from_value(response.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), response);
+    }
+    for code in [json!("UNSUPPORTED_PENDING_REASON"), json!(null)] {
+        response["pendingReason"]["code"] = code;
+        assert!(
+            serde_json::from_value::<nrz_api::Serving200ResponseDesired>(response.clone()).is_err()
+        );
+    }
+}
+
+#[test]
+fn project_include_files_literals_preserve_string_wire_values() {
+    for value in [json!(true), json!(false), json!("true"), json!("false")] {
+        let parsed: nrz_api::ProjectRequestBody2IncludeFilesOutsideRoot =
+            serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), value);
+    }
+    for value in [json!("unknown"), json!(null)] {
+        assert!(
+            serde_json::from_value::<nrz_api::ProjectRequestBody2IncludeFilesOutsideRoot>(value)
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn compute_config_response_matches_current_server_fields() {
     for health_check_path in [json!(null), json!("/health")] {
         let response = json!({

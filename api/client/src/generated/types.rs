@@ -15975,9 +15975,65 @@ pub enum ProjectRequestBody2IncludeFilesOutsideRoot {
     #[default]
     Boolean(bool),
     #[serde(rename = "true")]
+    #[serde(
+        deserialize_with = "ProjectRequestBody2IncludeFilesOutsideRoot::deserialize_const_true"
+    )]
+    #[serde(serialize_with = "ProjectRequestBody2IncludeFilesOutsideRoot::serialize_const_true")]
     True,
     #[serde(rename = "false")]
+    #[serde(
+        deserialize_with = "ProjectRequestBody2IncludeFilesOutsideRoot::deserialize_const_false"
+    )]
+    #[serde(serialize_with = "ProjectRequestBody2IncludeFilesOutsideRoot::serialize_const_false")]
     False,
+}
+impl ProjectRequestBody2IncludeFilesOutsideRoot {
+    #[allow(
+        clippy::float_cmp,
+        reason = "schema numeric constants require exact equality"
+    )]
+    fn deserialize_const_true<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<(), D::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: serde_json::Value =
+            serde_json::from_str("\"true\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(())
+    }
+    fn serialize_const_true<S: serde::Serializer>(serializer: S) -> Result<S::Ok, S::Error> {
+        let value: serde_json::Value =
+            serde_json::from_str("\"true\"").map_err(serde::ser::Error::custom)?;
+        serde::Serialize::serialize(&value, serializer)
+    }
+}
+impl ProjectRequestBody2IncludeFilesOutsideRoot {
+    #[allow(
+        clippy::float_cmp,
+        reason = "schema numeric constants require exact equality"
+    )]
+    fn deserialize_const_false<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<(), D::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: serde_json::Value =
+            serde_json::from_str("\"false\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(())
+    }
+    fn serialize_const_false<S: serde::Serializer>(serializer: S) -> Result<S::Ok, S::Error> {
+        let value: serde_json::Value =
+            serde_json::from_str("\"false\"").map_err(serde::ser::Error::custom)?;
+        serde::Serialize::serialize(&value, serializer)
+    }
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
@@ -16423,7 +16479,40 @@ pub enum Serving200ResponseDesiredPendingReasonCode {
     #[default]
     Enum(Serving200ResponseDesiredPendingReasonCodeEnum),
     #[serde(rename = "RELEASE_MATERIALIZATION_PENDING")]
+    #[serde(
+        deserialize_with = "Serving200ResponseDesiredPendingReasonCode::deserialize_const_release_materialization_pending"
+    )]
+    #[serde(
+        serialize_with = "Serving200ResponseDesiredPendingReasonCode::serialize_const_release_materialization_pending"
+    )]
     ReleaseMaterializationPending,
+}
+impl Serving200ResponseDesiredPendingReasonCode {
+    #[allow(
+        clippy::float_cmp,
+        reason = "schema numeric constants require exact equality"
+    )]
+    fn deserialize_const_release_materialization_pending<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<(), D::Error> {
+        let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: serde_json::Value =
+            serde_json::from_str("\"RELEASE_MATERIALIZATION_PENDING\"")
+                .map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(())
+    }
+    fn serialize_const_release_materialization_pending<S: serde::Serializer>(
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let value: serde_json::Value = serde_json::from_str("\"RELEASE_MATERIALIZATION_PENDING\"")
+            .map_err(serde::ser::Error::custom)?;
+        serde::Serialize::serialize(&value, serializer)
+    }
 }
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
