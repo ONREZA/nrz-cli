@@ -93,7 +93,14 @@
                             ]
                           },
                           "branch": {
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "frameworkPreset": {
                             "anyOf": [
@@ -845,9 +852,49 @@
                       "type": "string",
                       "format": "uuid"
                     },
+                    "productId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
                     "workspaceId": {
                       "type": "string",
                       "format": "uuid"
+                    },
+                    "workspaceBindingGeneration": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$"
+                    },
+                    "application": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "serviceId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "sourceId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "status": {
+                              "enum": [
+                                "ACTIVE",
+                                "REMOVING"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "serviceId",
+                            "sourceId",
+                            "status"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "name": {
                       "type": "string",
@@ -866,11 +913,18 @@
                       ]
                     },
                     "sourceType": {
-                      "enum": [
-                        "GIT",
-                        "CLI"
-                      ],
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "GIT",
+                            "CLI"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "gitUrl": {
                       "anyOf": [
@@ -883,7 +937,14 @@
                       ]
                     },
                     "branch": {
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "frameworkPreset": {
                       "anyOf": [
@@ -906,12 +967,19 @@
                       ]
                     },
                     "installCommandSource": {
-                      "enum": [
-                        "PRESET",
-                        "DETECTED",
-                        "USER"
-                      ],
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "PRESET",
+                            "DETECTED",
+                            "USER"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "buildCommand": {
                       "anyOf": [
@@ -924,12 +992,19 @@
                       ]
                     },
                     "buildCommandSource": {
-                      "enum": [
-                        "PRESET",
-                        "DETECTED",
-                        "USER"
-                      ],
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "PRESET",
+                            "DETECTED",
+                            "USER"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "outputDirectory": {
                       "anyOf": [
@@ -942,12 +1017,19 @@
                       ]
                     },
                     "outputDirectorySource": {
-                      "enum": [
-                        "PRESET",
-                        "DETECTED",
-                        "USER"
-                      ],
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "PRESET",
+                            "DETECTED",
+                            "USER"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "buildTimeoutMinutes": {
                       "anyOf": [
@@ -962,46 +1044,81 @@
                       ]
                     },
                     "rootDirectory": {
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "includeFilesOutsideRoot": {
-                      "type": "boolean"
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "nodeVersion": {
-                      "enum": [
-                        "NODE_22",
-                        "NODE_24",
-                        "NODE_26"
-                      ],
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "NODE_22",
+                            "NODE_24",
+                            "NODE_26"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "packageManager": {
-                      "enum": [
-                        "NPM",
-                        "YARN",
-                        "PNPM",
-                        "BUN",
-                        "PIP",
-                        "UV",
-                        "POETRY",
-                        "PUB",
-                        "GO"
-                      ],
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "NPM",
+                            "YARN",
+                            "PNPM",
+                            "BUN",
+                            "PIP",
+                            "UV",
+                            "POETRY",
+                            "PUB",
+                            "GO"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "ignoredBuildBehavior": {
-                      "enum": [
-                        "AUTOMATIC",
-                        "ONLY_PRODUCTION",
-                        "ONLY_PREVIEW",
-                        "ONLY_CHANGES",
-                        "CHANGES_IN_FOLDER",
-                        "NEVER",
-                        "BASH_SCRIPT",
-                        "NODE_SCRIPT",
-                        "CUSTOM"
-                      ],
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "AUTOMATIC",
+                            "ONLY_PRODUCTION",
+                            "ONLY_PREVIEW",
+                            "ONLY_CHANGES",
+                            "CHANGES_IN_FOLDER",
+                            "NEVER",
+                            "BASH_SCRIPT",
+                            "NODE_SCRIPT",
+                            "CUSTOM"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "ignoredBuildFolder": {
                       "anyOf": [
@@ -1074,26 +1191,68 @@
                       ]
                     },
                     "autoDeployEnabled": {
-                      "type": "boolean"
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "autoDeployTriggerScope": {
-                      "enum": [
-                        "REPOSITORY",
-                        "ROOT_DIRECTORY"
-                      ],
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "REPOSITORY",
+                            "ROOT_DIRECTORY"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "prCommentsEnabled": {
-                      "type": "boolean"
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "deploymentStatusEnabled": {
-                      "type": "boolean"
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "commitStatusEnabled": {
-                      "type": "boolean"
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "gitLfsEnabled": {
-                      "type": "boolean"
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "sourceUrl": {
                       "anyOf": [
@@ -1116,16 +1275,44 @@
                       ]
                     },
                     "exposeSystemEnvVars": {
-                      "type": "boolean"
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "concurrentBuildsEnabled": {
-                      "type": "boolean"
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "prioritizeProductionBuilds": {
-                      "type": "boolean"
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "previewProtectionEnabled": {
-                      "type": "boolean"
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "detectedFramework": {
                       "anyOf": [
@@ -1173,9 +1360,16 @@
                       ]
                     },
                     "sessionTtlSeconds": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "deletedAt": {
                       "anyOf": [
@@ -1420,7 +1614,10 @@
                   },
                   "required": [
                     "id",
+                    "productId",
                     "workspaceId",
+                    "workspaceBindingGeneration",
+                    "application",
                     "name",
                     "displayName",
                     "sourceType",
@@ -2079,7 +2276,7 @@
       },
       "delete": {
         "summary": "Delete project",
-        "description": "Soft-deletes a project and invalidates its domains and deployment aliases.",
+        "description": "Deletes an empty Product. Remove or transfer its Services, databases and KV data first.",
         "tags": [
           "Projects"
         ],
@@ -2262,6 +2459,216 @@
           }
         },
         "operationId": "deleteV1ProjectsById"
+      }
+    },
+    "/v1/projects/{id}/services/{serviceId}": {
+      "delete": {
+        "summary": "Remove Service",
+        "description": "Requests explicit Service removal and runtime withdrawal. Product databases and KV data are preserved.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "productId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "serviceId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "enum": [
+                        "REMOVING",
+                        "DELETED"
+                      ],
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "productId",
+                    "serviceId",
+                    "status",
+                    "message"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "deleteV1ProjectsByIdServicesByServiceId"
       }
     },
     "/v1/projects/{id}/detection": {
@@ -10518,6 +10925,17 @@
                             "type": "string",
                             "format": "uuid"
                           },
+                          "productId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "workspaceId": {
                             "type": "string",
                             "format": "uuid"
@@ -10711,6 +11129,47 @@
                             "items": {
                               "type": "object",
                               "properties": {
+                                "serviceId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "productEnvironmentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "workspaceEnvironmentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "ownerProductId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "ownerProductEnvironmentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "databaseEnvironmentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "providerBranchId": {
+                                  "type": "string"
+                                },
+                                "sharingGrantId": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "isFunctionsDefault": {
+                                  "type": "boolean"
+                                },
                                 "id": {
                                   "type": "string",
                                   "format": "uuid"
@@ -10746,6 +11205,15 @@
                                 }
                               },
                               "required": [
+                                "serviceId",
+                                "productEnvironmentId",
+                                "workspaceEnvironmentId",
+                                "ownerProductId",
+                                "ownerProductEnvironmentId",
+                                "databaseEnvironmentId",
+                                "providerBranchId",
+                                "sharingGrantId",
+                                "isFunctionsDefault",
                                 "id",
                                 "workspaceId",
                                 "managedDatabaseId",
@@ -10801,6 +11269,7 @@
                         },
                         "required": [
                           "id",
+                          "productId",
                           "workspaceId",
                           "kaikiDatabaseId",
                           "kaikiEndpointId",
@@ -11062,6 +11531,17 @@
                       "type": "string",
                       "format": "uuid"
                     },
+                    "productId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "workspaceId": {
                       "type": "string",
                       "format": "uuid"
@@ -11189,6 +11669,7 @@
                   },
                   "required": [
                     "id",
+                    "productId",
                     "workspaceId",
                     "kaikiDatabaseId",
                     "kaikiEndpointId",
@@ -11390,6 +11871,17 @@
                       "type": "string",
                       "format": "uuid"
                     },
+                    "productId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "workspaceId": {
                       "type": "string",
                       "format": "uuid"
@@ -11516,6 +12008,47 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "serviceId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "productEnvironmentId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "workspaceEnvironmentId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "ownerProductId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "ownerProductEnvironmentId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "databaseEnvironmentId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "providerBranchId": {
+                            "type": "string"
+                          },
+                          "sharingGrantId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "isFunctionsDefault": {
+                            "type": "boolean"
+                          },
                           "id": {
                             "type": "string",
                             "format": "uuid"
@@ -11551,6 +12084,15 @@
                           }
                         },
                         "required": [
+                          "serviceId",
+                          "productEnvironmentId",
+                          "workspaceEnvironmentId",
+                          "ownerProductId",
+                          "ownerProductEnvironmentId",
+                          "databaseEnvironmentId",
+                          "providerBranchId",
+                          "sharingGrantId",
+                          "isFunctionsDefault",
                           "id",
                           "workspaceId",
                           "managedDatabaseId",
@@ -11829,6 +12371,7 @@
                   },
                   "required": [
                     "id",
+                    "productId",
                     "workspaceId",
                     "kaikiDatabaseId",
                     "kaikiEndpointId",
@@ -12083,6 +12626,17 @@
                       "type": "string",
                       "format": "uuid"
                     },
+                    "productId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "workspaceId": {
                       "type": "string",
                       "format": "uuid"
@@ -12210,6 +12764,7 @@
                   },
                   "required": [
                     "id",
+                    "productId",
                     "workspaceId",
                     "kaikiDatabaseId",
                     "kaikiEndpointId",
@@ -14896,6 +15451,23 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "serviceId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "productEnvironmentId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "ownerProductEnvironmentId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "providerBranchId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
                   "envVarName": {
                     "type": "string",
                     "minLength": 1,
@@ -14907,9 +15479,17 @@
                   },
                   "autoCreatePreviewBranch": {
                     "type": "boolean"
+                  },
+                  "isFunctionsDefault": {
+                    "type": "boolean"
                   }
                 },
-                "required": [],
+                "required": [
+                  "serviceId",
+                  "productEnvironmentId",
+                  "ownerProductEnvironmentId",
+                  "providerBranchId"
+                ],
                 "$schema": "https://json-schema.org/draft/2020-12/schema"
               }
             }
@@ -14923,6 +15503,47 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "serviceId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "productEnvironmentId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "workspaceEnvironmentId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "ownerProductId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "ownerProductEnvironmentId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "databaseEnvironmentId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "providerBranchId": {
+                      "type": "string"
+                    },
+                    "sharingGrantId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "isFunctionsDefault": {
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string",
                       "format": "uuid"
@@ -14958,6 +15579,15 @@
                     }
                   },
                   "required": [
+                    "serviceId",
+                    "productEnvironmentId",
+                    "workspaceEnvironmentId",
+                    "ownerProductId",
+                    "ownerProductEnvironmentId",
+                    "databaseEnvironmentId",
+                    "providerBranchId",
+                    "sharingGrantId",
+                    "isFunctionsDefault",
                     "id",
                     "workspaceId",
                     "managedDatabaseId",
@@ -19827,6 +20457,30 @@
                           "type": "string",
                           "format": "uuid"
                         },
+                        "productId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "productEnvironmentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceEnvironmentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceBindingGeneration": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "serviceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sourceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
                         "workspaceSlug": {
                           "type": "string"
                         },
@@ -19875,6 +20529,12 @@
                       },
                       "required": [
                         "workspaceId",
+                        "productId",
+                        "productEnvironmentId",
+                        "workspaceEnvironmentId",
+                        "workspaceBindingGeneration",
+                        "serviceId",
+                        "sourceId",
                         "workspaceSlug",
                         "projectId",
                         "projectName",
@@ -20126,6 +20786,30 @@
                           "type": "string",
                           "format": "uuid"
                         },
+                        "productId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "productEnvironmentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceEnvironmentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceBindingGeneration": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "serviceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sourceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
                         "workspaceSlug": {
                           "type": "string"
                         },
@@ -20174,6 +20858,12 @@
                       },
                       "required": [
                         "workspaceId",
+                        "productId",
+                        "productEnvironmentId",
+                        "workspaceEnvironmentId",
+                        "workspaceBindingGeneration",
+                        "serviceId",
+                        "sourceId",
                         "workspaceSlug",
                         "projectId",
                         "projectName",
@@ -20445,6 +21135,48 @@
                       "DEPLOYMENT"
                     ],
                     "type": "string"
+                  },
+                  "expectedContext": {
+                    "type": "object",
+                    "properties": {
+                      "workspaceId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "productId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "productEnvironmentId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "workspaceEnvironmentId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "workspaceBindingGeneration": {
+                        "type": "string",
+                        "pattern": "^[1-9][0-9]*$"
+                      },
+                      "serviceId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "sourceId": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    },
+                    "required": [
+                      "workspaceId",
+                      "productId",
+                      "productEnvironmentId",
+                      "workspaceEnvironmentId",
+                      "workspaceBindingGeneration",
+                      "serviceId",
+                      "sourceId"
+                    ]
                   }
                 },
                 "required": [
@@ -20475,6 +21207,30 @@
                       "type": "object",
                       "properties": {
                         "workspaceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "productId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "productEnvironmentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceEnvironmentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceBindingGeneration": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "serviceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sourceId": {
                           "type": "string",
                           "format": "uuid"
                         },
@@ -20526,6 +21282,12 @@
                       },
                       "required": [
                         "workspaceId",
+                        "productId",
+                        "productEnvironmentId",
+                        "workspaceEnvironmentId",
+                        "workspaceBindingGeneration",
+                        "serviceId",
+                        "sourceId",
                         "workspaceSlug",
                         "projectId",
                         "projectName",
@@ -20776,6 +21538,30 @@
                           "type": "string",
                           "format": "uuid"
                         },
+                        "productId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "productEnvironmentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceEnvironmentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceBindingGeneration": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "serviceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sourceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
                         "workspaceSlug": {
                           "type": "string"
                         },
@@ -20824,6 +21610,12 @@
                       },
                       "required": [
                         "workspaceId",
+                        "productId",
+                        "productEnvironmentId",
+                        "workspaceEnvironmentId",
+                        "workspaceBindingGeneration",
+                        "serviceId",
+                        "sourceId",
                         "workspaceSlug",
                         "projectId",
                         "projectName",
@@ -21475,6 +22267,30 @@
                           "type": "string",
                           "format": "uuid"
                         },
+                        "productId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "productEnvironmentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceEnvironmentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceBindingGeneration": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$"
+                        },
+                        "serviceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sourceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
                         "workspaceSlug": {
                           "type": "string"
                         },
@@ -21523,6 +22339,12 @@
                       },
                       "required": [
                         "workspaceId",
+                        "productId",
+                        "productEnvironmentId",
+                        "workspaceEnvironmentId",
+                        "workspaceBindingGeneration",
+                        "serviceId",
+                        "sourceId",
                         "workspaceSlug",
                         "projectId",
                         "projectName",
@@ -25907,6 +26729,9 @@
             "$ref": "#/components/schemas/ApiErrorConflict"
           },
           {
+            "$ref": "#/components/schemas/ApiErrorProductNotEmpty"
+          },
+          {
             "$ref": "#/components/schemas/ApiErrorDnsRoutingRecordConflict"
           },
           {
@@ -25953,6 +26778,7 @@
           "propertyName": "code",
           "mapping": {
             "CONFLICT": "#/components/schemas/ApiErrorConflict",
+            "PRODUCT_NOT_EMPTY": "#/components/schemas/ApiErrorProductNotEmpty",
             "DNS_ROUTING_RECORD_CONFLICT": "#/components/schemas/ApiErrorDnsRoutingRecordConflict",
             "STALE_SNAPSHOT": "#/components/schemas/ApiErrorStaleSnapshot",
             "ALREADY_EXISTS": "#/components/schemas/ApiErrorAlreadyExists",
@@ -25997,6 +26823,25 @@
         "type": "object",
         "additionalProperties": true,
         "description": "Explicit fallback for error codes that return code-specific but unstructured details."
+      },
+      "ApiErrorProductNotEmpty": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "const": "PRODUCT_NOT_EMPTY",
+            "description": "Stable machine-readable ONREZA API error code."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable localized error message."
+          }
+        },
+        "description": "Standard ONREZA API error response for PRODUCT_NOT_EMPTY."
       },
       "ApiErrorDnsRoutingRecordConflict": {
         "type": "object",

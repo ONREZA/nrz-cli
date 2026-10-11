@@ -25,6 +25,12 @@ pub(super) fn purpose(value: &str) -> anyhow::Result<MaterializeRequestBodyPurpo
 impl From<nrz_api::Resolve200ResponseContext> for ExecutionContext {
     fn from(value: nrz_api::Resolve200ResponseContext) -> Self {
         Self {
+            product_id: value.product_id.to_string(),
+            product_environment_id: value.product_environment_id.to_string(),
+            workspace_environment_id: value.workspace_environment_id.to_string(),
+            workspace_binding_generation: value.workspace_binding_generation,
+            service_id: value.service_id.to_string(),
+            source_id: value.source_id.to_string(),
             workspace_id: value.workspace_id.to_string(),
             workspace_slug: value.workspace_slug,
             project_id: value.project_id.to_string(),

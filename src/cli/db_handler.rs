@@ -35,33 +35,42 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
-    let project_id = nrz::config::resolve_project_id(args.project_id.as_deref(), config)?;
+    let project_id = args
+        .project_id
+        .as_deref()
+        .or(config.project.id.as_deref())
+        .map(|id| nrz::config::resolve_project_id(Some(id), config))
+        .transpose()?;
 
     match args.command {
-        DbCommand::List => cmd_list(&client, &project_id, json).await,
+        DbCommand::List => cmd_list(&client, project_id.as_deref(), json).await,
         DbCommand::Create {
             name,
             cu_size,
             wait,
-        } => cmd_create(&client, &project_id, json, name, cu_size, wait).await,
+        } => cmd_create(&client, json, name, cu_size, wait).await,
         DbCommand::Info { database } => {
-            let db_id = resolve_db(&client, &project_id, database.as_deref(), config).await?;
-            cmd_info(&client, &project_id, &db_id, json).await
+            let db_id =
+                resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;
+            cmd_info(&client, project_id.as_deref(), &db_id, json).await
         }
         DbCommand::Delete { database, force } => {
-            let db_id = resolve_db(&client, &project_id, Some(&database), config).await?;
+            let db_id = resolve_db(&client, project_id.as_deref(), Some(&database), config).await?;
             cmd_delete(&client, &db_id, json, force).await
         }
         DbCommand::Start { database } => {
-            let db_id = resolve_db(&client, &project_id, database.as_deref(), config).await?;
+            let db_id =
+                resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;
             cmd_start_stop(&client, &db_id, json, "start").await
         }
         DbCommand::Stop { database } => {
-            let db_id = resolve_db(&client, &project_id, database.as_deref(), config).await?;
+            let db_id =
+                resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;
             cmd_start_stop(&client, &db_id, json, "stop").await
         }
         DbCommand::Connection { database, branch } => {
-            let db_id = resolve_db(&client, &project_id, database.as_deref(), config).await?;
+            let db_id =
+                resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;
             cmd_connection(&client, &db_id, json, branch.as_deref()).await
         }
         DbCommand::Query {
@@ -70,12 +79,19 @@ pub async fn run(
             file,
             branch,
         } => {
-            let db_id = resolve_db(&client, &project_id, database.as_deref(), config).await?;
+            let db_id =
+                resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;
             let sql = resolve_sql(sql.as_deref(), file.as_deref())?;
             cmd_query(&client, &db_id, json, &sql, branch.as_deref()).await
         }
         DbCommand::Branches(bargs) => {
-            let db_id = resolve_db(&client, &project_id, bargs.database.as_deref(), config).await?;
+            let db_id = resolve_db(
+                &client,
+                project_id.as_deref(),
+                bargs.database.as_deref(),
+                config,
+            )
+            .await?;
             match bargs.command {
                 None | Some(BranchesCommand::List) => {
                     cmd_branches_list(&client, &db_id, json).await
@@ -92,11 +108,15 @@ pub async fn run(
             }
         }
         DbCommand::Config(cargs) => {
-            let db_id = resolve_db(&client, &project_id, cargs.database.as_deref(), config).await?;
+            binding_body(&cargs)?;
+            let project_id = nrz::config::resolve_project_id(project_id.as_deref(), config)?;
+            // Binding authoring can select an authorized database before it is attached.
+            let db_id = resolve_db(&client, None, cargs.database.as_deref(), config).await?;
             cmd_config(&client, &project_id, &db_id, json, cargs).await
         }
         DbCommand::Schema { database, branch } => {
-            let db_id = resolve_db(&client, &project_id, database.as_deref(), config).await?;
+            let db_id =
+                resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;
             cmd_schema(&client, &db_id, json, branch.as_deref()).await
         }
     }
@@ -107,7 +127,7 @@ pub async fn run(
 /// Resolve database ID from explicit arg, config, or by listing databases.
 async fn resolve_db(
     client: &ApiClient,
-    project_id: &str,
+    project_id: Option<&str>,
     explicit: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<String> {
@@ -129,7 +149,7 @@ async fn resolve_db(
         return resolve_db_by_id_or_name(client, project_id, val).await;
     }
 
-    // Resolve only a unique project attachment.
+    // Resolve only an unambiguous resource in the selected scope.
     let list: ListResponse = client
         .databases()
         .await
@@ -141,9 +161,14 @@ async fn resolve_db(
 
 async fn resolve_db_by_id_or_name(
     client: &ApiClient,
-    project_id: &str,
+    project_id: Option<&str>,
     val: &str,
 ) -> anyhow::Result<String> {
+    // An exact ID is explicit resource selection. The operation's API checks authority;
+    // it does not require an application attachment for a database-only Product.
+    if let Ok(id) = val.parse::<uuid::Uuid>() {
+        return Ok(id.to_string());
+    }
     let list: ListResponse = client
         .databases()
         .await
@@ -157,12 +182,12 @@ async fn resolve_db_by_id_or_name(
 
 fn select_database<'a>(
     databases: &'a [ManagedDatabase],
-    project_id: &str,
+    project_id: Option<&str>,
     value: Option<&str>,
 ) -> anyhow::Result<&'a ManagedDatabase> {
     let attached: Vec<_> = databases
         .iter()
-        .filter(|db| db.is_attached_to_project(project_id))
+        .filter(|db| project_id.is_none_or(|id| db.belongs_to_project(id)))
         .collect();
     let candidates: Vec<_> = if let Some(value) = value {
         if let Some(db) = attached.iter().find(|db| db.id == value) {
@@ -176,7 +201,9 @@ fn select_database<'a>(
         let injected: Vec<_> = attached
             .iter()
             .copied()
-            .filter(|db| db.auto_inject_db_url_for_project(project_id) == Some(true))
+            .filter(|db| {
+                project_id.is_some_and(|id| db.auto_inject_db_url_for_project(id) == Some(true))
+            })
             .collect();
         if injected.is_empty() {
             attached
@@ -186,7 +213,7 @@ fn select_database<'a>(
     };
     match candidates.as_slice() {
         [db] => Ok(db),
-        [] => bail!("no matching database found in project"),
+        [] => bail!("no matching database found in the selected scope"),
         _ => bail!("multiple databases match; specify an exact database ID"),
     }
 }

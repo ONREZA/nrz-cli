@@ -55,6 +55,8 @@ static REGEX_PREPARE_UPLOAD_REQUEST_BODY_LOGICAL_MANIFEST_SHA256: std::sync::Laz
 > = std::sync::LazyLock::new(|| regex::Regex::new("^[0-9a-f]{64}$").expect("invalid regex"));
 static REGEX_PREPARE_UPLOAD_REQUEST_BODY_SOURCE_SIZE_BYTES: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[0-9]+$").expect("invalid regex"));
+static REGEX_PROJECT200RESPONSE3_WORKSPACE_BINDING_GENERATION: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new("^[1-9][0-9]*$").expect("invalid regex"));
 static REGEX_PROJECT_REQUEST_BODY_BRANCH: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[a-zA-Z0-9_\\-/.]+$").expect("invalid regex"));
 static REGEX_REMOTE_IMAGE_SOURCE_AUTHORING_ID: std::sync::LazyLock<regex::Regex> =
@@ -1312,6 +1314,7 @@ pub struct ApiErrorQueryTimeout {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApiError409 {
     Conflict(ApiErrorConflict),
+    ProductNotEmpty(ApiErrorProductNotEmpty),
     DnsRoutingRecordConflict(ApiErrorDnsRoutingRecordConflict),
     StaleSnapshot(ApiErrorStaleSnapshot),
     AlreadyExists(ApiErrorAlreadyExists),
@@ -1342,6 +1345,7 @@ impl serde::Serialize for ApiError409 {
     {
         match self {
             Self::Conflict(v) => v.serialize(serializer),
+            Self::ProductNotEmpty(v) => v.serialize(serializer),
             Self::DnsRoutingRecordConflict(v) => v.serialize(serializer),
             Self::StaleSnapshot(v) => v.serialize(serializer),
             Self::AlreadyExists(v) => v.serialize(serializer),
@@ -1371,6 +1375,9 @@ impl<'de> serde::Deserialize<'de> for ApiError409 {
         {
             Some("CONFLICT") => serde_json::from_value(value)
                 .map(Self::Conflict)
+                .map_err(serde::de::Error::custom),
+            Some("PRODUCT_NOT_EMPTY") => serde_json::from_value(value)
+                .map(Self::ProductNotEmpty)
                 .map_err(serde::de::Error::custom),
             Some("DNS_ROUTING_RECORD_CONFLICT") => serde_json::from_value(value)
                 .map(Self::DnsRoutingRecordConflict)
@@ -1426,6 +1433,13 @@ impl ApiError409 {
     /// Standard ONREZA API error response for CONFLICT.
     pub fn conflict(message: String) -> Self {
         Self::Conflict(ApiErrorConflict {
+            message,
+            ..Default::default()
+        })
+    }
+    /// Standard ONREZA API error response for PRODUCT_NOT_EMPTY.
+    pub fn product_not_empty(message: String) -> Self {
+        Self::ProductNotEmpty(ApiErrorProductNotEmpty {
             message,
             ..Default::default()
         })
@@ -1550,6 +1564,18 @@ pub struct ApiErrorGenericDetails {
     #[serde(flatten)]
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+/// Standard ONREZA API error response for PRODUCT_NOT_EMPTY.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct ApiErrorProductNotEmpty {
+    #[doc(hidden)]
+    #[serde(default, skip_deserializing)]
+    #[default(Some("PRODUCT_NOT_EMPTY"))]
+    pub code: Option<&'static str>,
+    /// Human-readable localized error message.
+    pub message: String,
 }
 /// Standard ONREZA API error response for DNS_ROUTING_RECORD_CONFLICT.
 #[serde_with::skip_serializing_none]
@@ -3732,7 +3758,7 @@ pub enum GetV1projectsByIdResponse {
 pub struct DeleteV1projectsByIdRequestPath {
     pub id: uuid::Uuid,
 }
-/// Soft-deletes a project and invalidates its domains and deployment aliases.
+/// Deletes an empty Product. Remove or transfer its Services, databases and KV data first.
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct DeleteV1projectsByIdRequest {
     pub path: DeleteV1projectsByIdRequestPath,
@@ -4031,6 +4057,139 @@ impl PatchV1projectsByIdRequest {
 pub enum PatchV1projectsByIdResponse {
     ///200: Response for status 200
     Ok(Project200Response5),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct DeleteV1projectsByIdServicesByServiceIdRequestPath {
+    pub id: uuid::Uuid,
+    pub service_id: uuid::Uuid,
+}
+/// Requests explicit Service removal and runtime withdrawal. Product databases and KV data are preserved.
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct DeleteV1projectsByIdServicesByServiceIdRequest {
+    pub path: DeleteV1projectsByIdServicesByServiceIdRequestPath,
+}
+impl DeleteV1projectsByIdServicesByServiceIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<DeleteV1projectsByIdServicesByServiceIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Service200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::BadRequest(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Forbidden(
+                data,
+            ));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::NotFound(
+                data,
+            ));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Conflict(
+                data,
+            ));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Unknown);
+    }
+}
+/// Response types for deleteV1ProjectsByIdServicesByServiceId
+#[derive(Debug, Clone)]
+pub enum DeleteV1projectsByIdServicesByServiceIdResponse {
+    ///200: Response for status 200
+    Ok(Service200Response),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -9546,6 +9705,15 @@ impl GetV1kaikiDatabasesByIdBranchesByBranchIdConnectionRequest {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct AttachmentRequestBody {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "productEnvironmentId")]
+    pub product_environment_id: uuid::Uuid,
+    #[serde(rename = "ownerProductEnvironmentId")]
+    pub owner_product_environment_id: uuid::Uuid,
+    #[serde(rename = "providerBranchId")]
+    #[validate(length(min = 1u64, max = 256u64))]
+    pub provider_branch_id: String,
     #[serde(rename = "envVarName")]
     #[validate(
         length(min = 1u64, max = 128u64),
@@ -9556,6 +9724,8 @@ pub struct AttachmentRequestBody {
     pub auto_inject_db_url: Option<bool>,
     #[serde(rename = "autoCreatePreviewBranch")]
     pub auto_create_preview_branch: Option<bool>,
+    #[serde(rename = "isFunctionsDefault")]
+    pub is_functions_default: Option<bool>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -11802,6 +11972,7 @@ pub enum PostV1projectsByIdExecutionContextMaterializeResponse {
     ///default: Unknown response
     Unknown,
 }
+#[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
@@ -11823,6 +11994,9 @@ pub struct AdmitRequestBody {
     pub commit_sha: String,
     #[serde(rename = "selectionSource")]
     pub selection_source: ResolveRequestBodySelectionSource,
+    #[serde(rename = "expectedContext")]
+    #[validate(nested)]
+    pub expected_context: Option<AdmitRequestBodyExpectedContext>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -15456,7 +15630,9 @@ pub struct Project200ResponseProject {
     #[serde(deserialize_with = "Option::deserialize", rename = "gitUrl")]
     #[serialize_always]
     pub git_url: Option<String>,
-    pub branch: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub branch: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "frameworkPreset")]
     #[serialize_always]
     pub framework_preset: Option<String>,
@@ -15620,6 +15796,34 @@ pub struct Project200Response2 {
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub message: String,
     pub warnings: Option<Vec<String>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Project200Response3ApplicationStatus {
+    #[serde(rename = "ACTIVE")]
+    #[default]
+    Active,
+    #[serde(rename = "REMOVING")]
+    Removing,
+}
+impl core::fmt::Display for Project200Response3ApplicationStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Active => write!(f, "ACTIVE"),
+            Self::Removing => write!(f, "REMOVING"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Project200Response3Application {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "sourceId")]
+    pub source_id: uuid::Uuid,
+    pub status: Project200Response3ApplicationStatus,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -15819,8 +16023,16 @@ pub struct Project200Response3Count {
 )]
 pub struct Project200Response3 {
     pub id: uuid::Uuid,
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
     #[serde(rename = "workspaceId")]
     pub workspace_id: uuid::Uuid,
+    #[serde(rename = "workspaceBindingGeneration")]
+    #[validate(regex(path = "REGEX_PROJECT200RESPONSE3_WORKSPACE_BINDING_GENERATION"))]
+    pub workspace_binding_generation: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub application: Option<Project200Response3Application>,
     #[validate(
         length(min = 1u64, max = 50u64),
         regex(path = "REGEX_GET_V1PROJECTS_REQUEST_QUERY_NAME")
@@ -15829,46 +16041,72 @@ pub struct Project200Response3 {
     #[serde(deserialize_with = "Option::deserialize", rename = "displayName")]
     #[serialize_always]
     pub display_name: Option<String>,
-    #[serde(rename = "sourceType")]
-    pub source_type: Project200Response2SourceType,
+    #[serde(deserialize_with = "Option::deserialize", rename = "sourceType")]
+    #[serialize_always]
+    pub source_type: Option<Project200Response2SourceType>,
     #[serde(deserialize_with = "Option::deserialize", rename = "gitUrl")]
     #[serialize_always]
     pub git_url: Option<String>,
-    pub branch: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub branch: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "frameworkPreset")]
     #[serialize_always]
     pub framework_preset: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "installCommand")]
     #[serialize_always]
     pub install_command: Option<String>,
-    #[serde(rename = "installCommandSource")]
-    pub install_command_source: ProjectRequestBodyInstallCommandSource,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "installCommandSource"
+    )]
+    #[serialize_always]
+    pub install_command_source: Option<ProjectRequestBodyInstallCommandSource>,
     #[serde(deserialize_with = "Option::deserialize", rename = "buildCommand")]
     #[serialize_always]
     pub build_command: Option<String>,
-    #[serde(rename = "buildCommandSource")]
-    pub build_command_source: ProjectRequestBodyInstallCommandSource,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "buildCommandSource"
+    )]
+    #[serialize_always]
+    pub build_command_source: Option<ProjectRequestBodyInstallCommandSource>,
     #[serde(deserialize_with = "Option::deserialize", rename = "outputDirectory")]
     #[serialize_always]
     pub output_directory: Option<String>,
-    #[serde(rename = "outputDirectorySource")]
-    pub output_directory_source: ProjectRequestBodyInstallCommandSource,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "outputDirectorySource"
+    )]
+    #[serialize_always]
+    pub output_directory_source: Option<ProjectRequestBodyInstallCommandSource>,
     #[serde(
         deserialize_with = "Option::deserialize",
         rename = "buildTimeoutMinutes"
     )]
     #[serialize_always]
     pub build_timeout_minutes: Option<i64>,
-    #[serde(rename = "rootDirectory")]
-    pub root_directory: String,
-    #[serde(rename = "includeFilesOutsideRoot")]
-    pub include_files_outside_root: bool,
-    #[serde(rename = "nodeVersion")]
-    pub node_version: Project200Response3NodeVersion,
-    #[serde(rename = "packageManager")]
-    pub package_manager: ProjectRequestBodyPackageManager,
-    #[serde(rename = "ignoredBuildBehavior")]
-    pub ignored_build_behavior: Project200Response3IgnoredBuildBehavior,
+    #[serde(deserialize_with = "Option::deserialize", rename = "rootDirectory")]
+    #[serialize_always]
+    pub root_directory: Option<String>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "includeFilesOutsideRoot"
+    )]
+    #[serialize_always]
+    pub include_files_outside_root: Option<bool>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "nodeVersion")]
+    #[serialize_always]
+    pub node_version: Option<Project200Response3NodeVersion>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "packageManager")]
+    #[serialize_always]
+    pub package_manager: Option<ProjectRequestBodyPackageManager>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "ignoredBuildBehavior"
+    )]
+    #[serialize_always]
+    pub ignored_build_behavior: Option<Project200Response3IgnoredBuildBehavior>,
     #[serde(
         deserialize_with = "Option::deserialize",
         rename = "ignoredBuildFolder"
@@ -15893,32 +16131,63 @@ pub struct Project200Response3 {
     #[serde(deserialize_with = "Option::deserialize", rename = "gitverseWebhookId")]
     #[serialize_always]
     pub gitverse_webhook_id: Option<i64>,
-    #[serde(rename = "autoDeployEnabled")]
-    pub auto_deploy_enabled: bool,
-    #[serde(rename = "autoDeployTriggerScope")]
-    pub auto_deploy_trigger_scope: ProjectRequestBodyAutoDeployTriggerScope,
-    #[serde(rename = "prCommentsEnabled")]
-    pub pr_comments_enabled: bool,
-    #[serde(rename = "deploymentStatusEnabled")]
-    pub deployment_status_enabled: bool,
-    #[serde(rename = "commitStatusEnabled")]
-    pub commit_status_enabled: bool,
-    #[serde(rename = "gitLfsEnabled")]
-    pub git_lfs_enabled: bool,
+    #[serde(deserialize_with = "Option::deserialize", rename = "autoDeployEnabled")]
+    #[serialize_always]
+    pub auto_deploy_enabled: Option<bool>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "autoDeployTriggerScope"
+    )]
+    #[serialize_always]
+    pub auto_deploy_trigger_scope: Option<ProjectRequestBodyAutoDeployTriggerScope>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "prCommentsEnabled")]
+    #[serialize_always]
+    pub pr_comments_enabled: Option<bool>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "deploymentStatusEnabled"
+    )]
+    #[serialize_always]
+    pub deployment_status_enabled: Option<bool>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "commitStatusEnabled"
+    )]
+    #[serialize_always]
+    pub commit_status_enabled: Option<bool>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "gitLfsEnabled")]
+    #[serialize_always]
+    pub git_lfs_enabled: Option<bool>,
     #[serde(deserialize_with = "Option::deserialize", rename = "sourceUrl")]
     #[serialize_always]
     pub source_url: Option<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "forkedFrom")]
     #[serialize_always]
     pub forked_from: Option<String>,
-    #[serde(rename = "exposeSystemEnvVars")]
-    pub expose_system_env_vars: bool,
-    #[serde(rename = "concurrentBuildsEnabled")]
-    pub concurrent_builds_enabled: bool,
-    #[serde(rename = "prioritizeProductionBuilds")]
-    pub prioritize_production_builds: bool,
-    #[serde(rename = "previewProtectionEnabled")]
-    pub preview_protection_enabled: bool,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "exposeSystemEnvVars"
+    )]
+    #[serialize_always]
+    pub expose_system_env_vars: Option<bool>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "concurrentBuildsEnabled"
+    )]
+    #[serialize_always]
+    pub concurrent_builds_enabled: Option<bool>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "prioritizeProductionBuilds"
+    )]
+    #[serialize_always]
+    pub prioritize_production_builds: Option<bool>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "previewProtectionEnabled"
+    )]
+    #[serialize_always]
+    pub preview_protection_enabled: Option<bool>,
     #[serde(deserialize_with = "Option::deserialize", rename = "detectedFramework")]
     #[serialize_always]
     pub detected_framework: Option<String>,
@@ -15934,9 +16203,9 @@ pub struct Project200Response3 {
     #[serde(deserialize_with = "Option::deserialize", rename = "lastDetectionAt")]
     #[serialize_always]
     pub last_detection_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(rename = "sessionTtlSeconds")]
-    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
-    pub session_ttl_seconds: i64,
+    #[serde(deserialize_with = "Option::deserialize", rename = "sessionTtlSeconds")]
+    #[serialize_always]
+    pub session_ttl_seconds: Option<i64>,
     #[serde(deserialize_with = "Option::deserialize", rename = "deletedAt")]
     #[serialize_always]
     pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -16041,6 +16310,35 @@ pub struct Project200Response5 {
     pub id: uuid::Uuid,
     pub message: String,
     pub warnings: Option<Vec<String>>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Service200ResponseStatus {
+    #[serde(rename = "REMOVING")]
+    #[default]
+    Removing,
+    #[serde(rename = "DELETED")]
+    Deleted,
+}
+impl core::fmt::Display for Service200ResponseStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Removing => write!(f, "REMOVING"),
+            Self::Deleted => write!(f, "DELETED"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Service200Response {
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    pub status: Service200ResponseStatus,
+    pub message: String,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -18568,8 +18866,28 @@ pub struct Database200ResponseDatumBranch {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct Database200ResponseDatumProjectAttachment {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "productEnvironmentId")]
+    pub product_environment_id: uuid::Uuid,
+    #[serde(rename = "workspaceEnvironmentId")]
+    pub workspace_environment_id: uuid::Uuid,
+    #[serde(rename = "ownerProductId")]
+    pub owner_product_id: uuid::Uuid,
+    #[serde(rename = "ownerProductEnvironmentId")]
+    pub owner_product_environment_id: uuid::Uuid,
+    #[serde(rename = "databaseEnvironmentId")]
+    pub database_environment_id: uuid::Uuid,
+    #[serde(rename = "providerBranchId")]
+    pub provider_branch_id: String,
+    #[serde(deserialize_with = "Option::deserialize", rename = "sharingGrantId")]
+    #[serialize_always]
+    pub sharing_grant_id: Option<uuid::Uuid>,
+    #[serde(rename = "isFunctionsDefault")]
+    pub is_functions_default: bool,
     pub id: uuid::Uuid,
     #[serde(rename = "workspaceId")]
     pub workspace_id: uuid::Uuid,
@@ -18617,6 +18935,9 @@ impl core::fmt::Display for Database200ResponseDatumEndpointStatus {
 )]
 pub struct Database200ResponseDatum {
     pub id: uuid::Uuid,
+    #[serde(deserialize_with = "Option::deserialize", rename = "productId")]
+    #[serialize_always]
+    pub product_id: Option<uuid::Uuid>,
     #[serde(rename = "workspaceId")]
     pub workspace_id: uuid::Uuid,
     #[serde(rename = "kaikiDatabaseId")]
@@ -18731,6 +19052,9 @@ pub struct Database200Response {
 )]
 pub struct Database200Response2 {
     pub id: uuid::Uuid,
+    #[serde(deserialize_with = "Option::deserialize", rename = "productId")]
+    #[serialize_always]
+    pub product_id: Option<uuid::Uuid>,
     #[serde(rename = "workspaceId")]
     pub workspace_id: uuid::Uuid,
     #[serde(rename = "kaikiDatabaseId")]
@@ -18898,6 +19222,9 @@ impl core::fmt::Display for Database200Response3KaikiStatus {
 )]
 pub struct Database200Response3 {
     pub id: uuid::Uuid,
+    #[serde(deserialize_with = "Option::deserialize", rename = "productId")]
+    #[serialize_always]
+    pub product_id: Option<uuid::Uuid>,
     #[serde(rename = "workspaceId")]
     pub workspace_id: uuid::Uuid,
     #[serde(rename = "kaikiDatabaseId")]
@@ -19043,6 +19370,9 @@ impl StatusResponse {
 )]
 pub struct Database200Response4 {
     pub id: uuid::Uuid,
+    #[serde(deserialize_with = "Option::deserialize", rename = "productId")]
+    #[serialize_always]
+    pub product_id: Option<uuid::Uuid>,
     #[serde(rename = "workspaceId")]
     pub workspace_id: uuid::Uuid,
     #[serde(rename = "kaikiDatabaseId")]
@@ -21423,10 +21753,25 @@ impl core::fmt::Display for ResolveRequestBodySelectionSource {
     }
 }
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 pub struct Resolve200ResponseContext {
     #[serde(rename = "workspaceId")]
     pub workspace_id: uuid::Uuid,
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "productEnvironmentId")]
+    pub product_environment_id: uuid::Uuid,
+    #[serde(rename = "workspaceEnvironmentId")]
+    pub workspace_environment_id: uuid::Uuid,
+    #[serde(rename = "workspaceBindingGeneration")]
+    #[validate(regex(path = "REGEX_PROJECT200RESPONSE3_WORKSPACE_BINDING_GENERATION"))]
+    pub workspace_binding_generation: String,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "sourceId")]
+    pub source_id: uuid::Uuid,
     #[serde(rename = "workspaceSlug")]
     pub workspace_slug: String,
     #[serde(rename = "projectId")]
@@ -21449,13 +21794,16 @@ pub struct Resolve200ResponseContext {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 pub struct Resolve200Response {
     #[serde(rename = "protocolVersion")]
     #[serde(deserialize_with = "Resolve200Response::deserialize_const_protocol_version")]
     #[serde(serialize_with = "Resolve200Response::serialize_const_protocol_version")]
     #[default("execution-context-v2".to_string())]
     pub protocol_version: String,
+    #[validate(nested)]
     pub context: Resolve200ResponseContext,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
@@ -21565,6 +21913,7 @@ pub struct Materialize200Response {
     #[serde(serialize_with = "Materialize200Response::serialize_const_protocol_version")]
     #[default("execution-context-v2".to_string())]
     pub protocol_version: String,
+    #[validate(nested)]
     pub context: Resolve200ResponseContext,
     pub variables: std::collections::HashMap<String, String>,
     #[serde(rename = "secretKeys")]
@@ -21616,6 +21965,30 @@ impl Materialize200Response {
         }
         serde::Serialize::serialize(value, serializer)
     }
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct AdmitRequestBodyExpectedContext {
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: uuid::Uuid,
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "productEnvironmentId")]
+    pub product_environment_id: uuid::Uuid,
+    #[serde(rename = "workspaceEnvironmentId")]
+    pub workspace_environment_id: uuid::Uuid,
+    #[serde(rename = "workspaceBindingGeneration")]
+    #[validate(regex(path = "REGEX_PROJECT200RESPONSE3_WORKSPACE_BINDING_GENERATION"))]
+    pub workspace_binding_generation: String,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "sourceId")]
+    pub source_id: uuid::Uuid,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -21700,6 +22073,7 @@ pub struct Admit200Response {
     #[serde(serialize_with = "Admit200Response::serialize_const_protocol_version")]
     #[default("execution-context-v2".to_string())]
     pub protocol_version: String,
+    #[validate(nested)]
     pub context: Resolve200ResponseContext,
     #[validate(nested)]
     pub deployment: Admit200ResponseDeployment,
@@ -22479,6 +22853,7 @@ pub struct RunnerContext200ResponseSettings {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct RunnerContext200Response {
+    #[validate(nested)]
     pub context: Resolve200ResponseContext,
     #[serde(rename = "protocolVersion")]
     #[serde(deserialize_with = "RunnerContext200Response::deserialize_const_protocol_version")]

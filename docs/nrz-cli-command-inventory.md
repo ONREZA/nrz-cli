@@ -112,6 +112,13 @@ Platform execution context выбирается единообразно:
 `.onreza/environment.json`. `nrz context use <environment>` сохраняет выбор для
 checkout. Legacy `--env`/`NRZ_ENV` остался только у локального KV namespace.
 
+Admission `deploy` передаёт `expectedContext` с разрешёнными Product, Service, Source,
+ProductEnvironment, Workspace Environment и workspace binding generation. Если
+канонический target изменился, ответ `409 CONFLICT` завершает команду до сборки;
+повторный запуск заново разрешает context.
+После admission server-origin build settings обновляются из frozen runner snapshot.
+Явные CLI/onreza.toml overrides и локальный выбор DIR/`--app` сохраняют приоритет.
+
 ## Верхнеуровневые команды
 
 | Команда | Что умеет сейчас | Ключевые флаги / особенности |
@@ -129,7 +136,7 @@ checkout. Legacy `--env`/`NRZ_ENV` остался только у локальн
 | `nrz rollback` | Запрашивает новую активацию сохранённого immutable release в выбранном Environment. | `--release-id` для активации либо `--list` для списка; `--environment`, `--project-id`, `--dir`. По умолчанию ждёт финального наблюдения текущего rollout; `--finish-observation-early` завершает это наблюдение раньше для этой операции, сохраняя grace и drain. Операция асинхронна; фактический active определяется Edge receipt. |
 | `nrz functions check [DIR]` | Загружает Functions через точный STABLE runtime и проверяет `onreza.rules.toml`. | Runtime скачивается в пользовательский cache при первом Function-check; ошибка `ONREZA_FUNCTIONS_NOT_FOUND`, если нет function entries и rules-файла. |
 | `nrz kv ...` | Локальный KV store для dev/emulator state. | Не ходит в API. Хранилище: `.onreza/data/kv.<env>.json` от текущей директории; default env namespace `development`. |
-| `nrz db ...` | Managed PostgreSQL (kaiki) операции. | Management идет через `/v1/kaiki/databases`; project-scoped команды фильтруют/обновляют `projectAttachments`. `query` и `schema` получают connection URI через API и выполняют SQL локально из `nrz`. Database auto-resolve: explicit arg -> config `[db].database` -> auto-inject attachment -> первый attached DB. |
+| `nrz db ...` | Managed PostgreSQL (kaiki) операции. | Management идет через `/v1/kaiki/databases`; выбранный Product видит собственные DB и явно связанные через `projectAttachments`. `query` и `schema` получают connection URI через API и выполняют SQL локально из `nrz`. Exact DB ID задаёт ресурс напрямую с проверкой API authority; выбор по имени/config или auto-resolve требует единственного совпадения в workspace либо выбранном Product. Binding не выводится из Git ref или branch name. |
 | `nrz env ...` | Безопасное управление platform env vars, проверка и запуск команд с материализованным snapshot. | `--project-id` global внутри группы; точный context выбирается через `--environment`/`NRZ_ENVIRONMENT`/`nrz context`. Dotenv pull/push отсутствуют. |
 | `nrz domains ...` | Custom domain hostnames проекта через workspace-domain API. | `--project-id` global внутри `domains`; `add --environment` использует единый execution-context resolver и создает/переиспользует workspace domain zone. |
 | `nrz projects ...` | CRUD projects через API. | `create --link` также пишет `onreza.toml` в cwd. |
@@ -143,19 +150,19 @@ checkout. Legacy `--env`/`NRZ_ENV` остался только у локальн
 
 | Команда | Назначение | Опции |
 | --- | --- | --- |
-| `nrz db list` | Список managed databases проекта. | `--project-id`. |
-| `nrz db create` | Создает managed DB. | `--name`, `--cu-size`, `--wait`. |
+| `nrz db list` | Список managed databases workspace; выбранный Product сужает список. | `--project-id`. |
+| `nrz db create` | Создает самостоятельную managed DB без неявного app binding. | `--name`, `--cu-size`, `--wait`; приложение подключается отдельным `db config`. |
 | `nrz db info [DATABASE]` | Детали DB. | DB можно указать ID/name; иначе auto-resolve. |
 | `nrz db delete <DATABASE>` | Удаляет DB. | `--force` для non-interactive/JSON. |
-| `nrz db start [DATABASE]` | Запускает stopped DB. | DB optional, auto-resolve требует единственного подходящего project attachment. |
-| `nrz db stop [DATABASE]` | Останавливает running DB. | DB optional, auto-resolve требует единственного подходящего project attachment. |
+| `nrz db start [DATABASE]` | Запускает stopped DB. | DB optional, auto-resolve требует единственного подходящего ресурса в выбранном scope. |
+| `nrz db stop [DATABASE]` | Останавливает running DB. | DB optional, auto-resolve требует единственного подходящего ресурса в выбранном scope. |
 | `nrz db connection [DATABASE]` | Печатает connection string. | `--branch` для branch connection. |
 | `nrz db query [SQL]` | Выполняет SQL локально с устройства через PostgreSQL connection URI. | API используется только для auth/project/database resolution и получения connection URI. `--database`, `--file`, `--branch`; если SQL и file не заданы, читает stdin. |
 | `nrz db branches [list]` | Список branches. | `--database`; subcommand optional, отсутствие subcommand = `list`. |
 | `nrz db branches create <NAME>` | Создает branch. | `--database`. |
 | `nrz db branches delete <BRANCH>` | Удаляет branch по ID/name. | `--database`. |
 | `nrz db branches connection <BRANCH>` | Печатает branch connection string. | `--database`. |
-| `nrz db config [DATABASE]` | Показывает или меняет auto-inject settings. | `--auto-inject true|false`, `--env-var`, `--preview-branches true|false`. |
+| `nrz db config [DATABASE]` | Показывает все Service bindings выбранного Product или создаёт/меняет один точный binding. | Для изменения обязательны `--service-id`, `--product-environment-id`, `--owner-product-environment-id`, `--provider-branch-id`. Настройки: `--auto-inject true|false`, `--env-var`, `--preview-branches true|false`, `--functions-default true|false`. |
 | `nrz db schema [DATABASE]` | Локальная интроспекция `public` schema через PostgreSQL connection URI. | `--branch`. |
 
 Текущее DB-семейство - managed PostgreSQL. Старые D1/SQLite migration команды в текущем CLI отсутствуют.
@@ -176,7 +183,7 @@ checkout. Legacy `--env`/`NRZ_ENV` остался только у локальн
 | --- | --- | --- |
 | `nrz projects list` | Список projects. | `--limit` (1..100, default 20). |
 | `nrz projects create --name <NAME>` | Создает project. | `--display-name`, `--git-url`, `--branch`, `--framework`, `--install-command`, `--build-command`, `--output-directory`, `--link`. |
-| `nrz projects info <ID>` | Детали project. | - |
+| `nrz projects info <ID>` | Детали Product, включая Product без приложения. | App-поля без выбранного Service возвращаются как `null`; app settings commands требуют приложение и возвращают `APPLICATION_SERVICE_REQUIRED`. |
 | `nrz projects update <ID>` | Обновляет project settings. | `--display-name`, `--git-url`, `--branch`, `--framework`, `--install-command`, `--build-command`, `--output-directory`, `--root-directory`, `--node-version`. Без полей падает. |
 | `nrz projects delete <ID>` | Удаляет project. | `--force` для non-interactive/JSON. |
 | `nrz workspace list` | Список локально сохраненных workspaces. | Local config only. |

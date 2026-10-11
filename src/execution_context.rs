@@ -21,6 +21,12 @@ const SAVED_CONTEXT_VERSION: u8 = 1;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionContext {
+    pub product_id: String,
+    pub product_environment_id: String,
+    pub workspace_environment_id: String,
+    pub workspace_binding_generation: String,
+    pub service_id: String,
+    pub source_id: String,
     pub workspace_id: String,
     pub workspace_slug: String,
     pub project_id: String,
@@ -30,6 +36,20 @@ pub struct ExecutionContext {
     pub environment_type: String,
     pub source_ref: Option<String>,
     pub selection_source: String,
+}
+
+impl ExecutionContext {
+    pub(crate) fn same_execution_target(&self, other: &Self) -> bool {
+        self.workspace_id == other.workspace_id
+            && self.product_id == other.product_id
+            && self.product_environment_id == other.product_environment_id
+            && self.workspace_environment_id == other.workspace_environment_id
+            && self.workspace_binding_generation == other.workspace_binding_generation
+            && self.service_id == other.service_id
+            && self.source_id == other.source_id
+            && self.project_id == other.project_id
+            && self.environment_id == other.environment_id
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -233,9 +253,7 @@ pub async fn materialize_desired(
         .into();
     require_protocol(&response.protocol_version)?;
     validate_snapshot_binding(&response, "DESIRED_STATE", None)?;
-    if response.context.project_id != context.project_id
-        || response.context.environment_id != context.environment_id
-    {
+    if !response.context.same_execution_target(context) {
         bail!("ENV_SNAPSHOT_SCOPE_MISMATCH: materialized context changed during resolution");
     }
     Ok(response)

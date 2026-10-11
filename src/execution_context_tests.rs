@@ -6,6 +6,12 @@ use super::*;
 
 fn context() -> ExecutionContext {
     ExecutionContext {
+        product_id: "project-1".into(),
+        product_environment_id: "environment-1".into(),
+        workspace_environment_id: "workspace-environment-1".into(),
+        workspace_binding_generation: "1".into(),
+        service_id: "service-1".into(),
+        source_id: "source-1".into(),
         workspace_id: "workspace-1".into(),
         workspace_slug: "workspace".into(),
         project_id: "project-1".into(),

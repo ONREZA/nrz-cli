@@ -277,7 +277,10 @@ pub async fn run(
         .await;
         return Err(error);
     }
-    if materialized.context.environment_id != execution_context.environment_id {
+    if !materialized
+        .context
+        .same_execution_target(&execution_context)
+    {
         let error = anyhow::anyhow!(
             "ENV_SNAPSHOT_SCOPE_MISMATCH: deployment context changed during admission"
         );
@@ -385,9 +388,7 @@ pub async fn run(
     let deploy_result = async {
         if runner_context.is_none() {
             let frozen = wire::load_runner_context(&client, deployment.id.parse()?).await?;
-            if frozen.context.project_id != execution_context.project_id
-                || frozen.context.workspace_id != execution_context.workspace_id
-                || frozen.context.environment_id != execution_context.environment_id
+            if !frozen.context.same_execution_target(&execution_context)
                 || frozen.deployment.attempt != deployment.attempt
             {
                 return Err(output::coded_error(
@@ -402,6 +403,7 @@ pub async fn run(
                     .as_deref()
                     .context("admitted deployment has no Node version")?,
             )?;
+            command_context.apply_server_settings(Some(&frozen.settings));
         }
         if let Some(runner) = &runner_context {
             match ignored_build::evaluate(IgnoredBuildRequest {

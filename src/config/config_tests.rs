@@ -139,55 +139,101 @@ entrypoint = "node index.js"
 #[test]
 fn effective_config_merges_server_settings_into_onreza_shape() {
     let dir = tempfile::tempdir().unwrap();
-    let config = ProjectConfig::default();
-    let mut effective =
-        EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
-
+    let mut effective = EffectiveProjectConfig::from_project_config(
+        dir.path().to_path_buf(),
+        ProjectConfig::default(),
+    );
+    for (version, framework, node, lfs) in [
+        ("early", "vite", "NODE_22", true),
+        ("frozen", "astro", "NODE_24", false),
+    ] {
+        effective.apply_server_settings(Some(&ProjectBuildSettings {
+            node_version: Some(node.into()),
+            framework_preset: Some(framework.into()),
+            root_directory: format!("apps/{version}"),
+            git_lfs_enabled: Some(lfs),
+            install_command: Some(format!("{version} install")),
+            install_command_source: Some(BuildSettingSource::User),
+            build_command: Some(format!("{version} build")),
+            build_command_source: Some(BuildSettingSource::User),
+            output_directory: Some(format!("{version}-dist")),
+            output_directory_source: Some(BuildSettingSource::Preset),
+            ..Default::default()
+        }));
+        assert_eq!(effective.project_dir(), dir.path());
+        assert_eq!(effective.node_version(), Some(node));
+        assert_eq!(effective.framework_override(), Some(framework));
+        assert_eq!(effective.git_lfs_enabled(), lfs);
+        for (actual, expected) in [
+            (effective.install_command(), format!("{version} install")),
+            (effective.build_command(), format!("{version} build")),
+            (effective.output_directory(), format!("{version}-dist")),
+        ] {
+            assert_eq!(
+                actual.and_then(SourceAwareSetting::value),
+                Some(expected.as_str())
+            );
+        }
+        assert_eq!(
+            effective
+                .output_directory()
+                .map(SourceAwareSetting::source_or_preset),
+            Some(BuildSettingSource::Preset)
+        );
+    }
     effective.apply_server_settings(Some(&ProjectBuildSettings {
-        framework_preset: Some("vite".to_string()),
-        build_command: Some("npm run build".to_string()),
+        node_version: Some("NODE_26".into()),
+        install_command_source: Some(BuildSettingSource::User),
         build_command_source: Some(BuildSettingSource::User),
-        output_directory: Some("dist".to_string()),
-        output_directory_source: Some(BuildSettingSource::Preset),
         ..Default::default()
     }));
-
-    assert_eq!(effective.project_dir(), dir.path());
-    assert_eq!(effective.framework_override(), Some("vite"));
-    assert_eq!(
+    assert_eq!(effective.node_version(), Some("NODE_26"));
+    assert_eq!(effective.framework_override(), None);
+    assert!(
+        effective
+            .install_command()
+            .is_some_and(|setting| setting.value().is_none())
+    );
+    assert!(
         effective
             .build_command()
-            .and_then(SourceAwareSetting::value),
-        Some("npm run build")
+            .is_some_and(|setting| setting.value().is_none())
     );
-    assert_eq!(
-        effective
-            .output_directory()
-            .map(SourceAwareSetting::source_or_preset),
-        Some(BuildSettingSource::Preset)
-    );
+    assert!(effective.output_directory().is_none());
+    assert!(!effective.git_lfs_enabled());
 }
 
 #[test]
 fn effective_config_local_build_command_wins_over_server() {
     let dir = tempfile::tempdir().unwrap();
     let mut config = ProjectConfig::default();
-    config.build.command = Some("pnpm build".to_string());
+    config.project.framework = Some("local-framework".into());
+    config.build.install_command = Some("local install".into());
+    config.build.command = Some("pnpm build".into());
+    config.build.output_directory = Some("local-dist".into());
     let mut effective =
         EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
-
-    effective.apply_server_settings(Some(&ProjectBuildSettings {
-        build_command: Some("npm run build".to_string()),
-        build_command_source: Some(BuildSettingSource::User),
-        ..Default::default()
-    }));
-
-    assert_eq!(
-        effective
-            .build_command()
-            .and_then(SourceAwareSetting::value),
-        Some("pnpm build")
-    );
+    for version in ["early", "frozen"] {
+        effective.apply_server_settings(Some(&ProjectBuildSettings {
+            framework_preset: Some(format!("{version}-framework")),
+            root_directory: format!("apps/{version}"),
+            install_command: Some(format!("{version} install")),
+            install_command_source: Some(BuildSettingSource::User),
+            build_command: Some(format!("{version} build")),
+            build_command_source: Some(BuildSettingSource::User),
+            output_directory: Some(format!("{version}-dist")),
+            ..Default::default()
+        }));
+        assert_eq!(effective.project_dir(), dir.path());
+        assert_eq!(effective.framework_override(), Some("local-framework"));
+        for (actual, expected) in [
+            (effective.install_command(), "local install"),
+            (effective.build_command(), "pnpm build"),
+            (effective.output_directory(), "local-dist"),
+        ] {
+            assert_eq!(actual.and_then(SourceAwareSetting::value), Some(expected));
+        }
+    }
 }
 
 #[test]
@@ -377,6 +423,14 @@ fn effective_config_preset_commands_keep_autodetect_open() {
     let config = ProjectConfig::default();
     let mut effective =
         EffectiveProjectConfig::from_project_config(dir.path().to_path_buf(), config);
+
+    effective.apply_server_settings(Some(&ProjectBuildSettings {
+        install_command: Some("early authored install".into()),
+        install_command_source: Some(BuildSettingSource::User),
+        build_command: Some("early authored build".into()),
+        build_command_source: Some(BuildSettingSource::User),
+        ..Default::default()
+    }));
 
     effective.apply_server_settings(Some(&ProjectBuildSettings {
         install_command: Some("npm install".to_string()),

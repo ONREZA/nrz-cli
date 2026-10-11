@@ -69,48 +69,29 @@ fn connection() -> Value {
 }
 
 #[tokio::test]
-async fn create_database_attaches_exact_resource_and_project_without_sending_defaults() {
+async fn create_database_keeps_standalone_ownership_without_implicit_attachment() {
     let created = nrz_api::Database200Response2 {
         id: DB.parse().unwrap(),
+        product_id: Some(PROJECT.parse().unwrap()),
         db_name: "primary".into(),
         password: "private-password".into(),
         ..Default::default()
     };
-    let attachment = nrz_api::Database200ResponseDatumProjectAttachment {
-        managed_database_id: DB.parse().unwrap(),
-        project_id: PROJECT.parse().unwrap(),
-        ..Default::default()
-    };
-    let (client, pending, server) = serve(vec![
-        Exchange {
-            method: "POST",
-            path: "/v1/kaiki/databases/".into(),
-            body: Some(json!({"dbName":"primary","cuSize":0.5})),
-            response: serde_json::to_value(created.clone()).unwrap(),
-        },
-        Exchange {
-            method: "PATCH",
-            path: format!("/v1/kaiki/databases/{DB}/attachments/{PROJECT}"),
-            body: Some(json!({})),
-            response: serde_json::to_value(attachment).unwrap(),
-        },
-    ])
+    let (client, pending, server) = serve(vec![Exchange {
+        method: "POST",
+        path: "/v1/kaiki/databases/".into(),
+        body: Some(json!({"dbName":"primary","cuSize":0.5})),
+        response: serde_json::to_value(created.clone()).unwrap(),
+    }])
     .await;
-    cmd_create(
-        &client,
-        PROJECT,
-        true,
-        Some("primary".into()),
-        Some(0.5),
-        false,
-    )
-    .await
-    .unwrap();
+    cmd_create(&client, true, Some("primary".into()), Some(0.5), false)
+        .await
+        .unwrap();
     assert!(pending.lock().unwrap().is_empty());
     let output = serde_json::to_value(CreateResponse::from(created)).unwrap();
     assert_eq!(
         output,
-        json!({"id":DB,"dbName":"primary","status":"CREATING"})
+        json!({"id":DB,"productId":PROJECT,"dbName":"primary","status":"CREATING"})
     );
     server.abort();
 }
@@ -244,7 +225,7 @@ async fn database_detail_and_attachment_reject_another_resource() {
         Exchange {
             method: "PATCH",
             path: format!("/v1/kaiki/databases/{DB}/attachments/{PROJECT}"),
-            body: Some(json!({"autoInjectDbUrl":false})),
+            body: Some(json!({"serviceId":PROJECT,"productEnvironmentId":PROJECT,"ownerProductEnvironmentId":PROJECT,"providerBranchId":"exact-provider-branch","autoInjectDbUrl":false})),
             response: serde_json::to_value(attachment).unwrap(),
         },
     ])
@@ -262,6 +243,10 @@ async fn database_detail_and_attachment_reject_another_resource() {
             DB,
             PROJECT,
             nrz_api::AttachmentRequestBody {
+                service_id: PROJECT.parse().unwrap(),
+                product_environment_id: PROJECT.parse().unwrap(),
+                owner_product_environment_id: PROJECT.parse().unwrap(),
+                provider_branch_id: "exact-provider-branch".into(),
                 auto_inject_db_url: Some(false),
                 ..Default::default()
             }
@@ -270,6 +255,66 @@ async fn database_detail_and_attachment_reject_another_resource() {
         .unwrap_err()
         .to_string()
         .contains("another database or project")
+    );
+    assert!(pending.lock().unwrap().is_empty());
+    server.abort();
+}
+
+#[tokio::test]
+async fn attachment_preserves_explicit_targets_and_rejects_another_binding() {
+    let body = nrz_api::AttachmentRequestBody {
+        service_id: DB.parse().unwrap(),
+        product_environment_id: PROJECT.parse().unwrap(),
+        owner_product_environment_id: DB.parse().unwrap(),
+        provider_branch_id: "provider/exact".into(),
+        auto_inject_db_url: Some(true),
+        ..Default::default()
+    };
+    for changed in [false, true] {
+        let response = nrz_api::Database200ResponseDatumProjectAttachment {
+            managed_database_id: DB.parse().unwrap(),
+            project_id: PROJECT.parse().unwrap(),
+            service_id: body.service_id,
+            product_environment_id: body.product_environment_id,
+            owner_product_environment_id: body.owner_product_environment_id,
+            provider_branch_id: if changed {
+                "other-branch".into()
+            } else {
+                body.provider_branch_id.clone()
+            },
+            ..Default::default()
+        };
+        let (client, pending, server) = serve(vec![Exchange {
+            method: "PATCH",
+            path: format!("/v1/kaiki/databases/{DB}/attachments/{PROJECT}"),
+            body: Some(serde_json::to_value(&body).unwrap()),
+            response: serde_json::to_value(response).unwrap(),
+        }])
+        .await;
+        let result = wire::attach(&client, DB, PROJECT, body.clone()).await;
+        if changed {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("another Service, ProductEnvironment or provider branch")
+            );
+        } else {
+            assert_eq!(result.unwrap().provider_branch_id, body.provider_branch_id);
+        }
+        assert!(pending.lock().unwrap().is_empty());
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn exact_database_selection_needs_no_application_attachment() {
+    let (client, pending, server) = serve(vec![]).await;
+    assert_eq!(
+        resolve_db_by_id_or_name(&client, Some(PROJECT), DB)
+            .await
+            .unwrap(),
+        DB
     );
     assert!(pending.lock().unwrap().is_empty());
     server.abort();

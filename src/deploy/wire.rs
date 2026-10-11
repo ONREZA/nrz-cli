@@ -122,6 +122,25 @@ pub(super) async fn admit(
                     .context("invalid environment ID")?,
                 branch,
                 commit_sha,
+                expected_context: Some(nrz_api::AdmitRequestBodyExpectedContext {
+                    workspace_id: context
+                        .workspace_id
+                        .parse()
+                        .context("invalid workspace ID")?,
+                    product_id: context.product_id.parse().context("invalid Product ID")?,
+                    product_environment_id: context
+                        .product_environment_id
+                        .parse()
+                        .context("invalid ProductEnvironment ID")?,
+                    workspace_environment_id: context
+                        .workspace_environment_id
+                        .parse()
+                        .context("invalid Workspace Environment ID")?,
+                    workspace_binding_generation: context.workspace_binding_generation.clone(),
+                    service_id: context.service_id.parse().context("invalid Service ID")?,
+                    source_id: context.source_id.parse().context("invalid Source ID")?,
+                    additional_properties: Default::default(),
+                }),
                 selection_source: crate::execution_context::wire::selection_source(
                     &context.selection_source,
                 )?,
@@ -129,14 +148,14 @@ pub(super) async fn admit(
         )
         .await?;
     anyhow::ensure!(
-        value.context.project_id == project_id.parse::<Uuid>()?
-            && value.context.environment_id == context.environment_id.parse::<Uuid>()?
-            && value.context.workspace_id == context.workspace_id.parse::<Uuid>()?,
-        "admission response belongs to another workspace, project or environment"
-    );
-    anyhow::ensure!(
         value.protocol_version == crate::execution_context::EXECUTION_CONTEXT_PROTOCOL,
         "unsupported execution context protocol"
     );
-    value.try_into()
+    let response: AdmissionResponse = value.try_into()?;
+    anyhow::ensure!(
+        response.context.project_id == project_id.parse::<Uuid>()?.to_string()
+            && response.context.same_execution_target(context),
+        "admission response belongs to another workspace, Product, Service, Source or environment"
+    );
+    Ok(response)
 }

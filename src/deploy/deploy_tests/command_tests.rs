@@ -356,11 +356,15 @@ fn build_command_explicit_wins_over_server() {
     let dir = tempdir().unwrap();
     let config = nrz::config::ProjectConfig::default();
 
-    let effective = effective_with_server_settings(
+    let mut effective = effective_with_server_settings(
         dir.path(),
         config,
         server_build_settings(Some("server cmd"), None),
     );
+    effective.apply_server_settings(Some(&server_build_settings(
+        Some("frozen server cmd"),
+        None,
+    )));
     let result = resolve_build_command(Some("explicit"), dir.path(), &effective);
     assert_eq!(result.unwrap(), "explicit");
 }

@@ -29,6 +29,8 @@ pub mod rules;
 pub mod rules_handler;
 #[cfg(test)]
 mod rules_handler_tests;
+pub mod services;
+pub mod services_handler;
 pub mod workspace;
 pub mod workspace_handler;
 
@@ -43,6 +45,7 @@ pub use kv::KvArgs;
 pub use preview::PreviewArgs;
 pub use projects::ProjectsArgs;
 pub use rules::RulesArgs;
+pub use services::ServicesArgs;
 pub use workspace::WorkspaceArgs;
 
 use clap::{ArgAction, Parser, Subcommand, builder::BoolishValueParser};
@@ -121,6 +124,9 @@ pub enum Command {
 
     /// Manage projects
     Projects(ProjectsArgs),
+
+    /// Manage Product Services
+    Services(ServicesArgs),
 
     /// Manage protected preview URL access
     Preview(PreviewArgs),

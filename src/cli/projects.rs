@@ -104,7 +104,7 @@ pub enum ProjectsCommand {
         node_version: Option<String>,
     },
 
-    /// Delete a project
+    /// Delete an empty Product (remove Services, databases and KV data first)
     Delete {
         /// Project ID
         #[arg(value_parser = clap::builder::NonEmptyStringValueParser::new())]

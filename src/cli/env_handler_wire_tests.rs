@@ -213,6 +213,8 @@ fn env_exec_runs_selected_snapshot_and_preserves_child_failure() {
         "protocolVersion":"execution-context-v2",
         "context":{
             "workspaceId":"workspace-1","workspaceSlug":"workspace",
+            "productId":PROJECT,"productEnvironmentId":ENVIRONMENT,"workspaceEnvironmentId":"workspace-environment-1",
+            "workspaceBindingGeneration":"1","serviceId":"service-1","sourceId":"source-1",
             "projectId":PROJECT,"projectName":"project",
             "environmentId":ENVIRONMENT,"environmentName":"Preview","environmentType":"PREVIEW",
             "sourceRef":"feature","selectionSource":"EXPLICIT"

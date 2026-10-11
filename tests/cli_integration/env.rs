@@ -296,6 +296,9 @@ fn env_scope_change_respects_terminal_confirmation() {
 
 fn selected_environment_api(variables: Value) -> Router {
     let context = json!({"workspaceId":"00000000-0000-0000-0000-000000000004", "workspaceSlug":"workspace",
+        "productId":PROJECT_ID, "productEnvironmentId":ENVIRONMENT_ID,
+        "workspaceEnvironmentId":"00000000-0000-0000-0000-000000000005", "workspaceBindingGeneration":"1",
+        "serviceId":"00000000-0000-0000-0000-000000000006", "sourceId":"00000000-0000-0000-0000-000000000007",
         "projectId":PROJECT_ID, "projectName":"project", "environmentId":ENVIRONMENT_ID,
         "environmentName":"Production", "environmentType":"PRODUCTION", "sourceRef":null, "selectionSource":"EXPLICIT"});
     let resolved = context.clone();

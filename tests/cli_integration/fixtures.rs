@@ -163,6 +163,16 @@ fn project(id: String) -> nrz_api::Project200Response3 {
         id: id.parse().unwrap(),
         name: "internal-name".to_string(),
         display_name: None,
+        application: Some(nrz_api::Project200Response3Application {
+            service_id: "11111111-1111-4111-8111-111111111111".parse().unwrap(),
+            source_id: "22222222-2222-4222-8222-222222222222".parse().unwrap(),
+            ..Default::default()
+        }),
+        node_version: Some(nrz_api::Project200Response3NodeVersion::Node22),
+        package_manager: Some(nrz_api::ProjectRequestBodyPackageManager::Npm),
+        root_directory: Some(".".into()),
+        git_lfs_enabled: Some(false),
+        ignored_build_behavior: Some(nrz_api::Project200Response3IgnoredBuildBehavior::Automatic),
         ..Default::default()
     }
 }

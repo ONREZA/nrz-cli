@@ -116,7 +116,7 @@ impl PlatformClient {
     }
     /// Delete project
     ///
-    /// Soft-deletes a project and invalidates its domains and deployment aliases.
+    /// Deletes an empty Product. Remove or transfer its Services, databases and KV data first.
     ///
     /// * Path: `DELETE /v1/projects/{id}`
     pub async fn delete_v1projects_by_id(
@@ -151,6 +151,27 @@ impl PlatformClient {
             .push(&request.path.id.to_string());
         let response = self.client.patch(url).json(&request.body).send().await?;
         Ok(PatchV1projectsByIdRequest::parse_response(response).await?)
+    }
+    /// Remove Service
+    ///
+    /// Requests explicit Service removal and runtime withdrawal. Product databases and KV data are preserved.
+    ///
+    /// * Path: `DELETE /v1/projects/{id}/services/{serviceId}`
+    pub async fn delete_v1projects_by_id_services_by_service_id(
+        &self,
+        request: DeleteV1projectsByIdServicesByServiceIdRequest,
+    ) -> anyhow::Result<DeleteV1projectsByIdServicesByServiceIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string());
+        let response = self.client.delete(url).send().await?;
+        Ok(DeleteV1projectsByIdServicesByServiceIdRequest::parse_response(response).await?)
     }
     /// Sync project detection result
     ///
@@ -1503,7 +1524,7 @@ impl PlatformClientRaw {
     }
     /// Delete project
     ///
-    /// Soft-deletes a project and invalidates its domains and deployment aliases.
+    /// Deletes an empty Product. Remove or transfer its Services, databases and KV data first.
     ///
     /// * Path: `DELETE /v1/projects/{id}`
     pub async fn delete_v1projects_by_id(
@@ -1537,6 +1558,27 @@ impl PlatformClientRaw {
             .push("projects")
             .push(&request.path.id.to_string());
         let response = self.client.patch(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Remove Service
+    ///
+    /// Requests explicit Service removal and runtime withdrawal. Product databases and KV data are preserved.
+    ///
+    /// * Path: `DELETE /v1/projects/{id}/services/{serviceId}`
+    pub async fn delete_v1projects_by_id_services_by_service_id(
+        &self,
+        request: DeleteV1projectsByIdServicesByServiceIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string());
+        let response = self.client.delete(url).send().await?;
         Ok(response)
     }
     /// Sync project detection result

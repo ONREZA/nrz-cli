@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) async fn cmd_list(
     client: &ApiClient,
-    project_id: &str,
+    project_id: Option<&str>,
     json: bool,
 ) -> anyhow::Result<()> {
     let mut list: ListResponse = client
@@ -10,7 +10,9 @@ pub(super) async fn cmd_list(
         .await
         .context("failed to list databases")?
         .into();
-    list.data.retain(|db| db.is_attached_to_project(project_id));
+    if let Some(project_id) = project_id {
+        list.data.retain(|db| db.belongs_to_project(project_id));
+    }
 
     if json {
         output::json_output(&list);
@@ -36,11 +38,12 @@ pub(super) async fn cmd_list(
         let name = output::terminal_line(db.db_name.as_deref().unwrap_or("(unnamed)"));
         let status = output::terminal_line(db.status.as_deref().unwrap_or("unknown"));
         let cu = db.cu_size.map(|v| format!("{v}")).unwrap_or_default();
-        let inject = if db.auto_inject_db_url_for_project(project_id) == Some(true) {
-            " [auto-inject]"
-        } else {
-            ""
-        };
+        let inject =
+            if project_id.and_then(|id| db.auto_inject_db_url_for_project(id)) == Some(true) {
+                " [auto-inject]"
+            } else {
+                ""
+            };
         eprintln!(
             "  {} {} ({}CU, {}){inject}",
             console::style(id).dim(),
@@ -54,7 +57,6 @@ pub(super) async fn cmd_list(
 
 pub(super) async fn cmd_create(
     client: &ApiClient,
-    project_id: &str,
     json: bool,
     name: Option<String>,
     cu_size: Option<f64>,
@@ -68,19 +70,6 @@ pub(super) async fn cmd_create(
         .await
         .context("failed to create database")?
         .into();
-    wire::attach(
-        client,
-        &created.id,
-        project_id,
-        nrz_api::AttachmentRequestBody::default(),
-    )
-    .await
-    .with_context(|| {
-        format!(
-            "database {} was created, but failed to attach it to project {}",
-            created.id, project_id
-        )
-    })?;
 
     if wait {
         output::status(
@@ -132,7 +121,7 @@ pub(super) async fn cmd_create(
 
 pub(super) async fn cmd_info(
     client: &ApiClient,
-    project_id: &str,
+    project_id: Option<&str>,
     db_id: &str,
     json: bool,
 ) -> anyhow::Result<()> {
@@ -161,12 +150,12 @@ pub(super) async fn cmd_info(
     if let Some(pg) = db.pg_version {
         eprintln!("  PostgreSQL: {pg}");
     }
-    if let Some(true) = db.auto_inject_db_url_for_project(project_id) {
-        let var = db
-            .env_var_name_for_project(project_id)
+    if let Some(true) = project_id.and_then(|id| db.auto_inject_db_url_for_project(id)) {
+        let var = project_id
+            .and_then(|id| db.env_var_name_for_project(id))
             .unwrap_or("DATABASE_URL");
         eprintln!("  Auto-inject: {}", output::terminal_line(var));
-        if db.auto_create_preview_branch_for_project(project_id) == Some(true) {
+        if project_id.and_then(|id| db.auto_create_preview_branch_for_project(id)) == Some(true) {
             eprintln!("  Preview branches: enabled");
         }
     }

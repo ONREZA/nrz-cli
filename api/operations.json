@@ -5,6 +5,7 @@
   "deleteV1PreviewAccessByIdBySecretId",
   "deleteV1ProjectsById",
   "deleteV1ProjectsByIdEnvByKey",
+  "deleteV1ProjectsByIdServicesByServiceId",
   "deleteV1WorkspaceDomainsDomainsByZoneIdHostnamesByBindingId",
   "getV1BuildLogSessionsWorkspacePolicy",
   "getV1DeploymentsById",

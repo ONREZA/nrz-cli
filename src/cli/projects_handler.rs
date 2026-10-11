@@ -1,5 +1,3 @@
-use std::io::{BufRead, IsTerminal, Write};
-
 use anyhow::{Context, bail};
 
 use crate::api::ApiClient;
@@ -369,32 +367,16 @@ async fn update(
 }
 
 async fn delete(client: &ApiClient, id: &str, force: bool, json: bool) -> anyhow::Result<()> {
-    if !force {
-        if json || !std::io::stdin().is_terminal() {
-            bail!("--force is required in non-interactive mode");
-        }
-
-        eprint!(
-            "  {} ",
-            console::style(format!(
-                "Type project ID ({}) to confirm deletion:",
-                output::terminal_line(id)
-            ))
-            .bold(),
-        );
-        std::io::stderr().flush()?;
-
-        let mut line = String::new();
-        std::io::stdin().lock().read_line(&mut line)?;
-
-        if line.trim() != id {
-            bail!("confirmation did not match, aborting.");
-        }
-    }
+    super::remote::confirm_deletion("project", id, force, json)?;
 
     let result = client
         .delete_project(id)
         .await
+        .map_err(|error| {
+            if error.downcast_ref::<crate::api::StructuredApiError>().is_some_and(|error| error.code == "PRODUCT_NOT_EMPTY") {
+                error.context(format!("Product is not empty. Remove an application with `nrz services delete <service-id> --project-id {id} --force`, or remove/transfer its databases and KV data before deleting the Product"))
+            } else { error }
+        })
         .with_context(|| format!("failed to delete project {id}"))?;
     let resp = DeleteProjectResponse {
         id: result.id.to_string(),

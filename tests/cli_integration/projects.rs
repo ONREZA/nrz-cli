@@ -265,10 +265,12 @@ fn info_preserves_the_cli_projection_of_project_details() {
         id: PROJECT.parse().unwrap(),
         name: "app".into(),
         display_name: Some("App".into()),
-        branch: "main".into(),
-        root_directory: "apps/web".into(),
-        node_version: nrz_api::Project200Response3NodeVersion::Node24,
-        package_manager: nrz_api::ProjectRequestBodyPackageManager::Bun,
+        source_type: Some(nrz_api::Project200Response2SourceType::Git),
+        auto_deploy_enabled: Some(false),
+        branch: Some("main".into()),
+        root_directory: Some("apps/web".into()),
+        node_version: Some(nrz_api::Project200Response3NodeVersion::Node24),
+        package_manager: Some(nrz_api::ProjectRequestBodyPackageManager::Bun),
         created_at: TIMESTAMP.parse().unwrap(),
         updated_at: TIMESTAMP.parse().unwrap(),
         ..Default::default()
@@ -373,5 +375,177 @@ fn terminal_project_deletion_requires_the_matching_id() {
             assert!(text.contains("confirmation did not match"), "{text}");
             assert!(requests.try_recv().is_err());
         }
+    }
+}
+
+#[test]
+fn service_removal_requires_force_and_preserves_explicit_target_and_pending_status() {
+    const SERVICE: &str = "00000000-0000-0000-0000-000000000041";
+    let directory = tempfile::tempdir().unwrap();
+    for status in ["REMOVING", "DELETED"] {
+        let response =
+            json!({"productId":PROJECT,"serviceId":SERVICE,"status":status,"message":"accepted"});
+        let (api_url, requests) = project_api(response.clone());
+        for mode in ["--json", "--human"] {
+            let invoke = |force: bool| {
+                let mut command = nrz();
+                command
+                    .current_dir(directory.path())
+                    .env("NRZ_API_URL", &api_url)
+                    .args([
+                        mode,
+                        "--token",
+                        "test-token",
+                        "--workspace",
+                        "original",
+                        "services",
+                        "delete",
+                        SERVICE,
+                        "--project-id",
+                        PROJECT,
+                    ]);
+                if force {
+                    command.arg("--force");
+                }
+                command.output().unwrap()
+            };
+            let denied = invoke(false);
+            assert!(!denied.status.success());
+            assert!(requests.try_recv().is_err());
+            if mode == "--json" {
+                assert!(
+                    stdout_json(&denied)["error"]
+                        .as_str()
+                        .unwrap()
+                        .contains("--force")
+                );
+            } else {
+                assert!(denied.stdout.is_empty());
+                assert!(String::from_utf8_lossy(&denied.stderr).contains("--force"));
+            }
+            let accepted = invoke(true);
+            assert!(accepted.status.success(), "{accepted:?}");
+            let wire = request(
+                &requests,
+                "DELETE",
+                &format!("/v1/projects/{PROJECT}/services/{SERVICE}"),
+            );
+            assert!(wire.body.is_none());
+            assert!(requests.try_recv().is_err());
+            if mode == "--json" {
+                assert_eq!(stdout_json(&accepted), response);
+            } else {
+                assert!(accepted.stdout.is_empty());
+                let stderr = String::from_utf8_lossy(&accepted.stderr);
+                assert!(stderr.contains("databases and KV data are preserved"));
+                if status == "REMOVING" {
+                    assert!(stderr.contains("Runtime withdrawal is pending"));
+                    assert!(!stderr.contains("Deleted service"));
+                } else {
+                    assert!(stderr.contains("Deleted service"));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn service_removal_requires_project_id_and_rejects_invalid_ids_before_transport() {
+    let directory = tempfile::tempdir().unwrap();
+    let (api_url, requests) = project_api(json!({}));
+    for arguments in [
+        vec!["services", "delete", PROJECT, "--force"],
+        vec![
+            "services",
+            "delete",
+            "../victim",
+            "--project-id",
+            PROJECT,
+            "--force",
+        ],
+        vec![
+            "services",
+            "delete",
+            PROJECT,
+            "--project-id",
+            "../victim",
+            "--force",
+        ],
+    ] {
+        let output = nrz()
+            .current_dir(directory.path())
+            .env("NRZ_API_URL", &api_url)
+            .args(["--json", "--token", "test-token"])
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(requests.try_recv().is_err());
+    }
+}
+
+#[test]
+fn nonempty_product_delete_returns_actionable_error_without_redirecting_to_service() {
+    let (sender, receiver) = channel();
+    let app = Router::new().fallback(move |method: axum::http::Method, uri: axum::http::Uri| {
+        let sender = sender.clone();
+        async move {
+            sender
+                .send((method.to_string(), uri.path().to_string()))
+                .unwrap();
+            (
+                axum::http::StatusCode::CONFLICT,
+                Json(json!({"error":"Product is not empty","code":"PRODUCT_NOT_EMPTY"})),
+            )
+        }
+    });
+    let api_url = support::api_mock::spawn(app);
+    let directory = tempfile::tempdir().unwrap();
+    let output = project_command(
+        &api_url,
+        directory.path(),
+        "--json",
+        &["delete", PROJECT, "--force"],
+    );
+    assert!(!output.status.success());
+    let error = stdout_json(&output);
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("nrz services delete")
+    );
+    assert_eq!(
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap(),
+        ("DELETE".into(), format!("/v1/projects/{PROJECT}"))
+    );
+    assert!(receiver.try_recv().is_err());
+}
+
+#[test]
+fn info_accepts_database_only_product_without_inventing_an_application() {
+    let response = serde_json::to_value(nrz_api::Project200Response3 {
+        id: PROJECT.parse().unwrap(),
+        name: "database-only".into(),
+        ..Default::default()
+    })
+    .unwrap();
+    let (api_url, _requests) = project_api(response);
+    let directory = tempfile::tempdir().unwrap();
+    let output = project_command(&api_url, directory.path(), "--json", &["info", PROJECT]);
+    assert!(output.status.success(), "{output:?}");
+    let result = stdout_json(&output);
+    assert_eq!(result["name"], "database-only");
+    for key in [
+        "sourceType",
+        "branch",
+        "rootDirectory",
+        "nodeVersion",
+        "packageManager",
+        "autoDeployEnabled",
+    ] {
+        assert!(result[key].is_null(), "{key}: {result}");
     }
 }

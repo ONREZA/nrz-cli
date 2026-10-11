@@ -24,6 +24,7 @@ mod projects;
 mod publication;
 mod releases;
 mod runtime_logs;
+mod services;
 
 #[cfg(test)]
 mod client_tests;

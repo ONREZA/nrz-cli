@@ -32,35 +32,41 @@ fn cu(value: nrz_api::Database200ResponseAllowedCuSize) -> f64 {
     }
 }
 
-impl From<nrz_api::Database200ResponseDatumProjectAttachment> for ProjectAttachment {
-    fn from(value: nrz_api::Database200ResponseDatumProjectAttachment) -> Self {
-        Self {
-            project_id: value.project_id.to_string(),
-            auto_inject_db_url: Some(value.auto_inject_db_url),
-            env_var_name: Some(value.env_var_name),
-            auto_create_preview_branch: Some(value.auto_create_preview_branch),
-        }
+fn database_summary(
+    id: uuid::Uuid,
+    product_id: Option<uuid::Uuid>,
+    db_name: String,
+    status: nrz_api::Database200ResponseDatumStatus,
+    cu_size: f64,
+    pg_version: i64,
+    project_attachments: Vec<ProjectAttachment>,
+) -> ManagedDatabase {
+    ManagedDatabase {
+        id: id.to_string(),
+        product_id: product_id.map(|id| id.to_string()),
+        db_name: Some(db_name),
+        status: Some(status.to_string()),
+        cu_size: Some(cu_size),
+        pg_version: Some(pg_version),
+        auto_inject_db_url: None,
+        env_var_name: None,
+        auto_create_preview_branch: None,
+        kaiki_status: None,
+        project_attachments,
     }
 }
 
 impl From<nrz_api::Database200ResponseDatum> for ManagedDatabase {
     fn from(value: nrz_api::Database200ResponseDatum) -> Self {
-        Self {
-            id: value.id.to_string(),
-            db_name: Some(value.db_name),
-            status: Some(value.status.to_string()),
-            cu_size: Some(value.cu_size),
-            pg_version: Some(value.pg_version),
-            auto_inject_db_url: None,
-            env_var_name: None,
-            auto_create_preview_branch: None,
-            kaiki_status: None,
-            project_attachments: value
-                .project_attachments
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-        }
+        database_summary(
+            value.id,
+            value.product_id,
+            value.db_name,
+            value.status,
+            value.cu_size,
+            value.pg_version,
+            value.project_attachments,
+        )
     }
 }
 
@@ -77,23 +83,18 @@ impl From<nrz_api::Database200Response> for ListResponse {
 
 impl From<nrz_api::Database200Response3> for DbInfoResponse {
     fn from(value: nrz_api::Database200Response3) -> Self {
+        let mut db = database_summary(
+            value.id,
+            value.product_id,
+            value.db_name,
+            value.status,
+            value.cu_size,
+            value.pg_version,
+            value.project_attachments,
+        );
+        db.kaiki_status = value.kaiki_status.map(|status| status.to_string());
         Self {
-            db: ManagedDatabase {
-                id: value.id.to_string(),
-                db_name: Some(value.db_name),
-                status: Some(value.status.to_string()),
-                cu_size: Some(value.cu_size),
-                pg_version: Some(value.pg_version),
-                auto_inject_db_url: None,
-                env_var_name: None,
-                auto_create_preview_branch: None,
-                kaiki_status: value.kaiki_status.map(|v| v.to_string()),
-                project_attachments: value
-                    .project_attachments
-                    .into_iter()
-                    .map(Into::into)
-                    .collect(),
-            },
+            db,
             allowed_cu_sizes: Some(value.allowed_cu_sizes.into_iter().map(cu).collect()),
             autoscale_max_cu: value.autoscale_max_cu.map(cu),
             plan: Some(value.plan.to_string()),
@@ -105,6 +106,7 @@ impl From<nrz_api::Database200Response2> for CreateResponse {
     fn from(value: nrz_api::Database200Response2) -> Self {
         Self {
             id: value.id.to_string(),
+            product_id: value.product_id.map(|id| id.to_string()),
             db_name: Some(value.db_name),
             status: Some(value.status.to_string()),
         }
@@ -150,11 +152,26 @@ pub(super) async fn attach(
     project_id: &str,
     body: nrz_api::AttachmentRequestBody,
 ) -> anyhow::Result<nrz_api::Database200ResponseDatumProjectAttachment> {
+    let selected = (
+        body.service_id,
+        body.product_environment_id,
+        body.owner_product_environment_id,
+        body.provider_branch_id.clone(),
+    );
     let value = client.attach_database(db_id, project_id, body).await?;
     anyhow::ensure!(
         value.managed_database_id == db_id.parse::<uuid::Uuid>()?
             && value.project_id == project_id.parse::<uuid::Uuid>()?,
         "attachment response belongs to another database or project"
+    );
+    anyhow::ensure!(
+        (
+            value.service_id,
+            value.product_environment_id,
+            value.owner_product_environment_id,
+            value.provider_branch_id.as_str()
+        ) == (selected.0, selected.1, selected.2, selected.3.as_str()),
+        "attachment response belongs to another Service, ProductEnvironment or provider branch"
     );
     Ok(value)
 }

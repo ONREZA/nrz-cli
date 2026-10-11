@@ -20,20 +20,38 @@ pub(crate) async fn fetch(
         .project(project_id)
         .await
         .context("failed to fetch project settings")?;
+    if project.application.is_none() {
+        return Err(crate::output::coded_error(
+            "APPLICATION_SERVICE_REQUIRED",
+            format!(
+                "Product '{project_id}' has no selected application Service; database and KV resources remain available"
+            ),
+        ));
+    }
     Ok(ProjectBuildSettings {
-        node_version: Some(project.node_version.to_string()),
+        node_version: Some(
+            project
+                .node_version
+                .context("application node version is missing")?
+                .to_string(),
+        ),
         source_build_context: None,
         framework_preset: project.framework_preset,
-        root_directory: project.root_directory,
-        git_lfs_enabled: Some(project.git_lfs_enabled),
-        package_manager: project.package_manager.to_string(),
+        root_directory: project
+            .root_directory
+            .context("application root directory is missing")?,
+        git_lfs_enabled: project.git_lfs_enabled,
+        package_manager: project
+            .package_manager
+            .context("application package manager is missing")?
+            .to_string(),
         install_command: project.install_command,
-        install_command_source: Some(setting_source(project.install_command_source)),
+        install_command_source: project.install_command_source.map(setting_source),
         build_command: project.build_command,
-        build_command_source: Some(setting_source(project.build_command_source)),
+        build_command_source: project.build_command_source.map(setting_source),
         output_directory: project.output_directory,
-        output_directory_source: Some(setting_source(project.output_directory_source)),
-        ignored_build_behavior: Some(ignored_build_behavior(project.ignored_build_behavior)),
+        output_directory_source: project.output_directory_source.map(setting_source),
+        ignored_build_behavior: project.ignored_build_behavior.map(ignored_build_behavior),
         ignored_build_folder: project.ignored_build_folder,
         ignored_build_command: project.ignored_build_command,
     })

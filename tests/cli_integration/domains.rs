@@ -290,7 +290,9 @@ fn domains_add_resolves_environment_and_attaches_zone_relative_hostname() {
         .route(&format!("/v1/projects/{PROJECT}/execution-context/resolve"), post(move |Json(body): Json<Value>| async move {
             assert_eq!(body, json!({"environment":"preview","sourceRef":null,"selectionSource":"EXPLICIT"}));
             Json(json!({"protocolVersion":"execution-context-v2","context":{
-                "workspaceId":Uuid::from_u128(10),"workspaceSlug":"team","projectId":PROJECT,"projectName":"app",
+                "workspaceId":Uuid::from_u128(10),"workspaceSlug":"team","projectId":PROJECT,
+                "productId":PROJECT,"productEnvironmentId":environment,"workspaceEnvironmentId":Uuid::from_u128(50),
+                "workspaceBindingGeneration":"1","serviceId":Uuid::from_u128(60),"sourceId":Uuid::from_u128(70),"projectName":"app",
                 "environmentId":environment,"environmentName":"preview","environmentType":"PREVIEW",
                 "sourceRef":null,"selectionSource":"EXPLICIT"
             }}))

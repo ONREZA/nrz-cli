@@ -93,19 +93,53 @@ async fn pre_source_failure_uploads_redacted_diagnostics_and_attempt() {
 
 fn context_json() -> Value {
     json!({"workspaceId":"00000000-0000-0000-0000-000000000002", "workspaceSlug":"workspace",
+        "productId":"00000000-0000-0000-0000-000000000003", "productEnvironmentId":"00000000-0000-0000-0000-000000000004",
+        "workspaceEnvironmentId":"00000000-0000-0000-0000-000000000005", "workspaceBindingGeneration":"1",
+        "serviceId":"00000000-0000-0000-0000-000000000006", "sourceId":"00000000-0000-0000-0000-000000000007",
         "projectId":"00000000-0000-0000-0000-000000000003", "projectName":"project",
         "environmentId":"00000000-0000-0000-0000-000000000004", "environmentName":"Production",
         "environmentType":"PRODUCTION", "sourceRef":null, "selectionSource":"EXPLICIT"})
 }
 
+fn expected_context_json() -> Value {
+    let context = context_json();
+    [
+        "workspaceId",
+        "productId",
+        "productEnvironmentId",
+        "workspaceEnvironmentId",
+        "workspaceBindingGeneration",
+        "serviceId",
+        "sourceId",
+    ]
+    .into_iter()
+    .map(|field| (field.to_owned(), context[field].clone()))
+    .collect::<serde_json::Map<_, _>>()
+    .into()
+}
+
+fn admission_request_json() -> Value {
+    json!({"protocolVersion":"execution-context-v2", "environmentId":context_json()["environmentId"],
+        "selectionSource":"EXPLICIT", "branch":"feature/a", "commitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expectedContext":expected_context_json()})
+}
+
 #[tokio::test]
 async fn admission_preserves_selection_and_rejects_another_scope() {
-    for wrong_scope in [false, true] {
+    for changed_field in [
+        None,
+        Some("workspaceId"),
+        Some("serviceId"),
+        Some("sourceId"),
+        Some("productId"),
+        Some("productEnvironmentId"),
+        Some("workspaceEnvironmentId"),
+        Some("workspaceBindingGeneration"),
+    ] {
         let app = Router::new().route("/v1/projects/{id}/deployments/admit", post(move |Json(body):Json<Value>| async move {
-            assert_eq!(body,json!({"protocolVersion":"execution-context-v2", "environmentId":context_json()["environmentId"],
-                "selectionSource":"EXPLICIT","branch":"feature/a","commitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}));
+            assert_eq!(body,admission_request_json());
             let mut context = context_json();
-            if wrong_scope { context["workspaceId"] = json!(Uuid::nil()); }
+            if let Some(field) = changed_field { context[field] = if field == "workspaceBindingGeneration" { json!("2") } else { json!(Uuid::nil()) }; }
             Json(json!({"protocolVersion":"execution-context-v2","context":context,
                 "deployment":{"id":DEPLOYMENT,"attempt":2,"status":"BUILDING","url":null},
                 "snapshot":{"fingerprint":format!("v1:{}","a".repeat(64)),"resolvedAt":"2026-09-12T00:00:00Z"}}))
@@ -121,7 +155,7 @@ async fn admission_preserves_selection_and_rejects_another_scope() {
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
         )
         .await;
-        if wrong_scope {
+        if changed_field.is_some() {
             assert!(
                 result
                     .unwrap_err()
@@ -135,6 +169,38 @@ async fn admission_preserves_selection_and_rejects_another_scope() {
         }
         server.abort();
     }
+}
+
+#[tokio::test]
+async fn admission_context_conflict_preserves_structured_error_without_retry() {
+    let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let app = Router::new().route("/v1/projects/{id}/deployments/admit", post(
+        |State(requests): State<Arc<Mutex<Vec<Value>>>>, Json(body): Json<Value>| async move {
+            requests.lock().unwrap().push(body);
+            (StatusCode::CONFLICT, Json(json!({"code":"CONFLICT", "message":"Execution context changed before admission"})))
+        })).with_state(Arc::clone(&requests));
+    let (client, server) = serve_api(app).await;
+    let context: crate::execution_context::ExecutionContext =
+        serde_json::from_value(context_json()).unwrap();
+    let error = wire::admit(
+        &client,
+        &context.project_id,
+        &context,
+        "feature/a".into(),
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+    )
+    .await
+    .unwrap_err();
+    let error = error
+        .downcast_ref::<crate::api::StructuredApiError>()
+        .unwrap();
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(error.code, "CONFLICT");
+    assert_eq!(
+        requests.lock().unwrap().as_slice(),
+        [admission_request_json()]
+    );
+    server.abort();
 }
 
 #[tokio::test]

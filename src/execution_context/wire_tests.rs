@@ -9,6 +9,9 @@ const DEPLOYMENT_ID: &str = "00000000-0000-0000-0000-000000000003";
 
 fn context_json() -> Value {
     json!({"workspaceId":"00000000-0000-0000-0000-000000000004", "workspaceSlug":"workspace",
+        "productId":PROJECT_ID, "productEnvironmentId":ENVIRONMENT_ID,
+        "workspaceEnvironmentId":"00000000-0000-0000-0000-000000000005", "workspaceBindingGeneration":"1",
+        "serviceId":"00000000-0000-0000-0000-000000000006", "sourceId":"00000000-0000-0000-0000-000000000007",
         "projectId":PROJECT_ID, "projectName":"project", "environmentId":ENVIRONMENT_ID,
         "environmentName":"Production", "environmentType":"PRODUCTION", "sourceRef":null, "selectionSource":"EXPLICIT"})
 }
@@ -39,6 +42,14 @@ async fn generated_execution_requests_preserve_selection_and_validate_snapshot_b
         .await
         .unwrap();
     assert_eq!(context.environment_id, ENVIRONMENT_ID);
+    assert_eq!(
+        context.service_id,
+        context_json()["serviceId"].as_str().unwrap()
+    );
+    assert_eq!(
+        context.source_id,
+        context_json()["sourceId"].as_str().unwrap()
+    );
     let materialized = materialize_desired(&client, &context, None, "EXEC")
         .await
         .unwrap();

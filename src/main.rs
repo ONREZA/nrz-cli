@@ -204,6 +204,7 @@ async fn run_command(
         Command::Link(args) => link::run(args, json, token, workspace, config).await,
         Command::Upgrade(args) => upgrade::run(args, json).await,
         Command::Projects(args) => cli::projects_handler::run(args, json, token, workspace).await,
+        Command::Services(args) => cli::services_handler::run(args, json, token, workspace).await,
         Command::Preview(args) => preview::run(args, json, token, workspace, config).await,
         Command::Config(args) => {
             cli::config_handler::run(args, json, token, workspace, config).await

@@ -6,6 +6,7 @@ use serde::Serialize;
 #[serde(rename_all = "camelCase")]
 pub(super) struct ManagedDatabase {
     pub(super) id: String,
+    pub(super) product_id: Option<String>,
     pub(super) db_name: Option<String>,
     pub(super) status: Option<String>,
     pub(super) cu_size: Option<f64>,
@@ -17,41 +18,43 @@ pub(super) struct ManagedDatabase {
     pub(super) project_attachments: Vec<ProjectAttachment>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct ProjectAttachment {
-    pub(super) project_id: String,
-    pub(super) auto_inject_db_url: Option<bool>,
-    pub(super) env_var_name: Option<String>,
-    pub(super) auto_create_preview_branch: Option<bool>,
-}
+pub(super) type ProjectAttachment = nrz_api::Database200ResponseDatumProjectAttachment;
 
 impl ManagedDatabase {
+    pub(super) fn belongs_to_project(&self, project_id: &str) -> bool {
+        self.product_id.as_deref() == Some(project_id) || self.is_attached_to_project(project_id)
+    }
+
     pub(super) fn attachment_for_project(&self, project_id: &str) -> Option<&ProjectAttachment> {
-        self.project_attachments
+        let mut matching = self
+            .project_attachments
             .iter()
-            .find(|attachment| attachment.project_id == project_id)
+            .filter(|attachment| attachment.project_id.to_string() == project_id);
+        let first = matching.next()?;
+        matching.next().is_none().then_some(first)
     }
 
     pub(super) fn is_attached_to_project(&self, project_id: &str) -> bool {
-        self.attachment_for_project(project_id).is_some()
+        self.project_attachments
+            .iter()
+            .any(|binding| binding.project_id.to_string() == project_id)
     }
 
     pub(super) fn auto_inject_db_url_for_project(&self, project_id: &str) -> Option<bool> {
         self.attachment_for_project(project_id)
-            .and_then(|attachment| attachment.auto_inject_db_url)
+            .map(|attachment| attachment.auto_inject_db_url)
             .or(self.auto_inject_db_url)
     }
 
     pub(super) fn env_var_name_for_project(&self, project_id: &str) -> Option<&str> {
         self.attachment_for_project(project_id)
-            .and_then(|attachment| attachment.env_var_name.as_deref())
+            .map(|attachment| attachment.env_var_name.as_str())
             .or(self.env_var_name.as_deref())
     }
 
     pub(super) fn auto_create_preview_branch_for_project(&self, project_id: &str) -> Option<bool> {
         self.attachment_for_project(project_id)
-            .and_then(|attachment| attachment.auto_create_preview_branch)
+            .map(|attachment| attachment.auto_create_preview_branch)
             .or(self.auto_create_preview_branch)
     }
 }
@@ -79,6 +82,7 @@ pub(super) struct DbInfoResponse {
 #[serde(rename_all = "camelCase")]
 pub(super) struct CreateResponse {
     pub(super) id: String,
+    pub(super) product_id: Option<String>,
     pub(super) db_name: Option<String>,
     pub(super) status: Option<String>,
 }

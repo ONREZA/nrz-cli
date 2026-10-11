@@ -122,17 +122,17 @@ impl From<nrz_api::Project200Response3> for ProjectDetailResponse {
             id: value.id.to_string(),
             name: value.name,
             display_name: value.display_name,
-            source_type: Some(value.source_type.to_string()),
+            source_type: value.source_type.map(|value| value.to_string()),
             git_url: value.git_url,
-            branch: Some(value.branch),
+            branch: value.branch,
             framework_preset: value.framework_preset,
             install_command: value.install_command,
             build_command: value.build_command,
             output_directory: value.output_directory,
-            root_directory: Some(value.root_directory),
-            node_version: Some(value.node_version.to_string()),
-            package_manager: Some(value.package_manager.to_string()),
-            auto_deploy_enabled: Some(value.auto_deploy_enabled),
+            root_directory: value.root_directory,
+            node_version: value.node_version.map(|value| value.to_string()),
+            package_manager: value.package_manager.map(|value| value.to_string()),
+            auto_deploy_enabled: value.auto_deploy_enabled,
             created_at: Some(
                 value
                     .created_at

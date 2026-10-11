@@ -869,38 +869,53 @@ impl EffectiveProjectConfig {
         };
         self.node_version.clone_from(&settings.node_version);
 
-        if self.framework_override.is_none()
-            && let Some(framework) =
-                normalize_authoritative_framework(settings.framework_preset.as_deref())
+        if self
+            .framework_override_source
+            .is_none_or(|source| source == EffectiveSettingOrigin::ServerSettings)
         {
-            self.framework_override = Some(framework.to_string());
-            self.framework_override_source = Some(EffectiveSettingOrigin::ServerSettings);
+            self.framework_override =
+                normalize_authoritative_framework(settings.framework_preset.as_deref())
+                    .map(str::to_owned);
+            self.framework_override_source = self
+                .framework_override
+                .as_ref()
+                .map(|_| EffectiveSettingOrigin::ServerSettings);
         }
 
-        if self.install_command.is_none() {
+        if self
+            .install_command
+            .as_ref()
+            .is_none_or(|setting| setting.origin == EffectiveSettingOrigin::ServerSettings)
+        {
             self.install_command = SourceAwareSetting::from_server_command(
                 settings.install_command.clone(),
                 settings.install_command_source,
             );
         }
 
-        if self.build_command.is_none() {
+        if self
+            .build_command
+            .as_ref()
+            .is_none_or(|setting| setting.origin == EffectiveSettingOrigin::ServerSettings)
+        {
             self.build_command = SourceAwareSetting::from_server_command(
                 settings.build_command.clone(),
                 settings.build_command_source,
             );
         }
 
-        if self.output_directory.is_none() {
+        if self
+            .output_directory
+            .as_ref()
+            .is_none_or(|setting| setting.origin == EffectiveSettingOrigin::ServerSettings)
+        {
             self.output_directory = SourceAwareSetting::from_server_output(
                 settings.output_directory.clone(),
                 settings.output_directory_source,
             );
         }
 
-        if self.git_lfs_enabled.is_none() {
-            self.git_lfs_enabled = settings.git_lfs_enabled;
-        }
+        self.git_lfs_enabled = settings.git_lfs_enabled;
     }
 
     pub fn apply_platform_runner_settings(&mut self, settings: &ProjectBuildSettings) {

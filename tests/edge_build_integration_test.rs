@@ -31,6 +31,26 @@ impl EdgeBuildApiState {
     }
 }
 
+fn edge_build_execution_context() -> serde_json::Value {
+    json!({
+        "workspaceId": "00000000-0000-0000-0000-000000000001",
+        "workspaceSlug": "edge",
+        "productId": "00000000-0000-0000-0000-000000000002",
+        "productEnvironmentId": "00000000-0000-0000-0000-000000000003",
+        "workspaceEnvironmentId": "00000000-0000-0000-0000-000000000004",
+        "workspaceBindingGeneration": "1",
+        "serviceId": "00000000-0000-0000-0000-000000000005",
+        "sourceId": "00000000-0000-0000-0000-000000000006",
+        "projectId": "00000000-0000-0000-0000-000000000002",
+        "projectName": "Edge project",
+        "environmentId": "00000000-0000-0000-0000-000000000003",
+        "environmentName": "Preview",
+        "environmentType": "PREVIEW",
+        "sourceRef": "0123456789abcdef0123456789abcdef01234567",
+        "selectionSource": "DEPLOYMENT"
+    })
+}
+
 async fn edge_build_runner_context(
     State(state): State<EdgeBuildApiState>,
     uri: OriginalUri,
@@ -38,17 +58,7 @@ async fn edge_build_runner_context(
     state.record(Method::GET, &uri);
     Json(json!({
         "protocolVersion": "runner-context-v6",
-        "context": {
-            "workspaceId": "00000000-0000-0000-0000-000000000001",
-            "workspaceSlug": "edge",
-            "projectId": "00000000-0000-0000-0000-000000000002",
-            "projectName": "Edge project",
-            "environmentId": "00000000-0000-0000-0000-000000000003",
-            "environmentName": "Preview",
-            "environmentType": "PREVIEW",
-            "sourceRef": "0123456789abcdef0123456789abcdef01234567",
-            "selectionSource": "DEPLOYMENT"
-        },
+        "context": edge_build_execution_context(),
         "deployment": {
             "id": state.deployment_id,
             "attempt": 1,
@@ -86,17 +96,7 @@ async fn edge_build_materialize(
     assert_eq!(body, json!({ "purpose": "DEPLOY" }));
     Json(json!({
         "protocolVersion": "execution-context-v2",
-        "context": {
-            "workspaceId": "00000000-0000-0000-0000-000000000001",
-            "workspaceSlug": "edge",
-            "projectId": "00000000-0000-0000-0000-000000000002",
-            "projectName": "Edge project",
-            "environmentId": "00000000-0000-0000-0000-000000000003",
-            "environmentName": "Preview",
-            "environmentType": "PREVIEW",
-            "sourceRef": "0123456789abcdef0123456789abcdef01234567",
-            "selectionSource": "DEPLOYMENT"
-        },
+        "context": edge_build_execution_context(),
         "variables": {},
         "secretKeys": [],
         "snapshot": {

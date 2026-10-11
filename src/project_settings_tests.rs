@@ -19,7 +19,18 @@ async fn only_retryable_settings_failures_allow_fallback() {
             false,
         ),
         (StatusCode::OK, json!({"unexpected":"schema"}), false),
+        (
+            StatusCode::OK,
+            serde_json::to_value(nrz_api::Project200Response3 {
+                id: project.parse().unwrap(),
+                name: "database-only".into(),
+                ..Default::default()
+            })
+            .unwrap(),
+            false,
+        ),
     ] {
+        let empty_product = body.get("name").is_some();
         let app = Router::new().route(
             &format!("/v1/projects/{project}"),
             get(move || {
@@ -42,7 +53,16 @@ async fn only_retryable_settings_failures_allow_fallback() {
                 Ok(ProjectSettingsFetch::TransientFailure { .. })
             ));
         } else {
-            assert!(result.is_err());
+            let error = result.err().expect("permanent failure must not fall back");
+            if status == StatusCode::OK && empty_product {
+                assert_eq!(
+                    error
+                        .downcast_ref::<crate::output::CodedError>()
+                        .unwrap()
+                        .code,
+                    "APPLICATION_SERVICE_REQUIRED"
+                );
+            }
         }
         server.abort();
     }

@@ -13,10 +13,10 @@ pub struct DbArgs {
 
 #[derive(Subcommand)]
 pub enum DbCommand {
-    /// List databases in project
+    /// List workspace databases (or filter by the selected Product)
     List,
 
-    /// Create a new managed database
+    /// Create a standalone managed database; attach explicitly with db config
     Create {
         /// Database name
         #[arg(long)]
@@ -91,7 +91,7 @@ pub enum DbCommand {
     /// Manage database branches
     Branches(BranchesArgs),
 
-    /// Show or update auto-inject settings
+    /// Show bindings or explicitly bind a Service and ProductEnvironment
     Config(ConfigArgs),
 
     /// Show database schema (tables, columns, types)
@@ -141,6 +141,25 @@ pub enum BranchesCommand {
 
 #[derive(Parser)]
 pub struct ConfigArgs {
+    /// Application Service receiving this SQL binding
+    #[arg(long)]
+    pub service_id: Option<uuid::Uuid>,
+
+    /// Consumer ProductEnvironment receiving this SQL binding
+    #[arg(long)]
+    pub product_environment_id: Option<uuid::Uuid>,
+
+    /// Database owner's ProductEnvironment in the same Workspace Environment
+    #[arg(long)]
+    pub owner_product_environment_id: Option<uuid::Uuid>,
+
+    /// Exact provider branch ID; never inferred from Git or a branch name
+    #[arg(long)]
+    pub provider_branch_id: Option<String>,
+
+    /// Whether this binding supplies SQL for Functions
+    #[arg(long)]
+    pub functions_default: Option<bool>,
     /// Database ID or name (default: auto-resolved from config)
     pub database: Option<String>,
 
