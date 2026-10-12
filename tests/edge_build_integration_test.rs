@@ -22,6 +22,7 @@ struct EdgeBuildApiState {
     build_command: Option<String>,
     install_command: Option<String>,
     build_toolchain: serde_json::Value,
+    output_directory: Option<String>,
 }
 
 impl EdgeBuildApiState {
@@ -80,7 +81,7 @@ async fn edge_build_runner_context(
             "installCommandSource": if state.build_command.is_some() || !state.application_runtime.is_null() {"USER"} else {"PRESET"},
             "buildCommand": state.build_command,
             "buildCommandSource": if state.build_command.is_some() {"USER"} else {"PRESET"},
-            "outputDirectory": state.build_command.as_ref().map(|_| "."),
+            "outputDirectory": state.output_directory,
             "outputDirectorySource": if state.build_command.is_some() {"USER"} else {"PRESET"},
             "ignoredBuildBehavior": "AUTOMATIC",
             "ignoredBuildFolder": null,
@@ -156,6 +157,7 @@ fn spawn_edge_build_handoff_mock_with_build(
         json!({"family":"NODE"}),
         install_command,
         build_command,
+        None,
     )
 }
 
@@ -165,8 +167,12 @@ fn spawn_edge_build_handoff_mock_with_commands(
     build_toolchain: serde_json::Value,
     install_command: Option<String>,
     build_command: Option<String>,
+    output_directory: Option<&str>,
 ) -> (String, Arc<Mutex<Vec<String>>>) {
     let requests = Arc::new(Mutex::new(Vec::new()));
+    let output_directory = output_directory
+        .map(str::to_owned)
+        .or_else(|| build_command.as_ref().map(|_| ".".into()));
     let state = EdgeBuildApiState {
         deployment_id: deployment_id.to_string(),
         requests: Arc::clone(&requests),
@@ -174,6 +180,7 @@ fn spawn_edge_build_handoff_mock_with_commands(
         build_command,
         install_command,
         build_toolchain,
+        output_directory,
     };
     let app = Router::new()
         .route(
@@ -767,6 +774,200 @@ fn retained_platform_handoff_preserves_authored_targets_without_new_build_facts(
 }
 
 #[test]
+fn fresh_hono_dist_handoff_keeps_primary_lineage_through_runtime_relocation() {
+    for (explicit_entry, authored) in [(true, false), (true, true), (false, false), (false, true)] {
+        let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
+        let entry = if authored {
+            "app/server.mjs"
+        } else {
+            "server.mjs"
+        };
+        let declaration = json!({"family":"BUN","entry":entry,"args":[]});
+        let (api_url, _) = spawn_edge_build_handoff_mock_with_commands(
+            deployment_id,
+            declaration,
+            json!({"family":"BUN"}),
+            Some("true".into()),
+            Some("bun run build".into()),
+            Some("dist"),
+        );
+        let project = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        fs::write(
+            project.path().join("onreza.toml"),
+            format!(
+                "[build]\ntoolchain='bun'\n[deploy]\nruntime='bun'\n{}",
+                if explicit_entry {
+                    format!("entry='{entry}'\n")
+                } else {
+                    String::new()
+                }
+            ),
+        )
+        .unwrap();
+        let build = if authored {
+            "mkdir -p dist/app && cp source.mjs dist/app/server.mjs"
+        } else {
+            "mkdir -p dist && cp source.mjs dist/server.mjs"
+        };
+        fs::write(project.path().join("package.json"), serde_json::to_vec(&json!({"packageManager":"bun@1.4.2","dependencies":{"hono":"4.0.0"},"scripts":{"build":build,"start":format!("bun {entry}")}})).unwrap()).unwrap();
+        fs::write(project.path().join("bun.lock"), "{}").unwrap();
+        fs::create_dir_all(project.path().join("node_modules/hono")).unwrap();
+        fs::write(
+            project.path().join("node_modules/hono/package.json"),
+            r#"{"name":"hono","version":"4.0.0","type":"module","main":"index.js"}"#,
+        )
+        .unwrap();
+        fs::write(
+            project.path().join("node_modules/hono/index.js"),
+            "export default 1",
+        )
+        .unwrap();
+        fs::write(project.path().join("source.mjs"), "export default 'ready'").unwrap();
+        if authored {
+            fs::create_dir_all(project.path().join("dist/.onreza")).unwrap();
+            fs::create_dir_all(project.path().join("dist/worker")).unwrap();
+            fs::write(
+                project.path().join("dist/worker/sibling.js"),
+                "export default 2",
+            )
+            .unwrap();
+            fs::write(
+                project.path().join("dist/.onreza/manifest.json"),
+                serde_json::to_vec(&json!({
+                    "version":1,"routes":[{"pattern":"^/.*$","layer":"primary"}],"layers":[
+                        {"name":"sibling","target":"COMPUTE","directory":"worker","entry":"sibling.js",
+                         "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}},
+                        {"name":"primary","target":"COMPUTE","directory":"app","entry":"server.mjs",
+                         "runtime":{"applicationRuntime":{"family":"BUN","args":[]},"buildRuntimeVersion":"bun-1.4.2"}}
+                    ]
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        let result =
+            edge_build_command(project.path(), output.path(), &api_url, deployment_id, true)
+                .env("ONREZA_BUILD_RUNTIME_VERSION", "bun-1.4.3")
+                .env("ONREZA_BUILD_NODE_MAJOR", "24")
+                .env("ONREZA_RUNTIME_VERSION", "bun-1.4.3")
+                .output()
+                .unwrap();
+        let manifest = source_bundle_manifest(output.path(), &result, "Hono dist/server.mjs");
+        let primary = manifest
+            .layers
+            .iter()
+            .find(|layer| layer.entrypoint.as_deref() == Some(format!("dist/{entry}").as_str()))
+            .unwrap();
+        let runtime = primary.runtime_config.as_ref().unwrap();
+        assert_eq!(runtime["buildRuntimeVersion"], "bun-1.4.3");
+        assert_eq!(
+            runtime
+                .get("runtimePolicyLineage")
+                .and_then(|value| value.as_str()),
+            Some("BUN:CURRENT")
+        );
+        if authored {
+            assert_eq!(primary.name, "primary");
+            let sibling = manifest
+                .layers
+                .iter()
+                .find(|layer| layer.name == "sibling")
+                .unwrap();
+            let runtime = sibling.runtime_config.as_ref().unwrap();
+            assert_eq!(runtime["buildRuntimeVersion"], "node-22");
+            assert!(runtime.get("runtimePolicyLineage").is_none());
+        }
+        assert!(
+            manifest
+                .files
+                .iter()
+                .any(|file| file.path == format!("dist/{entry}"))
+        );
+    }
+}
+
+#[test]
+fn fresh_python_module_handoff_keeps_project_owned_bootstrap_with_dist_output() {
+    let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
+    let (api_url, _) = spawn_edge_build_handoff_mock_with_commands(
+        deployment_id,
+        json!({"family":"PYTHON","pythonVersion":"3.13","entry":".onreza/python/launch.py","args":["MODULE","app"]}),
+        json!({"family":"PYTHON","pythonVersion":"3.13"}),
+        Some("true".into()),
+        Some(String::new()),
+        Some("dist"),
+    );
+    let project = tempfile::tempdir().unwrap();
+    let output = tempfile::tempdir().unwrap();
+    fs::write(project.path().join("onreza.toml"), "[build]\ntoolchain='python'\npython_version='3.13'\n[deploy]\nruntime='python'\npython_version='3.13'\nmodule='app'\n").unwrap();
+    fs::write(
+        project.path().join("requirements.txt"),
+        "retained-dep==1.0\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("app.py"),
+        "import retained_dep\nprint(retained_dep.VALUE)\n",
+    )
+    .unwrap();
+    let dependencies = project.path().join(".onreza/python/3.14/site-packages");
+    fs::create_dir_all(&dependencies).unwrap();
+    fs::write(
+        dependencies.join("retained_dep.py"),
+        "VALUE = 'BOOTSTRAP_OK'\n",
+    )
+    .unwrap();
+    fs::create_dir(project.path().join("dist")).unwrap();
+    fs::write(project.path().join("dist/asset.txt"), "build output").unwrap();
+    let result = edge_build_command(project.path(), output.path(), &api_url, deployment_id, true)
+        .env("ONREZA_BUILD_RUNTIME_FAMILY", "python")
+        .env("ONREZA_BUILD_RUNTIME_VERSION", "python-3.14")
+        .env("ONREZA_RUNTIME_VERSION", "python-3.14")
+        .output()
+        .unwrap();
+    let manifest = source_bundle_manifest(output.path(), &result, "project-owned Python bootstrap");
+    let primary = &manifest.layers[0];
+    assert_eq!(
+        primary.entrypoint.as_deref(),
+        Some(".onreza/python/launch.py")
+    );
+    let runtime = primary.runtime_config.as_ref().unwrap();
+    assert_eq!(runtime["buildRuntimeVersion"], "python-3.14");
+    assert_eq!(runtime["runtimePolicyLineage"], "PYTHON:3.13");
+    assert!(manifest.files.iter().any(|file| file.path == "app.py"));
+    let unpacked = tempfile::tempdir().unwrap();
+    tar::Archive::new(
+        zstd::Decoder::new(fs::File::open(output.path().join("source-bundle-v1.tar.zst")).unwrap())
+            .unwrap(),
+    )
+    .unpack(unpacked.path())
+    .unwrap();
+    fs::remove_dir_all(project.path()).unwrap();
+    let executed = std::process::Command::new("python3")
+        .args(["-S", primary.entrypoint.as_deref().unwrap()])
+        .args(
+            runtime["applicationRuntime"]["args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|argument| argument.as_str().unwrap()),
+        )
+        .current_dir(unpacked.path())
+        .output()
+        .unwrap();
+    assert!(
+        executed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&executed.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&executed.stdout).trim(),
+        "BOOTSTRAP_OK"
+    );
+}
+
+#[test]
 fn fresh_python_dependencies_use_resolved_minors_without_rejecting_requested_lines() {
     for (fresh_install, fresh_build) in [(true, false), (false, true), (false, false)] {
         let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
@@ -776,6 +977,7 @@ fn fresh_python_dependencies_use_resolved_minors_without_rejecting_requested_lin
             json!({"family":"PYTHON","pythonVersion":"3.12"}),
             Some(if fresh_install { "true" } else { "" }.into()),
             Some(if fresh_build { "true" } else { "" }.into()),
+            None,
         );
         let project = tempfile::tempdir().unwrap();
         let output = tempfile::tempdir().unwrap();

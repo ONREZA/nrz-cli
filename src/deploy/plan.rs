@@ -739,6 +739,13 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         .transpose()
         .context("failed to serialize manifest")?;
 
+    let mut application_runtime = super::application_runtime_in_output(
+        build_artifact.detection.metadata.application_runtime(),
+        project_dir,
+        &build_artifact.output_dir,
+        effective.deploy_entry().is_some(),
+    );
+
     if compute == ComputeType::Process && !has_build_manifest {
         let process_entry_root = if effective.deploy_entry().is_none()
             && build_artifact
@@ -773,7 +780,7 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         match entry {
             Some(entry) => {
                 let mut auto = build_manifest::generate_compute_manifest(&entry);
-                let application_runtime = super::application_runtime_in_output(
+                application_runtime = super::application_runtime_in_output(
                     build_artifact.detection.metadata.application_runtime(),
                     project_dir,
                     process_entry_root,
@@ -832,6 +839,52 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
     let manifest_for_planning: build_manifest::Manifest =
         serde_json::from_value(manifest_raw.clone())
             .context("failed to parse resolved deployment manifest")?;
+    // Bind the validated owner before relocation changes artifact-relative paths.
+    let runtime_policy_lineage = if effective.primary_runtime_rebuilt()
+        && super::manifest_has_compute_layer(&manifest_for_planning)
+    {
+        if let Some(original) = command
+            .effective
+            .platform_source_build_context()
+            .and_then(|context| context.application_runtime.as_ref())
+        {
+            let lineage = match original.family {
+                nrz_source_bundle::ApplicationRuntimeFamily::Bun => Some("BUN:CURRENT".to_string()),
+                nrz_source_bundle::ApplicationRuntimeFamily::Node => Some(format!(
+                    "NODE:{}",
+                    command
+                        .effective
+                        .node_version()
+                        .context("original Node lineage is missing")?
+                        .strip_prefix("NODE_")
+                        .context("original Node lineage is invalid")?
+                )),
+                nrz_source_bundle::ApplicationRuntimeFamily::Python => Some(format!(
+                    "PYTHON:{}",
+                    original
+                        .python_version
+                        .context("original Python lineage is missing")?
+                        .version()
+                )),
+                nrz_source_bundle::ApplicationRuntimeFamily::Executable => None,
+            };
+            if let Some(lineage) = lineage {
+                let declaration = application_runtime
+                    .as_ref()
+                    .context("runtime policy application declaration is missing")?;
+                let index =
+                    super::select_application_runtime_primary(&manifest_for_planning, declaration)?
+                        .context("runtime policy primary layer is missing")?;
+                Some((manifest_for_planning.layers[index].name.clone(), lineage))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let mut runtime_artifact = super::resolve_runtime_artifact_with_manifest_source(
         &command.root_dir,
         project_dir,
@@ -841,6 +894,14 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         json,
         deployment_manifest_source,
     )?;
+    if let Some((primary, _)) = &runtime_policy_lineage {
+        anyhow::ensure!(
+            runtime_artifact.manifest.layers.iter().any(|layer| {
+                layer.name == *primary && layer.target == build_manifest::LayerTarget::Compute
+            }),
+            "runtime policy primary layer is missing after artifact relocation"
+        );
+    }
     if native_recipe == Some(crate::detect::native::NativeRecipe::FlutterWeb) {
         super::native_build::apply_flutter_static_cache_policy(&mut runtime_artifact.manifest);
     }
@@ -974,57 +1035,6 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         super::build_functions_payload(effective.config(), project_dir, json, args.force_rules)
             .await?;
 
-    let runtime_policy_lineage = if effective.primary_runtime_rebuilt() {
-        if let Some(original) = command
-            .effective
-            .platform_source_build_context()
-            .and_then(|context| context.application_runtime.as_ref())
-        {
-            let lineage = match original.family {
-                nrz_source_bundle::ApplicationRuntimeFamily::Bun => Some("BUN:CURRENT".to_string()),
-                nrz_source_bundle::ApplicationRuntimeFamily::Node => Some(format!(
-                    "NODE:{}",
-                    command
-                        .effective
-                        .node_version()
-                        .context("original Node lineage is missing")?
-                        .strip_prefix("NODE_")
-                        .context("original Node lineage is invalid")?
-                )),
-                nrz_source_bundle::ApplicationRuntimeFamily::Python => Some(format!(
-                    "PYTHON:{}",
-                    original
-                        .python_version
-                        .context("original Python lineage is missing")?
-                        .version()
-                )),
-                nrz_source_bundle::ApplicationRuntimeFamily::Executable => None,
-            };
-            if let Some(lineage) = lineage {
-                let declaration = super::application_runtime_in_output(
-                    Some(original),
-                    project_dir,
-                    &runtime_artifact.root_dir,
-                    effective.deploy_entry().is_some(),
-                );
-                let index = super::select_application_runtime_primary(
-                    &runtime_artifact.manifest,
-                    declaration.as_ref().unwrap(),
-                )?
-                .context("runtime policy primary layer is missing")?;
-                Some((
-                    runtime_artifact.manifest.layers[index].name.clone(),
-                    lineage,
-                ))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
     Ok(DeployPlan {
         artifact: ArtifactPlan {
             build: build_artifact,

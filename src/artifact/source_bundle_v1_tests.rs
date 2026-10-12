@@ -2599,10 +2599,10 @@ fn fresh_primary_lineage_is_hashed_without_rewriting_sibling_provenance() {
     fs::write(directory.path().join("sibling.js"), b"export default 2").unwrap();
     let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
         "version":1, "routes":[], "layers":[
-            {"name":"server", "target":"COMPUTE", "directory":".", "entry":"server.js",
-                "runtime":{"applicationRuntime":{"family":"NODE","args":[]}, "buildRuntimeVersion":"node-26"}},
             {"name":"sibling", "target":"COMPUTE", "directory":".", "entry":"sibling.js",
-                "runtime":{"applicationRuntime":{"family":"BUN","args":[]}, "buildRuntimeVersion":"bun-1.4.2"}}
+                "runtime":{"applicationRuntime":{"family":"BUN","args":[]}, "buildRuntimeVersion":"bun-1.4.2"}},
+            {"name":"server", "target":"COMPUTE", "directory":".", "entry":"server.js",
+                "runtime":{"applicationRuntime":{"family":"NODE","args":[]}, "buildRuntimeVersion":"node-26"}}
         ]
     })).unwrap();
     let root = ArtifactRoot::open(directory.path()).unwrap();
@@ -2625,7 +2625,7 @@ fn fresh_primary_lineage_is_hashed_without_rewriting_sibling_provenance() {
         .unwrap();
         let layers = &plan.logical_manifest.layers;
         assert_eq!(
-            layers[0]
+            layers[1]
                 .runtime_config
                 .as_ref()
                 .unwrap()
@@ -2634,11 +2634,11 @@ fn fresh_primary_lineage_is_hashed_without_rewriting_sibling_provenance() {
             lineage.map(|(_, value)| value)
         );
         assert_eq!(
-            layers[1].runtime_config.as_ref().unwrap()["buildRuntimeVersion"],
+            layers[0].runtime_config.as_ref().unwrap()["buildRuntimeVersion"],
             "bun-1.4.2"
         );
         assert!(
-            layers[1]
+            layers[0]
                 .runtime_config
                 .as_ref()
                 .unwrap()
