@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.45.0] - 2026-10-12
+
+### 🐛 Bug Fixes
+
+- **deploy:** honor runtime policy and provenance ([17e843d](https://github.com/ONREZA/nrz-cli/commit/17e843da549b532d34d6de95f7ced21b4ca3017e))
+- **cli:** preserve nullable deployment history ([1f7b550](https://github.com/ONREZA/nrz-cli/commit/1f7b5508f5e9d7382e237441dcf4bf3fba5eef2b))
+- **cli:** preserve scalar union wire values ([95ebeb5](https://github.com/ONREZA/nrz-cli/commit/95ebeb55542dbe1b178ae6ef7189ad604cf159ed))
+- **deploy:** sync runtime bun projection ([3c72905](https://github.com/ONREZA/nrz-cli/commit/3c72905a242290aafad66c6dc8feca1820994cb0))
+
+### ✨ Features
+
+- **cli:** support product service contexts ([3ee9919](https://github.com/ONREZA/nrz-cli/commit/3ee991940ac7a13b113ba95e38534172d522c054))
+
 ## [0.44.0] - 2026-10-10
 
 ### ✨ Features
