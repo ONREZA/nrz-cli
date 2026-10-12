@@ -775,6 +775,16 @@ fn retained_platform_handoff_preserves_authored_targets_without_new_build_facts(
 
 #[test]
 fn fresh_hono_dist_handoff_keeps_primary_lineage_through_runtime_relocation() {
+    let bun = assert_cmd::Command::new("bun")
+        .arg("--version")
+        .assert()
+        .success();
+    let target = format!(
+        "bun-{}",
+        std::str::from_utf8(&bun.get_output().stdout)
+            .unwrap()
+            .trim()
+    );
     for (explicit_entry, authored) in [(true, false), (true, true), (false, false), (false, true)] {
         let deployment_id = "01991c1d-08ad-75f0-8f9a-e5925fb3c2a7";
         let entry = if authored {
@@ -848,9 +858,9 @@ fn fresh_hono_dist_handoff_keeps_primary_lineage_through_runtime_relocation() {
         }
         let result =
             edge_build_command(project.path(), output.path(), &api_url, deployment_id, true)
-                .env("ONREZA_BUILD_RUNTIME_VERSION", "bun-1.4.3")
+                .env("ONREZA_BUILD_RUNTIME_VERSION", &target)
                 .env("ONREZA_BUILD_NODE_MAJOR", "24")
-                .env("ONREZA_RUNTIME_VERSION", "bun-1.4.3")
+                .env("ONREZA_RUNTIME_VERSION", &target)
                 .output()
                 .unwrap();
         let manifest = source_bundle_manifest(output.path(), &result, "Hono dist/server.mjs");
@@ -860,7 +870,7 @@ fn fresh_hono_dist_handoff_keeps_primary_lineage_through_runtime_relocation() {
             .find(|layer| layer.entrypoint.as_deref() == Some(format!("dist/{entry}").as_str()))
             .unwrap();
         let runtime = primary.runtime_config.as_ref().unwrap();
-        assert_eq!(runtime["buildRuntimeVersion"], "bun-1.4.3");
+        assert_eq!(runtime["buildRuntimeVersion"], target);
         assert_eq!(
             runtime
                 .get("runtimePolicyLineage")
