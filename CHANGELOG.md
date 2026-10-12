@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.45.1] - 2026-10-12
+
+### 🐛 Bug Fixes
+
+- **tests:** match admitted bun to local tool ([ca50267](https://github.com/ONREZA/nrz-cli/commit/ca502676ba76504c270ee046cd04223f7409e294))
+- **deploy:** retain runtime policy owner ([54d32c4](https://github.com/ONREZA/nrz-cli/commit/54d32c46548635e5a9f9042e2ef92e4981a25870))
+
 ## [0.45.0] - 2026-10-12
 
 ### 🐛 Bug Fixes
