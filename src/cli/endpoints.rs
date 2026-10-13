@@ -36,7 +36,7 @@ pub enum EndpointCommand {
         #[arg(long)]
         revoke: bool,
     },
-    /// Import provider ports for this caller layer; requires both Product permissions
+    /// Grant provider imports with both Product permissions, or revoke this caller's existing import
     Import {
         layer: String,
         #[arg(long)]

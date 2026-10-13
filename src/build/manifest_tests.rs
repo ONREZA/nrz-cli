@@ -2576,3 +2576,23 @@ fn nextjs_adapter_manifest_without_static_files_is_valid() {
     assert_eq!(m.routes.len(), 1);
     assert_eq!(m.routes[0].layer, "server");
 }
+
+#[test]
+fn modern_layer_names_accept_codepoints_and_reject_controls() {
+    let mut manifest = generate_compute_manifest("server.js");
+    manifest.layers[0]
+        .runtime
+        .as_mut()
+        .unwrap()
+        .network
+        .as_mut()
+        .unwrap()
+        .exposure = "PRIVATE".into();
+    manifest.routes.clear();
+    manifest.layers[0].name = "😀".repeat(40);
+    assert!(validate(&manifest).is_ok());
+    for name in ["api\n".into(), "api\u{85}".into(), "😀".repeat(65)] {
+        manifest.layers[0].name = name;
+        assert!(validate(&manifest).is_err());
+    }
+}

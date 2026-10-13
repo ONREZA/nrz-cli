@@ -120,7 +120,7 @@ pub async fn run(
     if json {
         output::json_output(&value)
     } else {
-        println!("{}", serde_json::to_string_pretty(&value)?)
+        eprintln!("{}", serde_json::to_string_pretty(&value)?)
     }
     Ok(())
 }

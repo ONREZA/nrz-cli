@@ -419,3 +419,35 @@ stage и дополнительные Python-слои. Известные Mach-O
 Эта проверка формата и архитектуры не доказывает полную ABI-совместимость или
 импортируемость packages. Relocatable `.o` и архивы `.a` могут оставаться assets;
 платформа членов архивов этой проверкой не подтверждается.
+
+
+## [[services]]: сеть Compute layers
+
+`services` описывает endpoints выбранного Service; `name` — точное имя COMPUTE
+layer, а не имя отдельного platform Service. Если блок объявлен, он должен
+покрывать все COMPUTE layers. `nrz deploy --service-id <UUID>` выбирает Service;
+локальные `DIR`/`--app` и overrides сохраняют свой приоритет.
+
+```toml
+[[services]]
+name = "server"
+exposure = "private"
+ports = [{ name = "http", protocol = "http", port = 3000, binding = "primary" }, { name = "raw", protocol = "tcp", port = 9000, binding = "fixed" }]
+readiness = { protocol = "http", port = "http", path = "/health" }
+allow_from = [{ layer_name = "worker" }]
+```
+
+`allow_from` без `service_id` ссылается на sibling COMPUTE layer текущего
+Service, существующий в том же manifest. Для другого Service задайте точный
+`service_id`; между Product дополнительно нужны export/import портов в том же
+Workspace Environment и права на оба Product. Владелец caller Product может
+отозвать собственный существующий import независимо от прав на provider.
+
+`primary` поддерживает `PORT`; `fixed` сохраняет логический номер порта.
+Readiness ссылается на имя объявленного порта: `tcp` без `path` или `http` с
+абсолютным `path`. PRIVATE не имеет публичных routes. У автоматически
+сгенерированного manifest CLI убирает routes PRIVATE layers; в авторском
+`.onreza/manifest.json` удалите их явно. Новый writer использует manifest v2 с
+обязательным `runtime.network` у каждого COMPUTE layer; retained v1 остаётся
+форматом чтения. Изменение PRIVATE→PUBLIC выполняется отдельным exposure
+command с route preview, а публикация маршрута требует нового deployment.

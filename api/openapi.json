@@ -192,12 +192,14 @@
                                   "properties": {
                                     "serviceId": {
                                       "type": "string",
-                                      "format": "uuid"
+                                      "format": "uuid",
+                                      "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
                                     },
                                     "layerName": {
                                       "type": "string",
                                       "minLength": 1,
-                                      "maxLength": 64
+                                      "maxLength": 64,
+                                      "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                                     }
                                   },
                                   "required": [
@@ -396,12 +398,14 @@
                                   "properties": {
                                     "serviceId": {
                                       "type": "string",
-                                      "format": "uuid"
+                                      "format": "uuid",
+                                      "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
                                     },
                                     "layerName": {
                                       "type": "string",
                                       "minLength": 1,
-                                      "maxLength": 64
+                                      "maxLength": 64,
+                                      "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                                     }
                                   },
                                   "required": [
@@ -718,7 +722,8 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 64
+              "maxLength": 64,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
             }
           }
         ],
@@ -916,7 +921,7 @@
     },
     "/v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/import": {
       "put": {
-        "summary": "Set or revoke scoped endpoint import with both Product permissions",
+        "summary": "Grant endpoint imports with both Product permissions or withdraw an owned import",
         "tags": [
           "Compute Endpoints"
         ],
@@ -966,7 +971,8 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 64
+              "maxLength": 64,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
             }
           }
         ],
@@ -1225,7 +1231,8 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 64
+              "maxLength": 64,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
             }
           }
         ],
@@ -1334,12 +1341,14 @@
                           "properties": {
                             "serviceId": {
                               "type": "string",
-                              "format": "uuid"
+                              "format": "uuid",
+                              "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
                             },
                             "layerName": {
                               "type": "string",
                               "minLength": 1,
-                              "maxLength": 64
+                              "maxLength": 64,
+                              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                             }
                           },
                           "required": [
@@ -1368,7 +1377,8 @@
                         "layer": {
                           "type": "string",
                           "minLength": 1,
-                          "maxLength": 64
+                          "maxLength": 64,
+                          "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                         },
                         "pattern": {
                           "type": "string",
@@ -1603,7 +1613,8 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 64
+              "maxLength": 64,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
             }
           }
         ],
@@ -1634,7 +1645,8 @@
                         "layer": {
                           "type": "string",
                           "minLength": 1,
-                          "maxLength": 64
+                          "maxLength": 64,
+                          "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                         },
                         "pattern": {
                           "type": "string",
@@ -20062,12 +20074,14 @@
                                               "properties": {
                                                 "serviceId": {
                                                   "type": "string",
-                                                  "format": "uuid"
+                                                  "format": "uuid",
+                                                  "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
                                                 },
                                                 "layerName": {
                                                   "type": "string",
                                                   "minLength": 1,
-                                                  "maxLength": 64
+                                                  "maxLength": 64,
+                                                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                                                 }
                                               },
                                               "required": [
@@ -21507,12 +21521,14 @@
                                           "properties": {
                                             "serviceId": {
                                               "type": "string",
-                                              "format": "uuid"
+                                              "format": "uuid",
+                                              "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
                                             },
                                             "layerName": {
                                               "type": "string",
                                               "minLength": 1,
-                                              "maxLength": 64
+                                              "maxLength": 64,
+                                              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                                             }
                                           },
                                           "required": [
@@ -22502,12 +22518,14 @@
                                           "properties": {
                                             "serviceId": {
                                               "type": "string",
-                                              "format": "uuid"
+                                              "format": "uuid",
+                                              "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
                                             },
                                             "layerName": {
                                               "type": "string",
                                               "minLength": 1,
-                                              "maxLength": 64
+                                              "maxLength": 64,
+                                              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                                             }
                                           },
                                           "required": [
@@ -26882,7 +26900,8 @@
                                 "name": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "maxLength": 64
+                                  "maxLength": 64,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                                 },
                                 "directory": {
                                   "type": "string",
@@ -26907,7 +26926,8 @@
                                 "name": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "maxLength": 64
+                                  "maxLength": 64,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                                 },
                                 "directory": {
                                   "type": "string",
@@ -27019,12 +27039,14 @@
                                             "properties": {
                                               "serviceId": {
                                                 "type": "string",
-                                                "format": "uuid"
+                                                "format": "uuid",
+                                                "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
                                               },
                                               "layerName": {
                                                 "type": "string",
                                                 "minLength": 1,
-                                                "maxLength": 64
+                                                "maxLength": 64,
+                                                "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                                               }
                                             },
                                             "required": [

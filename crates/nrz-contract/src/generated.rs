@@ -4643,6 +4643,13 @@ pub mod manifest {
             if value.chars().count() < 1usize {
                 return Err("shorter than 1 characters".into());
             }
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| {
+                    ::regress::Regex::new("^[^\\x00-\\x1f\\x7f-\\x9f]*$").unwrap()
+                });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[^\\x00-\\x1f\\x7f-\\x9f]*$\"".into());
+            }
             Ok(Self(value.to_string()))
         }
     }
@@ -4959,6 +4966,13 @@ pub mod manifest {
             }
             if value.chars().count() < 1usize {
                 return Err("shorter than 1 characters".into());
+            }
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> =
+                ::std::sync::LazyLock::new(|| {
+                    ::regress::Regex::new("^[^\\x00-\\x1f\\x7f-\\x9f]*$").unwrap()
+                });
+            if PATTERN.find(value).is_none() {
+                return Err("doesn't match pattern \"^[^\\x00-\\x1f\\x7f-\\x9f]*$\"".into());
             }
             Ok(Self(value.to_string()))
         }
@@ -9235,6 +9249,13 @@ pub mod runtime_artifact_graph {
             }
             if value.chars().count() < 1usize {
                 return Err("shorter than 1 characters".into());
+            }
+            static PATTERN: ::std::sync::LazyLock<::regress::Regex> = ::std::sync::LazyLock::new(||
+            { ::regress::Regex::new("^[^\\x00-\\x1f\\x7f-\\x9f]*$").unwrap() });
+            if PATTERN.find(value).is_none() {
+                return Err(
+                    "doesn't match pattern \"^[^\\x00-\\x1f\\x7f-\\x9f]*$\"".into(),
+                );
             }
             Ok(Self(value.to_string()))
         }

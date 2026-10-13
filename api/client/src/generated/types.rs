@@ -65,6 +65,11 @@ static REGEX_PROJECT200RESPONSE3_WORKSPACE_BINDING_GENERATION: std::sync::LazyLo
     std::sync::LazyLock::new(|| regex::Regex::new("^[1-9][0-9]*$").expect("invalid regex"));
 static REGEX_PROJECT_REQUEST_BODY_BRANCH: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[a-zA-Z0-9_\\-/.]+$").expect("invalid regex"));
+static REGEX_PUT_V1PROJECTS_BY_ID_SERVICES_BY_SERVICE_ID_ENVIRONMENTS_BY_ENVIRONMENT_ID_ENDPOINTS_BY_LAYER_NAME_EXPORT_REQUEST_PATH_LAYER_NAME: std::sync::LazyLock<
+    regex::Regex,
+> = std::sync::LazyLock::new(|| {
+    regex::Regex::new("^[^\\x00-\\x1f\\x7f-\\x9f]*$").expect("invalid regex")
+});
 static REGEX_REMOTE_IMAGE_SOURCE_AUTHORING_ID: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| {
         regex::Regex::new("^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$").expect("invalid regex")
@@ -3534,7 +3539,12 @@ pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpoi
     pub id: uuid::Uuid,
     pub service_id: uuid::Uuid,
     pub environment_id: uuid::Uuid,
-    #[validate(length(min = 1u64, max = 64u64))]
+    #[validate(
+        length(min = 1u64, max = 64u64),
+        regex(
+            path = "REGEX_PUT_V1PROJECTS_BY_ID_SERVICES_BY_SERVICE_ID_ENVIRONMENTS_BY_ENVIRONMENT_ID_ENDPOINTS_BY_LAYER_NAME_EXPORT_REQUEST_PATH_LAYER_NAME"
+        )
+    )]
     pub layer_name: String,
 }
 /// Set or revoke scoped endpoint export
@@ -3747,10 +3757,15 @@ pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpoi
     pub id: uuid::Uuid,
     pub service_id: uuid::Uuid,
     pub environment_id: uuid::Uuid,
-    #[validate(length(min = 1u64, max = 64u64))]
+    #[validate(
+        length(min = 1u64, max = 64u64),
+        regex(
+            path = "REGEX_PUT_V1PROJECTS_BY_ID_SERVICES_BY_SERVICE_ID_ENVIRONMENTS_BY_ENVIRONMENT_ID_ENDPOINTS_BY_LAYER_NAME_EXPORT_REQUEST_PATH_LAYER_NAME"
+        )
+    )]
     pub layer_name: String,
 }
-/// Set or revoke scoped endpoint import with both Product permissions
+/// Grant endpoint imports with both Product permissions or withdraw an owned import
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameImportRequest {
     #[validate(nested)]
@@ -3922,7 +3937,12 @@ pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpoi
     pub id: uuid::Uuid,
     pub service_id: uuid::Uuid,
     pub environment_id: uuid::Uuid,
-    #[validate(length(min = 1u64, max = 64u64))]
+    #[validate(
+        length(min = 1u64, max = 64u64),
+        regex(
+            path = "REGEX_PUT_V1PROJECTS_BY_ID_SERVICES_BY_SERVICE_ID_ENVIRONMENTS_BY_ENVIRONMENT_ID_ENDPOINTS_BY_LAYER_NAME_EXPORT_REQUEST_PATH_LAYER_NAME"
+        )
+    )]
     pub layer_name: String,
 }
 /// Authorize endpoint network change with explicit public exposure preview
@@ -4157,7 +4177,12 @@ pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpoi
     pub id: uuid::Uuid,
     pub service_id: uuid::Uuid,
     pub environment_id: uuid::Uuid,
-    #[validate(length(min = 1u64, max = 64u64))]
+    #[validate(
+        length(min = 1u64, max = 64u64),
+        regex(
+            path = "REGEX_PUT_V1PROJECTS_BY_ID_SERVICES_BY_SERVICE_ID_ENVIRONMENTS_BY_ENVIRONMENT_ID_ENDPOINTS_BY_LAYER_NAME_EXPORT_REQUEST_PATH_LAYER_NAME"
+        )
+    )]
     pub layer_name: String,
 }
 /// Authorize explicit endpoint exposure transition and future public routes
@@ -17198,7 +17223,12 @@ pub struct Endpoint200ResponseEndpointNetworkAllowFrom {
     #[serde(rename = "serviceId")]
     pub service_id: uuid::Uuid,
     #[serde(rename = "layerName")]
-    #[validate(length(min = 1u64, max = 64u64))]
+    #[validate(
+        length(min = 1u64, max = 64u64),
+        regex(
+            path = "REGEX_PUT_V1PROJECTS_BY_ID_SERVICES_BY_SERVICE_ID_ENVIRONMENTS_BY_ENVIRONMENT_ID_ENDPOINTS_BY_LAYER_NAME_EXPORT_REQUEST_PATH_LAYER_NAME"
+        )
+    )]
     pub layer_name: String,
 }
 #[derive(
@@ -17397,7 +17427,12 @@ pub struct IdResponse {
 )]
 #[serde(deny_unknown_fields)]
 pub struct NetworkRequestBodyPublicRoutePreview {
-    #[validate(length(min = 1u64, max = 64u64))]
+    #[validate(
+        length(min = 1u64, max = 64u64),
+        regex(
+            path = "REGEX_PUT_V1PROJECTS_BY_ID_SERVICES_BY_SERVICE_ID_ENVIRONMENTS_BY_ENVIRONMENT_ID_ENDPOINTS_BY_LAYER_NAME_EXPORT_REQUEST_PATH_LAYER_NAME"
+        )
+    )]
     pub layer: String,
     #[validate(length(min = 1u64))]
     pub pattern: String,
@@ -25078,7 +25113,12 @@ pub struct FailBeforeSource200Response {
 )]
 #[serde(deny_unknown_fields)]
 pub struct LayerKindObject {
-    #[validate(length(min = 1u64, max = 64u64))]
+    #[validate(
+        length(min = 1u64, max = 64u64),
+        regex(
+            path = "REGEX_PUT_V1PROJECTS_BY_ID_SERVICES_BY_SERVICE_ID_ENVIRONMENTS_BY_ENVIRONMENT_ID_ENDPOINTS_BY_LAYER_NAME_EXPORT_REQUEST_PATH_LAYER_NAME"
+        )
+    )]
     pub name: String,
     #[validate(length(min = 1u64, max = 256u64))]
     pub directory: String,
@@ -25204,7 +25244,12 @@ pub struct LayerKindObject2Runtime {
 )]
 #[serde(deny_unknown_fields)]
 pub struct LayerKindObject2 {
-    #[validate(length(min = 1u64, max = 64u64))]
+    #[validate(
+        length(min = 1u64, max = 64u64),
+        regex(
+            path = "REGEX_PUT_V1PROJECTS_BY_ID_SERVICES_BY_SERVICE_ID_ENVIRONMENTS_BY_ENVIRONMENT_ID_ENDPOINTS_BY_LAYER_NAME_EXPORT_REQUEST_PATH_LAYER_NAME"
+        )
+    )]
     pub name: String,
     #[validate(length(min = 1u64, max = 256u64))]
     pub directory: String,

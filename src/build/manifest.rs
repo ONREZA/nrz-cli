@@ -310,6 +310,9 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
 
     // Per-layer rules
     for layer in &manifest.layers {
+        if layer.name.chars().any(char::is_control) {
+            anyhow::bail!("layer name must not contain control characters");
+        }
         if layer.name.is_empty() {
             anyhow::bail!("layer name must not be empty");
         }

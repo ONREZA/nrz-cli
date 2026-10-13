@@ -291,7 +291,7 @@ impl DeployPlan {
         for layer in &manifest.layers {
             if let Some(network) = layer.runtime.as_ref().and_then(|r| r.network.as_ref()) {
                 for caller in &network.allow_from {
-                    if caller.service_id == service_id {
+                    if caller.service_id.eq_ignore_ascii_case(service_id) {
                         anyhow::ensure!(
                             manifest
                                 .layers

@@ -551,6 +551,59 @@ fn info_accepts_database_only_product_without_inventing_an_application() {
 }
 
 #[test]
+fn endpoints_keep_machine_stdout_separate_from_human_output() {
+    let service = "00000000-0000-0000-0000-000000000004";
+    let environment = "00000000-0000-0000-0000-000000000005";
+    let response = json!({
+        "context": {"productId": PROJECT, "serviceId": service, "environmentId": environment,
+            "workspaceEnvironmentId": "00000000-0000-0000-0000-000000000006"},
+        "canManage": false, "endpoints": [], "available": []
+    });
+    for mode in ["--json", "--human"] {
+        let (api_url, requests) = project_api(response.clone());
+        let directory = tempfile::tempdir().unwrap();
+        let output = nrz()
+            .current_dir(directory.path())
+            .env("NRZ_API_URL", api_url)
+            .args([
+                mode,
+                "--token",
+                "test-token",
+                "endpoints",
+                "--project-id",
+                PROJECT,
+                "--service-id",
+                service,
+                "--environment-id",
+                environment,
+                "list",
+            ])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        request(
+            &requests,
+            "GET",
+            &format!(
+                "/v1/projects/{PROJECT}/services/{service}/environments/{environment}/endpoints/"
+            ),
+        );
+        if mode == "--json" {
+            assert_eq!(stdout_json(&output), response);
+        } else {
+            assert!(
+                output.stdout.is_empty(),
+                "human endpoint data leaked into machine stdout"
+            );
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output.stderr).unwrap(),
+                response
+            );
+        }
+    }
+}
+
+#[test]
 fn services_discover_sources_and_configure_an_explicit_neighbor_service() {
     let service = "00000000-0000-0000-0000-000000000004";
     let source = "00000000-0000-0000-0000-000000000005";

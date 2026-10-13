@@ -309,6 +309,13 @@ pub fn verify_runtime_artifact_graph(
     let mut referenced_mounts = HashSet::new();
     for layer in &wire.runtime_layers {
         let layer_name = layer.layer_name.as_str();
+        if schema_version == RUNTIME_ARTIFACT_GRAPH_NETWORK_SCHEMA_VERSION
+            && (layer_name.is_empty()
+                || layer_name.chars().count() > 64
+                || layer_name.chars().any(char::is_control))
+        {
+            return invariant("invalid modern runtime layer name");
+        }
         if !layer_names.insert(layer_name) {
             return invariant(format!("duplicate runtime layer '{layer_name}'"));
         }

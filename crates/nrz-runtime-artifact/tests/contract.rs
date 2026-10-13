@@ -328,3 +328,25 @@ fn launch_is_digest_bound_and_rejects_unsafe_or_contradictory_execution() {
     value["runtimeLayers"][0]["runtimeConfig"]["runtimeFamily"] = json!("JAVASCRIPT");
     assert!(finalize_runtime_artifact_graph(value, &[]).is_err());
 }
+
+#[test]
+fn modern_graph_layer_names_reject_controls_without_tightening_legacy_readers() {
+    let modern = |name: &str| {
+        let mut value = graph();
+        value.as_object_mut().unwrap().remove("graphDigest");
+        value["schemaVersion"] = json!("RUNTIME_ARTIFACT_GRAPH_V2.2");
+        value["runtimeLayers"][0]["layerName"] = json!(name);
+        value["runtimeLayers"][0]["dependencyBindings"] =
+            json!({"mounts":[{"materializationId":HEX_B,"mountPoint":"/output/node_modules"}]});
+        value
+    };
+    let paths = ["server/server.js".into()];
+    assert!(finalize_runtime_artifact_graph(modern(&"😀".repeat(40)), &paths).is_ok());
+    for name in ["api\n".into(), "😀".repeat(65)] {
+        assert!(finalize_runtime_artifact_graph(modern(&name), &paths).is_err());
+    }
+    let mut retained = graph();
+    retained.as_object_mut().unwrap().remove("graphDigest");
+    retained["runtimeLayers"][0]["layerName"] = json!("api\n");
+    assert!(finalize_runtime_artifact_graph(retained, &paths).is_ok());
+}

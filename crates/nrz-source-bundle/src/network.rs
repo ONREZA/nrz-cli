@@ -44,7 +44,8 @@ fn valid_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
 }
 fn valid_uuid(value: &str) -> bool {
-    value.len() == 36
+    value != "00000000-0000-0000-0000-000000000000"
+        && value.len() == 36
         && value.bytes().enumerate().all(|(i, c)| {
             if [8, 13, 18, 23].contains(&i) {
                 c == b'-'
@@ -98,7 +99,8 @@ impl ComputeNetwork {
             if !valid_uuid(&caller.service_id)
                 || caller.layer_name.is_empty()
                 || caller.layer_name.chars().count() > 64
-                || !callers.insert((&caller.service_id, &caller.layer_name))
+                || caller.layer_name.chars().any(char::is_control)
+                || !callers.insert((caller.service_id.to_ascii_lowercase(), &caller.layer_name))
             {
                 return Err("invalid or duplicate endpoint caller".into());
             }
@@ -147,6 +149,13 @@ pub fn validate_source_network(manifest: &SourceLogicalManifest) -> Result<bool,
         .any(|c| c == COMPUTE_NETWORK_SCHEMA_VERSION);
     let mut names = HashSet::new();
     for layer in &manifest.layers {
+        if declared
+            && (layer.name.is_empty()
+                || layer.name.chars().count() > 64
+                || layer.name.chars().any(char::is_control))
+        {
+            return Err("invalid source layer name".into());
+        }
         if !names.insert(layer.name.as_str()) {
             return Err("duplicate source layer".into());
         }
@@ -196,54 +205,5 @@ pub fn validate_source_network(manifest: &SourceLogicalManifest) -> Result<bool,
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-    fn private_network() -> serde_json::Value {
-        json!({"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"redis","protocol":"tcp","port":6379,"binding":"fixed"}],"readiness":{"protocol":"tcp","port":"redis"},"allowFrom":[]})
-    }
-    // Legacy aggregate readiness rejected mixed endpoints and never checked private route exposure.
-    #[test]
-    fn private_only_and_mixed_readiness_preserve_per_layer_policy() {
-        let mut public = private_network();
-        public["exposure"] = json!("PUBLIC");
-        public["ports"][0] =
-            json!({"name":"http","protocol":"http","port":3000,"binding":"primary"});
-        public["readiness"] = json!({"protocol":"http","port":"http","path":"/health"});
-        let manifest: SourceLogicalManifest = serde_json::from_value(json!({
-            "schemaVersion":"SOURCE_BUNDLE_V1.0","capabilities":[COMPUTE_NETWORK_SCHEMA_VERSION],"files":[],"entrypoints":[],
-            "layers":[{"name":"web","target":"COMPUTE","runtimeConfig":{"network":public}},{"name":"cache","target":"COMPUTE","runtimeConfig":{"network":private_network()}}],
-            "routes":[{"pattern":"^/.*$","layerName":"web"}]
-        })).unwrap();
-        assert!(validate_source_network(&manifest).unwrap());
-        assert!(
-            crate::source_runtime_readiness(&manifest)
-                .unwrap()
-                .is_none()
-        );
-        let mut private_only = manifest.clone();
-        private_only.layers.remove(0);
-        private_only.routes.clear();
-        assert!(validate_source_network(&private_only).unwrap());
-        private_only.routes.push(crate::SourceLogicalManifestRoute {
-            pattern: "^/.*$".into(),
-            layer_name: "cache".into(),
-            priority: None,
-            methods: None,
-            fallthrough_when: None,
-            headers: None,
-        });
-        assert!(validate_source_network(&private_only).is_err());
-    }
-    #[test]
-    fn invalid_ports_unknown_fields_and_incomplete_capability_fail_closed() {
-        let mut network = private_network();
-        network["readiness"]["port"] = json!("missing");
-        assert!(layer_compute_network(Some(&json!({"network":network}))).is_err());
-        let mut network = private_network();
-        network["allowUnknown"] = json!(true);
-        assert!(layer_compute_network(Some(&json!({"network":network}))).is_err());
-        let manifest: SourceLogicalManifest = serde_json::from_value(json!({"schemaVersion":"SOURCE_BUNDLE_V1.0","capabilities":[COMPUTE_NETWORK_SCHEMA_VERSION],"files":[],"entrypoints":[],"layers":[{"name":"server","target":"COMPUTE"}],"routes":[]})).unwrap();
-        assert!(validate_source_network(&manifest).is_err());
-    }
-}
+#[path = "network_tests.rs"]
+mod tests;

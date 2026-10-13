@@ -118,7 +118,7 @@ impl PlatformClient {
                 .await?,
         )
     }
-    /// Set or revoke scoped endpoint import with both Product permissions
+    /// Grant endpoint imports with both Product permissions or withdraw an owned import
     ///
     /// * Path: `PUT /v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/import`
     pub async fn put_v1projects_by_id_services_by_service_id_environments_by_environment_id_endpoints_by_layer_name_import(
@@ -1731,7 +1731,7 @@ impl PlatformClientRaw {
         let response = self.client.put(url).json(&request.body).send().await?;
         Ok(response)
     }
-    /// Set or revoke scoped endpoint import with both Product permissions
+    /// Grant endpoint imports with both Product permissions or withdraw an owned import
     ///
     /// * Path: `PUT /v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/import`
     pub async fn put_v1projects_by_id_services_by_service_id_environments_by_environment_id_endpoints_by_layer_name_import(
