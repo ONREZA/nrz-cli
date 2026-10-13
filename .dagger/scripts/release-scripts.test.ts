@@ -308,6 +308,8 @@ test("release cargo lock leaves public library versions stable", () => {
   ].join("\n");
 
   const updated = releaseCargoLock(lock, "0.33.0-beta.0");
+  assert.equal(releaseCargoLock(updated, "0.33.0-beta.0"), updated);
+  assert.throws(() => releaseCargoLock('[[package]]\nname = "other"\nversion = "1.0.0"\n', "0.33.0-beta.0"), /Could not update/);
 
   assert.match(updated, /\[\[package\]\]\nname = "nrz"\nversion = "0\.33\.0-beta\.0"/);
   assert.match(updated, /\[\[package\]\]\nname = "nrz-contract"\nversion = "0\.1\.0"/);

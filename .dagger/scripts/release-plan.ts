@@ -254,11 +254,10 @@ export function releaseCargoToml(cargo: string, version: string): string {
 
 function updateLockPackageVersion(lock: string, packageName: string, version: string): string {
   const re = new RegExp(`(\\[\\[package\\]\\]\\nname = "${escapeRegExp(packageName)}"\\nversion = ")[^"]+(")`);
-  const updated = lock.replace(re, `$1${version}$2`);
-  if (updated === lock) {
+  if (!re.test(lock)) {
     throw new Error(`Could not update ${packageName} version in Cargo.lock`);
   }
-  return updated;
+  return lock.replace(re, `$1${version}$2`);
 }
 
 export function releaseCargoLock(lock: string, version: string): string {
