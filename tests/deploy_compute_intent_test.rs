@@ -1,8 +1,26 @@
 #[path = "support/cli.rs"]
 mod cli;
+#[path = "support/network_fixture.rs"]
+mod network_fixture;
 
 use cli::{nrz, stdout_json};
 use std::fs;
+
+fn deploy_dry(dir: &tempfile::TempDir) -> std::process::Output {
+    nrz()
+        .current_dir(dir.path())
+        .args([
+            "--token",
+            "test-token",
+            "--json",
+            "deploy",
+            "--dry",
+            "--skip-build",
+            "--skip-install",
+        ])
+        .output()
+        .unwrap()
+}
 
 fn fixture(compute: Option<&str>) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -63,19 +81,7 @@ fn process_flag_replaces_inferred_static_output_with_compute_artifact() {
 #[test]
 fn process_config_replaces_inferred_static_output_with_compute_artifact() {
     let dir = fixture(Some("process"));
-    let output = nrz()
-        .current_dir(dir.path())
-        .args([
-            "--token",
-            "test-token",
-            "--json",
-            "deploy",
-            "--dry",
-            "--skip-build",
-            "--skip-install",
-        ])
-        .output()
-        .unwrap();
+    let output = deploy_dry(&dir);
     assert!(
         output.status.success(),
         "{}",
@@ -90,20 +96,8 @@ fn process_config_replaces_inferred_static_output_with_compute_artifact() {
 fn explicit_process_rejects_conflicting_authored_static_manifest() {
     let dir = fixture(Some("process"));
     fs::create_dir(dir.path().join("dist/.onreza")).unwrap();
-    fs::write(dir.path().join("dist/.onreza/manifest.json"), r#"{"version":1,"layers":[{"name":"static","target":"STATIC","directory":"."}],"routes":[{"pattern":"^/.*$","layer":"static"}]}"#).unwrap();
-    let output = nrz()
-        .current_dir(dir.path())
-        .args([
-            "--token",
-            "test-token",
-            "--json",
-            "deploy",
-            "--dry",
-            "--skip-build",
-            "--skip-install",
-        ])
-        .output()
-        .unwrap();
+    fs::write(dir.path().join("dist/.onreza/manifest.json"), r#"{"version":2,"layers":[{"name":"static","target":"STATIC","directory":"."}],"routes":[{"pattern":"^/.*$","layer":"static"}]}"#).unwrap();
+    let output = deploy_dry(&dir);
     assert!(!output.status.success());
     assert_eq!(stdout_json(&output)["code"], "COMPUTE_MANIFEST_MISMATCH");
 }
@@ -117,20 +111,8 @@ fn static_mode_rejects_an_authored_process_runtime() {
     )
     .unwrap();
     fs::create_dir(dir.path().join("dist/.onreza")).unwrap();
-    fs::write(dir.path().join("dist/.onreza/manifest.json"), r#"{"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.mjs"}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#).unwrap();
-    let output = nrz()
-        .current_dir(dir.path())
-        .args([
-            "--token",
-            "test-token",
-            "--json",
-            "deploy",
-            "--dry",
-            "--skip-build",
-            "--skip-install",
-        ])
-        .output()
-        .unwrap();
+    fs::write(dir.path().join("dist/.onreza/manifest.json"), crate::network_fixture::manifest(r#"{"version":2,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.mjs","runtime":{"network":"$PUBLIC_NETWORK"}}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#)).unwrap();
+    let output = deploy_dry(&dir);
     assert!(!output.status.success());
     assert_eq!(stdout_json(&output)["code"], "COMPUTE_MANIFEST_MISMATCH");
 }

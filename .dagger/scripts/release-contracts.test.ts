@@ -15,12 +15,19 @@ test("release provenance binds the exact selected contract inputs", () => {
     }
     const original = releaseContracts(root);
     expect(releaseContracts(root)).toEqual(original);
-    const changed = "{\"openapi\":\"changed fixture\"}\n";
-    writeFileSync(join(root, "api/openapi.json"), changed);
-    const next = releaseContracts(root);
-    expect(next.sha256["api/openapi.json"]).toBe(createHash("sha256").update(changed).digest("hex"));
-    expect(next.sha256["api/openapi.json"]).not.toBe(original.sha256["api/openapi.json"]);
-    expect(next.functionsRuntime).toEqual(original.functionsRuntime);
+    for (const path of ["api/openapi.json", "crates/nrz-contract/schemas/manifest-v2.schema.json"] as const) {
+      const changed = "{\"contract\":\"changed fixture\"}\n";
+      writeFileSync(join(root, path), changed);
+      const next = releaseContracts(root);
+      expect(next.sha256[path]).toBe(createHash("sha256").update(changed).digest("hex"));
+      expect(next.sha256[path]).not.toBe(original.sha256[path]);
+      expect(next.functionsRuntime).toEqual(original.functionsRuntime);
+      const expected = { version: "0.46.0", tag: "v0.46.0", channel: "stable" };
+      expect(() => verifyReleaseProvenance(root, {
+        ...expected, sourceDirty: false, sourceRevision: "1".repeat(40), contracts: original,
+      }, expected)).toThrow("does not match");
+      writeFileSync(join(root, path), readFileSync(join(source, path)));
+    }
     writeFileSync(join(root, "api/generator/oas3-gen.patch"), "different patch");
     expect(() => releaseContracts(root)).toThrow("does not match its lockfile");
     rmSync(join(root, "api/generator/oas3-gen.patch"));

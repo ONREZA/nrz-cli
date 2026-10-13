@@ -5,25 +5,46 @@ use super::*;
 // Verifies the contract: primary_compute_target(manifest) → LayerTarget,
 // which deploy maps as: Compute→Process, Static→Static.
 
-#[test]
-fn manifest_compute_layer_maps_to_process() {
-    let manifest: crate::build::manifest::Manifest = serde_json::from_str(
-        r#"{
-        "version": 1,
-        "layers": [
-            {"name": "assets", "target": "STATIC", "directory": "static"},
-            {"name": "server", "target": "COMPUTE", "directory": "standalone", "entry": "server.js"}
-        ],
-        "routes": [{"pattern": "^/.*$", "layer": "server"}]
-    }"#,
-    )
-    .unwrap();
-
-    let target = crate::build::manifest::primary_compute_target(&manifest);
-    let compute = match target {
+fn manifest_compute_type(manifest: &crate::build::manifest::Manifest) -> ComputeType {
+    match crate::build::manifest::primary_compute_target(manifest) {
         crate::build::manifest::LayerTarget::Compute => ComputeType::Process,
         crate::build::manifest::LayerTarget::Static => ComputeType::Static,
-    };
+    }
+}
+
+#[test]
+fn manifest_compute_layer_maps_to_process() {
+    let manifest: crate::build::manifest::Manifest =
+        serde_json::from_str(&crate::network_fixture::manifest(
+            r#"{
+    "version": 2,
+    "layers": [
+        {
+            "name": "assets",
+            "target": "STATIC",
+            "directory": "static"
+        },
+        {
+            "name": "server",
+            "target": "COMPUTE",
+            "directory": "standalone",
+            "entry": "server.js",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "server"
+        }
+    ]
+}"#,
+        ))
+        .unwrap();
+
+    let compute = manifest_compute_type(&manifest);
     assert_eq!(compute, ComputeType::Process);
 }
 
@@ -31,18 +52,25 @@ fn manifest_compute_layer_maps_to_process() {
 fn manifest_static_only_maps_to_static() {
     let manifest: crate::build::manifest::Manifest = serde_json::from_str(
         r#"{
-        "version": 1,
-        "layers": [{"name": "site", "target": "STATIC", "directory": "."}],
-        "routes": [{"pattern": "^/.*$", "layer": "site"}]
-    }"#,
+    "version": 2,
+    "layers": [
+        {
+            "name": "site",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "site"
+        }
+    ]
+}"#,
     )
     .unwrap();
 
-    let target = crate::build::manifest::primary_compute_target(&manifest);
-    let compute = match target {
-        crate::build::manifest::LayerTarget::Compute => ComputeType::Process,
-        crate::build::manifest::LayerTarget::Static => ComputeType::Static,
-    };
+    let compute = manifest_compute_type(&manifest);
     assert_eq!(compute, ComputeType::Static);
 }
 
@@ -340,7 +368,7 @@ fn validate_hydrogen_oxygen_bails_via_output_marker() {
     let dir = tempdir().unwrap();
     let output_dir = dir.path().join("dist");
     fs::create_dir_all(output_dir.join("server")).unwrap();
-    fs::write(output_dir.join("server/oxygen.json"), r#"{"version":1}"#).unwrap();
+    fs::write(output_dir.join("server/oxygen.json"), r#"{"version":2}"#).unwrap();
 
     let detection = make_detection("hydrogen", None);
     let result = validate_process_output(&output_dir, dir.path(), &detection);

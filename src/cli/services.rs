@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
 pub struct ServicesArgs {
@@ -8,6 +8,24 @@ pub struct ServicesArgs {
 
 #[derive(Subcommand)]
 pub enum ServicesCommand {
+    /// List Services and available Sources within a Product
+    List {
+        #[arg(long)]
+        project_id: uuid::Uuid,
+    },
+    /// Create a distinct CLI Source for a Service
+    CreateSource {
+        #[arg(long)]
+        project_id: uuid::Uuid,
+    },
+    /// Create a Service using an explicit Source and source root
+    Create(ServiceConfiguration),
+    /// Update one Service without changing neighboring Services
+    Update {
+        service_id: uuid::Uuid,
+        #[command(flatten)]
+        configuration: ServiceConfiguration,
+    },
     /// Remove a Service while preserving Product databases and KV data
     Delete {
         /// Explicit Service ID
@@ -20,4 +38,18 @@ pub enum ServicesCommand {
         #[arg(long)]
         force: bool,
     },
+}
+
+#[derive(Args)]
+pub struct ServiceConfiguration {
+    #[arg(long)]
+    pub project_id: uuid::Uuid,
+    #[arg(long)]
+    pub name: String,
+    #[arg(long)]
+    pub source_id: uuid::Uuid,
+    #[arg(long, default_value = "main")]
+    pub source_ref: String,
+    #[arg(long, default_value = ".")]
+    pub root_directory: String,
 }

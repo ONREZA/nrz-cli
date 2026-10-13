@@ -14,7 +14,7 @@ use crate::cli::execution_context::{ContextArgs, ContextCommand};
 use crate::output;
 use nrz::config::{self, ProjectConfig};
 
-pub const EXECUTION_CONTEXT_PROTOCOL: &str = "execution-context-v2";
+pub const EXECUTION_CONTEXT_PROTOCOL: &str = "execution-context-v3";
 pub const RUNNER_CONTEXT_PROTOCOL: &str = "runner-context-v6";
 const SAVED_CONTEXT_VERSION: u8 = 1;
 
@@ -205,6 +205,33 @@ fn map_repository_context_error(error: anyhow::Error) -> anyhow::Error {
     error
 }
 
+pub async fn resolve_for_service_mutation(
+    client: &ApiClient,
+    project_id: &str,
+    project_dir: &Path,
+    explicit: Option<&str>,
+    source_ref: Option<&str>,
+    service_id: Option<&str>,
+) -> anyhow::Result<ExecutionContext> {
+    let saved = load_saved(project_dir)?;
+    let process_environment = std::env::var("NRZ_ENVIRONMENT").ok();
+    let selection = select_environment(explicit, process_environment.as_deref(), saved.as_ref())?;
+    let resolved = resolve_service(
+        client,
+        project_id,
+        &selection.selector,
+        source_ref,
+        selection.source,
+        service_id,
+    )
+    .await;
+    if selection.source == "REPOSITORY" {
+        resolved.map_err(map_repository_context_error)
+    } else {
+        resolved
+    }
+}
+
 pub async fn resolve(
     client: &ApiClient,
     project_id: &str,
@@ -212,12 +239,34 @@ pub async fn resolve(
     source_ref: Option<&str>,
     selection_source: &str,
 ) -> anyhow::Result<ExecutionContext> {
+    resolve_service(
+        client,
+        project_id,
+        selector,
+        source_ref,
+        selection_source,
+        None,
+    )
+    .await
+}
+async fn resolve_service(
+    client: &ApiClient,
+    project_id: &str,
+    selector: &str,
+    source_ref: Option<&str>,
+    selection_source: &str,
+    service_id: Option<&str>,
+) -> anyhow::Result<ExecutionContext> {
     let response = client
         .resolve_execution_context(
             project_id,
             nrz_api::ResolveRequestBody {
                 additional_properties: Default::default(),
                 environment: selector.to_owned(),
+                service_id: service_id
+                    .map(str::parse)
+                    .transpose()
+                    .context("invalid Service ID")?,
                 source_ref: Some(source_ref.map(str::to_owned)),
                 selection_source: wire::selection_source(selection_source)?,
             },
@@ -239,6 +288,7 @@ pub async fn materialize_desired(
             &context.project_id,
             nrz_api::MaterializeRequestBody {
                 additional_properties: Default::default(),
+                service_id: Some(context.service_id.parse().context("invalid Service ID")?),
                 environment_id: context
                     .environment_id
                     .parse()

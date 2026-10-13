@@ -151,7 +151,7 @@ async fn selected_python_output_named_like_backend_state_survives_verified_publi
             )
             .unwrap();
             let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-                "version":1,"routes":[{"pattern":"^/.*$","layer":"python"}],"layers":[{"name":"python","target":"COMPUTE","directory":".","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":minor.target()}}]
+                "version":2,"routes":[{"pattern":"^/.*$","layer":"python"}],"layers":[{"name":"python","target":"COMPUTE","directory":".","entry":"main.py","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":minor.target()}}]
             })).unwrap();
             let artifact = resolve_runtime_artifact(
                 project.path(),
@@ -197,7 +197,7 @@ async fn unpackaged_python_backend_named_resources_remain_application_assets() {
     )
     .unwrap();
     let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version":1,"routes":[{"pattern":"^/.*$","layer":"python"}],"layers":[{"name":"python","target":"COMPUTE","directory":".","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":nrz_source_bundle::PythonMinor::default().target()}}]
+        "version":2,"routes":[{"pattern":"^/.*$","layer":"python"}],"layers":[{"name":"python","target":"COMPUTE","directory":".","entry":"main.py","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":nrz_source_bundle::PythonMinor::default().target()}}]
     })).unwrap();
     let artifact = resolve_runtime_artifact(
         project.path(),
@@ -251,7 +251,7 @@ async fn staged_python_dotenv_resources_survive_verified_publication() {
         )
         .unwrap();
         let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-            "version":1,"routes":[{"pattern":"^/.*$","layer":"python"}],"layers":[{"name":"python","target":"COMPUTE","directory":".","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":minor.target()}}]
+            "version":2,"routes":[{"pattern":"^/.*$","layer":"python"}],"layers":[{"name":"python","target":"COMPUTE","directory":".","entry":"main.py","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":minor.target()}}]
         })).unwrap();
         let artifact = resolve_runtime_artifact(
             project.path(),
@@ -374,10 +374,10 @@ fn published_python_bundle_excludes_installer_staging_and_retains_installed_asse
             std::fs::write(file, "INSTALLER_INTERMEDIATE").unwrap();
         }
         let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-            "version": 1, "routes": [], "layers": [{
+            "version": 2, "routes": [], "layers": [{
                 "name": "python", "target": "COMPUTE", "directory": ".",
                 "entry": ".onreza/python/launch.py",
-                "runtime": {"applicationRuntime": {"family": "PYTHON", "args": []},
+                "runtime": {"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime": {"family": "PYTHON", "args": []},
                     "buildRuntimeVersion": minor.target()}
             }]
         }))

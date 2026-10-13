@@ -210,7 +210,7 @@ fn noninteractive_confirmation_distinguishes_required_changes_and_explicit_yes()
 #[test]
 fn env_exec_runs_selected_snapshot_and_preserves_child_failure() {
     let materialized: crate::execution_context::MaterializedExecutionContext = serde_json::from_value(json!({
-        "protocolVersion":"execution-context-v2",
+        "protocolVersion":"execution-context-v3",
         "context":{
             "workspaceId":"workspace-1","workspaceSlug":"workspace",
             "productId":PROJECT,"productEnvironmentId":ENVIRONMENT,"workspaceEnvironmentId":"workspace-environment-1",

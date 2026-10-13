@@ -165,6 +165,10 @@ impl ApiClient {
             HeaderValue::from_str(&format!("nrz-cli/{}", env!("CARGO_PKG_VERSION")))?,
         );
 
+        headers.insert(
+            "X-Nrz-Cli-Version",
+            HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+        );
         let client = build_api_http_client(headers)?;
 
         Self::with_http_client(base_url, client)
@@ -182,6 +186,10 @@ impl ApiClient {
             HeaderValue::from_str(token).context("invalid token format")?,
         );
 
+        headers.insert(
+            "X-Nrz-Cli-Version",
+            HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+        );
         let client = build_api_http_client(headers)?;
 
         Self::with_http_client(base_url, client)

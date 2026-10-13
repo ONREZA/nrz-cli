@@ -6,9 +6,9 @@ fn manifest_with_python_sibling(
     target: &str,
 ) -> build_manifest::Manifest {
     serde_json::from_value(serde_json::json!({
-        "version":1, "routes":[{"pattern":"^/.*$", "layer":"api"}], "layers":[
-            {"name":"api","target":"COMPUTE","directory":".","entry":entry,"runtime":{"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":target}},
-            {"name":"side","target":"COMPUTE","directory":"side","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}}
+        "version":2, "routes":[{"pattern":"^/.*$", "layer":"api"}], "layers":[
+            {"name":"api","target":"COMPUTE","directory":".","entry":entry,"runtime":{"network":crate::network_fixture::network(),"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":target}},
+            {"name":"side","target":"COMPUTE","directory":"side","entry":"main.py","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}}
         ]
     })).unwrap()
 }
@@ -160,7 +160,7 @@ fn prepare_deploy_files_keeps_python_dependencies_and_prunes_platform_metadata()
     assert_eq!(
         plan.logical_manifest.layers[0].runtime_config,
         Some(serde_json::json!({
-            "readiness": {"path": "/healthz", "protocol": "HTTP"},
+            "network": nrz_source_bundle::ComputeNetwork::public_default(),
             "runtimeFamily": "PYTHON"
         }))
     );
@@ -305,9 +305,9 @@ fn python_published_staged_dependencies_keep_assets_named_like_project_build_out
         crate::detect::detect_with_framework_override(project.path(), Some("python"));
     detection.metadata.runtime.runtime_type = RuntimeType::Python;
     let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [{"name":"compute", "target":"COMPUTE", "directory":".", "entry":"main.py",
-            "runtime":{"applicationRuntime":{"family":"PYTHON","args":[]}, "buildRuntimeVersion":minor.target()}}],
+            "runtime":{"network":crate::network_fixture::network(),"applicationRuntime":{"family":"PYTHON","args":[]}, "buildRuntimeVersion":minor.target()}}],
         "routes": [{"pattern":"^/.*$", "layer":"compute"}]
     })).unwrap();
     let artifact = resolve_runtime_artifact(
@@ -394,9 +394,9 @@ fn pnpm_install_preserves_project_build_script_policy() {
 #[test]
 fn prepare_deploy_files_prunes_next_cache_only() {
     let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [
-            {"name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js"}
+            {"name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js","runtime":{"network":crate::network_fixture::network()}}
         ],
         "routes": [
             {"pattern": "^/.*$", "layer": "server"}
@@ -692,10 +692,10 @@ fn relocated_python_runtime_preserves_compute_file_ownership() {
     detection.metadata.runtime.version =
         Some(nrz_source_bundle::PythonMinor::default().version().into());
     let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [
             {"name": "static", "target": "STATIC", "directory": "."},
-            {"name": "api", "target": "COMPUTE", "directory": "api", "entry": "main.py", "runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}}
+            {"name": "api", "target": "COMPUTE", "directory": "api", "entry": "main.py", "runtime":{"network":crate::network_fixture::network(),"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}}
         ],
         "routes": [
             {"pattern": "^/api/.*$", "layer": "api"},
@@ -1304,9 +1304,9 @@ fn hoisted_javascript_dependencies_survive_a_code_only_python_sibling() {
                 }),
             });
             let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version":1, "routes":[{"pattern":"^/.*$", "layer":"api"}], "layers":[
-            {"name":"api","target":"COMPUTE","directory":"api","entry":"server.js","runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
-            {"name":"side","target":"COMPUTE","directory":"side","entry":entry,"runtime":{"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":target}}
+        "version":2, "routes":[{"pattern":"^/.*$", "layer":"api"}], "layers":[
+            {"name":"api","target":"COMPUTE","directory":"api","entry":"server.js","runtime":{"network":crate::network_fixture::network(),"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
+            {"name":"side","target":"COMPUTE","directory":"side","entry":entry,"runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":target}}
         ]
     })).unwrap();
 
@@ -1426,9 +1426,9 @@ fn standalone_output_owns_dependencies_with_source_install_present() {
         )
         .unwrap();
         let manifest = serde_json::from_value(serde_json::json!({
-            "version":1,"routes":[{"pattern":"^/.*$","layer":"server"}],
+            "version":2,"routes":[{"pattern":"^/.*$","layer":"server"}],
             "layers":[{"name":"server","target":"COMPUTE","directory":directory,"entry":entry,
-                "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}}]
+                "runtime":{"network":crate::network_fixture::network(),"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}}]
         })).unwrap();
         let detection =
             crate::detect::detect_with_framework_override(project.path(), Some(framework));

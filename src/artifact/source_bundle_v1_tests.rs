@@ -13,22 +13,22 @@ use crate::artifact::*;
 
 fn static_manifest() -> crate::build::manifest::Manifest {
     serde_json::from_value(serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [
             { "name": "static", "target": "STATIC", "directory": "." }
         ],
-        "routes": []
+        "routes": [{"pattern":"^/.*$","layer":"static"}]
     }))
     .unwrap()
 }
 
 fn compute_manifest() -> crate::build::manifest::Manifest {
     serde_json::from_value(serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [
-            { "name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js" }
+            { "name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js" ,"runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]}}}
         ],
-        "routes": []
+        "routes": [{"pattern":"^/.*$","layer":"server"}]
     }))
     .unwrap()
 }
@@ -103,7 +103,7 @@ fn native_source_bundle_requires_archived_libraries_owned_by_its_compute_layer()
         native_elf_fixture(Some("$ORIGIN/lib")),
     )
     .unwrap();
-    let mut manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({"version":1,"layers":[{"name":"native","target":"COMPUTE","directory":".","entry":"server","runtime":{"applicationRuntime":{"family":"EXECUTABLE","args":[]},"buildRuntimeVersion":"native-linux-x86_64-glibc"}}],"routes":[]})).unwrap();
+    let mut manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({"version":2,"layers":[{"name":"native","target":"COMPUTE","directory":".","entry":"server","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"EXECUTABLE","args":[]},"buildRuntimeVersion":"native-linux-x86_64-glibc"}}],"routes":[]})).unwrap();
     let files = scan_dir(dir.path()).unwrap();
     build_source_bundle_plan(dir.path(), &manifest, &files).unwrap();
     let excluded = files
@@ -368,9 +368,9 @@ async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
     .unwrap();
     let mut manifest: crate::build::manifest::Manifest =
         serde_json::from_value(serde_json::json!({
-            "version": 1,
+            "version": 2,
             "layers": [
-                { "name": "server", "target": "COMPUTE", "directory": ".", "entry": "main.py" }
+                { "name": "server", "target": "COMPUTE", "directory": ".", "entry": "main.py" ,"runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]}}}
             ],
             "routes": []
         }))
@@ -430,7 +430,7 @@ async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
     assert_eq!(
         plan.logical_manifest.layers[0].runtime_config,
         Some(
-            serde_json::json!({"runtimeFamily": "PYTHON", "buildRuntimeVersion": "python-3.14", "applicationRuntime":{"family":"PYTHON","args":[]}})
+            serde_json::json!({"network":nrz_source_bundle::ComputeNetwork::public_default(),"runtimeFamily": "PYTHON", "buildRuntimeVersion": "python-3.14", "applicationRuntime":{"family":"PYTHON","args":[]}})
         )
     );
 }
@@ -519,13 +519,13 @@ async fn mixed_python_node_and_native_bundle_preserves_per_layer_runtime_authori
     fs::copy("/bin/true", dir.path().join("native-server")).unwrap();
     for primary_python in [true, false] {
         let mut manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
-            "version":1,"routes":[],"layers":[
+            "version":2,"routes":[],"layers":[
                 {"name":"python","target":"COMPUTE","directory":".","entry":"main.py",
-                 "runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}},
+                 "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}},
                 {"name":"node","target":"COMPUTE","directory":".","entry":"server.js",
-                 "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
+                 "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
                 {"name":"native","target":"COMPUTE","directory":".","entry":"native-server",
-                 "runtime":{"applicationRuntime":{"family":"EXECUTABLE","args":[]},"buildRuntimeVersion":"native-linux-x86_64-glibc"}}
+                 "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"EXECUTABLE","args":[]},"buildRuntimeVersion":"native-linux-x86_64-glibc"}}
             ]
         })).unwrap();
         let (family, entry, target, scan) = if primary_python {
@@ -618,14 +618,14 @@ async fn admitted_node_build_preserves_code_only_sibling_target() {
     )
     .unwrap();
     let manifest = serde_json::json!({
-        "version":1,
+        "version":2,
         "routes":[{"pattern":"^/.*$","layer":"primary","priority":0},
                   {"pattern":"^/secondary/.*$","layer":"secondary","priority":1}],
         "layers":[
             {"name":"primary","target":"COMPUTE","directory":".","entry":"server.js",
-             "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
+             "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
             {"name":"secondary","target":"COMPUTE","directory":"secondary","entry":"server.js",
-             "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}}
+             "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}}
         ]
     });
     let mut effective = provided_manifest_config(directory.path(), &manifest);
@@ -723,6 +723,7 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
         for witness in [None, Some("node-24"), Some("node-22")] {
             let mut manifest = crate::build::manifest::generate_compute_manifest("server.js");
             manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
+                network: Some(nrz_source_bundle::ComputeNetwork::public_default()),
                 application_runtime: Some(nrz_source_bundle::ApplicationRuntimeIntent {
                     family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
                     args: vec![],
@@ -776,8 +777,9 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
     }
     for family in [None, Some(nrz_source_bundle::ApplicationRuntimeFamily::Bun)] {
         let mut manifest = crate::build::manifest::generate_compute_manifest("server.js");
-        manifest.layers[0].runtime = family.map(|family| crate::build::manifest::RuntimeConfig {
-            application_runtime: Some(nrz_source_bundle::ApplicationRuntimeIntent {
+        manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
+            network: Some(nrz_source_bundle::ComputeNetwork::public_default()),
+            application_runtime: family.map(|family| nrz_source_bundle::ApplicationRuntimeIntent {
                 family,
                 args: vec![],
             }),
@@ -836,6 +838,7 @@ fn sibling_target_exemption_rejects_invalid_targets_and_primary_override() {
         let mut manifest = compute_manifest();
         manifest.layers[0].directory = directory.into();
         manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
+            network: Some(nrz_source_bundle::ComputeNetwork::public_default()),
             application_runtime: Some(declaration.intent()),
             build_runtime_version: Some(target.into()),
             ..Default::default()
@@ -1017,6 +1020,7 @@ async fn managed_build_declarations_preserve_frozen_targets_and_static_publicati
     ] {
         let mut manifest = crate::build::manifest::generate_compute_manifest("server.js");
         manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
+            network: Some(nrz_source_bundle::ComputeNetwork::public_default()),
             application_runtime: Some(nrz_source_bundle::ApplicationRuntimeIntent {
                 family,
                 args: vec![],
@@ -1229,10 +1233,10 @@ fn source_bundle_marks_prerender_files_under_layer_root() {
     fs::write(dir.path().join("server/server.js"), b"// server").unwrap();
 
     let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [
             { "name": "prerendered", "target": "STATIC", "directory": "_prerender" },
-            { "name": "server", "target": "COMPUTE", "directory": "server", "entry": "server.js" }
+            { "name": "server", "target": "COMPUTE", "directory": "server", "entry": "server.js" ,"runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]}}}
         ],
         "routes": [
             {
@@ -1731,7 +1735,7 @@ fn source_bundle_plan_rejects_legacy_manifest_middleware() {
     let middleware_body = b"export default function middleware() {}";
     fs::write(dir.path().join("middleware/auth.mjs"), middleware_body).unwrap();
     let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [
             { "name": "static", "target": "STATIC", "directory": "." }
         ],
@@ -1766,6 +1770,7 @@ fn compute_framework_checks_selected_and_authored_runtime_without_fabricating_in
         let mut manifest = compute_manifest();
         if authored_node {
             manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
+                network: Some(nrz_source_bundle::ComputeNetwork::public_default()),
                 application_runtime: Some(nrz_source_bundle::ApplicationRuntimeIntent {
                     family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
                     args: vec![],
@@ -1817,8 +1822,8 @@ fn compute_framework_checks_selected_and_authored_runtime_without_fabricating_in
             .is_none()
     );
     let mut contradictory: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js",
-            "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"bun-1.4.2"}}],"routes":[]
+        "version":2,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js",
+            "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"bun-1.4.2"}}],"routes":[]
     })).unwrap();
     let error =
         crate::deploy::apply_application_runtime_manifest(&mut contradictory, None, None, "other")
@@ -2318,8 +2323,8 @@ fn source_bundle_assigns_unmatched_files_to_static_fallback_without_prefix_colli
     ] {
         fs::write(directory.path().join(path), b"content").unwrap();
     }
-    let manifest = serde_json::from_value(serde_json::json!({"version":1,"routes":[],"layers":[
-        {"name":"compute","target":"COMPUTE","directory":"server","entry":"main.js"},
+    let manifest = serde_json::from_value(serde_json::json!({"version":2,"routes":[],"layers":[
+        {"name":"compute","target":"COMPUTE","directory":"server","entry":"main.js","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]}}},
         {"name":"static","target":"STATIC","directory":"public"}
     ]}))
     .unwrap();
@@ -2598,11 +2603,11 @@ fn fresh_primary_lineage_is_hashed_without_rewriting_sibling_provenance() {
     fs::write(directory.path().join("server.js"), b"export default 1").unwrap();
     fs::write(directory.path().join("sibling.js"), b"export default 2").unwrap();
     let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version":1, "routes":[], "layers":[
+        "version":2, "routes":[], "layers":[
             {"name":"sibling", "target":"COMPUTE", "directory":".", "entry":"sibling.js",
-                "runtime":{"applicationRuntime":{"family":"BUN","args":[]}, "buildRuntimeVersion":"bun-1.4.2"}},
+                "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"BUN","args":[]}, "buildRuntimeVersion":"bun-1.4.2"}},
             {"name":"server", "target":"COMPUTE", "directory":".", "entry":"server.js",
-                "runtime":{"applicationRuntime":{"family":"NODE","args":[]}, "buildRuntimeVersion":"node-26"}}
+                "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]}, "buildRuntimeVersion":"node-26"}}
         ]
     })).unwrap();
     let root = ArtifactRoot::open(directory.path()).unwrap();

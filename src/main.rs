@@ -29,6 +29,9 @@ mod logs;
 mod logs_tests;
 #[cfg(test)]
 mod main_tests;
+#[cfg(test)]
+#[path = "../tests/support/network_fixture.rs"]
+mod network_fixture;
 mod nextjs_adapter;
 mod output;
 #[cfg(test)]
@@ -204,6 +207,7 @@ async fn run_command(
         Command::Link(args) => link::run(args, json, token, workspace, config).await,
         Command::Upgrade(args) => upgrade::run(args, json).await,
         Command::Projects(args) => cli::projects_handler::run(args, json, token, workspace).await,
+        Command::Endpoints(args) => cli::endpoints_handler::run(args, json, token, workspace).await,
         Command::Services(args) => cli::services_handler::run(args, json, token, workspace).await,
         Command::Preview(args) => preview::run(args, json, token, workspace, config).await,
         Command::Config(args) => {

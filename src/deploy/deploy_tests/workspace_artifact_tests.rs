@@ -212,10 +212,10 @@ fn relocated_compute_entrypoint_keeps_compute_ownership_under_static_output() {
 
     let detection = crate::detect::detect_with_framework_override(project.path(), Some("other"));
     let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [
             {"name": "static", "target": "STATIC", "directory": "."},
-            {"name": "api", "target": "COMPUTE", "directory": "api", "entry": "main.js"},
+            {"name": "api", "target": "COMPUTE", "directory": "api", "entry": "main.js","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]}}},
             {"name": "assets", "target": "STATIC", "directory": "api/public"}
         ],
         "routes": [

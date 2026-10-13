@@ -28,6 +28,8 @@
   "getV1ProjectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRules",
   "getV1ProjectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctions",
   "getV1ProjectsByIdRuntimeLogs",
+  "getV1ProjectsByIdServices",
+  "getV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpoints",
   "getV1User",
   "getV1Workspace",
   "getV1WorkspaceDomainsDomains",
@@ -35,6 +37,7 @@
   "patchV1KaikiDatabasesById",
   "patchV1KaikiDatabasesByIdAttachmentsByProjectId",
   "patchV1ProjectsById",
+  "patchV1ProjectsByIdServicesByServiceId",
   "postV1BuildLogSessions",
   "postV1BuildLogSessionsByIdEvents",
   "postV1BuildLogSessionsByIdFinish",
@@ -65,7 +68,13 @@
   "postV1ProjectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRulesStatus",
   "postV1ProjectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsByFunctionIdRevisionsByRevisionIdTestInvoke",
   "postV1ProjectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsPublish",
+  "postV1ProjectsByIdServices",
+  "postV1ProjectsByIdSources",
   "postV1WorkspaceDomainsDomainsByZoneIdHostnames",
   "postV1WorkspaceDomainsDomainsByZoneIdVerify",
-  "putV1ComputeConfigByProjectId"
+  "putV1ComputeConfigByProjectId",
+  "putV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExport",
+  "putV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExposure",
+  "putV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameImport",
+  "putV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetwork"
 ]

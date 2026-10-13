@@ -24,7 +24,7 @@ async fn generated_execution_requests_preserve_selection_and_validate_snapshot_b
             Json(json!({"protocolVersion":EXECUTION_CONTEXT_PROTOCOL, "context":context_json()}))
         }))
         .route("/v1/projects/{id}/execution-context/materialize", post(|Json(body): Json<Value>| async move {
-            assert_eq!(body, json!({"environmentId":ENVIRONMENT_ID, "sourceRef":null, "purpose":"EXEC", "selectionSource":"EXPLICIT"}));
+            assert_eq!(body, json!({"environmentId":ENVIRONMENT_ID, "serviceId":"00000000-0000-0000-0000-000000000006", "sourceRef":null, "purpose":"EXEC", "selectionSource":"EXPLICIT"}));
             Json(json!({"protocolVersion":EXECUTION_CONTEXT_PROTOCOL, "context":context_json(),
                 "variables":{"TOKEN":"test-value"}, "secretKeys":["TOKEN"],
                 "snapshot":{"fingerprint":format!("v1:{}", "a".repeat(64)), "resolvedAt":"2026-09-12T00:00:00Z",

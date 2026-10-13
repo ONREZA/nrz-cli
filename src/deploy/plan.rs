@@ -225,6 +225,90 @@ impl DeployPlan {
         }
     }
 
+    pub(super) fn apply_endpoint_declarations(
+        &mut self,
+        config: &crate::config::ProjectConfig,
+        service_id: &str,
+    ) -> anyhow::Result<()> {
+        // Preserve generated health detection when upgrading the writer contract.
+        // Authored endpoint readiness remains exact and is never overwritten.
+        if config.services.is_none()
+            && self.manifest_source != BuildManifestSource::File
+            && let Some(path) = self
+                .health_check
+                .as_ref()
+                .and_then(|health| health.path.as_ref())
+        {
+            for layer in &mut self.artifact.runtime.manifest.layers {
+                if let Some(network) = layer
+                    .runtime
+                    .as_mut()
+                    .and_then(|runtime| runtime.network.as_mut())
+                {
+                    network.readiness.protocol = "http".to_owned();
+                    network.readiness.path = Some(path.clone());
+                }
+            }
+        }
+        if let Some(endpoints) = &config.services {
+            anyhow::ensure!(endpoints.len() <= 10, "too many endpoints");
+            let manifest = &mut self.artifact.runtime.manifest;
+            let mut declared = std::collections::HashSet::new();
+            for endpoint in endpoints {
+                anyhow::ensure!(
+                    declared.insert(endpoint.name.as_str()),
+                    "duplicate endpoint '{}'",
+                    endpoint.name
+                );
+                let layer = manifest
+                    .layers
+                    .iter_mut()
+                    .find(|l| {
+                        l.name == endpoint.name && l.target == build_manifest::LayerTarget::Compute
+                    })
+                    .with_context(|| {
+                        format!("endpoint '{}' is not a COMPUTE layer", endpoint.name)
+                    })?;
+                let network = endpoint.resolve(service_id)?;
+                if network.exposure == "PRIVATE"
+                    && self.manifest_source != BuildManifestSource::File
+                {
+                    manifest.routes.retain(|route| route.layer != endpoint.name);
+                }
+                layer.runtime.get_or_insert_with(Default::default).network = Some(network);
+            }
+            anyhow::ensure!(
+                manifest
+                    .layers
+                    .iter()
+                    .filter(|l| l.target == build_manifest::LayerTarget::Compute)
+                    .all(|l| declared.contains(l.name.as_str())),
+                "endpoint declarations must cover every COMPUTE layer"
+            );
+        }
+        let manifest = &self.artifact.runtime.manifest;
+        build_manifest::validate(manifest)?;
+        for layer in &manifest.layers {
+            if let Some(network) = layer.runtime.as_ref().and_then(|r| r.network.as_ref()) {
+                for caller in &network.allow_from {
+                    if caller.service_id.eq_ignore_ascii_case(service_id) {
+                        anyhow::ensure!(
+                            manifest
+                                .layers
+                                .iter()
+                                .any(|l| l.target == build_manifest::LayerTarget::Compute
+                                    && l.name == caller.layer_name),
+                            "caller references unknown sibling COMPUTE layer"
+                        );
+                    }
+                }
+            }
+        }
+        self.manifest_raw =
+            super::conform_manifest_to_wire_contract(serde_json::to_value(manifest)?)?;
+        Ok(())
+    }
+
     pub(super) fn materialize_source_bundle(
         &self,
         json: bool,

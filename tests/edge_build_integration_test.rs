@@ -98,7 +98,7 @@ async fn edge_build_materialize(
     state.record(Method::POST, &uri);
     assert_eq!(body, json!({ "purpose": "DEPLOY" }));
     Json(json!({
-        "protocolVersion": "execution-context-v2",
+        "protocolVersion": "execution-context-v3",
         "context": edge_build_execution_context(),
         "variables": {},
         "secretKeys": [],
@@ -712,9 +712,9 @@ fn retained_platform_handoff_preserves_authored_targets_without_new_build_facts(
         }
         fs::create_dir(project.path().join(".onreza")).unwrap();
         let mut authored_manifest = json!({
-            "version":1,"routes":[{"pattern":"^/.*$","layer":"primary"}],"layers":[
+            "version":2,"routes":[{"pattern":"^/.*$","layer":"primary"}],"layers":[
                 {"name":"primary","target":"COMPUTE","directory":".","entry":"server.js",
-                 "runtime":{"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":old_target}}
+                 "runtime":{"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":old_target,"network":fixture_network("PUBLIC")}}
             ]
         });
         if !typed {
@@ -845,11 +845,11 @@ fn fresh_hono_dist_handoff_keeps_primary_lineage_through_runtime_relocation() {
             fs::write(
                 project.path().join("dist/.onreza/manifest.json"),
                 serde_json::to_vec(&json!({
-                    "version":1,"routes":[{"pattern":"^/.*$","layer":"primary"}],"layers":[
+                    "version":2,"routes":[{"pattern":"^/.*$","layer":"primary"}],"layers":[
                         {"name":"sibling","target":"COMPUTE","directory":"worker","entry":"sibling.js",
-                         "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}},
+                         "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22","network":fixture_network("PRIVATE")}},
                         {"name":"primary","target":"COMPUTE","directory":"app","entry":"server.mjs",
-                         "runtime":{"applicationRuntime":{"family":"BUN","args":[]},"buildRuntimeVersion":"bun-1.4.2"}}
+                         "runtime":{"applicationRuntime":{"family":"BUN","args":[]},"buildRuntimeVersion":"bun-1.4.2","network":fixture_network("PUBLIC")}}
                     ]
                 }))
                 .unwrap(),
@@ -1070,4 +1070,10 @@ fn admitted_source_manifest(
         .output()
         .unwrap();
     source_bundle_manifest(output, &result, target)
+}
+
+fn fixture_network(exposure: &str) -> serde_json::Value {
+    json!({"schemaVersion":"COMPUTE_NETWORK_V1","exposure":exposure,
+        "ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],
+        "readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]})
 }

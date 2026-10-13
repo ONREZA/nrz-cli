@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::SourcePublicationError;
 
 pub(crate) const SOURCE_BUNDLE_FORMAT: &str = "tar.zst";
-pub(crate) const CLI_PROTOCOL_VERSION: &str = "source-bundle-v1-embedded-manifest";
+pub(crate) const CLI_PROTOCOL_VERSION: &str = "source-bundle-v1-network-v2";
 const MULTIPART_THRESHOLD_BYTES: u64 = 268_435_456;
 const MULTIPART_CHUNK_BYTES: u64 = 16_777_216;
 

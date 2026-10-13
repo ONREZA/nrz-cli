@@ -6,6 +6,3034 @@
     "version": "0.0.0"
   },
   "paths": {
+    "/v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/": {
+      "get": {
+        "summary": "Read compute endpoint network intent and applied state",
+        "tags": [
+          "Compute Endpoints"
+        ],
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "context": {
+                      "type": "object",
+                      "properties": {
+                        "productId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "serviceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "environmentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "workspaceEnvironmentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      },
+                      "required": [
+                        "productId",
+                        "serviceId",
+                        "environmentId",
+                        "workspaceEnvironmentId"
+                      ]
+                    },
+                    "endpoints": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "layerName": {
+                            "type": "string"
+                          },
+                          "dnsToken": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{32}$"
+                          },
+                          "network": {
+                            "type": "object",
+                            "properties": {
+                              "schemaVersion": {
+                                "const": "COMPUTE_NETWORK_V1",
+                                "type": "string"
+                              },
+                              "exposure": {
+                                "enum": [
+                                  "PUBLIC",
+                                  "PRIVATE"
+                                ],
+                                "type": "string"
+                              },
+                              "ports": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 64,
+                                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                    },
+                                    "protocol": {
+                                      "enum": [
+                                        "http",
+                                        "grpc",
+                                        "websocket",
+                                        "tcp"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "port": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 65535
+                                    },
+                                    "binding": {
+                                      "enum": [
+                                        "primary",
+                                        "fixed"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "name",
+                                    "protocol",
+                                    "port",
+                                    "binding"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minItems": 1,
+                                "maxItems": 16
+                              },
+                              "readiness": {
+                                "type": "object",
+                                "properties": {
+                                  "protocol": {
+                                    "enum": [
+                                      "tcp",
+                                      "http"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "port": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                  },
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 2048
+                                  }
+                                },
+                                "required": [
+                                  "protocol",
+                                  "port"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "allowFrom": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "serviceId": {
+                                      "type": "string",
+                                      "format": "uuid",
+                                      "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
+                                    },
+                                    "layerName": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 64,
+                                      "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                                    }
+                                  },
+                                  "required": [
+                                    "serviceId",
+                                    "layerName"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 128
+                              }
+                            },
+                            "required": [
+                              "schemaVersion",
+                              "exposure",
+                              "ports",
+                              "readiness",
+                              "allowFrom"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "desiredGeneration": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "state": {
+                            "enum": [
+                              "PENDING",
+                              "APPLIED"
+                            ],
+                            "type": "string"
+                          },
+                          "export": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "ports": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "generation": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "revoked": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "ports",
+                                  "generation",
+                                  "revoked"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "layerName",
+                          "dnsToken",
+                          "network",
+                          "desiredGeneration",
+                          "state",
+                          "export"
+                        ]
+                      }
+                    },
+                    "available": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "serviceId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "productId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "environmentId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "productName": {
+                            "type": "string"
+                          },
+                          "serviceName": {
+                            "type": "string"
+                          },
+                          "layerName": {
+                            "type": "string"
+                          },
+                          "network": {
+                            "type": "object",
+                            "properties": {
+                              "schemaVersion": {
+                                "const": "COMPUTE_NETWORK_V1",
+                                "type": "string"
+                              },
+                              "exposure": {
+                                "enum": [
+                                  "PUBLIC",
+                                  "PRIVATE"
+                                ],
+                                "type": "string"
+                              },
+                              "ports": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 64,
+                                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                    },
+                                    "protocol": {
+                                      "enum": [
+                                        "http",
+                                        "grpc",
+                                        "websocket",
+                                        "tcp"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "port": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 65535
+                                    },
+                                    "binding": {
+                                      "enum": [
+                                        "primary",
+                                        "fixed"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "name",
+                                    "protocol",
+                                    "port",
+                                    "binding"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "minItems": 1,
+                                "maxItems": 16
+                              },
+                              "readiness": {
+                                "type": "object",
+                                "properties": {
+                                  "protocol": {
+                                    "enum": [
+                                      "tcp",
+                                      "http"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "port": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                  },
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 2048
+                                  }
+                                },
+                                "required": [
+                                  "protocol",
+                                  "port"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "allowFrom": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "serviceId": {
+                                      "type": "string",
+                                      "format": "uuid",
+                                      "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
+                                    },
+                                    "layerName": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 64,
+                                      "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                                    }
+                                  },
+                                  "required": [
+                                    "serviceId",
+                                    "layerName"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 128
+                              }
+                            },
+                            "required": [
+                              "schemaVersion",
+                              "exposure",
+                              "ports",
+                              "readiness",
+                              "allowFrom"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "generation": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "export": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "ports": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "generation": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "revoked": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "ports",
+                                  "generation",
+                                  "revoked"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "imports": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "exportId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "generation": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 9007199254740991
+                                },
+                                "exportGeneration": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 9007199254740991
+                                },
+                                "ports": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "exportId",
+                                "generation",
+                                "exportGeneration",
+                                "ports"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "serviceId",
+                          "productId",
+                          "environmentId",
+                          "productName",
+                          "serviceName",
+                          "layerName",
+                          "network",
+                          "generation",
+                          "export",
+                          "imports"
+                        ]
+                      }
+                    },
+                    "canManage": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "context",
+                    "endpoints",
+                    "available",
+                    "canManage"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "getV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpoints"
+      }
+    },
+    "/v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/export": {
+      "put": {
+        "summary": "Set or revoke scoped endpoint export",
+        "tags": [
+          "Compute Endpoints"
+        ],
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "layerName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ports": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "minItems": 1,
+                    "maxItems": 16
+                  },
+                  "expectedGeneration": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "revoke": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "ports",
+                  "expectedGeneration"
+                ],
+                "additionalProperties": false,
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "putV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExport"
+      }
+    },
+    "/v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/import": {
+      "put": {
+        "summary": "Grant endpoint imports with both Product permissions or withdraw an owned import",
+        "tags": [
+          "Compute Endpoints"
+        ],
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "layerName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ports": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "minItems": 1,
+                    "maxItems": 16
+                  },
+                  "expectedGeneration": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "revoke": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "exportId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "exportGeneration": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "ports",
+                  "expectedGeneration",
+                  "exportId",
+                  "exportGeneration"
+                ],
+                "additionalProperties": false,
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "putV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameImport"
+      }
+    },
+    "/v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/network": {
+      "put": {
+        "summary": "Authorize endpoint network change with explicit public exposure preview",
+        "tags": [
+          "Compute Endpoints"
+        ],
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "layerName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expectedGeneration": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "network": {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "COMPUTE_NETWORK_V1",
+                        "type": "string"
+                      },
+                      "exposure": {
+                        "enum": [
+                          "PUBLIC",
+                          "PRIVATE"
+                        ],
+                        "type": "string"
+                      },
+                      "ports": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                            },
+                            "protocol": {
+                              "enum": [
+                                "http",
+                                "grpc",
+                                "websocket",
+                                "tcp"
+                              ],
+                              "type": "string"
+                            },
+                            "port": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 65535
+                            },
+                            "binding": {
+                              "enum": [
+                                "primary",
+                                "fixed"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "protocol",
+                            "port",
+                            "binding"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1,
+                        "maxItems": 16
+                      },
+                      "readiness": {
+                        "type": "object",
+                        "properties": {
+                          "protocol": {
+                            "enum": [
+                              "tcp",
+                              "http"
+                            ],
+                            "type": "string"
+                          },
+                          "port": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2048
+                          }
+                        },
+                        "required": [
+                          "protocol",
+                          "port"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "allowFrom": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "serviceId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
+                            },
+                            "layerName": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                            }
+                          },
+                          "required": [
+                            "serviceId",
+                            "layerName"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "maxItems": 128
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "exposure",
+                      "ports",
+                      "readiness",
+                      "allowFrom"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "publicRoutePreview": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "layer": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                        },
+                        "pattern": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "layer",
+                        "pattern"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 100,
+                    "default": []
+                  }
+                },
+                "required": [
+                  "expectedGeneration",
+                  "network"
+                ],
+                "additionalProperties": false,
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "generation": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "generation"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "putV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetwork"
+      }
+    },
+    "/v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/exposure": {
+      "put": {
+        "summary": "Authorize explicit endpoint exposure transition and future public routes",
+        "tags": [
+          "Compute Endpoints"
+        ],
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "layerName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expectedGeneration": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "exposure": {
+                    "enum": [
+                      "PUBLIC",
+                      "PRIVATE"
+                    ],
+                    "type": "string"
+                  },
+                  "publicRoutePreview": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "layer": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                        },
+                        "pattern": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "layer",
+                        "pattern"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 100,
+                    "default": []
+                  }
+                },
+                "required": [
+                  "expectedGeneration",
+                  "exposure"
+                ],
+                "additionalProperties": false,
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "generation": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "generation"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "putV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExposure"
+      }
+    },
+    "/v1/projects/{id}/services": {
+      "get": {
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "canManage": {
+                      "type": "boolean"
+                    },
+                    "services": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "serviceId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "sourceId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "sourceRef": {
+                            "type": "string"
+                          },
+                          "rootDirectory": {
+                            "type": "string"
+                          },
+                          "sourceType": {
+                            "type": "string"
+                          },
+                          "gitUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sourceUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "deletionRequestedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "serviceId",
+                          "name",
+                          "sourceId",
+                          "sourceRef",
+                          "rootDirectory",
+                          "sourceType",
+                          "gitUrl",
+                          "sourceUrl",
+                          "deletionRequestedAt",
+                          "isDefault"
+                        ]
+                      }
+                    },
+                    "sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sourceId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "sourceType": {
+                            "type": "string"
+                          },
+                          "gitUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "sourceUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "sourceId",
+                          "sourceType",
+                          "gitUrl",
+                          "sourceUrl"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "canManage",
+                    "services",
+                    "sources"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "getV1ProjectsByIdServices"
+      },
+      "post": {
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "sourceId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "sourceRef": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "rootDirectory": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                },
+                "required": [
+                  "name",
+                  "sourceId",
+                  "sourceRef",
+                  "rootDirectory"
+                ],
+                "additionalProperties": false,
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serviceId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "sourceId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "sourceRef": {
+                      "type": "string"
+                    },
+                    "rootDirectory": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "serviceId",
+                    "name",
+                    "sourceId",
+                    "sourceRef",
+                    "rootDirectory"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "postV1ProjectsByIdServices"
+      }
+    },
+    "/v1/projects/{id}/services/{serviceId}": {
+      "patch": {
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "sourceId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "sourceRef": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "rootDirectory": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024
+                  }
+                },
+                "required": [
+                  "name",
+                  "sourceId",
+                  "sourceRef",
+                  "rootDirectory"
+                ],
+                "additionalProperties": false,
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serviceId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "sourceId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "sourceRef": {
+                      "type": "string"
+                    },
+                    "rootDirectory": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "serviceId",
+                    "name",
+                    "sourceId",
+                    "sourceRef",
+                    "rootDirectory"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "patchV1ProjectsByIdServicesByServiceId"
+      },
+      "delete": {
+        "summary": "Remove Service",
+        "description": "Requests explicit Service removal and runtime withdrawal. Product databases and KV data are preserved.",
+        "tags": [
+          "Projects"
+        ],
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "serviceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "productId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "serviceId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "status": {
+                      "enum": [
+                        "REMOVING",
+                        "DELETED"
+                      ],
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "productId",
+                    "serviceId",
+                    "status",
+                    "message"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "deleteV1ProjectsByIdServicesByServiceId"
+      }
+    },
+    "/v1/projects/{id}/sources": {
+      "post": {
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sourceType": {
+                    "const": "CLI",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sourceType"
+                ],
+                "additionalProperties": false,
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sourceId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "sourceType": {
+                      "type": "string"
+                    },
+                    "gitUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "sourceUrl": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "sourceId",
+                    "sourceType",
+                    "gitUrl",
+                    "sourceUrl"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "postV1ProjectsByIdSources"
+      }
+    },
     "/v1/projects/": {
       "get": {
         "summary": "List projects",
@@ -2454,216 +5482,6 @@
         "operationId": "deleteV1ProjectsById"
       }
     },
-    "/v1/projects/{id}/services/{serviceId}": {
-      "delete": {
-        "summary": "Remove Service",
-        "description": "Requests explicit Service removal and runtime withdrawal. Product databases and KV data are preserved.",
-        "tags": [
-          "Projects"
-        ],
-        "security": [
-          {
-            "sessionCookieAuth": []
-          },
-          {
-            "apiKeyAuth": []
-          },
-          {
-            "bearerApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "serviceId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Response for status 200",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "productId": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "serviceId": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "status": {
-                      "enum": [
-                        "REMOVING",
-                        "DELETED"
-                      ],
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "productId",
-                    "serviceId",
-                    "status",
-                    "message"
-                  ],
-                  "$schema": "https://json-schema.org/draft/2020-12/schema"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Response for status 400",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError400"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Response for status 401",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError401"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Response for status 402",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError402"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Response for status 403",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError403"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Response for status 404",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError404"
-                }
-              }
-            }
-          },
-          "408": {
-            "description": "Response for status 408",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError408"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Response for status 409",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError409"
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "Response for status 410",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError410"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "Response for status 413",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError413"
-                }
-              }
-            }
-          },
-          "426": {
-            "description": "Response for status 426",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError426"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Response for status 429",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError429"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Response for status 500",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError500"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Response for status 503",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError503"
-                }
-              }
-            }
-          }
-        },
-        "operationId": "deleteV1ProjectsByIdServicesByServiceId"
-      }
-    },
     "/v1/projects/{id}/detection": {
       "post": {
         "summary": "Sync project detection result",
@@ -3738,6 +6556,78 @@
                         ]
                       }
                     },
+                    "compositions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "compositionId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "components": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "serviceName": {
+                                  "type": "string"
+                                },
+                                "serviceId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "deploymentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "runtimeReleaseId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "contentDigest": {
+                                  "type": "object",
+                                  "properties": {
+                                    "algorithm": {
+                                      "enum": [
+                                        "SHA256",
+                                        "BLAKE3"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "pattern": "^[0-9a-f]{64}$"
+                                    }
+                                  },
+                                  "required": [
+                                    "algorithm",
+                                    "value"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "serviceId",
+                                "deploymentId",
+                                "runtimeReleaseId",
+                                "contentDigest"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "compositionId",
+                          "createdAt",
+                          "components"
+                        ]
+                      },
+                      "default": []
+                    },
                     "nextCursor": {
                       "anyOf": [
                         {
@@ -3765,7 +6655,8 @@
                   },
                   "required": [
                     "releases",
-                    "nextCursor"
+                    "nextCursor",
+                    "compositions"
                   ],
                   "$schema": "https://json-schema.org/draft/2020-12/schema"
                 }
@@ -16788,7 +19679,8 @@
                             "schemaVersion": {
                               "enum": [
                                 "RUNTIME_ARTIFACT_GRAPH_V2.0",
-                                "RUNTIME_ARTIFACT_GRAPH_V2.1"
+                                "RUNTIME_ARTIFACT_GRAPH_V2.1",
+                                "RUNTIME_ARTIFACT_GRAPH_V2.2"
                               ],
                               "type": "string"
                             },
@@ -17089,12 +19981,137 @@
                                   "runtimeConfig": {
                                     "type": "object",
                                     "properties": {
+                                      "network": {
+                                        "type": "object",
+                                        "properties": {
+                                          "schemaVersion": {
+                                            "const": "COMPUTE_NETWORK_V1",
+                                            "type": "string"
+                                          },
+                                          "exposure": {
+                                            "enum": [
+                                              "PUBLIC",
+                                              "PRIVATE"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "ports": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "name": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 64,
+                                                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                                },
+                                                "protocol": {
+                                                  "enum": [
+                                                    "http",
+                                                    "grpc",
+                                                    "websocket",
+                                                    "tcp"
+                                                  ],
+                                                  "type": "string"
+                                                },
+                                                "port": {
+                                                  "type": "integer",
+                                                  "minimum": 1,
+                                                  "maximum": 65535
+                                                },
+                                                "binding": {
+                                                  "enum": [
+                                                    "primary",
+                                                    "fixed"
+                                                  ],
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "required": [
+                                                "name",
+                                                "protocol",
+                                                "port",
+                                                "binding"
+                                              ],
+                                              "additionalProperties": false
+                                            },
+                                            "minItems": 1,
+                                            "maxItems": 16
+                                          },
+                                          "readiness": {
+                                            "type": "object",
+                                            "properties": {
+                                              "protocol": {
+                                                "enum": [
+                                                  "tcp",
+                                                  "http"
+                                                ],
+                                                "type": "string"
+                                              },
+                                              "port": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 64,
+                                                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                              },
+                                              "path": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 2048
+                                              }
+                                            },
+                                            "required": [
+                                              "protocol",
+                                              "port"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "allowFrom": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "serviceId": {
+                                                  "type": "string",
+                                                  "format": "uuid",
+                                                  "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
+                                                },
+                                                "layerName": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 64,
+                                                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                                                }
+                                              },
+                                              "required": [
+                                                "serviceId",
+                                                "layerName"
+                                              ],
+                                              "additionalProperties": false
+                                            },
+                                            "maxItems": 128
+                                          }
+                                        },
+                                        "required": [
+                                          "schemaVersion",
+                                          "exposure",
+                                          "ports",
+                                          "readiness",
+                                          "allowFrom"
+                                        ],
+                                        "additionalProperties": false
+                                      },
                                       "runtimeFamily": {
                                         "enum": [
                                           "JAVASCRIPT",
                                           "PYTHON"
                                         ],
                                         "type": "string"
+                                      },
+                                      "runtimePolicyLineage": {
+                                        "type": "string",
+                                        "pattern": "^(BUN:CURRENT|NODE:[1-9][0-9]{0,8}|PYTHON:[1-9][0-9]{0,8}\\.(0|[1-9][0-9]{0,8}))$"
                                       },
                                       "timeoutMs": {
                                         "type": "integer",
@@ -17112,10 +20129,6 @@
                                         "minimum": -9007199254740991,
                                         "maximum": 100,
                                         "exclusiveMinimum": 0
-                                      },
-                                      "runtimePolicyLineage": {
-                                        "type": "string",
-                                        "pattern": "^(BUN:CURRENT|NODE:[1-9][0-9]{0,8}|PYTHON:[1-9][0-9]{0,8}\\.(0|[1-9][0-9]{0,8}))$"
                                       }
                                     },
                                     "required": [],
@@ -18113,7 +21126,8 @@
                         "schemaVersion": {
                           "enum": [
                             "RUNTIME_ARTIFACT_GRAPH_V2.0",
-                            "RUNTIME_ARTIFACT_GRAPH_V2.1"
+                            "RUNTIME_ARTIFACT_GRAPH_V2.1",
+                            "RUNTIME_ARTIFACT_GRAPH_V2.2"
                           ],
                           "type": "string"
                         },
@@ -18414,12 +21428,137 @@
                               "runtimeConfig": {
                                 "type": "object",
                                 "properties": {
+                                  "network": {
+                                    "type": "object",
+                                    "properties": {
+                                      "schemaVersion": {
+                                        "const": "COMPUTE_NETWORK_V1",
+                                        "type": "string"
+                                      },
+                                      "exposure": {
+                                        "enum": [
+                                          "PUBLIC",
+                                          "PRIVATE"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "ports": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "name": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 64,
+                                              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                            },
+                                            "protocol": {
+                                              "enum": [
+                                                "http",
+                                                "grpc",
+                                                "websocket",
+                                                "tcp"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "port": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 65535
+                                            },
+                                            "binding": {
+                                              "enum": [
+                                                "primary",
+                                                "fixed"
+                                              ],
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "name",
+                                            "protocol",
+                                            "port",
+                                            "binding"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 16
+                                      },
+                                      "readiness": {
+                                        "type": "object",
+                                        "properties": {
+                                          "protocol": {
+                                            "enum": [
+                                              "tcp",
+                                              "http"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "port": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 64,
+                                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                          },
+                                          "path": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 2048
+                                          }
+                                        },
+                                        "required": [
+                                          "protocol",
+                                          "port"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "allowFrom": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "serviceId": {
+                                              "type": "string",
+                                              "format": "uuid",
+                                              "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
+                                            },
+                                            "layerName": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 64,
+                                              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                                            }
+                                          },
+                                          "required": [
+                                            "serviceId",
+                                            "layerName"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "maxItems": 128
+                                      }
+                                    },
+                                    "required": [
+                                      "schemaVersion",
+                                      "exposure",
+                                      "ports",
+                                      "readiness",
+                                      "allowFrom"
+                                    ],
+                                    "additionalProperties": false
+                                  },
                                   "runtimeFamily": {
                                     "enum": [
                                       "JAVASCRIPT",
                                       "PYTHON"
                                     ],
                                     "type": "string"
+                                  },
+                                  "runtimePolicyLineage": {
+                                    "type": "string",
+                                    "pattern": "^(BUN:CURRENT|NODE:[1-9][0-9]{0,8}|PYTHON:[1-9][0-9]{0,8}\\.(0|[1-9][0-9]{0,8}))$"
                                   },
                                   "timeoutMs": {
                                     "type": "integer",
@@ -18437,10 +21576,6 @@
                                     "minimum": -9007199254740991,
                                     "maximum": 100,
                                     "exclusiveMinimum": 0
-                                  },
-                                  "runtimePolicyLineage": {
-                                    "type": "string",
-                                    "pattern": "^(BUN:CURRENT|NODE:[1-9][0-9]{0,8}|PYTHON:[1-9][0-9]{0,8}\\.(0|[1-9][0-9]{0,8}))$"
                                   }
                                 },
                                 "required": [],
@@ -18988,7 +22123,8 @@
                         "schemaVersion": {
                           "enum": [
                             "RUNTIME_ARTIFACT_GRAPH_V2.0",
-                            "RUNTIME_ARTIFACT_GRAPH_V2.1"
+                            "RUNTIME_ARTIFACT_GRAPH_V2.1",
+                            "RUNTIME_ARTIFACT_GRAPH_V2.2"
                           ],
                           "type": "string"
                         },
@@ -19289,12 +22425,137 @@
                               "runtimeConfig": {
                                 "type": "object",
                                 "properties": {
+                                  "network": {
+                                    "type": "object",
+                                    "properties": {
+                                      "schemaVersion": {
+                                        "const": "COMPUTE_NETWORK_V1",
+                                        "type": "string"
+                                      },
+                                      "exposure": {
+                                        "enum": [
+                                          "PUBLIC",
+                                          "PRIVATE"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "ports": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "name": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 64,
+                                              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                            },
+                                            "protocol": {
+                                              "enum": [
+                                                "http",
+                                                "grpc",
+                                                "websocket",
+                                                "tcp"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "port": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 65535
+                                            },
+                                            "binding": {
+                                              "enum": [
+                                                "primary",
+                                                "fixed"
+                                              ],
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "name",
+                                            "protocol",
+                                            "port",
+                                            "binding"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 16
+                                      },
+                                      "readiness": {
+                                        "type": "object",
+                                        "properties": {
+                                          "protocol": {
+                                            "enum": [
+                                              "tcp",
+                                              "http"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "port": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 64,
+                                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                          },
+                                          "path": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 2048
+                                          }
+                                        },
+                                        "required": [
+                                          "protocol",
+                                          "port"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "allowFrom": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "serviceId": {
+                                              "type": "string",
+                                              "format": "uuid",
+                                              "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
+                                            },
+                                            "layerName": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 64,
+                                              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                                            }
+                                          },
+                                          "required": [
+                                            "serviceId",
+                                            "layerName"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "maxItems": 128
+                                      }
+                                    },
+                                    "required": [
+                                      "schemaVersion",
+                                      "exposure",
+                                      "ports",
+                                      "readiness",
+                                      "allowFrom"
+                                    ],
+                                    "additionalProperties": false
+                                  },
                                   "runtimeFamily": {
                                     "enum": [
                                       "JAVASCRIPT",
                                       "PYTHON"
                                     ],
                                     "type": "string"
+                                  },
+                                  "runtimePolicyLineage": {
+                                    "type": "string",
+                                    "pattern": "^(BUN:CURRENT|NODE:[1-9][0-9]{0,8}|PYTHON:[1-9][0-9]{0,8}\\.(0|[1-9][0-9]{0,8}))$"
                                   },
                                   "timeoutMs": {
                                     "type": "integer",
@@ -19312,10 +22573,6 @@
                                     "minimum": -9007199254740991,
                                     "maximum": 100,
                                     "exclusiveMinimum": 0
-                                  },
-                                  "runtimePolicyLineage": {
-                                    "type": "string",
-                                    "pattern": "^(BUN:CURRENT|NODE:[1-9][0-9]{0,8}|PYTHON:[1-9][0-9]{0,8}\\.(0|[1-9][0-9]{0,8}))$"
                                   }
                                 },
                                 "required": [],
@@ -20470,6 +23727,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "serviceId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
                   "environment": {
                     "type": "string",
                     "minLength": 1
@@ -20513,7 +23774,7 @@
                   "type": "object",
                   "properties": {
                     "protocolVersion": {
-                      "const": "execution-context-v2",
+                      "const": "execution-context-v3",
                       "type": "string"
                     },
                     "context": {
@@ -20794,6 +24055,10 @@
                     "type": "string",
                     "format": "uuid"
                   },
+                  "serviceId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
                   "sourceRef": {
                     "anyOf": [
                       {
@@ -20842,7 +24107,7 @@
                   "type": "object",
                   "properties": {
                     "protocolVersion": {
-                      "const": "execution-context-v2",
+                      "const": "execution-context-v3",
                       "type": "string"
                     },
                     "context": {
@@ -21266,7 +24531,7 @@
                   "type": "object",
                   "properties": {
                     "protocolVersion": {
-                      "const": "execution-context-v2",
+                      "const": "execution-context-v3",
                       "type": "string"
                     },
                     "context": {
@@ -22323,7 +25588,7 @@
                   "type": "object",
                   "properties": {
                     "protocolVersion": {
-                      "const": "execution-context-v2",
+                      "const": "execution-context-v3",
                       "type": "string"
                     },
                     "context": {
@@ -23622,7 +26887,7 @@
                     "type": "object",
                     "properties": {
                       "version": {
-                        "const": 1,
+                        "const": 2,
                         "type": "number"
                       },
                       "layers": {
@@ -23635,7 +26900,8 @@
                                 "name": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "maxLength": 64
+                                  "maxLength": 64,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                                 },
                                 "directory": {
                                   "type": "string",
@@ -23660,7 +26926,8 @@
                                 "name": {
                                   "type": "string",
                                   "minLength": 1,
-                                  "maxLength": 64
+                                  "maxLength": 64,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
                                 },
                                 "directory": {
                                   "type": "string",
@@ -23679,6 +26946,127 @@
                                 "runtime": {
                                   "type": "object",
                                   "properties": {
+                                    "network": {
+                                      "type": "object",
+                                      "properties": {
+                                        "schemaVersion": {
+                                          "const": "COMPUTE_NETWORK_V1",
+                                          "type": "string"
+                                        },
+                                        "exposure": {
+                                          "enum": [
+                                            "PUBLIC",
+                                            "PRIVATE"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "ports": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "name": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 64,
+                                                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                              },
+                                              "protocol": {
+                                                "enum": [
+                                                  "http",
+                                                  "grpc",
+                                                  "websocket",
+                                                  "tcp"
+                                                ],
+                                                "type": "string"
+                                              },
+                                              "port": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": 65535
+                                              },
+                                              "binding": {
+                                                "enum": [
+                                                  "primary",
+                                                  "fixed"
+                                                ],
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "name",
+                                              "protocol",
+                                              "port",
+                                              "binding"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "minItems": 1,
+                                          "maxItems": 16
+                                        },
+                                        "readiness": {
+                                          "type": "object",
+                                          "properties": {
+                                            "protocol": {
+                                              "enum": [
+                                                "tcp",
+                                                "http"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "port": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 64,
+                                              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                            },
+                                            "path": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 2048
+                                            }
+                                          },
+                                          "required": [
+                                            "protocol",
+                                            "port"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "allowFrom": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "serviceId": {
+                                                "type": "string",
+                                                "format": "uuid",
+                                                "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
+                                              },
+                                              "layerName": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 64,
+                                                "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                                              }
+                                            },
+                                            "required": [
+                                              "serviceId",
+                                              "layerName"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "maxItems": 128
+                                        }
+                                      },
+                                      "required": [
+                                        "schemaVersion",
+                                        "exposure",
+                                        "ports",
+                                        "readiness",
+                                        "allowFrom"
+                                      ],
+                                      "additionalProperties": false
+                                    },
                                     "applicationRuntime": {
                                       "type": "object",
                                       "properties": {
@@ -23863,7 +27251,6 @@
                             "layer"
                           ]
                         },
-                        "minItems": 1,
                         "maxItems": 200
                       },
                       "prerender": {

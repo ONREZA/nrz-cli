@@ -57,6 +57,246 @@ impl PlatformClient {
             base_url: self.base_url.clone(),
         }
     }
+    /// Read compute endpoint network intent and applied state
+    ///
+    /// * Path: `GET /v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/`
+    pub async fn get_v1projects_by_id_services_by_service_id_environments_by_environment_id_endpoints(
+        &self,
+        request: GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsRequest,
+    ) -> anyhow::Result<
+        GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse,
+    > {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("environments")
+            .push(&request.path.environment_id.to_string())
+            .push("endpoints")
+            .push("");
+        let response = self.client.get(url).send().await?;
+        Ok(
+            GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsRequest::parse_response(
+                    response,
+                )
+                .await?,
+        )
+    }
+    /// Set or revoke scoped endpoint export
+    ///
+    /// * Path: `PUT /v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/export`
+    pub async fn put_v1projects_by_id_services_by_service_id_environments_by_environment_id_endpoints_by_layer_name_export(
+        &self,
+        request: PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportRequest,
+    ) -> anyhow::Result<
+        PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse,
+    >{
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("environments")
+            .push(&request.path.environment_id.to_string())
+            .push("endpoints")
+            .push(&request.path.layer_name.to_string())
+            .push("export");
+        let response = self.client.put(url).json(&request.body).send().await?;
+        Ok(
+            PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportRequest::parse_response(
+                    response,
+                )
+                .await?,
+        )
+    }
+    /// Grant endpoint imports with both Product permissions or withdraw an owned import
+    ///
+    /// * Path: `PUT /v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/import`
+    pub async fn put_v1projects_by_id_services_by_service_id_environments_by_environment_id_endpoints_by_layer_name_import(
+        &self,
+        request: PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameImportRequest,
+    ) -> anyhow::Result<
+        PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse,
+    >{
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("environments")
+            .push(&request.path.environment_id.to_string())
+            .push("endpoints")
+            .push(&request.path.layer_name.to_string())
+            .push("import");
+        let response = self.client.put(url).json(&request.body).send().await?;
+        Ok(
+            PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameImportRequest::parse_response(
+                    response,
+                )
+                .await?,
+        )
+    }
+    /// Authorize endpoint network change with explicit public exposure preview
+    ///
+    /// * Path: `PUT /v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/network`
+    pub async fn put_v1projects_by_id_services_by_service_id_environments_by_environment_id_endpoints_by_layer_name_network(
+        &self,
+        request: PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkRequest,
+    ) -> anyhow::Result<
+        PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse,
+    >{
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("environments")
+            .push(&request.path.environment_id.to_string())
+            .push("endpoints")
+            .push(&request.path.layer_name.to_string())
+            .push("network");
+        let response = self.client.put(url).json(&request.body).send().await?;
+        Ok(
+            PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkRequest::parse_response(
+                    response,
+                )
+                .await?,
+        )
+    }
+    /// Authorize explicit endpoint exposure transition and future public routes
+    ///
+    /// * Path: `PUT /v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/exposure`
+    pub async fn put_v1projects_by_id_services_by_service_id_environments_by_environment_id_endpoints_by_layer_name_exposure(
+        &self,
+        request: PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExposureRequest,
+    ) -> anyhow::Result<
+        PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse,
+    >{
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("environments")
+            .push(&request.path.environment_id.to_string())
+            .push("endpoints")
+            .push(&request.path.layer_name.to_string())
+            .push("exposure");
+        let response = self.client.put(url).json(&request.body).send().await?;
+        Ok(
+            PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExposureRequest::parse_response(
+                    response,
+                )
+                .await?,
+        )
+    }
+    /// * Path: `GET /v1/projects/{id}/services`
+    pub async fn get_v1projects_by_id_services(
+        &self,
+        request: GetV1projectsByIdServicesRequest,
+    ) -> anyhow::Result<GetV1projectsByIdServicesResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services");
+        let response = self.client.get(url).send().await?;
+        Ok(GetV1projectsByIdServicesRequest::parse_response(response).await?)
+    }
+    /// * Path: `POST /v1/projects/{id}/services`
+    pub async fn post_v1projects_by_id_services(
+        &self,
+        request: PostV1projectsByIdServicesRequest,
+    ) -> anyhow::Result<PostV1projectsByIdServicesResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(PostV1projectsByIdServicesRequest::parse_response(response).await?)
+    }
+    /// Remove Service
+    ///
+    /// Requests explicit Service removal and runtime withdrawal. Product databases and KV data are preserved.
+    ///
+    /// * Path: `DELETE /v1/projects/{id}/services/{serviceId}`
+    pub async fn delete_v1projects_by_id_services_by_service_id(
+        &self,
+        request: DeleteV1projectsByIdServicesByServiceIdRequest,
+    ) -> anyhow::Result<DeleteV1projectsByIdServicesByServiceIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string());
+        let response = self.client.delete(url).send().await?;
+        Ok(DeleteV1projectsByIdServicesByServiceIdRequest::parse_response(response).await?)
+    }
+    /// * Path: `PATCH /v1/projects/{id}/services/{serviceId}`
+    pub async fn patch_v1projects_by_id_services_by_service_id(
+        &self,
+        request: PatchV1projectsByIdServicesByServiceIdRequest,
+    ) -> anyhow::Result<PostV1projectsByIdServicesResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string());
+        let response = self.client.patch(url).json(&request.body).send().await?;
+        Ok(PatchV1projectsByIdServicesByServiceIdRequest::parse_response(response).await?)
+    }
+    /// * Path: `POST /v1/projects/{id}/sources`
+    pub async fn post_v1projects_by_id_sources(
+        &self,
+        request: PostV1projectsByIdSourcesRequest,
+    ) -> anyhow::Result<PostV1projectsByIdSourcesResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("sources");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(PostV1projectsByIdSourcesRequest::parse_response(response).await?)
+    }
     /// List projects
     ///
     /// Returns projects in the current workspace with latest production deployment summary.
@@ -151,27 +391,6 @@ impl PlatformClient {
             .push(&request.path.id.to_string());
         let response = self.client.patch(url).json(&request.body).send().await?;
         Ok(PatchV1projectsByIdRequest::parse_response(response).await?)
-    }
-    /// Remove Service
-    ///
-    /// Requests explicit Service removal and runtime withdrawal. Product databases and KV data are preserved.
-    ///
-    /// * Path: `DELETE /v1/projects/{id}/services/{serviceId}`
-    pub async fn delete_v1projects_by_id_services_by_service_id(
-        &self,
-        request: DeleteV1projectsByIdServicesByServiceIdRequest,
-    ) -> anyhow::Result<DeleteV1projectsByIdServicesByServiceIdResponse> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("projects")
-            .push(&request.path.id.to_string())
-            .push("services")
-            .push(&request.path.service_id.to_string());
-        let response = self.client.delete(url).send().await?;
-        Ok(DeleteV1projectsByIdServicesByServiceIdRequest::parse_response(response).await?)
     }
     /// Sync project detection result
     ///
@@ -1484,6 +1703,211 @@ pub struct PlatformClientRaw {
     base_url: Url,
 }
 impl PlatformClientRaw {
+    /// Read compute endpoint network intent and applied state
+    ///
+    /// * Path: `GET /v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/`
+    pub async fn get_v1projects_by_id_services_by_service_id_environments_by_environment_id_endpoints(
+        &self,
+        request: GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("environments")
+            .push(&request.path.environment_id.to_string())
+            .push("endpoints")
+            .push("");
+        let response = self.client.get(url).send().await?;
+        Ok(response)
+    }
+    /// Set or revoke scoped endpoint export
+    ///
+    /// * Path: `PUT /v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/export`
+    pub async fn put_v1projects_by_id_services_by_service_id_environments_by_environment_id_endpoints_by_layer_name_export(
+        &self,
+        request: PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("environments")
+            .push(&request.path.environment_id.to_string())
+            .push("endpoints")
+            .push(&request.path.layer_name.to_string())
+            .push("export");
+        let response = self.client.put(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Grant endpoint imports with both Product permissions or withdraw an owned import
+    ///
+    /// * Path: `PUT /v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/import`
+    pub async fn put_v1projects_by_id_services_by_service_id_environments_by_environment_id_endpoints_by_layer_name_import(
+        &self,
+        request: PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameImportRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("environments")
+            .push(&request.path.environment_id.to_string())
+            .push("endpoints")
+            .push(&request.path.layer_name.to_string())
+            .push("import");
+        let response = self.client.put(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Authorize endpoint network change with explicit public exposure preview
+    ///
+    /// * Path: `PUT /v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/network`
+    pub async fn put_v1projects_by_id_services_by_service_id_environments_by_environment_id_endpoints_by_layer_name_network(
+        &self,
+        request: PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("environments")
+            .push(&request.path.environment_id.to_string())
+            .push("endpoints")
+            .push(&request.path.layer_name.to_string())
+            .push("network");
+        let response = self.client.put(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Authorize explicit endpoint exposure transition and future public routes
+    ///
+    /// * Path: `PUT /v1/projects/{id}/services/{serviceId}/environments/{environmentId}/endpoints/{layerName}/exposure`
+    pub async fn put_v1projects_by_id_services_by_service_id_environments_by_environment_id_endpoints_by_layer_name_exposure(
+        &self,
+        request: PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExposureRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string())
+            .push("environments")
+            .push(&request.path.environment_id.to_string())
+            .push("endpoints")
+            .push(&request.path.layer_name.to_string())
+            .push("exposure");
+        let response = self.client.put(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// * Path: `GET /v1/projects/{id}/services`
+    pub async fn get_v1projects_by_id_services(
+        &self,
+        request: GetV1projectsByIdServicesRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services");
+        let response = self.client.get(url).send().await?;
+        Ok(response)
+    }
+    /// * Path: `POST /v1/projects/{id}/services`
+    pub async fn post_v1projects_by_id_services(
+        &self,
+        request: PostV1projectsByIdServicesRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Remove Service
+    ///
+    /// Requests explicit Service removal and runtime withdrawal. Product databases and KV data are preserved.
+    ///
+    /// * Path: `DELETE /v1/projects/{id}/services/{serviceId}`
+    pub async fn delete_v1projects_by_id_services_by_service_id(
+        &self,
+        request: DeleteV1projectsByIdServicesByServiceIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string());
+        let response = self.client.delete(url).send().await?;
+        Ok(response)
+    }
+    /// * Path: `PATCH /v1/projects/{id}/services/{serviceId}`
+    pub async fn patch_v1projects_by_id_services_by_service_id(
+        &self,
+        request: PatchV1projectsByIdServicesByServiceIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("services")
+            .push(&request.path.service_id.to_string());
+        let response = self.client.patch(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// * Path: `POST /v1/projects/{id}/sources`
+    pub async fn post_v1projects_by_id_sources(
+        &self,
+        request: PostV1projectsByIdSourcesRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("sources");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(response)
+    }
     /// List projects
     ///
     /// Returns projects in the current workspace with latest production deployment summary.
@@ -1577,27 +2001,6 @@ impl PlatformClientRaw {
             .push("projects")
             .push(&request.path.id.to_string());
         let response = self.client.patch(url).json(&request.body).send().await?;
-        Ok(response)
-    }
-    /// Remove Service
-    ///
-    /// Requests explicit Service removal and runtime withdrawal. Product databases and KV data are preserved.
-    ///
-    /// * Path: `DELETE /v1/projects/{id}/services/{serviceId}`
-    pub async fn delete_v1projects_by_id_services_by_service_id(
-        &self,
-        request: DeleteV1projectsByIdServicesByServiceIdRequest,
-    ) -> anyhow::Result<reqwest::Response> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("projects")
-            .push(&request.path.id.to_string())
-            .push("services")
-            .push(&request.path.service_id.to_string());
-        let response = self.client.delete(url).send().await?;
         Ok(response)
     }
     /// Sync project detection result

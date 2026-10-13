@@ -12,6 +12,7 @@ export const CONTRACT_FILES = [
   "api/client/src/generated/types.rs",
   "crates/nrz-contract/schemas/onreza-rules-v1.schema.json",
   "crates/nrz-contract/schemas/manifest-v1.schema.json",
+  "crates/nrz-contract/schemas/manifest-v2.schema.json",
   "crates/nrz-contract/schemas/runtime-artifact-graph-v2.schema.json",
   "crates/nrz-contract/src/generated.rs",
   "assets/functions-runtime.lock.json",

@@ -1,4 +1,4 @@
-//! Unit tests for manifest parsing and validation (BUILD_OUTPUT_SPEC v1)
+//! Unit tests for manifest parsing and validation (BUILD_OUTPUT_SPEC v2)
 
 use std::path::Path;
 
@@ -16,65 +16,165 @@ use super::manifest::{
 // ── Fixtures ─────────────────────────────────────────────────
 
 const ASTRO_MANIFEST: &str = r#"{
-    "version": 1,
+    "version": 2,
     "layers": [
-        { "name": "assets", "target": "STATIC", "directory": "client" },
-        { "name": "server", "target": "COMPUTE", "directory": "server",
-          "entry": "entry.mjs" }
+        {
+            "name": "assets",
+            "target": "STATIC",
+            "directory": "client"
+        },
+        {
+            "name": "server",
+            "target": "COMPUTE",
+            "directory": "server",
+            "entry": "entry.mjs",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
     ],
     "routes": [
-        { "pattern": "^/_astro/.*$", "layer": "assets", "priority": 100 },
-        { "pattern": "^/.*$", "layer": "server", "priority": 0 }
+        {
+            "pattern": "^/_astro/.*$",
+            "layer": "assets",
+            "priority": 100
+        },
+        {
+            "pattern": "^/.*$",
+            "layer": "server",
+            "priority": 0
+        }
     ]
 }"#;
 
 const NEXTJS_MANIFEST: &str = r#"{
-    "version": 1,
+    "version": 2,
     "layers": [
-        { "name": "static", "target": "STATIC", "directory": "static" },
-        { "name": "server", "target": "COMPUTE", "directory": "standalone",
-          "entry": "server.js", "runtime": { "memoryMb": 512 } }
+        {
+            "name": "static",
+            "target": "STATIC",
+            "directory": "static"
+        },
+        {
+            "name": "server",
+            "target": "COMPUTE",
+            "directory": "standalone",
+            "entry": "server.js",
+            "runtime": {
+                "memoryMb": 512,
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
     ],
     "routes": [
-        { "pattern": "^/_next/static/.*$", "layer": "static", "priority": 100 },
-        { "pattern": "^/.*$", "layer": "server", "priority": 0 }
+        {
+            "pattern": "^/_next/static/.*$",
+            "layer": "static",
+            "priority": 100
+        },
+        {
+            "pattern": "^/.*$",
+            "layer": "server",
+            "priority": 0
+        }
     ],
     "meta": {
-        "adapter": { "name": "@onreza/adapter-nextjs", "version": "1.0.0" },
-        "framework": { "name": "nextjs", "version": "15.1.0" }
+        "adapter": {
+            "name": "@onreza/adapter-nextjs",
+            "version": "1.0.0"
+        },
+        "framework": {
+            "name": "nextjs",
+            "version": "15.1.0"
+        }
     }
 }"#;
 
 const STATIC_MANIFEST: &str = r#"{
-    "version": 1,
+    "version": 2,
     "layers": [
-        { "name": "site", "target": "STATIC", "directory": "." }
+        {
+            "name": "site",
+            "target": "STATIC",
+            "directory": "."
+        }
     ],
     "routes": [
-        { "pattern": "^/.*$", "layer": "site" }
+        {
+            "pattern": "^/.*$",
+            "layer": "site"
+        }
     ]
 }"#;
 
 const PRERENDER_MANIFEST: &str = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "prerendered", "target": "STATIC", "directory": "prerender" },
-            { "name": "server", "target": "COMPUTE", "directory": "server",
-              "entry": "entry.mjs" }
-        ],
-        "routes": [
-            { "pattern": "^/about/?$", "layer": "prerendered", "priority": 50 },
-            { "pattern": "^/.*$", "layer": "server", "priority": 0 }
-        ],
-        "prerender": {
-            "layer": "prerendered",
-            "pages": { "/about": { "html": "about/index.html" } }
+    "version": 2,
+    "layers": [
+        {
+            "name": "prerendered",
+            "target": "STATIC",
+            "directory": "prerender"
+        },
+        {
+            "name": "server",
+            "target": "COMPUTE",
+            "directory": "server",
+            "entry": "entry.mjs",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
         }
-    }"#;
+    ],
+    "routes": [
+        {
+            "pattern": "^/about/?$",
+            "layer": "prerendered",
+            "priority": 50
+        },
+        {
+            "pattern": "^/.*$",
+            "layer": "server",
+            "priority": 0
+        }
+    ],
+    "prerender": {
+        "layer": "prerendered",
+        "pages": {
+            "/about": {
+                "html": "about/index.html"
+            }
+        }
+    }
+}"#;
+
+fn mixed_compute_manifest(routes: serde_json::Value) -> String {
+    serde_json::json!({
+        "version": 2,
+        "layers": [
+            {"name": "pub", "target": "STATIC", "directory": "public"},
+            {"name": "srv", "target": "COMPUTE", "directory": ".", "entry": "server.js",
+             "runtime": {"network": crate::network_fixture::network()}}
+        ],
+        "routes": routes
+    })
+    .to_string()
+}
+
+fn numeric_runtime_manifest(field: &str, value: serde_json::Value) -> String {
+    let mut runtime = serde_json::json!({"network": crate::network_fixture::network()});
+    runtime[field] = value;
+    serde_json::json!({
+        "version": 2,
+        "layers": [{"name": "s", "target": "COMPUTE", "directory": "dist",
+                    "entry": "server.js", "runtime": runtime}],
+        "routes": [{"pattern": "^/.*$", "layer": "s"}]
+    })
+    .to_string()
+}
 
 fn write_manifest(dir: &Path, content: &str) -> std::path::PathBuf {
     let path = dir.join("manifest.json");
-    std::fs::write(&path, content).unwrap();
+    std::fs::write(&path, crate::network_fixture::manifest(content)).unwrap();
     path
 }
 
@@ -85,7 +185,7 @@ fn valid_astro_manifest_parses() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_manifest(dir.path(), ASTRO_MANIFEST);
     let m = load_and_validate(&path).unwrap();
-    assert_eq!(m.version, 1);
+    assert_eq!(m.version, 2);
     assert_eq!(m.layers.len(), 2);
     assert_eq!(m.layers[0].name, "assets");
     assert_eq!(m.layers[0].target, LayerTarget::Static);
@@ -113,15 +213,26 @@ fn valid_nextjs_manifest_parses() {
 fn route_fallthrough_parses() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{
+    "version": 2,
+    "layers": [
+        {
             "name": "server",
             "target": "COMPUTE",
             "directory": ".",
-            "entry": "server.js"
-        }],
-        "routes": [{ "pattern": "^/.*$", "layer": "server", "fallthrough": true }]
-    }"#;
+            "entry": "server.js",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "server",
+            "fallthrough": true
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let m = load_and_validate(&path).unwrap();
     assert_eq!(m.routes[0].fallthrough, Some(true));
@@ -142,11 +253,11 @@ fn valid_pure_static_manifest_parses() {
 #[test]
 fn wrong_version() {
     let dir = tempfile::tempdir().unwrap();
-    let json = ASTRO_MANIFEST.replace(r#""version": 1"#, r#""version": 2"#);
+    let json = ASTRO_MANIFEST.replace(r#""version": 2"#, r#""version": 3"#);
     let path = write_manifest(dir.path(), &json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
-        err.to_string().contains("unsupported manifest version: 2"),
+        err.to_string().contains("unsupported manifest version: 3"),
         "unexpected error: {err}"
     );
 }
@@ -156,7 +267,16 @@ fn wrong_version() {
 #[test]
 fn empty_layers() {
     let dir = tempfile::tempdir().unwrap();
-    let json = r#"{"version":1,"layers":[],"routes":[{"pattern":"^/.*$","layer":"x"}]}"#;
+    let json = r#"{
+    "version": 2,
+    "layers": [],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "x"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("at least one layer"), "{err}");
@@ -166,13 +286,26 @@ fn empty_layers() {
 fn duplicate_layer_names() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "server", "target": "STATIC", "directory": "a" },
-            { "name": "server", "target": "STATIC", "directory": "b" }
-        ],
-        "routes": [{ "pattern": "^/.*$", "layer": "server" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "server",
+            "target": "STATIC",
+            "directory": "a"
+        },
+        {
+            "name": "server",
+            "target": "STATIC",
+            "directory": "b"
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "server"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -185,10 +318,21 @@ fn duplicate_layer_names() {
 fn directory_path_traversal() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "x", "target": "STATIC", "directory": "../secret" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "x" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "x",
+            "target": "STATIC",
+            "directory": "../secret"
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "x"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("path traversal"), "{err}");
@@ -198,10 +342,21 @@ fn directory_path_traversal() {
 fn directory_absolute_path_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "x", "target": "STATIC", "directory": "/etc/passwd" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "x" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "x",
+            "target": "STATIC",
+            "directory": "/etc/passwd"
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "x"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("path traversal"), "{err}");
@@ -211,10 +366,21 @@ fn directory_absolute_path_is_error() {
 fn directory_windows_absolute_path_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "x", "target": "STATIC", "directory": "C:\\secret" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "x" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "x",
+            "target": "STATIC",
+            "directory": "C:\\secret"
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "x"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("path traversal"), "{err}");
@@ -224,10 +390,21 @@ fn directory_windows_absolute_path_is_error() {
 fn directory_path_traversal_url_encoded_dots() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "x", "target": "STATIC", "directory": "%2e%2e/secret" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "x" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "x",
+            "target": "STATIC",
+            "directory": "%2e%2e/secret"
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "x"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("path traversal"), "{err}");
@@ -237,10 +414,21 @@ fn directory_path_traversal_url_encoded_dots() {
 fn directory_path_traversal_double_encoded_dots() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "x", "target": "STATIC", "directory": "%252e%252e/secret" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "x" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "x",
+            "target": "STATIC",
+            "directory": "%252e%252e/secret"
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "x"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("path traversal"), "{err}");
@@ -252,10 +440,21 @@ fn directory_path_traversal_encoded_slash_not_blocked() {
     // %2f (encoded slash) alone is not flagged — only %2e (encoded dot) triggers the check.
     // A literal ".." segment is still required to form traversal, and that is caught separately.
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "x", "target": "STATIC", "directory": "foo%2fbar" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "x" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "x",
+            "target": "STATIC",
+            "directory": "foo%2fbar"
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "x"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     load_and_validate(&path).unwrap();
 }
@@ -264,7 +463,22 @@ fn directory_path_traversal_encoded_slash_not_blocked() {
 fn directory_path_traversal_null_byte() {
     let dir = tempfile::tempdir().unwrap();
     // JSON \u0000 is decoded by serde_json into a Rust string containing '\0'
-    let json = r#"{"version":1,"layers":[{"name":"x","target":"STATIC","directory":"server\u0000.js"}],"routes":[{"pattern":"^/.*$","layer":"x"}]}"#;
+    let json = r#"{
+    "version": 2,
+    "layers": [
+        {
+            "name": "x",
+            "target": "STATIC",
+            "directory": "server\u0000.js"
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "x"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("path traversal"), "{err}");
@@ -274,11 +488,25 @@ fn directory_path_traversal_null_byte() {
 fn entry_path_traversal_backslash() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "standalone",
-                     "entry": "..\\outside\\server.js" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "COMPUTE",
+            "directory": "standalone",
+            "entry": "..\\outside\\server.js",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("path traversal"), "{err}");
@@ -288,10 +516,22 @@ fn entry_path_traversal_backslash() {
 fn static_with_entry_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist", "entry": "index.html" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "dist",
+            "entry": "index.html"
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -305,10 +545,22 @@ fn static_with_entry_is_error() {
 fn static_with_export_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist", "export": "fetch" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "dist",
+            "export": "fetch"
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -322,10 +574,24 @@ fn static_with_export_is_error() {
 fn compute_without_entry_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "standalone" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "COMPUTE",
+            "directory": "standalone",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -339,11 +605,26 @@ fn compute_without_entry_is_error() {
 fn compute_with_export_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "standalone",
-                     "entry": "server.js", "export": "fetch" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "COMPUTE",
+            "directory": "standalone",
+            "entry": "server.js",
+            "export": "fetch",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -357,11 +638,25 @@ fn compute_with_export_is_error() {
 fn entry_path_traversal_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "standalone",
-                     "entry": "../outside/server.js" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "COMPUTE",
+            "directory": "standalone",
+            "entry": "../outside/server.js",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("path traversal"), "{err}");
@@ -373,10 +668,16 @@ fn entry_path_traversal_is_error() {
 fn empty_routes() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": []
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": []
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("at least one route"), "{err}");
@@ -386,10 +687,21 @@ fn empty_routes() {
 fn route_pattern_without_anchor_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "/api/.*", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "/api/.*",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("must start with '^/'"), "{err}");
@@ -399,10 +711,21 @@ fn route_pattern_without_anchor_is_error() {
 fn route_unknown_layer_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "assets", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "ghost" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "assets",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "ghost"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -416,10 +739,22 @@ fn route_unknown_layer_is_error() {
 fn revalidate_on_static_layer_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s", "revalidate": 60 }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s",
+            "revalidate": 60
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -433,13 +768,26 @@ fn revalidate_on_static_layer_is_error() {
 fn revalidate_zero_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "server", "target": "COMPUTE", "directory": "server",
-              "entry": "e.mjs" }
-        ],
-        "routes": [{ "pattern": "^/.*$", "layer": "server", "revalidate": 0 }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "server",
+            "target": "COMPUTE",
+            "directory": "server",
+            "entry": "e.mjs",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "server",
+            "revalidate": 0
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -452,13 +800,26 @@ fn revalidate_zero_is_error() {
 fn revalidate_valid_parses() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "server", "target": "COMPUTE", "directory": "server",
-              "entry": "e.mjs" }
-        ],
-        "routes": [{ "pattern": "^/blog/.*$", "layer": "server", "revalidate": 60 }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "server",
+            "target": "COMPUTE",
+            "directory": "server",
+            "entry": "e.mjs",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/blog/.*$",
+            "layer": "server",
+            "revalidate": 60
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let m = load_and_validate(&path).unwrap();
     assert_eq!(m.routes[0].revalidate, Some(60));
@@ -486,18 +847,31 @@ fn missing_file() {
 fn manifest_with_legacy_middleware_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "middleware": [
-            {
-                "name": "auth",
-                "bundlePath": "middleware/auth.mjs",
-                "codeHash": "sha256-abc",
-                "matchers": ["^/dashboard/.*$"]
-            }
-        ]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ],
+    "middleware": [
+        {
+            "name": "auth",
+            "bundlePath": "middleware/auth.mjs",
+            "codeHash": "sha256-abc",
+            "matchers": [
+                "^/dashboard/.*$"
+            ]
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -512,15 +886,28 @@ fn manifest_with_legacy_middleware_is_rejected() {
 fn manifest_with_edge_rules_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "edgeRules": {
-            "schemaVersion": "EDGE_RULE_SET_V1",
-            "source": { "origin": "build" },
-            "rules": []
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
         }
-    }"#;
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ],
+    "edgeRules": {
+        "schemaVersion": "EDGE_RULE_SET_V1",
+        "source": {
+            "origin": "build"
+        },
+        "rules": []
+    }
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -626,11 +1013,25 @@ fn verify_files_rejects_layer_symlink_outside_output() {
 fn validate_prerender_unknown_layer_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "prerender": { "layer": "ghost", "pages": {} }
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ],
+    "prerender": {
+        "layer": "ghost",
+        "pages": {}
+    }
+}"#;
     let path = write_manifest(dir.path(), json);
     // validate() now catches prerender→layer cross-reference
     let err = load_and_validate(&path).unwrap_err();
@@ -659,16 +1060,29 @@ fn verify_files_prerender_pages_exist() {
 fn verify_files_prerender_html_missing() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "prerendered", "target": "STATIC", "directory": "prerender" }
-        ],
-        "routes": [{ "pattern": "^/.*$", "layer": "prerendered" }],
-        "prerender": {
-            "layer": "prerendered",
-            "pages": { "/about": { "html": "about/index.html" } }
+    "version": 2,
+    "layers": [
+        {
+            "name": "prerendered",
+            "target": "STATIC",
+            "directory": "prerender"
         }
-    }"#;
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "prerendered"
+        }
+    ],
+    "prerender": {
+        "layer": "prerendered",
+        "pages": {
+            "/about": {
+                "html": "about/index.html"
+            }
+        }
+    }
+}"#;
     let path = write_manifest(dir.path(), json);
     let m = load_and_validate(&path).unwrap();
 
@@ -728,7 +1142,7 @@ fn too_many_layers_is_error() {
         .collect::<Vec<_>>()
         .join(",");
     let json = format!(
-        r#"{{"version":1,"layers":[{layers}],"routes":[{{"pattern":"^/.*$","layer":"l0"}}]}}"#
+        r#"{{"version":2,"layers":[{layers}],"routes":[{{"pattern":"^/.*$","layer":"l0"}}]}}"#
     );
     let path = write_manifest(dir.path(), &json);
     let err = load_and_validate(&path).unwrap_err();
@@ -746,7 +1160,7 @@ fn too_many_routes_is_error() {
         .collect::<Vec<_>>()
         .join(",");
     let json = format!(
-        r#"{{"version":1,"layers":[{{"name":"s","target":"STATIC","directory":"."}}],"routes":[{routes}]}}"#
+        r#"{{"version":2,"layers":[{{"name":"s","target":"STATIC","directory":"."}}],"routes":[{routes}]}}"#
     );
     let path = write_manifest(dir.path(), &json);
     let err = load_and_validate(&path).unwrap_err();
@@ -760,7 +1174,7 @@ fn layer_name_too_long_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let long_name = "a".repeat(65); // MAX_NAME_LEN = 64
     let json = format!(
-        r#"{{"version":1,"layers":[{{"name":"{long_name}","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"^/.*$","layer":"{long_name}"}}]}}"#
+        r#"{{"version":2,"layers":[{{"name":"{long_name}","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"^/.*$","layer":"{long_name}"}}]}}"#
     );
     let path = write_manifest(dir.path(), &json);
     let err = load_and_validate(&path).unwrap_err();
@@ -772,7 +1186,7 @@ fn layer_directory_too_long_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let long_dir = "a".repeat(257); // MAX_DIRECTORY_LEN = 256
     let json = format!(
-        r#"{{"version":1,"layers":[{{"name":"s","target":"STATIC","directory":"{long_dir}"}}],"routes":[{{"pattern":"^/.*$","layer":"s"}}]}}"#
+        r#"{{"version":2,"layers":[{{"name":"s","target":"STATIC","directory":"{long_dir}"}}],"routes":[{{"pattern":"^/.*$","layer":"s"}}]}}"#
     );
     let path = write_manifest(dir.path(), &json);
     let err = load_and_validate(&path).unwrap_err();
@@ -784,7 +1198,7 @@ fn layer_entry_too_long_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let long_entry = "a".repeat(513); // MAX_ENTRY_LEN = 512
     let json = format!(
-        r#"{{"version":1,"layers":[{{"name":"s","target":"COMPUTE","directory":"dist","entry":"{long_entry}"}}],"routes":[{{"pattern":"^/.*$","layer":"s"}}]}}"#
+        r#"{{"version":2,"layers":[{{"name":"s","target":"COMPUTE","directory":"dist","entry":"{long_entry}","runtime":{{"network":{{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{{"name":"http","protocol":"http","port":3000,"binding":"primary"}}],"readiness":{{"protocol":"tcp","port":"http"}},"allowFrom":[]}}}}}}],"routes":[{{"pattern":"^/.*$","layer":"s"}}]}}"#
     );
     let path = write_manifest(dir.path(), &json);
     let err = load_and_validate(&path).unwrap_err();
@@ -798,10 +1212,21 @@ fn route_invalid_regex_is_error() {
     let dir = tempfile::tempdir().unwrap();
     // `[invalid` is an unclosed character class — invalid regex
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/[invalid$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/[invalid$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -817,10 +1242,21 @@ fn directory_path_traversal_encoded_backslash_not_blocked() {
     let dir = tempfile::tempdir().unwrap();
     // %5c (encoded backslash) alone is not flagged — matches server behaviour.
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "x", "target": "STATIC", "directory": "foo%5cbar" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "x" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "x",
+            "target": "STATIC",
+            "directory": "foo%5cbar"
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "x"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     load_and_validate(&path).unwrap();
 }
@@ -831,17 +1267,33 @@ fn directory_path_traversal_encoded_backslash_not_blocked() {
 fn prerender_layer_must_be_static() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "server", "target": "COMPUTE", "directory": "server",
-              "entry": "e.mjs" }
-        ],
-        "routes": [{ "pattern": "^/.*$", "layer": "server" }],
-        "prerender": {
-            "layer": "server",
-            "pages": { "/about": { "html": "about/index.html" } }
+    "version": 2,
+    "layers": [
+        {
+            "name": "server",
+            "target": "COMPUTE",
+            "directory": "server",
+            "entry": "e.mjs",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
         }
-    }"#;
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "server"
+        }
+    ],
+    "prerender": {
+        "layer": "server",
+        "pages": {
+            "/about": {
+                "html": "about/index.html"
+            }
+        }
+    }
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -857,14 +1309,29 @@ fn prerender_layer_must_be_static() {
 fn prerender_html_traversal_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "prerender": {
-            "layer": "s",
-            "pages": { "/x": { "html": "../secret/index.html" } }
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
         }
-    }"#;
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ],
+    "prerender": {
+        "layer": "s",
+        "pages": {
+            "/x": {
+                "html": "../secret/index.html"
+            }
+        }
+    }
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("path traversal"), "{err}");
@@ -874,14 +1341,30 @@ fn prerender_html_traversal_is_error() {
 fn prerender_data_traversal_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "prerender": {
-            "layer": "s",
-            "pages": { "/x": { "html": "x/index.html", "data": "../../etc/passwd" } }
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
         }
-    }"#;
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ],
+    "prerender": {
+        "layer": "s",
+        "pages": {
+            "/x": {
+                "html": "x/index.html",
+                "data": "../../etc/passwd"
+            }
+        }
+    }
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("path traversal"), "{err}");
@@ -893,14 +1376,30 @@ fn prerender_data_traversal_is_error() {
 fn verify_files_prerender_data_missing() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "pre" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "prerender": {
-            "layer": "s",
-            "pages": { "/blog": { "html": "blog/index.html", "data": "blog/data.json" } }
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "pre"
         }
-    }"#;
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ],
+    "prerender": {
+        "layer": "s",
+        "pages": {
+            "/blog": {
+                "html": "blog/index.html",
+                "data": "blog/data.json"
+            }
+        }
+    }
+}"#;
     let path = write_manifest(dir.path(), json);
     let m = load_and_validate(&path).unwrap();
 
@@ -922,11 +1421,26 @@ fn verify_files_prerender_data_missing() {
 fn runtime_timeout_ms_zero_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "dist",
-                     "entry": "server.js", "runtime": { "timeoutMs": 0 } }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "COMPUTE",
+            "directory": "dist",
+            "entry": "server.js",
+            "runtime": {
+                "timeoutMs": 0,
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -940,11 +1454,26 @@ fn runtime_timeout_ms_zero_is_error() {
 fn runtime_memory_mb_zero_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "dist",
-                     "entry": "server.js", "runtime": { "memoryMb": 0 } }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "COMPUTE",
+            "directory": "dist",
+            "entry": "server.js",
+            "runtime": {
+                "memoryMb": 0,
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -958,12 +1487,26 @@ fn runtime_memory_mb_zero_is_error() {
 fn runtime_max_concurrency_zero_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "server",
-                     "entry": "e.mjs",
-                     "runtime": { "maxConcurrency": 0 } }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "COMPUTE",
+            "directory": "server",
+            "entry": "e.mjs",
+            "runtime": {
+                "maxConcurrency": 0,
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -978,11 +1521,26 @@ fn runtime_max_concurrency_on_compute_is_allowed() {
     // Server schema permits maxConcurrency on any layer target — CLI matches.
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "dist",
-                     "entry": "server.js", "runtime": { "maxConcurrency": 4 } }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "COMPUTE",
+            "directory": "dist",
+            "entry": "server.js",
+            "runtime": {
+                "maxConcurrency": 4,
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     load_and_validate(&path).unwrap();
 }
@@ -991,12 +1549,28 @@ fn runtime_max_concurrency_on_compute_is_allowed() {
 fn runtime_valid_values_parse() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "server",
-                     "entry": "e.mjs",
-                     "runtime": { "timeoutMs": 5000, "memoryMb": 256, "maxConcurrency": 10 } }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "COMPUTE",
+            "directory": "server",
+            "entry": "e.mjs",
+            "runtime": {
+                "timeoutMs": 5000,
+                "memoryMb": 256,
+                "maxConcurrency": 10,
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let m = load_and_validate(&path).unwrap();
     let rt = m.layers[0].runtime.as_ref().unwrap();
@@ -1012,10 +1586,21 @@ fn directory_path_traversal_single_encoded_dot() {
     let dir = tempfile::tempdir().unwrap();
     // Single %2e (encoded dot) is now flagged — matches server URL_ENCODED_TRAVERSAL_REGEX.
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "x", "target": "STATIC", "directory": "foo%2ebar" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "x" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "x",
+            "target": "STATIC",
+            "directory": "foo%2ebar"
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "x"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("path traversal"), "{err}");
@@ -1027,13 +1612,25 @@ fn directory_path_traversal_single_encoded_dot() {
 fn duplicate_route_patterns_same_priority_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [
-            { "pattern": "^/.*$", "layer": "s" },
-            { "pattern": "^/.*$", "layer": "s" }
-        ]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        },
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     let msg = err.to_string();
@@ -1044,54 +1641,30 @@ fn duplicate_route_patterns_same_priority_is_error() {
 #[test]
 fn duplicate_route_patterns_different_priority_is_allowed() {
     let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "pub", "target": "STATIC", "directory": "public" },
-            { "name": "srv", "target": "COMPUTE", "directory": ".", "entry": "server.js" }
-        ],
-        "routes": [
-            { "pattern": "^/.*$", "layer": "pub", "priority": 50 },
-            { "pattern": "^/.*$", "layer": "srv", "priority": 0 }
-        ]
-    }"#;
-    let path = write_manifest(dir.path(), json);
+    let json = mixed_compute_manifest(
+        serde_json::json!([{"pattern":"^/.*$","layer":"pub","priority":50},{"pattern":"^/.*$","layer":"srv","priority":0}]),
+    );
+    let path = write_manifest(dir.path(), &json);
     load_and_validate(&path).unwrap();
 }
 
 #[test]
 fn static_fallthrough_catch_all_can_share_default_priority_with_terminal_route() {
     let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "pub", "target": "STATIC", "directory": "public" },
-            { "name": "srv", "target": "COMPUTE", "directory": ".", "entry": "server.js" }
-        ],
-        "routes": [
-            { "pattern": "^/.*$", "layer": "pub", "fallthrough": true },
-            { "pattern": "^/.*$", "layer": "srv" }
-        ]
-    }"#;
-    let path = write_manifest(dir.path(), json);
+    let json = mixed_compute_manifest(
+        serde_json::json!([{"pattern":"^/.*$","layer":"pub","fallthrough":true},{"pattern":"^/.*$","layer":"srv"}]),
+    );
+    let path = write_manifest(dir.path(), &json);
     load_and_validate(&path).unwrap();
 }
 
 #[test]
 fn static_default_fallthrough_can_share_default_priority_with_terminal_route() {
     let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "pub", "target": "STATIC", "directory": "public" },
-            { "name": "srv", "target": "COMPUTE", "directory": ".", "entry": "server.js" }
-        ],
-        "routes": [
-            { "pattern": "^/.*$", "layer": "pub" },
-            { "pattern": "^/.*$", "layer": "srv" }
-        ]
-    }"#;
-    let path = write_manifest(dir.path(), json);
+    let json = mixed_compute_manifest(
+        serde_json::json!([{"pattern":"^/.*$","layer":"pub"},{"pattern":"^/.*$","layer":"srv"}]),
+    );
+    let path = write_manifest(dir.path(), &json);
     load_and_validate(&path).unwrap();
 }
 
@@ -1099,15 +1672,31 @@ fn static_default_fallthrough_can_share_default_priority_with_terminal_route() {
 fn duplicate_pattern_same_layer_different_priority_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "srv", "target": "COMPUTE", "directory": ".", "entry": "server.js" }
-        ],
-        "routes": [
-            { "pattern": "^/.*$", "layer": "srv", "priority": 50 },
-            { "pattern": "^/.*$", "layer": "srv", "priority": 0 }
-        ]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "srv",
+            "target": "COMPUTE",
+            "directory": ".",
+            "entry": "server.js",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "srv",
+            "priority": 50
+        },
+        {
+            "pattern": "^/.*$",
+            "layer": "srv",
+            "priority": 0
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -1120,16 +1709,38 @@ fn duplicate_pattern_same_layer_different_priority_is_error() {
 fn duplicate_terminal_non_static_pattern_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "srv", "target": "COMPUTE", "directory": ".", "entry": "server.js" },
-            { "name": "edge", "target": "COMPUTE", "directory": "edge", "entry": "worker.mjs" }
-        ],
-        "routes": [
-            { "pattern": "^/.*$", "layer": "srv" },
-            { "pattern": "^/.*$", "layer": "edge" }
-        ]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "srv",
+            "target": "COMPUTE",
+            "directory": ".",
+            "entry": "server.js",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        },
+        {
+            "name": "edge",
+            "target": "COMPUTE",
+            "directory": "edge",
+            "entry": "worker.mjs",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "srv"
+        },
+        {
+            "pattern": "^/.*$",
+            "layer": "edge"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -1147,7 +1758,7 @@ fn meta_too_large_is_error() {
     // Build a meta value that serialises to > 16 384 bytes
     let big_value = "x".repeat(20_000);
     let json = format!(
-        r#"{{"version":1,"layers":[{{"name":"s","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"^/.*$","layer":"s"}}],"meta":{{"big":"{big_value}"}}}}"#
+        r#"{{"version":2,"layers":[{{"name":"s","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"^/.*$","layer":"s"}}],"meta":{{"big":"{big_value}"}}}}"#
     );
     let path = write_manifest(dir.path(), &json);
     let err = load_and_validate(&path).unwrap_err();
@@ -1158,11 +1769,25 @@ fn meta_too_large_is_error() {
 fn meta_within_limit_parses() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "meta": { "framework": "astro", "version": "5.0.0" }
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ],
+    "meta": {
+        "framework": "astro",
+        "version": "5.0.0"
+    }
+}"#;
     let path = write_manifest(dir.path(), json);
     load_and_validate(&path).unwrap();
 }
@@ -1173,10 +1798,21 @@ fn meta_within_limit_parses() {
 fn empty_layer_name_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": ""
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -1189,10 +1825,21 @@ fn empty_layer_name_is_error() {
 fn empty_layer_directory_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": ""
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -1205,10 +1852,25 @@ fn empty_layer_directory_is_error() {
 fn empty_layer_entry_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "dist", "entry": "" }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "COMPUTE",
+            "directory": "dist",
+            "entry": "",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("entry must not be empty"), "{err}");
@@ -1220,14 +1882,29 @@ fn empty_layer_entry_is_error() {
 fn prerender_page_key_without_leading_slash_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "prerender": {
-            "layer": "s",
-            "pages": { "about": { "html": "about/index.html" } }
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
         }
-    }"#;
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ],
+    "prerender": {
+        "layer": "s",
+        "pages": {
+            "about": {
+                "html": "about/index.html"
+            }
+        }
+    }
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -1240,14 +1917,29 @@ fn prerender_page_key_without_leading_slash_is_error() {
 fn prerender_page_key_with_leading_slash_is_ok() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }],
-        "prerender": {
-            "layer": "s",
-            "pages": { "/about": { "html": "about/index.html" } }
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
         }
-    }"#;
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ],
+    "prerender": {
+        "layer": "s",
+        "pages": {
+            "/about": {
+                "html": "about/index.html"
+            }
+        }
+    }
+}"#;
     let path = write_manifest(dir.path(), json);
     load_and_validate(&path).unwrap();
 }
@@ -1260,7 +1952,7 @@ fn route_pattern_exceeds_500_chars_is_error() {
     // "^/" + 499 'a' chars = 501 bytes total
     let long_pattern = format!("^/{}", "a".repeat(499));
     let json = format!(
-        r#"{{"version":1,"layers":[{{"name":"s","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"{long_pattern}","layer":"s"}}]}}"#
+        r#"{{"version":2,"layers":[{{"name":"s","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"{long_pattern}","layer":"s"}}]}}"#
     );
     let path = write_manifest(dir.path(), &json);
     let err = load_and_validate(&path).unwrap_err();
@@ -1276,7 +1968,7 @@ fn route_pattern_exactly_500_chars_is_ok() {
     // "^/" + 498 'a' chars = 500 bytes — exactly at the limit
     let ok_pattern = format!("^/{}", "a".repeat(498));
     let json = format!(
-        r#"{{"version":1,"layers":[{{"name":"s","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"{ok_pattern}","layer":"s"}}]}}"#
+        r#"{{"version":2,"layers":[{{"name":"s","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"{ok_pattern}","layer":"s"}}]}}"#
     );
     let path = write_manifest(dir.path(), &json);
     load_and_validate(&path).unwrap();
@@ -1288,11 +1980,24 @@ fn route_pattern_exactly_500_chars_is_ok() {
 fn static_with_runtime_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist",
-                     "runtime": { "timeoutMs": 5000 } }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "dist",
+            "runtime": {
+                "timeoutMs": 5000
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -1308,13 +2013,26 @@ fn static_with_runtime_is_error() {
 fn revalidate_exceeds_max_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "server", "target": "COMPUTE", "directory": "server",
-              "entry": "e.mjs" }
-        ],
-        "routes": [{ "pattern": "^/.*$", "layer": "server", "revalidate": 31536001 }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "server",
+            "target": "COMPUTE",
+            "directory": "server",
+            "entry": "e.mjs",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "server",
+            "revalidate": 31536001
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -1327,13 +2045,26 @@ fn revalidate_exceeds_max_is_error() {
 fn revalidate_exactly_max_is_ok() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [
-            { "name": "server", "target": "COMPUTE", "directory": "server",
-              "entry": "e.mjs" }
-        ],
-        "routes": [{ "pattern": "^/.*$", "layer": "server", "revalidate": 31536000 }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "server",
+            "target": "COMPUTE",
+            "directory": "server",
+            "entry": "e.mjs",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "server",
+            "revalidate": 31536000
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let m = load_and_validate(&path).unwrap();
     assert_eq!(m.routes[0].revalidate, Some(31_536_000));
@@ -1345,10 +2076,24 @@ fn revalidate_exactly_max_is_ok() {
 fn route_lowercase_method_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s", "methods": ["get"] }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s",
+            "methods": [
+                "get"
+            ]
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -1361,10 +2106,24 @@ fn route_lowercase_method_is_error() {
 fn route_unknown_method_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s", "methods": ["INVALID"] }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s",
+            "methods": [
+                "INVALID"
+            ]
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
@@ -1377,11 +2136,30 @@ fn route_unknown_method_is_error() {
 fn route_valid_methods_parse() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s",
-                     "methods": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"] }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s",
+            "methods": [
+                "GET",
+                "POST",
+                "PUT",
+                "DELETE",
+                "PATCH",
+                "HEAD",
+                "OPTIONS"
+            ]
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let m = load_and_validate(&path).unwrap();
     assert_eq!(m.routes[0].methods.as_deref().unwrap().len(), 7);
@@ -1393,10 +2171,21 @@ fn route_valid_methods_parse() {
 fn route_pattern_lookahead_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/(?=login).*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/(?=login).*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("JS-only regex features"), "{err}");
@@ -1406,10 +2195,21 @@ fn route_pattern_lookahead_is_error() {
 fn route_pattern_lookbehind_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/(?<=api/).*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/(?<=api/).*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("JS-only regex features"), "{err}");
@@ -1419,10 +2219,21 @@ fn route_pattern_lookbehind_is_error() {
 fn route_pattern_backreference_is_error() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "." }],
-        "routes": [{ "pattern": "^/(\\w+)/\\1$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/(\\w+)/\\1$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(err.to_string().contains("JS-only regex features"), "{err}");
@@ -1437,7 +2248,7 @@ fn layer_name_unicode_within_char_limit_is_ok() {
     // but only 64 Unicode chars → within the 64-char limit.
     let name = "а".repeat(64);
     let json = format!(
-        r#"{{"version":1,"layers":[{{"name":"{name}","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"^/.*$","layer":"{name}"}}]}}"#
+        r#"{{"version":2,"layers":[{{"name":"{name}","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"^/.*$","layer":"{name}"}}]}}"#
     );
     let path = write_manifest(dir.path(), &json);
     load_and_validate(&path).unwrap();
@@ -1449,7 +2260,7 @@ fn layer_name_unicode_exceeds_char_limit_is_error() {
     // 65 Cyrillic chars — exceeds the 64-char limit.
     let name = "а".repeat(65);
     let json = format!(
-        r#"{{"version":1,"layers":[{{"name":"{name}","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"^/.*$","layer":"{name}"}}]}}"#
+        r#"{{"version":2,"layers":[{{"name":"{name}","target":"STATIC","directory":"."}}],"routes":[{{"pattern":"^/.*$","layer":"{name}"}}]}}"#
     );
     let path = write_manifest(dir.path(), &json);
     let err = load_and_validate(&path).unwrap_err();
@@ -1461,13 +2272,8 @@ fn layer_name_unicode_exceeds_char_limit_is_error() {
 #[test]
 fn runtime_fractional_timeout_is_error() {
     let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "dist",
-                     "entry": "server.js", "runtime": { "timeoutMs": 5000.5 } }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
+    let json = numeric_runtime_manifest("timeoutMs", serde_json::json!(5000.5));
+    let path = write_manifest(dir.path(), &json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
         err.to_string().contains("non-negative integer")
@@ -1479,13 +2285,8 @@ fn runtime_fractional_timeout_is_error() {
 #[test]
 fn runtime_negative_memory_is_error() {
     let dir = tempfile::tempdir().unwrap();
-    let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "COMPUTE", "directory": "dist",
-                     "entry": "server.js", "runtime": { "memoryMb": -256 } }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
-    let path = write_manifest(dir.path(), json);
+    let json = numeric_runtime_manifest("memoryMb", serde_json::json!(-256));
+    let path = write_manifest(dir.path(), &json);
     let err = load_and_validate(&path).unwrap_err();
     assert!(
         err.to_string().contains("non-negative integer")
@@ -1634,11 +2435,22 @@ fn generate_astro_ssr_manifest_without_client_is_valid() {
 fn legacy_is_precompressed_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let json = r#"{
-        "version": 1,
-        "layers": [{ "name": "s", "target": "STATIC", "directory": "dist",
-                     "isPrecompressed": true }],
-        "routes": [{ "pattern": "^/.*$", "layer": "s" }]
-    }"#;
+    "version": 2,
+    "layers": [
+        {
+            "name": "s",
+            "target": "STATIC",
+            "directory": "dist",
+            "isPrecompressed": true
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "s"
+        }
+    ]
+}"#;
     let path = write_manifest(dir.path(), json);
     let err = load_and_validate(&path).unwrap_err();
     let details = format!("{err:#}");
@@ -1763,4 +2575,24 @@ fn nextjs_adapter_manifest_without_static_files_is_valid() {
     assert_eq!(m.layers[0].name, "server");
     assert_eq!(m.routes.len(), 1);
     assert_eq!(m.routes[0].layer, "server");
+}
+
+#[test]
+fn modern_layer_names_accept_codepoints_and_reject_controls() {
+    let mut manifest = generate_compute_manifest("server.js");
+    manifest.layers[0]
+        .runtime
+        .as_mut()
+        .unwrap()
+        .network
+        .as_mut()
+        .unwrap()
+        .exposure = "PRIVATE".into();
+    manifest.routes.clear();
+    manifest.layers[0].name = "😀".repeat(40);
+    assert!(validate(&manifest).is_ok());
+    for name in ["api\n".into(), "api\u{85}".into(), "😀".repeat(65)] {
+        manifest.layers[0].name = name;
+        assert!(validate(&manifest).is_err());
+    }
 }

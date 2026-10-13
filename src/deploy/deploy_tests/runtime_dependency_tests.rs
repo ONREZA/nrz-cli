@@ -67,9 +67,9 @@ async fn mixed_python_javascript_published_bundle_keeps_actual_dependency_roots(
             }
             let detection = make_detection("other", None);
             let mut manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-                "version":1, "routes":[{"pattern":"^/.*$", "layer":js_name}], "layers":[
-                    {"name":js_name,"target":"COMPUTE","directory":js_directory,"entry":"server.js","runtime":{"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":target}},
-                    {"name":python_name,"target":"COMPUTE","directory":"side","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}},
+                "version":2, "routes":[{"pattern":"^/.*$", "layer":js_name}], "layers":[
+                    {"name":js_name,"target":"COMPUTE","directory":js_directory,"entry":"server.js","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":target}},
+                    {"name":python_name,"target":"COMPUTE","directory":"side","entry":"main.py","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}},
                     {"name":"public","target":"STATIC","directory":"public"}
                 ]
             })).unwrap();
@@ -130,7 +130,7 @@ async fn mixed_python_javascript_published_bundle_keeps_actual_dependency_roots(
                 .unwrap();
                 manifest.layers.push(serde_json::from_value(serde_json::json!({
                     "name":"zzzz-extra","target":"COMPUTE","directory":"extra","entry":"server.js",
-                    "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}
+                    "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}
                 })).unwrap());
                 fs::create_dir_all(project.join("dist/extra/node_modules/independent")).unwrap();
                 fs::write(
@@ -238,9 +238,9 @@ async fn relocated_python_dependencies_keep_frozen_primary_owner() {
                             }),
                         });
                         let mut manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-                    "version":1,"routes":[{"pattern":"^/.*$","layer":primary_name}],"layers":[
-                        {"name":primary_name,"target":"COMPUTE","directory":if matches!(scope, "equal" | "primary-root") { "." } else { "api" },"entry":if matches!(scope, "equal" | "primary-root") { "api/main.py" } else { "main.py" },"runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}},
-                        {"name":sibling_name,"target":"COMPUTE","directory":if matches!(scope, "equal" | "sibling-root") { "." } else { "side" },"entry":if matches!(scope, "equal" | "sibling-root") { "side/main.py" } else { "main.py" },"runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":sibling_target}},
+                    "version":2,"routes":[{"pattern":"^/.*$","layer":primary_name}],"layers":[
+                        {"name":primary_name,"target":"COMPUTE","directory":if matches!(scope, "equal" | "primary-root") { "." } else { "api" },"entry":if matches!(scope, "equal" | "primary-root") { "api/main.py" } else { "main.py" },"runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}},
+                        {"name":sibling_name,"target":"COMPUTE","directory":if matches!(scope, "equal" | "sibling-root") { "." } else { "side" },"entry":if matches!(scope, "equal" | "sibling-root") { "side/main.py" } else { "main.py" },"runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":sibling_target}},
                         {"name":"public","target":"STATIC","directory":"public"}
                     ]
                 })).unwrap();
@@ -407,9 +407,9 @@ fn relocated_python_dependencies_refuse_ambiguous_or_incompatible_primary() {
                     }),
                 });
                 let manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-            "version":1,"routes":[{"pattern":"^/.*$","layer":"aaa-primary"}],"layers":[
-                {"name":"aaa-primary","target":"COMPUTE","directory":if scope == "sibling-root" { "api" } else { "." },"entry":if scope == "sibling-root" { "main.py" } else { "api/main.py" },"runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}},
-                {"name":"zzz-sibling","target":"COMPUTE","directory":if scope == "primary-root" { "side" } else { "." },"entry":if scope == "primary-root" { "main.py" } else { "side/main.py" },"runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}}
+            "version":2,"routes":[{"pattern":"^/.*$","layer":"aaa-primary"}],"layers":[
+                {"name":"aaa-primary","target":"COMPUTE","directory":if scope == "sibling-root" { "api" } else { "." },"entry":if scope == "sibling-root" { "main.py" } else { "api/main.py" },"runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}},
+                {"name":"zzz-sibling","target":"COMPUTE","directory":if scope == "primary-root" { "side" } else { "." },"entry":if scope == "primary-root" { "main.py" } else { "side/main.py" },"runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}}
             ]
         })).unwrap();
                 let result = resolve_runtime_artifact(
@@ -482,7 +482,7 @@ async fn assert_workspace_python_state_boundary(bootstrap: bool, package_metadat
     )
     .unwrap();
     let mut manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
-        "version":1,"routes":[{"pattern":"^/.*$","layer":"api"}],"layers":[{"name":"api","target":"COMPUTE","directory":".","entry":"api/main.js","runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}}]
+        "version":2,"routes":[{"pattern":"^/.*$","layer":"api"}],"layers":[{"name":"api","target":"COMPUTE","directory":".","entry":"api/main.js","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}}]
     })).unwrap();
     if bootstrap {
         let launch = crate::detect::python_launch::PythonLaunch {
@@ -501,7 +501,7 @@ async fn assert_workspace_python_state_boundary(bootstrap: bool, package_metadat
         )
         .unwrap();
         manifest.layers.push(serde_json::from_value(serde_json::json!({
-            "name":"side","target":"COMPUTE","directory":".onreza/python","entry":"launch.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":launch.args},"buildRuntimeVersion":"python-3.12"}
+            "name":"side","target":"COMPUTE","directory":".onreza/python","entry":"launch.py","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":launch.args},"buildRuntimeVersion":"python-3.12"}
         })).unwrap());
     } else {
         let stage = project.join(PythonMinor::Python314.site_packages_root());

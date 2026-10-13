@@ -81,7 +81,7 @@ async fn published_build_python_dependencies_follow_serving_owner() {
                 }
             );
             let authored: Manifest = serde_json::from_value(serde_json::json!({
-                "version":1,"routes":[],"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":entry,"runtime":{"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":target}}]
+                "version":2,"routes":[],"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":entry,"runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":target}}]
             })).unwrap();
             let (manifest, scan) = if project_prefix == "." {
                 (

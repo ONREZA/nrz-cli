@@ -11,7 +11,7 @@
       "type": "object",
       "properties": {
         "schemaVersion": {
-          "enum": ["RUNTIME_ARTIFACT_GRAPH_V2.0", "RUNTIME_ARTIFACT_GRAPH_V2.1"],
+          "enum": ["RUNTIME_ARTIFACT_GRAPH_V2.0", "RUNTIME_ARTIFACT_GRAPH_V2.1", "RUNTIME_ARTIFACT_GRAPH_V2.2"],
           "type": "string"
         },
         "application": {
@@ -276,6 +276,96 @@
               "runtimeConfig": {
                 "type": "object",
                 "properties": {
+                  "network": {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "COMPUTE_NETWORK_V1",
+                        "type": "string"
+                      },
+                      "exposure": {
+                        "enum": ["PUBLIC", "PRIVATE"],
+                        "type": "string"
+                      },
+                      "ports": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                            },
+                            "protocol": {
+                              "enum": ["http", "grpc", "websocket", "tcp"],
+                              "type": "string"
+                            },
+                            "port": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 65535
+                            },
+                            "binding": {
+                              "enum": ["primary", "fixed"],
+                              "type": "string"
+                            }
+                          },
+                          "required": ["name", "protocol", "port", "binding"],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1,
+                        "maxItems": 16
+                      },
+                      "readiness": {
+                        "type": "object",
+                        "properties": {
+                          "protocol": {
+                            "enum": ["tcp", "http"],
+                            "type": "string"
+                          },
+                          "port": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2048
+                          }
+                        },
+                        "required": ["protocol", "port"],
+                        "additionalProperties": false
+                      },
+                      "allowFrom": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "serviceId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
+                            },
+                            "layerName": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                            }
+                          },
+                          "required": ["serviceId", "layerName"],
+                          "additionalProperties": false
+                        },
+                        "maxItems": 128
+                      }
+                    },
+                    "required": ["schemaVersion", "exposure", "ports", "readiness", "allowFrom"],
+                    "additionalProperties": false
+                  },
                   "runtimeFamily": {
                     "enum": ["JAVASCRIPT", "PYTHON"],
                     "type": "string"

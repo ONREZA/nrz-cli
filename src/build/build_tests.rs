@@ -1681,14 +1681,21 @@ async fn nextjs_user_root_run_with_hint_preserves_root_manifest() {
         project.path(),
         ".onreza/manifest.json",
         r#"{
-          "version": 1,
-          "layers": [
-            {"name": "root-static", "target": "STATIC", "directory": "."}
-          ],
-          "routes": [
-            {"pattern": "^/.*$", "layer": "root-static"}
-          ]
-        }"#,
+    "version": 2,
+    "layers": [
+        {
+            "name": "root-static",
+            "target": "STATIC",
+            "directory": "."
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "root-static"
+        }
+    ]
+}"#,
     );
     write_build_file(project.path(), ".next/standalone/server.js", "// server");
 
@@ -2663,7 +2670,28 @@ async fn standalone_authored_compute_binds_declared_node_without_fabricating_bui
     write_build_file(
         dir.path(),
         ".onreza/manifest.json",
-        r#"{"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js"}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#,
+        &crate::network_fixture::manifest(
+            r#"{
+    "version": 2,
+    "layers": [
+        {
+            "name": "server",
+            "target": "COMPUTE",
+            "directory": ".",
+            "entry": "server.js",
+            "runtime": {
+                "network": "$PUBLIC_NETWORK"
+            }
+        }
+    ],
+    "routes": [
+        {
+            "pattern": "^/.*$",
+            "layer": "server"
+        }
+    ]
+}"#,
+        ),
     );
     let config = toml::from_str("[build]\noutput_directory='.'\n[deploy]\nruntime='node'\nentry='server.js'\nargs=['literal argument']\n").unwrap();
     let result = run(

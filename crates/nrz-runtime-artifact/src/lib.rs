@@ -40,6 +40,7 @@ pub use source_graph::{
 };
 
 pub const RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION: &str = "RUNTIME_ARTIFACT_GRAPH_V2.0";
+pub const RUNTIME_ARTIFACT_GRAPH_NETWORK_SCHEMA_VERSION: &str = "RUNTIME_ARTIFACT_GRAPH_V2.2";
 pub const RUNTIME_ARTIFACT_GRAPH_MOUNT_BINDINGS_SCHEMA_VERSION: &str =
     "RUNTIME_ARTIFACT_GRAPH_V2.1";
 pub const DEPENDENCY_MATERIALIZATION_V1_SCHEMA_VERSION: &str = "DEPENDENCY_MATERIALIZATION_V1.0";
@@ -219,9 +220,15 @@ pub fn verify_runtime_artifact_graph(
 ) -> Result<VerifiedRuntimeArtifactGraph, RuntimeArtifactError> {
     let wire: RuntimeArtifactGraphV2Wire = serde_json::from_value(value)?;
     let mut normalized_value = serde_json::to_value(&wire)?;
+    for layer in &wire.runtime_layers {
+        let config = serde_json::to_value(&layer.runtime_config)?;
+        nrz_source_bundle::layer_compute_network(Some(&config))
+            .map_err(RuntimeArtifactError::Invariant)?;
+    }
 
     let schema_version = wire.schema_version.to_string();
-    let explicit_bindings = schema_version == RUNTIME_ARTIFACT_GRAPH_MOUNT_BINDINGS_SCHEMA_VERSION;
+    let explicit_bindings = schema_version == RUNTIME_ARTIFACT_GRAPH_MOUNT_BINDINGS_SCHEMA_VERSION
+        || schema_version == RUNTIME_ARTIFACT_GRAPH_NETWORK_SCHEMA_VERSION;
     if schema_version != RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION && !explicit_bindings {
         return invariant("unsupported runtime artifact graph schema version");
     }
@@ -302,6 +309,13 @@ pub fn verify_runtime_artifact_graph(
     let mut referenced_mounts = HashSet::new();
     for layer in &wire.runtime_layers {
         let layer_name = layer.layer_name.as_str();
+        if schema_version == RUNTIME_ARTIFACT_GRAPH_NETWORK_SCHEMA_VERSION
+            && (layer_name.is_empty()
+                || layer_name.chars().count() > 64
+                || layer_name.chars().any(char::is_control))
+        {
+            return invariant("invalid modern runtime layer name");
+        }
         if !layer_names.insert(layer_name) {
             return invariant(format!("duplicate runtime layer '{layer_name}'"));
         }

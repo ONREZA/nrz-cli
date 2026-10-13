@@ -1,0 +1,351 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://docs.onreza.ru/schemas/manifest-v2.schema.json",
+  "title": "ONREZA Build Output Manifest",
+  "description": "Build output manifest (manifest.json) — the contract between builder/adapter/CLI and the platform. Generated from the Valibot source of truth used by the API server and consumed by the Rust CLI contract crate. Cross-field rules (layer/route references, regex compatibility, meta size) are enforced in code, not in this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "layers", "routes"],
+  "properties": {
+    "version": {
+      "const": 2,
+      "type": "number"
+    },
+    "layers": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+              },
+              "directory": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "target": {
+                "const": "STATIC",
+                "type": "string"
+              }
+            },
+            "required": ["name", "directory", "target"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+              },
+              "directory": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "target": {
+                "const": "COMPUTE",
+                "type": "string"
+              },
+              "entry": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "runtime": {
+                "type": "object",
+                "properties": {
+                  "network": {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "COMPUTE_NETWORK_V1",
+                        "type": "string"
+                      },
+                      "exposure": {
+                        "enum": ["PUBLIC", "PRIVATE"],
+                        "type": "string"
+                      },
+                      "ports": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                            },
+                            "protocol": {
+                              "enum": ["http", "grpc", "websocket", "tcp"],
+                              "type": "string"
+                            },
+                            "port": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 65535
+                            },
+                            "binding": {
+                              "enum": ["primary", "fixed"],
+                              "type": "string"
+                            }
+                          },
+                          "required": ["name", "protocol", "port", "binding"],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1,
+                        "maxItems": 16
+                      },
+                      "readiness": {
+                        "type": "object",
+                        "properties": {
+                          "protocol": {
+                            "enum": ["tcp", "http"],
+                            "type": "string"
+                          },
+                          "port": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2048
+                          }
+                        },
+                        "required": ["protocol", "port"],
+                        "additionalProperties": false
+                      },
+                      "allowFrom": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "serviceId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
+                            },
+                            "layerName": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                            }
+                          },
+                          "required": ["serviceId", "layerName"],
+                          "additionalProperties": false
+                        },
+                        "maxItems": 128
+                      }
+                    },
+                    "required": ["schemaVersion", "exposure", "ports", "readiness", "allowFrom"],
+                    "additionalProperties": false
+                  },
+                  "applicationRuntime": {
+                    "type": "object",
+                    "properties": {
+                      "family": {
+                        "enum": ["BUN", "NODE", "PYTHON", "EXECUTABLE"],
+                        "type": "string"
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 4096,
+                          "pattern": "^[^\\u0000]*$"
+                        },
+                        "maxItems": 64
+                      }
+                    },
+                    "required": ["family", "args"],
+                    "additionalProperties": false
+                  },
+                  "buildRuntimeVersion": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "timeoutMs": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "exclusiveMinimum": 0
+                  },
+                  "memoryMb": {
+                    "type": "integer",
+                    "minimum": 32,
+                    "maximum": 8192
+                  },
+                  "maxConcurrency": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": []
+              }
+            },
+            "required": ["name", "directory", "target", "entry"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "minItems": 1,
+      "maxItems": 10
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "layer": {
+            "type": "string",
+            "minLength": 1
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "default": 0
+          },
+          "revalidate": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 31536000,
+            "exclusiveMinimum": 0
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+              "type": "string"
+            }
+          },
+          "headers": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[!#$%&'*+\\-.^`|~0-9A-Za-z]+$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 8192
+            },
+            "maxProperties": 128
+          },
+          "fallthrough": {
+            "type": "boolean"
+          },
+          "fallthroughWhen": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "header",
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "value": {
+                      "type": "string",
+                      "maxLength": 512
+                    }
+                  },
+                  "required": ["type", "name"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "query",
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "value": {
+                      "type": "string",
+                      "maxLength": 512
+                    }
+                  },
+                  "required": ["type", "name"]
+                }
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 16
+          }
+        },
+        "required": ["pattern", "layer"]
+      },
+      "maxItems": 200
+    },
+    "prerender": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pages": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "html": {
+                "type": "string",
+                "minLength": 1
+              },
+              "data": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["html"]
+          }
+        }
+      },
+      "required": ["layer", "pages"]
+    },
+    "meta": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    }
+  }
+}

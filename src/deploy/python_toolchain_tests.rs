@@ -1333,9 +1333,9 @@ async fn python_published_nonroot_output_keeps_project_owned_bootstrap() {
             )
             .unwrap();
             let manifest: crate::build::manifest::Manifest = serde_json::from_value(serde_json::json!({
-            "version": 1,
+            "version": 2,
             "layers": [{"name":"compute", "target":"COMPUTE", "directory":".", "entry":crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY,
-                "runtime":{"applicationRuntime":{"family":"PYTHON", "args":["MODULE","demo","literal argument"]}, "buildRuntimeVersion":minor.target()}}],
+                "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON", "args":["MODULE","demo","literal argument"]}, "buildRuntimeVersion":minor.target()}}],
             "routes": [{"pattern":"^/.*$", "layer":"compute"}]
         })).unwrap();
             std::fs::write(
@@ -1507,20 +1507,20 @@ async fn typed_python_layers_cannot_replace_the_selected_dependency_abi() {
         }
         let mut layers = vec![serde_json::json!({
             "name":"api", "target":"COMPUTE", "directory":".", "entry":"main.py",
-            "runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},
+            "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},
                 "buildRuntimeVersion":target.target()}
         })];
         if node_layer {
             layers.push(serde_json::json!({
             "name":"node", "target":"COMPUTE", "directory":"node", "entry":"server.js",
-            "runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}
+            "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}
         }));
         }
         std::fs::create_dir_all(project.path().join(".onreza")).unwrap();
         std::fs::write(
             project.path().join(".onreza/manifest.json"),
             serde_json::to_vec(&serde_json::json!({
-                "version":1, "layers":layers, "routes":[{"pattern":"^/.*$","layer":"api"}]
+                "version":2, "layers":layers, "routes":[{"pattern":"^/.*$","layer":"api"}]
             }))
             .unwrap(),
         )

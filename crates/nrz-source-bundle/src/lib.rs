@@ -47,3 +47,9 @@ pub use verifier::{
     SourceBundleVerificationFailure, SourceBundleVerificationInput, SourceBundleVerificationResult,
     SourceBundleVerificationSummary, verify_source_bundle_bytes, verify_source_bundle_stream,
 };
+
+mod network;
+pub use network::{
+    COMPUTE_NETWORK_SCHEMA_VERSION, ComputeCaller, ComputeEndpointReadiness, ComputeNetwork,
+    ComputePort, layer_compute_network, validate_source_network,
+};
