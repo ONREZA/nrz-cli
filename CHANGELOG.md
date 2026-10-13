@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.46.0] - 2026-10-13
+
+### 🐛 Bug Fixes
+
+- **release:** accept the selected lock version ([74d67b1](https://github.com/ONREZA/nrz-cli/commit/74d67b1cad316307fbdd56ce0f24bdcb855fc572))
+
+### ✨ Features
+
+- **release:** hold verified draft assets ([07fcbe6](https://github.com/ONREZA/nrz-cli/commit/07fcbe681000fdd09a3b8fa055d0fb549710ef22))
+- **cli:** add private endpoint declarations ([a2918ce](https://github.com/ONREZA/nrz-cli/commit/a2918cee1c35277d6c6ba1fad8af83c98dba8ec0))
+- **cli:** show project environments ([9d527f2](https://github.com/ONREZA/nrz-cli/commit/9d527f25aec933feb397a56becddbe2bf3500a45))
+
 ## [0.45.1] - 2026-10-12
 
 ### 🐛 Bug Fixes
