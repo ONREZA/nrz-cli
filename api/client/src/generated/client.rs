@@ -1457,6 +1457,25 @@ impl PlatformClient {
         let response = self.client.delete(url).query(&request.query).send().await?;
         Ok(DeleteV1projectsByIdEnvByKeyRequest::parse_response(response).await?)
     }
+    /// List project environments
+    ///
+    /// Returns project environments, custom-domain metadata, and resource action capabilities.
+    ///
+    /// * Path: `GET /v1/environments/{id}`
+    pub async fn get_v1environments_by_id(
+        &self,
+        request: GetV1environmentsByIdRequest,
+    ) -> anyhow::Result<GetV1environmentsByIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string());
+        let response = self.client.get(url).send().await?;
+        Ok(GetV1environmentsByIdRequest::parse_response(response).await?)
+    }
 }
 /// Typed operation transport without consuming response status, headers, or body.
 #[derive(Debug, Clone)]
@@ -2805,6 +2824,25 @@ impl PlatformClientRaw {
             .push("env")
             .push(&request.path.key.to_string());
         let response = self.client.delete(url).query(&request.query).send().await?;
+        Ok(response)
+    }
+    /// List project environments
+    ///
+    /// Returns project environments, custom-domain metadata, and resource action capabilities.
+    ///
+    /// * Path: `GET /v1/environments/{id}`
+    pub async fn get_v1environments_by_id(
+        &self,
+        request: GetV1environmentsByIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string());
+        let response = self.client.get(url).send().await?;
         Ok(response)
     }
 }

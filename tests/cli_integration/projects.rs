@@ -15,10 +15,26 @@ struct Request {
 }
 
 fn project_api(response: Value) -> (String, Receiver<Request>) {
+    project_api_with_environments(response, Vec::new())
+}
+
+fn project_api_with_environments(
+    response: Value,
+    environments: Vec<nrz_api::Environment200ResponseEnvironment>,
+) -> (String, Receiver<Request>) {
+    let environment_response = serde_json::to_value(nrz_api::Environment200Response {
+        environments,
+        ..Default::default()
+    })
+    .unwrap();
     let (sender, receiver) = channel();
     let app = Router::new().fallback(
         move |method: axum::http::Method, uri: axum::http::Uri, headers: HeaderMap, body: Bytes| {
-            let response = response.clone();
+            let response = if uri.path() == format!("/v1/environments/{PROJECT}") {
+                environment_response.clone()
+            } else {
+                response.clone()
+            };
             let sender = sender.clone();
             async move {
                 sender
@@ -276,7 +292,16 @@ fn info_preserves_the_cli_projection_of_project_details() {
         ..Default::default()
     })
     .unwrap();
-    let (api_url, requests) = project_api(response);
+    let environment = nrz_api::Environment200ResponseEnvironment {
+        id: uuid::Uuid::from_u128(2),
+        name: "app/Production/registry-id".into(),
+        r#type: nrz_api::DomainResponseItemEnvironmentType::Production,
+        branch_pattern: Some("main".into()),
+        ..Default::default()
+    };
+    let environments = vec![environment];
+    let expected_environments = serde_json::to_value(&environments).unwrap();
+    let (api_url, requests) = project_api_with_environments(response, environments);
     let directory = tempfile::tempdir().unwrap();
     let output = project_command(&api_url, directory.path(), "--json", &["info", PROJECT]);
     assert!(output.status.success(), "{output:?}");
@@ -292,9 +317,27 @@ fn info_preserves_the_cli_projection_of_project_details() {
             "gitUrl":null, "branch":"main", "frameworkPreset":null, "installCommand":null,
             "buildCommand":null, "outputDirectory":null, "rootDirectory":"apps/web",
             "nodeVersion":"NODE_24", "packageManager":"BUN", "autoDeployEnabled":false,
-            "createdAt":TIMESTAMP, "updatedAt":TIMESTAMP, "deployments":[], "_count":{"deployments":0,"envVars":0}
+            "createdAt":TIMESTAMP, "updatedAt":TIMESTAMP, "deployments":[], "_count":{"deployments":0,"envVars":0},
+            "environments":expected_environments
         })
     );
+    assert!(
+        request(&requests, "GET", &format!("/v1/environments/{PROJECT}"))
+            .body
+            .is_none()
+    );
+    let human = project_command(&api_url, directory.path(), "--human", &["info", PROJECT]);
+    assert!(human.status.success(), "{human:?}");
+    let text = String::from_utf8_lossy(&human.stderr);
+    for expected in [
+        "Environments",
+        "app/Production/registry-id",
+        "PRODUCTION",
+        "00000000-0000-0000-0000-000000000002",
+        "main",
+    ] {
+        assert!(text.contains(expected), "missing {expected}: {text}");
+    }
 }
 
 #[test]
@@ -538,6 +581,7 @@ fn info_accepts_database_only_product_without_inventing_an_application() {
     assert!(output.status.success(), "{output:?}");
     let result = stdout_json(&output);
     assert_eq!(result["name"], "database-only");
+    assert_eq!(result["environments"], json!([]));
     for key in [
         "sourceType",
         "branch",
@@ -548,4 +592,7 @@ fn info_accepts_database_only_product_without_inventing_an_application() {
     ] {
         assert!(result[key].is_null(), "{key}: {result}");
     }
+    let human = project_command(&api_url, directory.path(), "--human", &["info", PROJECT]);
+    assert!(human.status.success(), "{human:?}");
+    assert!(String::from_utf8_lossy(&human.stderr).contains("No environments found."));
 }

@@ -13,6 +13,7 @@
   "getV1DeploymentsByIdStatus",
   "getV1DeploymentsProjectByProjectId",
   "getV1DomainsById",
+  "getV1EnvironmentsById",
   "getV1EnvironmentsByIdReleases",
   "getV1EnvironmentsByIdServing",
   "getV1KaikiDatabases",

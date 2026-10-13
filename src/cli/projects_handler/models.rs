@@ -53,6 +53,7 @@ pub(super) struct ProjectDetailResponse {
     pub(super) created_at: Option<String>,
     pub(super) updated_at: Option<String>,
     pub(super) deployments: Vec<nrz_api::Project200Response3Deployment>,
+    pub(super) environments: Vec<nrz_api::Environment200ResponseEnvironment>,
     #[serde(rename = "_count")]
     pub(super) count: Option<nrz_api::Project200Response3Count>,
 }
@@ -144,6 +145,7 @@ impl From<nrz_api::Project200Response3> for ProjectDetailResponse {
                     .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
             ),
             deployments: value.deployments,
+            environments: Vec::new(),
             count: Some(value.count),
         }
     }

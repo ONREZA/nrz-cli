@@ -13442,6 +13442,130 @@ pub enum DeleteV1projectsByIdEnvByKeyResponse {
     ///default: Unknown response
     Unknown,
 }
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1environmentsByIdRequestPath {
+    pub id: uuid::Uuid,
+}
+/// Returns project environments, custom-domain metadata, and resource action capabilities.
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1environmentsByIdRequest {
+    pub path: GetV1environmentsByIdRequestPath,
+}
+impl GetV1environmentsByIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1environmentsByIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Environment200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(GetV1environmentsByIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1environmentsByIdResponse::Unknown);
+    }
+}
+/// Response types for getV1EnvironmentsById
+#[derive(Debug, Clone)]
+pub enum GetV1environmentsByIdResponse {
+    ///200: Response for status 200
+    Ok(Environment200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 #[serde(deny_unknown_fields)]
 pub struct ApiErrorValidationDetailsField {
@@ -24017,4 +24141,300 @@ impl Env200Response3 {
         }
         serde::Serialize::serialize(value, serializer)
     }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Environment200ResponseEnvironmentBranchMatchType {
+    #[serde(rename = "EQUALS")]
+    #[default]
+    Equals,
+    #[serde(rename = "STARTS_WITH")]
+    StartsWith,
+    #[serde(rename = "ENDS_WITH")]
+    EndsWith,
+}
+impl core::fmt::Display for Environment200ResponseEnvironmentBranchMatchType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Equals => write!(f, "EQUALS"),
+            Self::StartsWith => write!(f, "STARTS_WITH"),
+            Self::EndsWith => write!(f, "ENDS_WITH"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Environment200ResponseEnvironmentCustomDomain {
+    pub id: uuid::Uuid,
+    pub domain: String,
+    #[serde(rename = "dnsStatus")]
+    pub dns_status: DomainResponseItemDnsStatus,
+    #[serde(rename = "tlsStatus")]
+    pub tls_status: DomainResponseItemTlsStatus,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Environment200ResponseEnvironmentCount {
+    #[serde(rename = "customDomains")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub custom_domains: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Environment200ResponseEnvironment {
+    pub id: uuid::Uuid,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: uuid::Uuid,
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "productEnvironmentId")]
+    pub product_environment_id: uuid::Uuid,
+    #[serde(rename = "workspaceEnvironmentId")]
+    pub workspace_environment_id: uuid::Uuid,
+    #[serde(rename = "workspaceBindingGeneration")]
+    #[validate(regex(path = "REGEX_PROJECT200RESPONSE3_WORKSPACE_BINDING_GENERATION"))]
+    pub workspace_binding_generation: String,
+    #[serde(rename = "type")]
+    pub r#type: DomainResponseItemEnvironmentType,
+    pub name: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub description: Option<String>,
+    #[serde(rename = "branchMatchType")]
+    pub branch_match_type: Environment200ResponseEnvironmentBranchMatchType,
+    #[serde(deserialize_with = "Option::deserialize", rename = "branchPattern")]
+    #[serialize_always]
+    pub branch_pattern: Option<String>,
+    #[serde(rename = "autoDeployEnabled")]
+    pub auto_deploy_enabled: bool,
+    #[serde(rename = "deploymentRetentionDays")]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub deployment_retention_days: i64,
+    #[serde(rename = "effectiveDeploymentRetentionDays")]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub effective_deployment_retention_days: i64,
+    #[serde(rename = "maxDeploymentRetentionDays")]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub max_deployment_retention_days: i64,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "retainedPreviousReleases"
+    )]
+    #[serialize_always]
+    pub retained_previous_releases: Option<i64>,
+    #[serde(rename = "effectiveRetainedPreviousReleases")]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub effective_retained_previous_releases: i64,
+    #[serde(rename = "maxRetainedPreviousReleases")]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub max_retained_previous_releases: i64,
+    #[serde(rename = "blueGreenEnabled")]
+    pub blue_green_enabled: bool,
+    #[serde(rename = "blueGreenGracePeriodSec")]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub blue_green_grace_period_sec: i64,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "previewActivityTtlDays"
+    )]
+    #[serialize_always]
+    pub preview_activity_ttl_days: Option<i64>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "activeDeploymentId"
+    )]
+    #[serialize_always]
+    pub active_deployment_id: Option<uuid::Uuid>,
+    #[serde(rename = "createdAt")]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "customDomains")]
+    pub custom_domains: Vec<Environment200ResponseEnvironmentCustomDomain>,
+    #[serde(rename = "_count")]
+    #[validate(nested)]
+    pub count: Environment200ResponseEnvironmentCount,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Environment200ResponseProject {
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub branch: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed {
+    #[serde(
+        deserialize_with = "Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed::deserialize_const_allowed"
+    )]
+    #[serde(
+        serialize_with = "Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed::serialize_const_allowed"
+    )]
+    #[default(true)]
+    pub allowed: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_allowed<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<bool, D::Error> {
+        let value = <bool as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: bool =
+            serde_json::from_str::<bool>("true").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_allowed<S: serde::Serializer>(
+        value: &bool,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: bool =
+            serde_json::from_str::<bool>("true").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Environment200ResponseCapabilitiesCreateCustomEnvironmentObject {
+    #[serde(
+        deserialize_with = "Environment200ResponseCapabilitiesCreateCustomEnvironmentObject::deserialize_const_allowed"
+    )]
+    #[serde(
+        serialize_with = "Environment200ResponseCapabilitiesCreateCustomEnvironmentObject::serialize_const_allowed"
+    )]
+    #[default(false)]
+    pub allowed: bool,
+    /// Feature entitlement failure details.
+    pub details: ApiErrorFeatureDetails,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl Environment200ResponseCapabilitiesCreateCustomEnvironmentObject {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_allowed<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<bool, D::Error> {
+        let value = <bool as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: bool =
+            serde_json::from_str::<bool>("false").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_allowed<S: serde::Serializer>(
+        value: &bool,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: bool =
+            serde_json::from_str::<bool>("false").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum Environment200ResponseCapabilitiesCreateCustomEnvironment {
+    #[default]
+    Allowed(Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed),
+    Object(Environment200ResponseCapabilitiesCreateCustomEnvironmentObject),
+}
+impl Environment200ResponseCapabilitiesCreateCustomEnvironment {
+    pub fn allowed(allowed: bool) -> Self {
+        Self::Allowed(
+            Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed {
+                allowed,
+                ..Default::default()
+            },
+        )
+    }
+    pub fn object(details: ApiErrorFeatureDetails) -> Self {
+        Self::Object(
+            Environment200ResponseCapabilitiesCreateCustomEnvironmentObject {
+                details,
+                ..Default::default()
+            },
+        )
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Environment200ResponseCapabilities {
+    #[serde(rename = "createCustomEnvironment")]
+    pub create_custom_environment: Environment200ResponseCapabilitiesCreateCustomEnvironment,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Environment200Response {
+    #[validate(nested)]
+    pub environments: Vec<Environment200ResponseEnvironment>,
+    pub project: Environment200ResponseProject,
+    pub capabilities: Environment200ResponseCapabilities,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }

@@ -209,11 +209,16 @@ async fn create(
 }
 
 async fn info(client: &ApiClient, id: &str, json: bool) -> anyhow::Result<()> {
-    let resp: ProjectDetailResponse = client
+    let mut resp: ProjectDetailResponse = client
         .project(id)
         .await
         .with_context(|| format!("failed to fetch project {id}"))?
         .into();
+    resp.environments = client
+        .project_environments(id)
+        .await
+        .with_context(|| format!("failed to fetch environments for project {id}"))?
+        .environments;
 
     if json {
         output::json_output(&resp);
@@ -287,6 +292,22 @@ async fn info(client: &ApiClient, id: &str, json: bool) -> anyhow::Result<()> {
                 console::style("Updated").dim(),
                 output::terminal_line(u)
             );
+        }
+        eprintln!();
+        eprintln!("  {}", console::style("Environments").bold());
+        if resp.environments.is_empty() {
+            eprintln!("  No environments found.");
+        }
+        for environment in &resp.environments {
+            eprintln!(
+                "  {} ({})  {}",
+                output::terminal_line(&environment.name),
+                environment.r#type,
+                environment.id,
+            );
+            if let Some(branch) = &environment.branch_pattern {
+                eprintln!("    Branch pattern: {}", output::terminal_line(branch));
+            }
         }
         eprintln!();
     }

@@ -183,7 +183,7 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 | --- | --- | --- |
 | `nrz projects list` | Список projects. | `--limit` (1..100, default 20). |
 | `nrz projects create --name <NAME>` | Создает project. | `--display-name`, `--git-url`, `--branch`, `--framework`, `--install-command`, `--build-command`, `--output-directory`, `--link`. |
-| `nrz projects info <ID>` | Детали Product, включая Product без приложения. | App-поля без выбранного Service возвращаются как `null`; app settings commands требуют приложение и возвращают `APPLICATION_SERVICE_REQUIRED`. |
+| `nrz projects info <ID>` | Детали Product и список его окружений с именами, типами и ID, включая Product без приложения. | JSON содержит `environments`; пустой список показывается явно. App-поля без выбранного Service возвращаются как `null`; app settings commands требуют приложение и возвращают `APPLICATION_SERVICE_REQUIRED`. |
 | `nrz projects update <ID>` | Обновляет project settings. | `--display-name`, `--git-url`, `--branch`, `--framework`, `--install-command`, `--build-command`, `--output-directory`, `--root-directory`, `--node-version`. Без полей падает. |
 | `nrz projects delete <ID>` | Удаляет project. | `--force` для non-interactive/JSON. |
 | `nrz workspace list` | Список локально сохраненных workspaces. | Local config only. |
