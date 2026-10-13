@@ -455,6 +455,25 @@ impl PlatformClient {
                 .await?,
         )
     }
+    /// List project environments
+    ///
+    /// Returns project environments, custom-domain metadata, and resource action capabilities.
+    ///
+    /// * Path: `GET /v1/environments/{id}`
+    pub async fn get_v1environments_by_id(
+        &self,
+        request: GetV1environmentsByIdRequest,
+    ) -> anyhow::Result<GetV1environmentsByIdResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string());
+        let response = self.client.get(url).send().await?;
+        Ok(GetV1environmentsByIdRequest::parse_response(response).await?)
+    }
     /// List retained environment releases
     ///
     /// * Path: `GET /v1/environments/{id}/releases`
@@ -517,6 +536,25 @@ impl PlatformClient {
             .send()
             .await?;
         Ok(PostV1environmentsByIdActionsActivateReleaseRequest::parse_response(response).await?)
+    }
+    /// Deploy selected Services
+    ///
+    /// Creates one fenced Environment activation for selected Git Services or all Git Services.
+    ///
+    /// * Path: `POST /v1/deployments/set`
+    pub async fn post_v1deployments_set(
+        &self,
+        request: PostV1deploymentsSetRequest,
+    ) -> anyhow::Result<PostV1deploymentsSetResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("deployments")
+            .push("set");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(PostV1deploymentsSetRequest::parse_response(response).await?)
     }
     /// Get deployment
     ///
@@ -1493,6 +1531,25 @@ impl PlatformClient {
         let response = self.client.post(url).json(&request.body).send().await?;
         Ok(PostV1projectsByIdDeploymentsAdmitRequest::parse_response(response).await?)
     }
+    /// Admit selected local Service builds
+    ///
+    /// * Path: `POST /v1/projects/{id}/deployments/admit-set`
+    pub async fn post_v1projects_by_id_deployments_admit_set(
+        &self,
+        request: PostV1projectsByIdDeploymentsAdmitSetRequest,
+    ) -> anyhow::Result<PostV1deploymentsSetResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("deployments")
+            .push("admit-set");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(PostV1projectsByIdDeploymentsAdmitSetRequest::parse_response(response).await?)
+    }
     /// Get exact deployment runner context
     ///
     /// * Path: `GET /v1/deployments/{id}/runner-context`
@@ -1675,25 +1732,6 @@ impl PlatformClient {
             .push(&request.path.key.to_string());
         let response = self.client.delete(url).query(&request.query).send().await?;
         Ok(DeleteV1projectsByIdEnvByKeyRequest::parse_response(response).await?)
-    }
-    /// List project environments
-    ///
-    /// Returns project environments, custom-domain metadata, and resource action capabilities.
-    ///
-    /// * Path: `GET /v1/environments/{id}`
-    pub async fn get_v1environments_by_id(
-        &self,
-        request: GetV1environmentsByIdRequest,
-    ) -> anyhow::Result<GetV1environmentsByIdResponse> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("environments")
-            .push(&request.path.id.to_string());
-        let response = self.client.get(url).send().await?;
-        Ok(GetV1environmentsByIdRequest::parse_response(response).await?)
     }
 }
 /// Typed operation transport without consuming response status, headers, or body.
@@ -2063,6 +2101,25 @@ impl PlatformClientRaw {
         let response = self.client.delete(url).send().await?;
         Ok(response)
     }
+    /// List project environments
+    ///
+    /// Returns project environments, custom-domain metadata, and resource action capabilities.
+    ///
+    /// * Path: `GET /v1/environments/{id}`
+    pub async fn get_v1environments_by_id(
+        &self,
+        request: GetV1environmentsByIdRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("environments")
+            .push(&request.path.id.to_string());
+        let response = self.client.get(url).send().await?;
+        Ok(response)
+    }
     /// List retained environment releases
     ///
     /// * Path: `GET /v1/environments/{id}/releases`
@@ -2124,6 +2181,25 @@ impl PlatformClientRaw {
             .json(&request.body)
             .send()
             .await?;
+        Ok(response)
+    }
+    /// Deploy selected Services
+    ///
+    /// Creates one fenced Environment activation for selected Git Services or all Git Services.
+    ///
+    /// * Path: `POST /v1/deployments/set`
+    pub async fn post_v1deployments_set(
+        &self,
+        request: PostV1deploymentsSetRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("deployments")
+            .push("set");
+        let response = self.client.post(url).json(&request.body).send().await?;
         Ok(response)
     }
     /// Get deployment
@@ -3055,6 +3131,25 @@ impl PlatformClientRaw {
         let response = self.client.post(url).json(&request.body).send().await?;
         Ok(response)
     }
+    /// Admit selected local Service builds
+    ///
+    /// * Path: `POST /v1/projects/{id}/deployments/admit-set`
+    pub async fn post_v1projects_by_id_deployments_admit_set(
+        &self,
+        request: PostV1projectsByIdDeploymentsAdmitSetRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("projects")
+            .push(&request.path.id.to_string())
+            .push("deployments")
+            .push("admit-set");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(response)
+    }
     /// Get exact deployment runner context
     ///
     /// * Path: `GET /v1/deployments/{id}/runner-context`
@@ -3227,25 +3322,6 @@ impl PlatformClientRaw {
             .push("env")
             .push(&request.path.key.to_string());
         let response = self.client.delete(url).query(&request.query).send().await?;
-        Ok(response)
-    }
-    /// List project environments
-    ///
-    /// Returns project environments, custom-domain metadata, and resource action capabilities.
-    ///
-    /// * Path: `GET /v1/environments/{id}`
-    pub async fn get_v1environments_by_id(
-        &self,
-        request: GetV1environmentsByIdRequest,
-    ) -> anyhow::Result<reqwest::Response> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("environments")
-            .push(&request.path.id.to_string());
-        let response = self.client.get(url).send().await?;
         Ok(response)
     }
 }

@@ -108,6 +108,9 @@ async fn main() {
 }
 
 fn load_initial_config(command: &Command) -> anyhow::Result<ProjectConfig> {
+    if matches!(command, Command::DeploySet(_)) {
+        return Ok(ProjectConfig::default());
+    }
     if matches!(
         command,
         Command::Deploy(args) if args.resume_deployment.is_some()
@@ -199,6 +202,7 @@ async fn run_command(
         Command::Dev(args) => dev::run(args, json, token, workspace, config).await,
         Command::Build(args) => build::run(args, json, config).await.map(|_| ()),
         Command::Deploy(args) => deploy::run(args, json, token, workspace, config).await,
+        Command::DeploySet(args) => deploy::run_set(args, json, token, workspace).await,
         Command::Db(args) => cli::db_handler::run(args, json, token, workspace, config).await,
         Command::Kv(args) => cli::kv_handler::run(args, json).await,
         Command::Login => auth::login(json, token).await,

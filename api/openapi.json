@@ -2837,17 +2837,43 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "sourceType": {
-                    "const": "CLI",
-                    "type": "string"
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "sourceType": {
+                        "const": "CLI",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "sourceType"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "sourceType": {
+                        "const": "GIT",
+                        "type": "string"
+                      },
+                      "gitUrl": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "gitConnectionId": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    },
+                    "required": [
+                      "sourceType",
+                      "gitUrl"
+                    ],
+                    "additionalProperties": false
                   }
-                },
-                "required": [
-                  "sourceType"
                 ],
-                "additionalProperties": false,
                 "$schema": "https://json-schema.org/draft/2020-12/schema"
               }
             }
@@ -6440,6 +6466,498 @@
         "operationId": "deleteV1DomainsByIdPlatformSubdomainsByDomainId"
       }
     },
+    "/v1/environments/{id}": {
+      "get": {
+        "summary": "List project environments",
+        "description": "Returns project environments, custom-domain metadata, and resource action capabilities.",
+        "tags": [
+          "Environments"
+        ],
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "environments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "workspaceId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "productId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "productEnvironmentId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "workspaceEnvironmentId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "workspaceBindingGeneration": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]*$"
+                          },
+                          "type": {
+                            "enum": [
+                              "PRODUCTION",
+                              "PREVIEW",
+                              "DEVELOPMENT",
+                              "CUSTOM"
+                            ],
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "branchMatchType": {
+                            "enum": [
+                              "EQUALS",
+                              "STARTS_WITH",
+                              "ENDS_WITH"
+                            ],
+                            "type": "string"
+                          },
+                          "branchPattern": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "autoDeployEnabled": {
+                            "type": "boolean"
+                          },
+                          "deploymentRetentionDays": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "effectiveDeploymentRetentionDays": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "maxDeploymentRetentionDays": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "retainedPreviousReleases": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "effectiveRetainedPreviousReleases": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "maxRetainedPreviousReleases": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "blueGreenEnabled": {
+                            "type": "boolean"
+                          },
+                          "blueGreenGracePeriodSec": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "previewActivityTtlDays": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "activeDeploymentId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "customDomains": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "domain": {
+                                  "type": "string"
+                                },
+                                "dnsStatus": {
+                                  "enum": [
+                                    "PENDING",
+                                    "VALIDATING",
+                                    "VALIDATED",
+                                    "FAILED"
+                                  ],
+                                  "type": "string"
+                                },
+                                "tlsStatus": {
+                                  "enum": [
+                                    "PENDING",
+                                    "ISSUING",
+                                    "ISSUED",
+                                    "FAILED",
+                                    "EXPIRED"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "domain",
+                                "dnsStatus",
+                                "tlsStatus"
+                              ]
+                            }
+                          },
+                          "_count": {
+                            "type": "object",
+                            "properties": {
+                              "customDomains": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "customDomains"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "workspaceId",
+                          "productId",
+                          "productEnvironmentId",
+                          "workspaceEnvironmentId",
+                          "workspaceBindingGeneration",
+                          "type",
+                          "name",
+                          "description",
+                          "branchMatchType",
+                          "branchPattern",
+                          "autoDeployEnabled",
+                          "deploymentRetentionDays",
+                          "effectiveDeploymentRetentionDays",
+                          "maxDeploymentRetentionDays",
+                          "retainedPreviousReleases",
+                          "effectiveRetainedPreviousReleases",
+                          "maxRetainedPreviousReleases",
+                          "blueGreenEnabled",
+                          "blueGreenGracePeriodSec",
+                          "previewActivityTtlDays",
+                          "activeDeploymentId",
+                          "createdAt",
+                          "customDomains",
+                          "_count"
+                        ]
+                      }
+                    },
+                    "project": {
+                      "type": "object",
+                      "properties": {
+                        "branch": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "branch"
+                      ]
+                    },
+                    "capabilities": {
+                      "type": "object",
+                      "properties": {
+                        "createCustomEnvironment": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "allowed": {
+                                  "const": true,
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": [
+                                "allowed"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "allowed": {
+                                  "const": false,
+                                  "type": "boolean"
+                                },
+                                "details": {
+                                  "type": "object",
+                                  "properties": {
+                                    "feature": {
+                                      "type": "string"
+                                    },
+                                    "featureLabel": {
+                                      "type": "string"
+                                    },
+                                    "requiredPlan": {
+                                      "type": "string"
+                                    },
+                                    "currentPlan": {
+                                      "type": "string"
+                                    },
+                                    "ctaText": {
+                                      "type": "string"
+                                    },
+                                    "ctaUrl": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "feature",
+                                    "requiredPlan"
+                                  ],
+                                  "description": "Feature entitlement failure details."
+                                }
+                              },
+                              "required": [
+                                "allowed",
+                                "details"
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "createCustomEnvironment"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "environments",
+                    "project",
+                    "capabilities"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "getV1EnvironmentsById"
+      }
+    },
     "/v1/environments/{id}/releases": {
       "get": {
         "summary": "List retained environment releases",
@@ -6478,6 +6996,24 @@
           },
           {
             "name": "beforeReleaseId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "beforeCompositionCreatedAt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "beforeCompositionId",
             "in": "query",
             "required": false,
             "schema": {
@@ -6651,12 +7187,38 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "nextCompositionCursor": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "compositionId": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "createdAt",
+                            "compositionId"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null
                     }
                   },
                   "required": [
                     "releases",
                     "nextCursor",
-                    "compositions"
+                    "compositions",
+                    "nextCompositionCursor"
                   ],
                   "$schema": "https://json-schema.org/draft/2020-12/schema"
                 }
@@ -6838,23 +7400,30 @@
                       "format": "uuid"
                     },
                     "address": {
-                      "type": "object",
-                      "properties": {
-                        "url": {
-                          "type": "string",
-                          "format": "uri"
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "url": {
+                              "type": "string",
+                              "format": "uri"
+                            },
+                            "subdomain": {
+                              "type": "string"
+                            },
+                            "enabled": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "url",
+                            "subdomain",
+                            "enabled"
+                          ]
                         },
-                        "subdomain": {
-                          "type": "string"
-                        },
-                        "enabled": {
-                          "type": "boolean"
+                        {
+                          "type": "null"
                         }
-                      },
-                      "required": [
-                        "url",
-                        "subdomain",
-                        "enabled"
                       ]
                     },
                     "desired": {
@@ -7405,6 +7974,347 @@
           }
         },
         "operationId": "postV1EnvironmentsByIdActionsActivateRelease"
+      }
+    },
+    "/v1/deployments/set": {
+      "post": {
+        "summary": "Deploy selected Services",
+        "description": "Creates one fenced Environment activation for selected Git Services or all Git Services.",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "environmentId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "expectedGeneration": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
+                  },
+                  "idempotencyKey": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "selection": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "ALL",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "SERVICES",
+                            "type": "string"
+                          },
+                          "services": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "serviceId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "branch": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 50,
+                                  "pattern": "^[a-zA-Z0-9_\\-/.]+$"
+                                },
+                                "commitSha": {
+                                  "type": "string",
+                                  "minLength": 7,
+                                  "maxLength": 40,
+                                  "pattern": "^[0-9a-f]+$"
+                                }
+                              },
+                              "required": [
+                                "serviceId"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 4096
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "services"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "envVars": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "maxLength": 4096
+                    },
+                    "default": {}
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "environmentId",
+                  "expectedGeneration",
+                  "idempotencyKey",
+                  "selection"
+                ],
+                "additionalProperties": false,
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "generation": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "PENDING",
+                        "ACCEPTED",
+                        "FAILED",
+                        "CANCELLED"
+                      ],
+                      "type": "string"
+                    },
+                    "replayed": {
+                      "type": "boolean"
+                    },
+                    "deployments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "serviceId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "status": {
+                            "enum": [
+                              "PENDING",
+                              "QUEUED",
+                              "BUILDING",
+                              "UPLOADING",
+                              "INGESTING",
+                              "SKIPPED",
+                              "SMOKE_TESTING",
+                              "LIVE",
+                              "STOPPED",
+                              "FAILED",
+                              "CANCELLED"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "serviceId",
+                          "status"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "operationId",
+                    "generation",
+                    "status",
+                    "replayed",
+                    "deployments"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "postV1DeploymentsSet"
       }
     },
     "/v1/deployments/{id}": {
@@ -10707,6 +11617,13 @@
                               }
                             ]
                           },
+                          "targetAddresses": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
+                          },
                           "wwwTargetCname": {
                             "anyOf": [
                               {
@@ -10811,7 +11728,8 @@
                           "wwwTargetCname",
                           "redirectFromWww",
                           "activeDeploymentId",
-                          "environment"
+                          "environment",
+                          "targetAddresses"
                         ]
                       }
                     }
@@ -24439,6 +25357,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "serviceId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
                   "protocolVersion": {
                     "type": "string"
                   },
@@ -24824,6 +25746,412 @@
           }
         },
         "operationId": "postV1ProjectsByIdDeploymentsAdmit"
+      }
+    },
+    "/v1/projects/{id}/deployments/admit-set": {
+      "post": {
+        "summary": "Admit selected local Service builds",
+        "tags": [
+          "Execution Context"
+        ],
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "protocolVersion": {
+                    "type": "string"
+                  },
+                  "environmentId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "expectedGeneration": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
+                  },
+                  "idempotencyKey": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "selection": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "ALL",
+                          "SERVICES"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "services": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "const": "LOCAL",
+                              "type": "string"
+                            },
+                            "serviceId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "branch": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 50,
+                              "pattern": "^[a-zA-Z0-9_\\-/.]+$"
+                            },
+                            "commitSha": {
+                              "type": "string",
+                              "minLength": 7,
+                              "maxLength": 40,
+                              "pattern": "^[0-9a-f]+$"
+                            },
+                            "expectedContext": {
+                              "type": "object",
+                              "properties": {
+                                "workspaceId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "productId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "productEnvironmentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "workspaceEnvironmentId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "workspaceBindingGeneration": {
+                                  "type": "string",
+                                  "pattern": "^[1-9][0-9]*$"
+                                },
+                                "serviceId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "sourceId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                }
+                              },
+                              "required": [
+                                "workspaceId",
+                                "productId",
+                                "productEnvironmentId",
+                                "workspaceEnvironmentId",
+                                "workspaceBindingGeneration",
+                                "serviceId",
+                                "sourceId"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "serviceId",
+                            "branch",
+                            "commitSha",
+                            "expectedContext"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "const": "REMOTE",
+                              "type": "string"
+                            },
+                            "serviceId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "branch": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 50,
+                              "pattern": "^[a-zA-Z0-9_\\-/.]+$"
+                            },
+                            "commitSha": {
+                              "type": "string",
+                              "minLength": 7,
+                              "maxLength": 40,
+                              "pattern": "^[0-9a-f]+$"
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "serviceId"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 4096
+                  }
+                },
+                "required": [
+                  "protocolVersion",
+                  "environmentId",
+                  "expectedGeneration",
+                  "idempotencyKey",
+                  "selection",
+                  "services"
+                ],
+                "additionalProperties": false,
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "generation": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "PENDING",
+                        "ACCEPTED",
+                        "FAILED",
+                        "CANCELLED"
+                      ],
+                      "type": "string"
+                    },
+                    "replayed": {
+                      "type": "boolean"
+                    },
+                    "deployments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "serviceId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "status": {
+                            "enum": [
+                              "PENDING",
+                              "QUEUED",
+                              "BUILDING",
+                              "UPLOADING",
+                              "INGESTING",
+                              "SKIPPED",
+                              "SMOKE_TESTING",
+                              "LIVE",
+                              "STOPPED",
+                              "FAILED",
+                              "CANCELLED"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "serviceId",
+                          "status"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "operationId",
+                    "generation",
+                    "status",
+                    "replayed",
+                    "deployments"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        },
+        "operationId": "postV1ProjectsByIdDeploymentsAdmitSet"
       }
     },
     "/v1/deployments/{id}/runner-context": {
@@ -28946,498 +30274,6 @@
           }
         },
         "operationId": "deleteV1ProjectsByIdEnvByKey"
-      }
-    },
-    "/v1/environments/{id}": {
-      "get": {
-        "summary": "List project environments",
-        "description": "Returns project environments, custom-domain metadata, and resource action capabilities.",
-        "tags": [
-          "Environments"
-        ],
-        "security": [
-          {
-            "sessionCookieAuth": []
-          },
-          {
-            "apiKeyAuth": []
-          },
-          {
-            "bearerApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Response for status 200",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "environments": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "workspaceId": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "productId": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "productEnvironmentId": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "workspaceEnvironmentId": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "workspaceBindingGeneration": {
-                            "type": "string",
-                            "pattern": "^[1-9][0-9]*$"
-                          },
-                          "type": {
-                            "enum": [
-                              "PRODUCTION",
-                              "PREVIEW",
-                              "DEVELOPMENT",
-                              "CUSTOM"
-                            ],
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "description": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "branchMatchType": {
-                            "enum": [
-                              "EQUALS",
-                              "STARTS_WITH",
-                              "ENDS_WITH"
-                            ],
-                            "type": "string"
-                          },
-                          "branchPattern": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "autoDeployEnabled": {
-                            "type": "boolean"
-                          },
-                          "deploymentRetentionDays": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "effectiveDeploymentRetentionDays": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "maxDeploymentRetentionDays": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "retainedPreviousReleases": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "minimum": -9007199254740991,
-                                "maximum": 9007199254740991
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "effectiveRetainedPreviousReleases": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "maxRetainedPreviousReleases": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "blueGreenEnabled": {
-                            "type": "boolean"
-                          },
-                          "blueGreenGracePeriodSec": {
-                            "type": "integer",
-                            "minimum": -9007199254740991,
-                            "maximum": 9007199254740991
-                          },
-                          "previewActivityTtlDays": {
-                            "anyOf": [
-                              {
-                                "type": "integer",
-                                "minimum": -9007199254740991,
-                                "maximum": 9007199254740991
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "activeDeploymentId": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "format": "uuid"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "customDomains": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string",
-                                  "format": "uuid"
-                                },
-                                "domain": {
-                                  "type": "string"
-                                },
-                                "dnsStatus": {
-                                  "enum": [
-                                    "PENDING",
-                                    "VALIDATING",
-                                    "VALIDATED",
-                                    "FAILED"
-                                  ],
-                                  "type": "string"
-                                },
-                                "tlsStatus": {
-                                  "enum": [
-                                    "PENDING",
-                                    "ISSUING",
-                                    "ISSUED",
-                                    "FAILED",
-                                    "EXPIRED"
-                                  ],
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "id",
-                                "domain",
-                                "dnsStatus",
-                                "tlsStatus"
-                              ]
-                            }
-                          },
-                          "_count": {
-                            "type": "object",
-                            "properties": {
-                              "customDomains": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "maximum": 9007199254740991
-                              }
-                            },
-                            "required": [
-                              "customDomains"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "workspaceId",
-                          "productId",
-                          "productEnvironmentId",
-                          "workspaceEnvironmentId",
-                          "workspaceBindingGeneration",
-                          "type",
-                          "name",
-                          "description",
-                          "branchMatchType",
-                          "branchPattern",
-                          "autoDeployEnabled",
-                          "deploymentRetentionDays",
-                          "effectiveDeploymentRetentionDays",
-                          "maxDeploymentRetentionDays",
-                          "retainedPreviousReleases",
-                          "effectiveRetainedPreviousReleases",
-                          "maxRetainedPreviousReleases",
-                          "blueGreenEnabled",
-                          "blueGreenGracePeriodSec",
-                          "previewActivityTtlDays",
-                          "activeDeploymentId",
-                          "createdAt",
-                          "customDomains",
-                          "_count"
-                        ]
-                      }
-                    },
-                    "project": {
-                      "type": "object",
-                      "properties": {
-                        "branch": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        }
-                      },
-                      "required": [
-                        "branch"
-                      ]
-                    },
-                    "capabilities": {
-                      "type": "object",
-                      "properties": {
-                        "createCustomEnvironment": {
-                          "oneOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "allowed": {
-                                  "const": true,
-                                  "type": "boolean"
-                                }
-                              },
-                              "required": [
-                                "allowed"
-                              ]
-                            },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "allowed": {
-                                  "const": false,
-                                  "type": "boolean"
-                                },
-                                "details": {
-                                  "type": "object",
-                                  "properties": {
-                                    "feature": {
-                                      "type": "string"
-                                    },
-                                    "featureLabel": {
-                                      "type": "string"
-                                    },
-                                    "requiredPlan": {
-                                      "type": "string"
-                                    },
-                                    "currentPlan": {
-                                      "type": "string"
-                                    },
-                                    "ctaText": {
-                                      "type": "string"
-                                    },
-                                    "ctaUrl": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "feature",
-                                    "requiredPlan"
-                                  ],
-                                  "description": "Feature entitlement failure details."
-                                }
-                              },
-                              "required": [
-                                "allowed",
-                                "details"
-                              ]
-                            }
-                          ]
-                        }
-                      },
-                      "required": [
-                        "createCustomEnvironment"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "environments",
-                    "project",
-                    "capabilities"
-                  ],
-                  "$schema": "https://json-schema.org/draft/2020-12/schema"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Response for status 400",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError400"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Response for status 401",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError401"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Response for status 402",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError402"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Response for status 403",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError403"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Response for status 404",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError404"
-                }
-              }
-            }
-          },
-          "408": {
-            "description": "Response for status 408",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError408"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Response for status 409",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError409"
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "Response for status 410",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError410"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "Response for status 413",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError413"
-                }
-              }
-            }
-          },
-          "426": {
-            "description": "Response for status 426",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError426"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Response for status 429",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError429"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Response for status 500",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError500"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Response for status 503",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError503"
-                }
-              }
-            }
-          }
-        },
-        "operationId": "getV1EnvironmentsById"
       }
     }
   },

@@ -2,6 +2,7 @@ pub mod config;
 pub mod config_handler;
 pub mod db;
 pub mod db_handler;
+pub mod deployment_set;
 pub mod detect;
 pub mod detect_handler;
 pub mod domains;
@@ -103,6 +104,9 @@ pub enum Command {
 
     /// Deploy to ONREZA platform
     Deploy(DeployArgs),
+
+    /// Deploy a selected Service set as one Environment composition
+    DeploySet(deployment_set::DeploymentSetArgs),
 
     /// Manage managed PostgreSQL databases
     Db(DbArgs),
@@ -228,6 +232,17 @@ pub struct RollbackArgs {
     /// List retained releases and saved full compositions for the selected environment
     #[arg(long)]
     pub list: bool,
+
+    /// Scalar retained-release cursor, as returned by --list --json
+    #[arg(long, requires_all = ["list", "before_release_id"])]
+    pub before_created_at: Option<String>,
+    #[arg(long, requires_all = ["list", "before_created_at"])]
+    pub before_release_id: Option<uuid::Uuid>,
+    /// Full-composition cursor, independent of the scalar release cursor
+    #[arg(long, requires_all = ["list", "before_composition_id"])]
+    pub before_composition_created_at: Option<String>,
+    #[arg(long, requires_all = ["list", "before_composition_created_at"])]
+    pub before_composition_id: Option<uuid::Uuid>,
 
     /// Finish the current rollout's final observation early before activating the release
     #[arg(long, conflicts_with = "list")]

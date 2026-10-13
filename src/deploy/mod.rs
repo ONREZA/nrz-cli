@@ -12,9 +12,11 @@ mod access;
 mod activation;
 #[cfg(test)]
 mod activation_tests;
+mod selected_set;
 #[cfg(test)]
 mod status_wire_tests;
 mod workflow;
+pub(crate) use selected_set::run as run_set;
 pub use workflow::run;
 
 mod application_runtime;
@@ -525,6 +527,7 @@ struct ResumeDeployRequest<'a> {
     warnings: Vec<String>,
     runtime_artifact_files: crate::artifact::RuntimeArtifactFileBreakdown,
     json: bool,
+    emit_result: bool,
 }
 
 async fn resume_deploy(request: ResumeDeployRequest<'_>) -> anyhow::Result<()> {
@@ -537,6 +540,7 @@ async fn resume_deploy(request: ResumeDeployRequest<'_>) -> anyhow::Result<()> {
         warnings,
         runtime_artifact_files,
         json,
+        emit_result,
     } = request;
 
     output::status(
@@ -569,7 +573,10 @@ async fn resume_deploy(request: ResumeDeployRequest<'_>) -> anyhow::Result<()> {
     })
     .await?;
 
-    // Output result (no polling in resume mode — builder handles status)
+    // Selected local sets publish every component before waiting for their shared activation.
+    if !emit_result {
+        return Ok(());
+    }
     if json {
         let data = ResumeDeployOutput {
             deployment_id: deployment_id.to_string(),

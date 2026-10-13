@@ -23,6 +23,44 @@ impl ApiClient {
             PostV1projectsByIdDeploymentsAdmitResponse::Ok
         )
     }
+    pub async fn create_deployment_set(
+        &self,
+        body: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let response = self
+            .platform()?
+            .post_v1deployments_set(PostV1deploymentsSetRequest {
+                body: serde_json::from_value(body)?,
+            })
+            .await?;
+        let value: anyhow::Result<_> = api_success!(
+            response,
+            PostV1deploymentsSetRequest,
+            PostV1deploymentsSetResponse::Ok
+        );
+        Ok(serde_json::to_value(value?)?)
+    }
+    pub async fn admit_deployment_set(
+        &self,
+        project_id: uuid::Uuid,
+        body: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
+        let response = self
+            .platform()?
+            .post_v1projects_by_id_deployments_admit_set(
+                PostV1projectsByIdDeploymentsAdmitSetRequest {
+                    path: PostV1projectsByIdDeploymentsAdmitSetRequestPath { id: project_id },
+                    body: serde_json::from_value(body)?,
+                },
+            )
+            .await?;
+        let value: anyhow::Result<_> = api_success!(
+            response,
+            PostV1projectsByIdDeploymentsAdmitSetRequest,
+            PostV1deploymentsSetResponse::Ok
+        );
+        Ok(serde_json::to_value(value?)?)
+    }
     pub async fn runner_context(&self, id: &str) -> anyhow::Result<RunnerContext200Response> {
         let response = self
             .platform()?
@@ -85,7 +123,7 @@ impl ApiClient {
     pub async fn register_source(
         &self,
         id: &str,
-        body: SourceRequestBody,
+        body: SourceRequestBody2,
     ) -> anyhow::Result<Source200Response> {
         let response = self
             .platform()?
