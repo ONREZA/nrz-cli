@@ -28,9 +28,30 @@ impl ApiClient {
             .platform()?
             .post_v1projects_by_id_sources(PostV1projectsByIdSourcesRequest {
                 path: PostV1projectsByIdSourcesRequestPath { id: product_id },
-                body: SourceTypeRequestBody {
-                    source_type: "CLI".into(),
-                },
+                body: serde_json::from_value(serde_json::json!({ "sourceType": "CLI" }))?,
+            })
+            .await?;
+        api_success!(
+            response,
+            PostV1projectsByIdSourcesRequest,
+            PostV1projectsByIdSourcesResponse::Ok
+        )
+    }
+    pub async fn create_git_source(
+        &self,
+        product_id: uuid::Uuid,
+        git_url: String,
+        git_connection_id: Option<uuid::Uuid>,
+    ) -> anyhow::Result<Service200ResponseSource> {
+        let mut body = serde_json::json!({ "sourceType": "GIT", "gitUrl": git_url });
+        if let Some(connection) = git_connection_id {
+            body["gitConnectionId"] = serde_json::json!(connection);
+        }
+        let response = self
+            .platform()?
+            .post_v1projects_by_id_sources(PostV1projectsByIdSourcesRequest {
+                path: PostV1projectsByIdSourcesRequestPath { id: product_id },
+                body: serde_json::from_value(body)?,
             })
             .await?;
         api_success!(

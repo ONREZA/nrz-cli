@@ -78,8 +78,8 @@ pub(super) fn source_request_body(
     operation_id: Uuid,
     manifest: serde_json::Value,
     functions: Option<serde_json::Value>,
-) -> anyhow::Result<nrz_api::SourceRequestBody> {
-    Ok(nrz_api::SourceRequestBody {
+) -> anyhow::Result<nrz_api::SourceRequestBody2> {
+    Ok(nrz_api::SourceRequestBody2 {
         additional_properties: Default::default(),
         protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL.to_string(),
         attempt: i64::from(attempt),

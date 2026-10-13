@@ -4855,53 +4855,24 @@ impl PatchV1projectsByIdServicesByServiceIdRequest {
     }
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(deny_unknown_fields)]
-pub struct SourceTypeRequestBody {
-    #[serde(rename = "sourceType")]
-    #[serde(deserialize_with = "SourceTypeRequestBody::deserialize_const_source_type")]
-    #[serde(serialize_with = "SourceTypeRequestBody::serialize_const_source_type")]
-    #[default("CLI".to_string())]
-    pub source_type: String,
+#[serde(untagged)]
+pub enum SourceRequestBody {
+    #[default]
+    SourceType(SourceRequestBodySourceType),
+    Object(SourceRequestBodyObject),
 }
-impl SourceTypeRequestBody {
-    #[allow(
-        clippy::float_cmp,
-        reason = "JSON Schema constants require exact equality"
-    )]
-    fn deserialize_const_source_type<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<String, D::Error> {
-        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let expected: String =
-            serde_json::from_str::<String>("\"CLI\"").map_err(serde::de::Error::custom)?;
-        if value != expected {
-            return Err(serde::de::Error::custom(
-                "value does not match schema const",
-            ));
-        }
-        Ok(value)
+impl SourceRequestBody {
+    pub fn r#type(source_type: String) -> Self {
+        Self::SourceType(SourceRequestBodySourceType {
+            source_type,
+            ..Default::default()
+        })
     }
-    #[allow(
-        clippy::ref_option,
-        clippy::trivially_copy_pass_by_ref,
-        reason = "serde field serializers receive a reference"
-    )]
-    #[allow(
-        clippy::float_cmp,
-        reason = "JSON Schema constants require exact equality"
-    )]
-    fn serialize_const_source_type<S: serde::Serializer>(
-        value: &String,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let expected: String =
-            serde_json::from_str::<String>("\"CLI\"").map_err(serde::ser::Error::custom)?;
-        if value != &expected {
-            return Err(serde::ser::Error::custom(
-                "value does not match schema const",
-            ));
-        }
-        serde::Serialize::serialize(value, serializer)
+    pub fn object(git_url: String) -> Self {
+        Self::Object(SourceRequestBodyObject {
+            git_url,
+            ..Default::default()
+        })
     }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
@@ -4911,7 +4882,7 @@ pub struct PostV1projectsByIdSourcesRequestPath {
 #[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
 pub struct PostV1projectsByIdSourcesRequest {
     pub path: PostV1projectsByIdSourcesRequestPath,
-    pub body: SourceTypeRequestBody,
+    pub body: SourceRequestBody,
 }
 impl PostV1projectsByIdSourcesRequest {
     /// Parse the HTTP response into the response enum.
@@ -6182,6 +6153,130 @@ pub enum DeleteV1domainsByIdPlatformSubdomainsByDomainIdResponse {
     Unknown,
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1environmentsByIdRequestPath {
+    pub id: uuid::Uuid,
+}
+/// Returns project environments, custom-domain metadata, and resource action capabilities.
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1environmentsByIdRequest {
+    pub path: GetV1environmentsByIdRequestPath,
+}
+impl GetV1environmentsByIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1environmentsByIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Environment200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(GetV1environmentsByIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1environmentsByIdResponse::Unknown);
+    }
+}
+/// Response types for getV1EnvironmentsById
+#[derive(Debug, Clone)]
+pub enum GetV1environmentsByIdResponse {
+    ///200: Response for status 200
+    Ok(Environment200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct GetV1environmentsByIdReleasesRequestPath {
     pub id: uuid::Uuid,
 }
@@ -6192,6 +6287,10 @@ pub struct GetV1environmentsByIdReleasesRequestQuery {
     pub before_created_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(rename = "beforeReleaseId")]
     pub before_release_id: Option<uuid::Uuid>,
+    #[serde(rename = "beforeCompositionCreatedAt")]
+    pub before_composition_created_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(rename = "beforeCompositionId")]
+    pub before_composition_id: Option<uuid::Uuid>,
     #[validate(regex(path = "REGEX_GET_V1ENVIRONMENTS_BY_ID_RELEASES_REQUEST_QUERY_LIMIT"))]
     pub limit: Option<String>,
 }
@@ -6604,6 +6703,149 @@ impl PostV1environmentsByIdActionsActivateReleaseRequest {
 pub enum PostV1environmentsByIdActionsActivateReleaseResponse {
     ///202: Response for status 202
     Accepted(ActivateRelease202Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct SetRequestBody {
+    #[serde(rename = "projectId")]
+    pub project_id: uuid::Uuid,
+    #[serde(rename = "environmentId")]
+    pub environment_id: uuid::Uuid,
+    #[serde(rename = "expectedGeneration")]
+    #[validate(regex(path = "REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION"))]
+    pub expected_generation: String,
+    #[serde(rename = "idempotencyKey")]
+    #[validate(regex(
+        path = "REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_ACTIVATE_RELEASE_REQUEST_HEADER_IDEMPOTENCY_KEY"
+    ))]
+    pub idempotency_key: String,
+    pub selection: SetRequestBodySelection,
+    #[serde(rename = "envVars")]
+    #[default(Some(Default::default()))]
+    pub env_vars: Option<std::collections::HashMap<String, String>>,
+}
+/// Creates one fenced Environment activation for selected Git Services or all Git Services.
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1deploymentsSetRequest {
+    #[validate(nested)]
+    pub body: SetRequestBody,
+}
+impl PostV1deploymentsSetRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1deploymentsSetResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Set200Response>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1deploymentsSetResponse::Unknown);
+    }
+}
+/// Response types for postV1DeploymentsSet
+#[derive(Debug, Clone)]
+pub enum PostV1deploymentsSetResponse {
+    ///200: Response for status 200
+    Ok(Set200Response),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -13564,6 +13806,8 @@ pub enum PostV1projectsByIdExecutionContextMaterializeResponse {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct AdmitRequestBody {
+    #[serde(rename = "serviceId")]
+    pub service_id: Option<uuid::Uuid>,
     #[serde(rename = "protocolVersion")]
     pub protocol_version: String,
     #[serde(rename = "environmentId")]
@@ -13726,6 +13970,118 @@ pub enum PostV1projectsByIdDeploymentsAdmitResponse {
     ServiceUnavailable(ApiError503),
     ///default: Unknown response
     Unknown,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct AdmitSetRequestBody {
+    #[serde(rename = "protocolVersion")]
+    pub protocol_version: String,
+    #[serde(rename = "environmentId")]
+    pub environment_id: uuid::Uuid,
+    #[serde(rename = "expectedGeneration")]
+    #[validate(regex(path = "REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION"))]
+    pub expected_generation: String,
+    #[serde(rename = "idempotencyKey")]
+    #[validate(regex(
+        path = "REGEX_POST_V1ENVIRONMENTS_BY_ID_ACTIONS_ACTIVATE_RELEASE_REQUEST_HEADER_IDEMPOTENCY_KEY"
+    ))]
+    pub idempotency_key: String,
+    pub selection: AdmitSetRequestBodySelection,
+    #[validate(length(min = 1u64, max = 4_096u64))]
+    pub services: Vec<ServiceKind>,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1projectsByIdDeploymentsAdmitSetRequestPath {
+    pub id: uuid::Uuid,
+}
+/// Admit selected local Service builds
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1projectsByIdDeploymentsAdmitSetRequest {
+    pub path: PostV1projectsByIdDeploymentsAdmitSetRequestPath,
+    #[validate(nested)]
+    pub body: AdmitSetRequestBody,
+}
+impl PostV1projectsByIdDeploymentsAdmitSetRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1deploymentsSetResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Set200Response>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1deploymentsSetResponse::Unknown);
+    }
 }
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct GetV1deploymentsByIdRunnerContextRequestPath {
@@ -14303,7 +14659,7 @@ impl PostV1deploymentsByIdExecutionContextSkipBeforeSourceRequest {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct SourceRequestBody {
+pub struct SourceRequestBody2 {
     #[serde(rename = "protocolVersion")]
     pub protocol_version: String,
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
@@ -14311,9 +14667,9 @@ pub struct SourceRequestBody {
     #[serde(rename = "operationId")]
     pub operation_id: uuid::Uuid,
     #[validate(nested)]
-    pub manifest: SourceRequestBodyManifest,
+    pub manifest: SourceRequestBody2Manifest,
     #[validate(nested)]
-    pub functions: Option<SourceRequestBodyFunctions>,
+    pub functions: Option<SourceRequestBody2Functions>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -14328,7 +14684,7 @@ pub struct PostV1deploymentsByIdSourceRequestPath {
 pub struct PostV1deploymentsByIdSourceRequest {
     pub path: PostV1deploymentsByIdSourceRequestPath,
     #[validate(nested)]
-    pub body: SourceRequestBody,
+    pub body: SourceRequestBody2,
 }
 impl PostV1deploymentsByIdSourceRequest {
     /// Parse the HTTP response into the response enum.
@@ -14992,130 +15348,6 @@ impl DeleteV1projectsByIdEnvByKeyRequest {
 pub enum DeleteV1projectsByIdEnvByKeyResponse {
     ///200: Response for status 200
     Ok(Env200Response3),
-    ///400: Response for status 400
-    BadRequest(ApiError400),
-    ///401: Response for status 401
-    Unauthorized(ApiError401),
-    ///402: Response for status 402
-    PaymentRequired(ApiError402),
-    ///403: Response for status 403
-    Forbidden(ApiError403),
-    ///404: Response for status 404
-    NotFound(ApiError404),
-    ///408: Response for status 408
-    RequestTimeout(ApiError408),
-    ///409: Response for status 409
-    Conflict(ApiError409),
-    ///410: Response for status 410
-    Gone(ApiError410),
-    ///413: Response for status 413
-    ContentTooLarge(ApiError413),
-    ///426: Response for status 426
-    UpgradeRequired(ApiError426),
-    ///429: Response for status 429
-    TooManyRequests(ApiError429),
-    ///500: Response for status 500
-    InternalServerError(ApiError500),
-    ///503: Response for status 503
-    ServiceUnavailable(ApiError503),
-    ///default: Unknown response
-    Unknown,
-}
-#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
-pub struct GetV1environmentsByIdRequestPath {
-    pub id: uuid::Uuid,
-}
-/// Returns project environments, custom-domain metadata, and resource action capabilities.
-#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
-pub struct GetV1environmentsByIdRequest {
-    pub path: GetV1environmentsByIdRequestPath,
-}
-impl GetV1environmentsByIdRequest {
-    /// Parse the HTTP response into the response enum.
-    pub async fn parse_response(
-        req: reqwest::Response,
-    ) -> anyhow::Result<GetV1environmentsByIdResponse> {
-        let status = req.status();
-        if status == http::StatusCode::OK {
-            let data =
-                oas3_gen_support::Diagnostics::<Environment200Response>::json_with_diagnostics(req)
-                    .await?;
-            return Ok(GetV1environmentsByIdResponse::Ok(data));
-        }
-        if status == http::StatusCode::BAD_REQUEST {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::BadRequest(data));
-        }
-        if status == http::StatusCode::UNAUTHORIZED {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::Unauthorized(data));
-        }
-        if status == http::StatusCode::PAYMENT_REQUIRED {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::PaymentRequired(data));
-        }
-        if status == http::StatusCode::FORBIDDEN {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::Forbidden(data));
-        }
-        if status == http::StatusCode::NOT_FOUND {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::NotFound(data));
-        }
-        if status == http::StatusCode::REQUEST_TIMEOUT {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::RequestTimeout(data));
-        }
-        if status == http::StatusCode::CONFLICT {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::Conflict(data));
-        }
-        if status == http::StatusCode::GONE {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::Gone(data));
-        }
-        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::ContentTooLarge(data));
-        }
-        if status == http::StatusCode::UPGRADE_REQUIRED {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::UpgradeRequired(data));
-        }
-        if status == http::StatusCode::TOO_MANY_REQUESTS {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::TooManyRequests(data));
-        }
-        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::InternalServerError(data));
-        }
-        if status == http::StatusCode::SERVICE_UNAVAILABLE {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
-            return Ok(GetV1environmentsByIdResponse::ServiceUnavailable(data));
-        }
-        let _ = req.bytes().await?;
-        return Ok(GetV1environmentsByIdResponse::Unknown);
-    }
-}
-/// Response types for getV1EnvironmentsById
-#[derive(Debug, Clone)]
-pub enum GetV1environmentsByIdResponse {
-    ///200: Response for status 200
-    Ok(Environment200Response),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -17679,6 +17911,114 @@ pub struct Service200Response3 {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct SourceRequestBodySourceType {
+    #[serde(rename = "sourceType")]
+    #[serde(deserialize_with = "SourceRequestBodySourceType::deserialize_const_source_type")]
+    #[serde(serialize_with = "SourceRequestBodySourceType::serialize_const_source_type")]
+    #[default("CLI".to_string())]
+    pub source_type: String,
+}
+impl SourceRequestBodySourceType {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_source_type<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"CLI\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_source_type<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"CLI\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct SourceRequestBodyObject {
+    #[serde(rename = "sourceType")]
+    #[serde(deserialize_with = "SourceRequestBodyObject::deserialize_const_source_type")]
+    #[serde(serialize_with = "SourceRequestBodyObject::serialize_const_source_type")]
+    #[default("GIT".to_string())]
+    pub source_type: String,
+    #[serde(rename = "gitUrl")]
+    #[validate(length(min = 1u64))]
+    pub git_url: String,
+    #[serde(rename = "gitConnectionId")]
+    pub git_connection_id: Option<uuid::Uuid>,
+}
+impl SourceRequestBodyObject {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_source_type<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"GIT\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_source_type<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"GIT\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Project200ResponseProjectDetectedComputeType {
     #[serde(rename = "STATIC")]
@@ -18802,6 +19142,302 @@ impl DeletedResponse {
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Environment200ResponseEnvironmentBranchMatchType {
+    #[serde(rename = "EQUALS")]
+    #[default]
+    Equals,
+    #[serde(rename = "STARTS_WITH")]
+    StartsWith,
+    #[serde(rename = "ENDS_WITH")]
+    EndsWith,
+}
+impl core::fmt::Display for Environment200ResponseEnvironmentBranchMatchType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Equals => write!(f, "EQUALS"),
+            Self::StartsWith => write!(f, "STARTS_WITH"),
+            Self::EndsWith => write!(f, "ENDS_WITH"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Environment200ResponseEnvironmentCustomDomain {
+    pub id: uuid::Uuid,
+    pub domain: String,
+    #[serde(rename = "dnsStatus")]
+    pub dns_status: DomainResponseItemDnsStatus,
+    #[serde(rename = "tlsStatus")]
+    pub tls_status: DomainResponseItemTlsStatus,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Environment200ResponseEnvironmentCount {
+    #[serde(rename = "customDomains")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub custom_domains: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Environment200ResponseEnvironment {
+    pub id: uuid::Uuid,
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: uuid::Uuid,
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "productEnvironmentId")]
+    pub product_environment_id: uuid::Uuid,
+    #[serde(rename = "workspaceEnvironmentId")]
+    pub workspace_environment_id: uuid::Uuid,
+    #[serde(rename = "workspaceBindingGeneration")]
+    #[validate(regex(path = "REGEX_PROJECT200RESPONSE3_WORKSPACE_BINDING_GENERATION"))]
+    pub workspace_binding_generation: String,
+    #[serde(rename = "type")]
+    pub r#type: DomainResponseItemEnvironmentType,
+    pub name: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub description: Option<String>,
+    #[serde(rename = "branchMatchType")]
+    pub branch_match_type: Environment200ResponseEnvironmentBranchMatchType,
+    #[serde(deserialize_with = "Option::deserialize", rename = "branchPattern")]
+    #[serialize_always]
+    pub branch_pattern: Option<String>,
+    #[serde(rename = "autoDeployEnabled")]
+    pub auto_deploy_enabled: bool,
+    #[serde(rename = "deploymentRetentionDays")]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub deployment_retention_days: i64,
+    #[serde(rename = "effectiveDeploymentRetentionDays")]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub effective_deployment_retention_days: i64,
+    #[serde(rename = "maxDeploymentRetentionDays")]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub max_deployment_retention_days: i64,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "retainedPreviousReleases"
+    )]
+    #[serialize_always]
+    pub retained_previous_releases: Option<i64>,
+    #[serde(rename = "effectiveRetainedPreviousReleases")]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub effective_retained_previous_releases: i64,
+    #[serde(rename = "maxRetainedPreviousReleases")]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub max_retained_previous_releases: i64,
+    #[serde(rename = "blueGreenEnabled")]
+    pub blue_green_enabled: bool,
+    #[serde(rename = "blueGreenGracePeriodSec")]
+    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
+    pub blue_green_grace_period_sec: i64,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "previewActivityTtlDays"
+    )]
+    #[serialize_always]
+    pub preview_activity_ttl_days: Option<i64>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "activeDeploymentId"
+    )]
+    #[serialize_always]
+    pub active_deployment_id: Option<uuid::Uuid>,
+    #[serde(rename = "createdAt")]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "customDomains")]
+    pub custom_domains: Vec<Environment200ResponseEnvironmentCustomDomain>,
+    #[serde(rename = "_count")]
+    #[validate(nested)]
+    pub count: Environment200ResponseEnvironmentCount,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Environment200ResponseProject {
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    pub branch: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed {
+    #[serde(
+        deserialize_with = "Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed::deserialize_const_allowed"
+    )]
+    #[serde(
+        serialize_with = "Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed::serialize_const_allowed"
+    )]
+    #[default(true)]
+    pub allowed: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_allowed<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<bool, D::Error> {
+        let value = <bool as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: bool =
+            serde_json::from_str::<bool>("true").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_allowed<S: serde::Serializer>(
+        value: &bool,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: bool =
+            serde_json::from_str::<bool>("true").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Environment200ResponseCapabilitiesCreateCustomEnvironmentObject {
+    #[serde(
+        deserialize_with = "Environment200ResponseCapabilitiesCreateCustomEnvironmentObject::deserialize_const_allowed"
+    )]
+    #[serde(
+        serialize_with = "Environment200ResponseCapabilitiesCreateCustomEnvironmentObject::serialize_const_allowed"
+    )]
+    #[default(false)]
+    pub allowed: bool,
+    /// Feature entitlement failure details.
+    pub details: ApiErrorFeatureDetails,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl Environment200ResponseCapabilitiesCreateCustomEnvironmentObject {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_allowed<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<bool, D::Error> {
+        let value = <bool as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: bool =
+            serde_json::from_str::<bool>("false").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_allowed<S: serde::Serializer>(
+        value: &bool,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: bool =
+            serde_json::from_str::<bool>("false").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum Environment200ResponseCapabilitiesCreateCustomEnvironment {
+    #[default]
+    Allowed(Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed),
+    Object(Environment200ResponseCapabilitiesCreateCustomEnvironmentObject),
+}
+impl Environment200ResponseCapabilitiesCreateCustomEnvironment {
+    pub fn allowed(allowed: bool) -> Self {
+        Self::Allowed(
+            Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed {
+                allowed,
+                ..Default::default()
+            },
+        )
+    }
+    pub fn object(details: ApiErrorFeatureDetails) -> Self {
+        Self::Object(
+            Environment200ResponseCapabilitiesCreateCustomEnvironmentObject {
+                details,
+                ..Default::default()
+            },
+        )
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Environment200ResponseCapabilities {
+    #[serde(rename = "createCustomEnvironment")]
+    pub create_custom_environment: Environment200ResponseCapabilitiesCreateCustomEnvironment,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Environment200Response {
+    #[validate(nested)]
+    pub environments: Vec<Environment200ResponseEnvironment>,
+    pub project: Environment200ResponseProject,
+    pub capabilities: Environment200ResponseCapabilities,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Release200ResponseReleaseContentDigestAlgorithm {
     #[serde(rename = "SHA256")]
     #[default]
@@ -18894,6 +19530,17 @@ pub struct Release200ResponseNextCursor {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Release200ResponseNextCompositionCursor {
+    #[serde(rename = "createdAt")]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "compositionId")]
+    pub composition_id: uuid::Uuid,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
@@ -18907,6 +19554,12 @@ pub struct Release200Response {
     #[serde(deserialize_with = "Option::deserialize", rename = "nextCursor")]
     #[serialize_always]
     pub next_cursor: Option<Release200ResponseNextCursor>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "nextCompositionCursor"
+    )]
+    #[serialize_always]
+    pub next_composition_cursor: Option<Release200ResponseNextCompositionCursor>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -19063,14 +19716,17 @@ pub struct Serving200ResponseObserved {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
+#[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct Serving200Response {
     #[serde(rename = "environmentId")]
     pub environment_id: uuid::Uuid,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
     #[validate(nested)]
-    pub address: Serving200ResponseAddress,
+    pub address: Option<Serving200ResponseAddress>,
     #[validate(nested)]
     pub desired: Serving200ResponseDesired,
     pub observed: Serving200ResponseObserved,
@@ -19091,6 +19747,195 @@ pub struct ActivateRelease202Response {
     #[validate(regex(path = "REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION"))]
     pub desired_generation: String,
     pub status: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct SetRequestBodySelectionKind {
+    #[serde(deserialize_with = "SetRequestBodySelectionKind::deserialize_const_kind")]
+    #[serde(serialize_with = "SetRequestBodySelectionKind::serialize_const_kind")]
+    #[default("ALL".to_string())]
+    pub kind: String,
+}
+impl SetRequestBodySelectionKind {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_kind<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"ALL\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_kind<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"ALL\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct SetRequestBodySelectionObjectService {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[validate(
+        length(min = 1u64, max = 50u64),
+        regex(path = "REGEX_PROJECT_REQUEST_BODY_BRANCH")
+    )]
+    pub branch: Option<String>,
+    #[serde(rename = "commitSha")]
+    #[validate(
+        length(min = 7u64, max = 40u64),
+        regex(path = "REGEX_ADMIT_REQUEST_BODY_COMMIT_SHA")
+    )]
+    pub commit_sha: Option<String>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct SetRequestBodySelectionObject {
+    #[serde(deserialize_with = "SetRequestBodySelectionObject::deserialize_const_kind")]
+    #[serde(serialize_with = "SetRequestBodySelectionObject::serialize_const_kind")]
+    #[default("SERVICES".to_string())]
+    pub kind: String,
+    #[validate(length(min = 1u64, max = 4_096u64), nested)]
+    pub services: Vec<SetRequestBodySelectionObjectService>,
+}
+impl SetRequestBodySelectionObject {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_kind<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"SERVICES\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_kind<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"SERVICES\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum SetRequestBodySelection {
+    #[default]
+    Kind(SetRequestBodySelectionKind),
+    Object(SetRequestBodySelectionObject),
+}
+impl SetRequestBodySelection {
+    pub fn kind(kind: String) -> Self {
+        Self::Kind(SetRequestBodySelectionKind {
+            kind,
+            ..Default::default()
+        })
+    }
+    pub fn object(services: Vec<SetRequestBodySelectionObjectService>) -> Self {
+        Self::Object(SetRequestBodySelectionObject {
+            services,
+            ..Default::default()
+        })
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Set200ResponseStatus {
+    #[serde(rename = "PENDING")]
+    #[default]
+    Pending,
+    #[serde(rename = "ACCEPTED")]
+    Accepted,
+    #[serde(rename = "FAILED")]
+    Failed,
+    #[serde(rename = "CANCELLED")]
+    Cancelled,
+}
+impl core::fmt::Display for Set200ResponseStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "PENDING"),
+            Self::Accepted => write!(f, "ACCEPTED"),
+            Self::Failed => write!(f, "FAILED"),
+            Self::Cancelled => write!(f, "CANCELLED"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Set200ResponseDeployment {
+    pub id: uuid::Uuid,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    pub status: Project200ResponseProjectLatestDeploymentStatus,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Set200Response {
+    #[serde(rename = "operationId")]
+    pub operation_id: uuid::Uuid,
+    pub generation: String,
+    pub status: Set200ResponseStatus,
+    pub replayed: bool,
+    pub deployments: Vec<Set200ResponseDeployment>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -20092,6 +20937,9 @@ pub struct Domain200ResponseHostname {
     #[serde(deserialize_with = "Option::deserialize", rename = "targetCname")]
     #[serialize_always]
     pub target_cname: Option<String>,
+    #[serde(rename = "targetAddresses")]
+    #[default(Default::default())]
+    pub target_addresses: Vec<String>,
     #[serde(deserialize_with = "Option::deserialize", rename = "wwwTargetCname")]
     #[serialize_always]
     pub www_target_cname: Option<String>,
@@ -24332,6 +25180,174 @@ impl Admit200Response {
         serde::Serialize::serialize(value, serializer)
     }
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum AdmitSetRequestBodySelectionKind {
+    #[serde(rename = "ALL")]
+    #[default]
+    All,
+    #[serde(rename = "SERVICES")]
+    Services,
+}
+impl core::fmt::Display for AdmitSetRequestBodySelectionKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::All => write!(f, "ALL"),
+            Self::Services => write!(f, "SERVICES"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct AdmitSetRequestBodySelection {
+    pub kind: AdmitSetRequestBodySelectionKind,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceKindObject {
+    #[serde(deserialize_with = "ServiceKindObject::deserialize_const_mode")]
+    #[serde(serialize_with = "ServiceKindObject::serialize_const_mode")]
+    #[default("LOCAL".to_string())]
+    pub mode: String,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[validate(
+        length(min = 1u64, max = 50u64),
+        regex(path = "REGEX_PROJECT_REQUEST_BODY_BRANCH")
+    )]
+    pub branch: String,
+    #[serde(rename = "commitSha")]
+    #[validate(
+        length(min = 7u64, max = 40u64),
+        regex(path = "REGEX_ADMIT_REQUEST_BODY_COMMIT_SHA")
+    )]
+    pub commit_sha: String,
+    #[serde(rename = "expectedContext")]
+    #[validate(nested)]
+    pub expected_context: AdmitRequestBodyExpectedContext,
+}
+impl ServiceKindObject {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_mode<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"LOCAL\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_mode<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"LOCAL\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceKindObject2 {
+    #[serde(deserialize_with = "ServiceKindObject2::deserialize_const_mode")]
+    #[serde(serialize_with = "ServiceKindObject2::serialize_const_mode")]
+    #[default("REMOTE".to_string())]
+    pub mode: String,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[validate(
+        length(min = 1u64, max = 50u64),
+        regex(path = "REGEX_PROJECT_REQUEST_BODY_BRANCH")
+    )]
+    pub branch: Option<String>,
+    #[serde(rename = "commitSha")]
+    #[validate(
+        length(min = 7u64, max = 40u64),
+        regex(path = "REGEX_ADMIT_REQUEST_BODY_COMMIT_SHA")
+    )]
+    pub commit_sha: Option<String>,
+}
+impl ServiceKindObject2 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_mode<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"REMOTE\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_mode<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"REMOTE\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum ServiceKind {
+    #[default]
+    Object(ServiceKindObject),
+    Object2(ServiceKindObject2),
+}
+impl ServiceKind {
+    pub fn object2(service_id: uuid::Uuid) -> Self {
+        Self::Object2(ServiceKindObject2 {
+            service_id,
+            ..Default::default()
+        })
+    }
+}
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
@@ -25579,7 +26595,7 @@ impl FallthroughWhenKind {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct SourceRequestBodyManifestRoute {
+pub struct SourceRequestBody2ManifestRoute {
     #[validate(length(min = 1u64, max = 500u64))]
     pub pattern: String,
     #[validate(length(min = 1u64))]
@@ -25605,7 +26621,7 @@ pub struct SourceRequestBodyManifestRoute {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct SourceRequestBodyManifestPrerender {
+pub struct SourceRequestBody2ManifestPrerender {
     #[validate(length(min = 1u64))]
     pub layer: String,
     pub pages: std::collections::HashMap<String, serde_json::Value>,
@@ -25619,20 +26635,20 @@ pub struct SourceRequestBodyManifestPrerender {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 #[serde(deny_unknown_fields)]
-pub struct SourceRequestBodyManifest {
-    #[serde(deserialize_with = "SourceRequestBodyManifest::deserialize_const_version")]
-    #[serde(serialize_with = "SourceRequestBodyManifest::serialize_const_version")]
+pub struct SourceRequestBody2Manifest {
+    #[serde(deserialize_with = "SourceRequestBody2Manifest::deserialize_const_version")]
+    #[serde(serialize_with = "SourceRequestBody2Manifest::serialize_const_version")]
     #[default(2f64)]
     pub version: f64,
     #[validate(length(min = 1u64, max = 10u64))]
     pub layers: Vec<LayerKind>,
     #[validate(length(max = 200u64), nested)]
-    pub routes: Vec<SourceRequestBodyManifestRoute>,
+    pub routes: Vec<SourceRequestBody2ManifestRoute>,
     #[validate(nested)]
-    pub prerender: Option<SourceRequestBodyManifestPrerender>,
+    pub prerender: Option<SourceRequestBody2ManifestPrerender>,
     pub meta: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
-impl SourceRequestBodyManifest {
+impl SourceRequestBody2Manifest {
     #[allow(
         clippy::float_cmp,
         reason = "JSON Schema constants require exact equality"
@@ -25676,7 +26692,7 @@ impl SourceRequestBodyManifest {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 #[serde(deny_unknown_fields)]
-pub struct SourceRequestBodyFunctionsGeneratedEdgeRuleSet {
+pub struct SourceRequestBody2FunctionsGeneratedEdgeRuleSet {
     #[validate(length(min = 1u64, max = 128u64))]
     pub producer: String,
     #[validate(length(min = 1u64, max = 128u64))]
@@ -25690,9 +26706,9 @@ pub struct SourceRequestBodyFunctionsGeneratedEdgeRuleSet {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 #[serde(deny_unknown_fields)]
-pub struct SourceRequestBodyFunctions {
-    #[serde(deserialize_with = "SourceRequestBodyFunctions::deserialize_const_origin")]
-    #[serde(serialize_with = "SourceRequestBodyFunctions::serialize_const_origin")]
+pub struct SourceRequestBody2Functions {
+    #[serde(deserialize_with = "SourceRequestBody2Functions::deserialize_const_origin")]
+    #[serde(serialize_with = "SourceRequestBody2Functions::serialize_const_origin")]
     #[default("DEPLOYMENT".to_string())]
     pub origin: String,
     #[validate(length(max = 1_000u64), nested)]
@@ -25705,9 +26721,9 @@ pub struct SourceRequestBodyFunctions {
     pub edge_rules_force: Option<bool>,
     #[serde(rename = "generatedEdgeRuleSets")]
     #[validate(nested)]
-    pub generated_edge_rule_sets: Option<Vec<SourceRequestBodyFunctionsGeneratedEdgeRuleSet>>,
+    pub generated_edge_rule_sets: Option<Vec<SourceRequestBody2FunctionsGeneratedEdgeRuleSet>>,
 }
-impl SourceRequestBodyFunctions {
+impl SourceRequestBody2Functions {
     #[allow(
         clippy::float_cmp,
         reason = "JSON Schema constants require exact equality"
@@ -26202,300 +27218,4 @@ impl Env200Response3 {
         }
         serde::Serialize::serialize(value, serializer)
     }
-}
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum Environment200ResponseEnvironmentBranchMatchType {
-    #[serde(rename = "EQUALS")]
-    #[default]
-    Equals,
-    #[serde(rename = "STARTS_WITH")]
-    StartsWith,
-    #[serde(rename = "ENDS_WITH")]
-    EndsWith,
-}
-impl core::fmt::Display for Environment200ResponseEnvironmentBranchMatchType {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Equals => write!(f, "EQUALS"),
-            Self::StartsWith => write!(f, "STARTS_WITH"),
-            Self::EndsWith => write!(f, "ENDS_WITH"),
-        }
-    }
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct Environment200ResponseEnvironmentCustomDomain {
-    pub id: uuid::Uuid,
-    pub domain: String,
-    #[serde(rename = "dnsStatus")]
-    pub dns_status: DomainResponseItemDnsStatus,
-    #[serde(rename = "tlsStatus")]
-    pub tls_status: DomainResponseItemTlsStatus,
-    /// Additional properties not defined in the schema.
-    #[serde(flatten)]
-    #[default(Default::default())]
-    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
-}
-#[derive(
-    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
-)]
-pub struct Environment200ResponseEnvironmentCount {
-    #[serde(rename = "customDomains")]
-    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
-    pub custom_domains: i64,
-    /// Additional properties not defined in the schema.
-    #[serde(flatten)]
-    #[default(Default::default())]
-    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
-}
-#[serde_with::skip_serializing_none]
-#[derive(
-    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
-)]
-pub struct Environment200ResponseEnvironment {
-    pub id: uuid::Uuid,
-    #[serde(rename = "workspaceId")]
-    pub workspace_id: uuid::Uuid,
-    #[serde(rename = "productId")]
-    pub product_id: uuid::Uuid,
-    #[serde(rename = "productEnvironmentId")]
-    pub product_environment_id: uuid::Uuid,
-    #[serde(rename = "workspaceEnvironmentId")]
-    pub workspace_environment_id: uuid::Uuid,
-    #[serde(rename = "workspaceBindingGeneration")]
-    #[validate(regex(path = "REGEX_PROJECT200RESPONSE3_WORKSPACE_BINDING_GENERATION"))]
-    pub workspace_binding_generation: String,
-    #[serde(rename = "type")]
-    pub r#type: DomainResponseItemEnvironmentType,
-    pub name: String,
-    #[serde(deserialize_with = "Option::deserialize")]
-    #[serialize_always]
-    pub description: Option<String>,
-    #[serde(rename = "branchMatchType")]
-    pub branch_match_type: Environment200ResponseEnvironmentBranchMatchType,
-    #[serde(deserialize_with = "Option::deserialize", rename = "branchPattern")]
-    #[serialize_always]
-    pub branch_pattern: Option<String>,
-    #[serde(rename = "autoDeployEnabled")]
-    pub auto_deploy_enabled: bool,
-    #[serde(rename = "deploymentRetentionDays")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub deployment_retention_days: i64,
-    #[serde(rename = "effectiveDeploymentRetentionDays")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub effective_deployment_retention_days: i64,
-    #[serde(rename = "maxDeploymentRetentionDays")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub max_deployment_retention_days: i64,
-    #[serde(
-        deserialize_with = "Option::deserialize",
-        rename = "retainedPreviousReleases"
-    )]
-    #[serialize_always]
-    pub retained_previous_releases: Option<i64>,
-    #[serde(rename = "effectiveRetainedPreviousReleases")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub effective_retained_previous_releases: i64,
-    #[serde(rename = "maxRetainedPreviousReleases")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub max_retained_previous_releases: i64,
-    #[serde(rename = "blueGreenEnabled")]
-    pub blue_green_enabled: bool,
-    #[serde(rename = "blueGreenGracePeriodSec")]
-    #[validate(range(min = -9_007_199_254_740_991i64, max = 9_007_199_254_740_991i64))]
-    pub blue_green_grace_period_sec: i64,
-    #[serde(
-        deserialize_with = "Option::deserialize",
-        rename = "previewActivityTtlDays"
-    )]
-    #[serialize_always]
-    pub preview_activity_ttl_days: Option<i64>,
-    #[serde(
-        deserialize_with = "Option::deserialize",
-        rename = "activeDeploymentId"
-    )]
-    #[serialize_always]
-    pub active_deployment_id: Option<uuid::Uuid>,
-    #[serde(rename = "createdAt")]
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    #[serde(rename = "customDomains")]
-    pub custom_domains: Vec<Environment200ResponseEnvironmentCustomDomain>,
-    #[serde(rename = "_count")]
-    #[validate(nested)]
-    pub count: Environment200ResponseEnvironmentCount,
-    /// Additional properties not defined in the schema.
-    #[serde(flatten)]
-    #[default(Default::default())]
-    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
-}
-#[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct Environment200ResponseProject {
-    #[serde(deserialize_with = "Option::deserialize")]
-    #[serialize_always]
-    pub branch: Option<String>,
-    /// Additional properties not defined in the schema.
-    #[serde(flatten)]
-    #[default(Default::default())]
-    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed {
-    #[serde(
-        deserialize_with = "Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed::deserialize_const_allowed"
-    )]
-    #[serde(
-        serialize_with = "Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed::serialize_const_allowed"
-    )]
-    #[default(true)]
-    pub allowed: bool,
-    /// Additional properties not defined in the schema.
-    #[serde(flatten)]
-    #[default(Default::default())]
-    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
-}
-impl Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed {
-    #[allow(
-        clippy::float_cmp,
-        reason = "JSON Schema constants require exact equality"
-    )]
-    fn deserialize_const_allowed<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<bool, D::Error> {
-        let value = <bool as serde::Deserialize>::deserialize(deserializer)?;
-        let expected: bool =
-            serde_json::from_str::<bool>("true").map_err(serde::de::Error::custom)?;
-        if value != expected {
-            return Err(serde::de::Error::custom(
-                "value does not match schema const",
-            ));
-        }
-        Ok(value)
-    }
-    #[allow(
-        clippy::ref_option,
-        clippy::trivially_copy_pass_by_ref,
-        reason = "serde field serializers receive a reference"
-    )]
-    #[allow(
-        clippy::float_cmp,
-        reason = "JSON Schema constants require exact equality"
-    )]
-    fn serialize_const_allowed<S: serde::Serializer>(
-        value: &bool,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let expected: bool =
-            serde_json::from_str::<bool>("true").map_err(serde::ser::Error::custom)?;
-        if value != &expected {
-            return Err(serde::ser::Error::custom(
-                "value does not match schema const",
-            ));
-        }
-        serde::Serialize::serialize(value, serializer)
-    }
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct Environment200ResponseCapabilitiesCreateCustomEnvironmentObject {
-    #[serde(
-        deserialize_with = "Environment200ResponseCapabilitiesCreateCustomEnvironmentObject::deserialize_const_allowed"
-    )]
-    #[serde(
-        serialize_with = "Environment200ResponseCapabilitiesCreateCustomEnvironmentObject::serialize_const_allowed"
-    )]
-    #[default(false)]
-    pub allowed: bool,
-    /// Feature entitlement failure details.
-    pub details: ApiErrorFeatureDetails,
-    /// Additional properties not defined in the schema.
-    #[serde(flatten)]
-    #[default(Default::default())]
-    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
-}
-impl Environment200ResponseCapabilitiesCreateCustomEnvironmentObject {
-    #[allow(
-        clippy::float_cmp,
-        reason = "JSON Schema constants require exact equality"
-    )]
-    fn deserialize_const_allowed<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<bool, D::Error> {
-        let value = <bool as serde::Deserialize>::deserialize(deserializer)?;
-        let expected: bool =
-            serde_json::from_str::<bool>("false").map_err(serde::de::Error::custom)?;
-        if value != expected {
-            return Err(serde::de::Error::custom(
-                "value does not match schema const",
-            ));
-        }
-        Ok(value)
-    }
-    #[allow(
-        clippy::ref_option,
-        clippy::trivially_copy_pass_by_ref,
-        reason = "serde field serializers receive a reference"
-    )]
-    #[allow(
-        clippy::float_cmp,
-        reason = "JSON Schema constants require exact equality"
-    )]
-    fn serialize_const_allowed<S: serde::Serializer>(
-        value: &bool,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let expected: bool =
-            serde_json::from_str::<bool>("false").map_err(serde::ser::Error::custom)?;
-        if value != &expected {
-            return Err(serde::ser::Error::custom(
-                "value does not match schema const",
-            ));
-        }
-        serde::Serialize::serialize(value, serializer)
-    }
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-#[serde(untagged)]
-pub enum Environment200ResponseCapabilitiesCreateCustomEnvironment {
-    #[default]
-    Allowed(Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed),
-    Object(Environment200ResponseCapabilitiesCreateCustomEnvironmentObject),
-}
-impl Environment200ResponseCapabilitiesCreateCustomEnvironment {
-    pub fn allowed(allowed: bool) -> Self {
-        Self::Allowed(
-            Environment200ResponseCapabilitiesCreateCustomEnvironmentAllowed {
-                allowed,
-                ..Default::default()
-            },
-        )
-    }
-    pub fn object(details: ApiErrorFeatureDetails) -> Self {
-        Self::Object(
-            Environment200ResponseCapabilitiesCreateCustomEnvironmentObject {
-                details,
-                ..Default::default()
-            },
-        )
-    }
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct Environment200ResponseCapabilities {
-    #[serde(rename = "createCustomEnvironment")]
-    pub create_custom_environment: Environment200ResponseCapabilitiesCreateCustomEnvironment,
-    /// Additional properties not defined in the schema.
-    #[serde(flatten)]
-    #[default(Default::default())]
-    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
-}
-#[derive(
-    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
-)]
-pub struct Environment200Response {
-    #[validate(nested)]
-    pub environments: Vec<Environment200ResponseEnvironment>,
-    pub project: Environment200ResponseProject,
-    pub capabilities: Environment200ResponseCapabilities,
-    /// Additional properties not defined in the schema.
-    #[serde(flatten)]
-    #[default(Default::default())]
-    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }

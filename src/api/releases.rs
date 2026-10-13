@@ -22,9 +22,10 @@ impl ApiClient {
         )
     }
 
-    pub async fn environment_releases(
+    pub async fn environment_releases_page(
         &self,
         environment_id: &str,
+        query: GetV1environmentsByIdReleasesRequestQuery,
     ) -> anyhow::Result<Release200Response> {
         let response = self
             .platform()?
@@ -32,11 +33,7 @@ impl ApiClient {
                 path: GetV1environmentsByIdReleasesRequestPath {
                     id: environment_id.parse().context("invalid environment ID")?,
                 },
-                query: GetV1environmentsByIdReleasesRequestQuery {
-                    before_created_at: None,
-                    before_release_id: None,
-                    limit: Some("100".to_owned()),
-                },
+                query,
             })
             .await?;
         api_success!(
