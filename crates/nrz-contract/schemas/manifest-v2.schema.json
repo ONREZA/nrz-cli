@@ -5,11 +5,7 @@
   "description": "Build output manifest (manifest.json) — the contract between builder/adapter/CLI and the platform. Generated from the Valibot source of truth used by the API server and consumed by the Rust CLI contract crate. Cross-field rules (layer/route references, regex compatibility, meta size) are enforced in code, not in this schema.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "version",
-    "layers",
-    "routes"
-  ],
+  "required": ["version", "layers", "routes"],
   "properties": {
     "version": {
       "const": 2,
@@ -37,11 +33,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "name",
-              "directory",
-              "target"
-            ],
+            "required": ["name", "directory", "target"],
             "additionalProperties": false
           },
           {
@@ -77,10 +69,7 @@
                         "type": "string"
                       },
                       "exposure": {
-                        "enum": [
-                          "PUBLIC",
-                          "PRIVATE"
-                        ],
+                        "enum": ["PUBLIC", "PRIVATE"],
                         "type": "string"
                       },
                       "ports": {
@@ -95,12 +84,7 @@
                               "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
                             },
                             "protocol": {
-                              "enum": [
-                                "http",
-                                "grpc",
-                                "websocket",
-                                "tcp"
-                              ],
+                              "enum": ["http", "grpc", "websocket", "tcp"],
                               "type": "string"
                             },
                             "port": {
@@ -109,19 +93,11 @@
                               "maximum": 65535
                             },
                             "binding": {
-                              "enum": [
-                                "primary",
-                                "fixed"
-                              ],
+                              "enum": ["primary", "fixed"],
                               "type": "string"
                             }
                           },
-                          "required": [
-                            "name",
-                            "protocol",
-                            "port",
-                            "binding"
-                          ],
+                          "required": ["name", "protocol", "port", "binding"],
                           "additionalProperties": false
                         },
                         "minItems": 1,
@@ -131,10 +107,7 @@
                         "type": "object",
                         "properties": {
                           "protocol": {
-                            "enum": [
-                              "tcp",
-                              "http"
-                            ],
+                            "enum": ["tcp", "http"],
                             "type": "string"
                           },
                           "port": {
@@ -149,10 +122,7 @@
                             "maxLength": 2048
                           }
                         },
-                        "required": [
-                          "protocol",
-                          "port"
-                        ],
+                        "required": ["protocol", "port"],
                         "additionalProperties": false
                       },
                       "allowFrom": {
@@ -170,34 +140,20 @@
                               "maxLength": 64
                             }
                           },
-                          "required": [
-                            "serviceId",
-                            "layerName"
-                          ],
+                          "required": ["serviceId", "layerName"],
                           "additionalProperties": false
                         },
                         "maxItems": 128
                       }
                     },
-                    "required": [
-                      "schemaVersion",
-                      "exposure",
-                      "ports",
-                      "readiness",
-                      "allowFrom"
-                    ],
+                    "required": ["schemaVersion", "exposure", "ports", "readiness", "allowFrom"],
                     "additionalProperties": false
                   },
                   "applicationRuntime": {
                     "type": "object",
                     "properties": {
                       "family": {
-                        "enum": [
-                          "BUN",
-                          "NODE",
-                          "PYTHON",
-                          "EXECUTABLE"
-                        ],
+                        "enum": ["BUN", "NODE", "PYTHON", "EXECUTABLE"],
                         "type": "string"
                       },
                       "args": {
@@ -210,10 +166,7 @@
                         "maxItems": 64
                       }
                     },
-                    "required": [
-                      "family",
-                      "args"
-                    ],
+                    "required": ["family", "args"],
                     "additionalProperties": false
                   },
                   "buildRuntimeVersion": {
@@ -242,12 +195,7 @@
                 "required": []
               }
             },
-            "required": [
-              "name",
-              "directory",
-              "target",
-              "entry"
-            ],
+            "required": ["name", "directory", "target", "entry"],
             "additionalProperties": false
           }
         ]
@@ -284,15 +232,7 @@
           "methods": {
             "type": "array",
             "items": {
-              "enum": [
-                "GET",
-                "POST",
-                "PUT",
-                "DELETE",
-                "PATCH",
-                "HEAD",
-                "OPTIONS"
-              ],
+              "enum": ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
               "type": "string"
             }
           },
@@ -334,10 +274,7 @@
                       "maxLength": 512
                     }
                   },
-                  "required": [
-                    "type",
-                    "name"
-                  ]
+                  "required": ["type", "name"]
                 },
                 {
                   "type": "object",
@@ -356,10 +293,7 @@
                       "maxLength": 512
                     }
                   },
-                  "required": [
-                    "type",
-                    "name"
-                  ]
+                  "required": ["type", "name"]
                 }
               ]
             },
@@ -367,10 +301,7 @@
             "maxItems": 16
           }
         },
-        "required": [
-          "pattern",
-          "layer"
-        ]
+        "required": ["pattern", "layer"]
       },
       "maxItems": 200
     },
@@ -399,16 +330,11 @@
                 "minLength": 1
               }
             },
-            "required": [
-              "html"
-            ]
+            "required": ["html"]
           }
         }
       },
-      "required": [
-        "layer",
-        "pages"
-      ]
+      "required": ["layer", "pages"]
     },
     "meta": {
       "type": "object",
