@@ -30,6 +30,23 @@ on:
         type: boolean
         required: true
         default: true
+      hold_draft:
+        description: Verify assets in a draft without exposing GitHub latest or npm
+        type: boolean
+        required: true
+        default: false
+      resume_version:
+        description: Finalize existing verified assets without preparing or rebuilding
+        type: string
+        required: false
+      expected_tag_revision:
+        description: Exact release commit SHA required when resuming
+        type: string
+        required: false
+      expected_checksums_sha256:
+        description: SHA256 of checksums-sha256.txt recorded when assets were held
+        type: string
+        required: false
       npm_tag_version:
         description: Only move the selected npm channel to this already published version
         type: string
@@ -41,6 +58,13 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
+  RELEASE_HOLD_DRAFT: ${{ inputs.hold_draft }}
+  RELEASE_RESUME_VERSION: ${{ inputs.resume_version }}
+  RELEASE_EXPECTED_REVISION: ${{ inputs.expected_tag_revision }}
+  RELEASE_EXPECTED_CHECKSUMS_SHA256: ${{ inputs.expected_checksums_sha256 }}
+  RELEASE_RETAG_VERSION: ${{ inputs.npm_tag_version }}
+  RELEASE_EXPLICIT_VERSION: ${{ inputs.version }}
+  RELEASE_CHANNEL: ${{ inputs.channel }}
 
 concurrency:
   group: release-${{ github.ref }}
@@ -55,6 +79,9 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Validate release mode
+        run: bash .github/scripts/validate-release-mode.sh
       - uses: actions/setup-node@v6.4.0
         with:
           node-version: '24'
@@ -77,7 +104,7 @@ jobs:
           VERSION: ${{ inputs.npm_tag_version }}
   prepare:
     name: Prepare release
-    if: inputs.npm_tag_version == ''
+    if: inputs.npm_tag_version == '' && inputs.resume_version == ''
     runs-on: ubuntu-26.04
     permissions:
       contents: write
@@ -87,11 +114,15 @@ jobs:
       channel: ${{ steps.metadata.outputs.channel }}
       prerelease: ${{ steps.metadata.outputs.prerelease }}
       npm_dist_tag: ${{ steps.metadata.outputs.npm_dist_tag }}
+      release_revision: ${{ steps.commit.outputs.release_revision }}
     steps:
       - uses: actions/checkout@v6.0.2
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate release mode
+        run: bash .github/scripts/validate-release-mode.sh
 
       - name: Install Dagger CLI
         run: sh .github/scripts/install-dagger.sh
@@ -139,16 +170,9 @@ jobs:
             echo "npm_dist_tag=$NPM_DIST_TAG"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Upload release provenance
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: nrz-release-provenance
-          path: .nrz-release/metadata.json
-          include-hidden-files: true
-
       - name: Commit and tag release
+        id: commit
         run: |
-          rm -rf .nrz-release
           git add Cargo.toml Cargo.lock CHANGELOG.md package.json package-lock.json
           git diff --cached --check
           if git diff --cached --quiet; then
@@ -159,8 +183,19 @@ jobs:
           git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
           git push origin "HEAD:${GITHUB_REF_NAME}"
           git push origin "$RELEASE_TAG"
+          RELEASE_REVISION="$(git rev-parse HEAD)"
+          jq --arg revision "$RELEASE_REVISION" ' . + {releaseRevision: $revision}' .nrz-release/metadata.json > .nrz-release/metadata.tmp
+          mv .nrz-release/metadata.tmp .nrz-release/metadata.json
+          echo "release_revision=$RELEASE_REVISION" >> "$GITHUB_OUTPUT"
         env:
           RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+
+      - name: Upload release provenance
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: nrz-release-provenance
+          path: .nrz-release/metadata.json
+          include-hidden-files: true
 
   build:
     name: Build (${{ matrix.platform }})
@@ -217,25 +252,41 @@ jobs:
   publish:
     name: Publish
     needs: [prepare, build]
+    if: always() && inputs.npm_tag_version == '' && ((needs.prepare.result == 'success' && needs.build.result == 'success') || inputs.resume_version != '')
     runs-on: ubuntu-26.04
     permissions:
       attestations: write
       contents: write
       id-token: write
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version || inputs.resume_version }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag || format('v{0}', inputs.resume_version) }}
+      RELEASE_EXPECTED_REVISION: ${{ needs.prepare.outputs.release_revision || inputs.expected_tag_revision }}
+      NPM_DIST_TAG: ${{ inputs.channel == 'stable' && 'latest' || 'beta' }}
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Verify selected release identity
+        run: |
+          bash .github/scripts/validate-release-mode.sh
+          test "$(git rev-parse HEAD)" = "$RELEASE_EXPECTED_REVISION"
+          echo "RELEASE_REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "RELEASE_SOURCE_REVISION=$(git rev-parse HEAD^)" >> "$GITHUB_ENV"
 
       - name: Install Dagger CLI
         run: sh .github/scripts/install-dagger.sh
 
       - name: Download all artifacts
+        if: inputs.resume_version == ''
         uses: actions/download-artifact@v8.0.1
         with:
           path: ./dist/raw
 
       - name: Package release archives
+        if: inputs.resume_version == ''
         run: |
           dagger call package-release-artifacts \
             --binaries=./dist/raw \
@@ -245,9 +296,16 @@ jobs:
           cp ./dist/raw/nrz-release-provenance/metadata.json ./dist/release/release-metadata.json
 
       - name: Attest release archives
+        if: inputs.resume_version == ''
         uses: actions/attest@v4
         with:
           subject-path: ./dist/release/*.tar.gz
+
+      - name: Download existing release assets
+        if: inputs.resume_version != ''
+        run: gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir ./dist/release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish GitHub release
         run: |
@@ -258,22 +316,24 @@ jobs:
             --version="$RELEASE_VERSION" \
             --tag="$RELEASE_TAG" \
             --channel="$RELEASE_CHANNEL" \
-            --repository="$GITHUB_REPOSITORY"
+            --repository="$GITHUB_REPOSITORY" \
+            --hold-draft="$RELEASE_HOLD_DRAFT" \
+            --resume-existing="${{ inputs.resume_version != '' }}" \
+            --release-revision="$RELEASE_REVISION" \
+            --source-revision="$RELEASE_SOURCE_REVISION" \
+            --expected-checksums-sha256="$RELEASE_EXPECTED_CHECKSUMS_SHA256"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-          RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
 
       - name: Setup Node.js
-        if: inputs.publish_npm
+        if: inputs.publish_npm && !inputs.hold_draft
         uses: actions/setup-node@v6.4.0
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Generate npm package
-        if: inputs.publish_npm
+        if: inputs.publish_npm && !inputs.hold_draft
         run: |
           dagger call npm-package \
             --source=. \
@@ -282,14 +342,7 @@ jobs:
             --tag="$RELEASE_TAG" \
             --channel="$RELEASE_CHANNEL" \
             export --path ./dist/npm --wipe=true
-        env:
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-          RELEASE_CHANNEL: ${{ needs.prepare.outputs.channel }}
-
       - name: Publish npm package
-        if: inputs.publish_npm
+        if: inputs.publish_npm && !inputs.hold_draft
         run: npm publish --provenance --access public --tag "$NPM_DIST_TAG"
         working-directory: ./dist/npm
-        env:
-          NPM_DIST_TAG: ${{ needs.prepare.outputs.npm_dist_tag }}

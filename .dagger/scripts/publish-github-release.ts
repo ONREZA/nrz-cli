@@ -12,6 +12,11 @@ const version = process.env.NRZ_RELEASE_VERSION;
 const tag = process.env.NRZ_RELEASE_TAG;
 const channel = process.env.NRZ_RELEASE_CHANNEL || "stable";
 const prerelease = channel !== "stable";
+const holdDraft = process.env.NRZ_RELEASE_HOLD_DRAFT === "true";
+const resumeExisting = process.env.NRZ_RELEASE_RESUME_EXISTING === "true";
+const releaseRevision = process.env.NRZ_RELEASE_REVISION || undefined;
+const sourceRevision = process.env.NRZ_RELEASE_SOURCE_REVISION || undefined;
+const expectedChecksumsSha256 = process.env.NRZ_RELEASE_EXPECTED_CHECKSUMS_SHA256 || undefined;
 const apiBase = "https://api.github.com";
 const uploadBase = "https://uploads.github.com";
 const artifactRoot = "/dist";
@@ -190,24 +195,90 @@ function requireAsset(name: string): string {
   return assetPath;
 }
 
+export async function finalizeRelease(
+  repositoryName: string,
+  release: GitHubRelease,
+  mode: { prerelease: boolean; holdDraft: boolean },
+  requester: Requester = request,
+): Promise<GitHubRelease> {
+  if (mode.holdDraft) {
+    if (!release.draft) throw new Error("Cannot hold an already published release");
+    return release;
+  }
+  const body: { draft: boolean; prerelease: boolean; make_latest?: "true" } = { draft: false, prerelease: mode.prerelease };
+  if (!mode.prerelease) body.make_latest = "true";
+  const finalized = await requester<GitHubRelease>("PATCH", `/repos/${repositoryName}/releases/${release.id}`, body);
+  if (!finalized) throw new Error(`Release ${release.tag_name} disappeared after finalize`);
+  return finalized;
+}
+
+export function validateReleaseMode(mode: {
+  holdDraft: boolean; resumeExisting: boolean; releaseRevision?: string; sourceRevision?: string; expectedChecksumsSha256?: string;
+}): void {
+  if (mode.resumeExisting && !/^[a-f0-9]{64}$/.test(mode.expectedChecksumsSha256 || "")) {
+    throw new Error("Resume requires the recorded hold checksum digest");
+  }
+  if (mode.holdDraft && mode.resumeExisting) throw new Error("Cannot hold and resume a release together");
+  if ((mode.holdDraft || mode.resumeExisting) &&
+      (!/^[a-f0-9]{40}$/.test(mode.releaseRevision || "") ||
+       !/^[a-f0-9]{40}$/.test(mode.sourceRevision || ""))) {
+    throw new Error("Held and resumed releases require exact release and source revisions");
+  }
+}
+
+export function verifyResumeChecksums(checksumPath: string, computedText: string, expectedDigest: string): void {
+  const recorded = readFileSync(checksumPath);
+  if (createHash("sha256").update(recorded).digest("hex") !== expectedDigest) {
+    throw new Error("Release checksums differ from the recorded hold digest");
+  }
+  if (recorded.toString() !== computedText) throw new Error("Release checksums do not match existing assets");
+}
+
+/** Resume only verified existing bytes; never create, rebuild or replace release assets. */
+export async function resumeRelease(
+  repositoryName: string,
+  release: GitHubRelease | null,
+  expectedPaths: Readonly<Record<string, string>>,
+  isPrerelease: boolean,
+  downloader: AssetDownloader = downloadAsset,
+  requester: Requester = request,
+): Promise<GitHubRelease> {
+  if (!release) throw new Error("Cannot resume a missing release");
+  await verifyPublishedAssets(release, expectedPaths, downloader);
+  return release.draft
+    ? finalizeRelease(repositoryName, release, { prerelease: isPrerelease, holdDraft: false }, requester)
+    : release;
+}
+
 async function main(): Promise<void> {
   if (!token || !version || !tag) {
     throw new Error("GITHUB_TOKEN, NRZ_RELEASE_VERSION, and NRZ_RELEASE_TAG are required");
   }
 
+  validateReleaseMode({ holdDraft, resumeExisting, releaseRevision, sourceRevision, expectedChecksumsSha256 });
   const provenancePath = requireAsset("release-metadata.json");
   const provenance = JSON.parse(readFileSync(provenancePath, "utf8"));
-  verifyReleaseProvenance(process.cwd(), provenance, { version, tag, channel });
+  verifyReleaseProvenance(process.cwd(), provenance, { version, tag, channel, releaseRevision, sourceRevision });
   const assetNames = [...REQUIRED_RELEASE_ASSETS, "release-metadata.json"];
   const assetPaths = assetNames.map((asset) => requireAsset(asset));
   const checksum = createChecksums(assetPaths);
+  const checksumsSha256 = createHash("sha256").update(checksum.text).digest("hex");
+  if (resumeExisting) {
+    verifyResumeChecksums(requireAsset("checksums-sha256.txt"), checksum.text, expectedChecksumsSha256!);
+  }
   const releaseBody = releaseNotes(checksum.text);
   const allUploads = [...assetPaths, checksum.path];
   const allNames = [...assetNames, "checksums-sha256.txt"];
   const expectedPaths = Object.fromEntries(allNames.map((name, index) => [name, allUploads[index]]));
 
   let release = await findReleaseByTag(repository, tag);
+  if (resumeExisting) {
+    release = await resumeRelease(repository, release, expectedPaths, prerelease);
+    process.stdout.write(`${JSON.stringify({ tag, version, channel, checksumsSha256, releaseId: release.id, releaseUrl: release.html_url, status: "published" }, null, 2)}\n`);
+    return;
+  }
   if (release && !release.draft) {
+    if (holdDraft) throw new Error("Cannot hold an already published release");
     await verifyPublishedAssets(release, expectedPaths);
     process.stdout.write(
       `${JSON.stringify({ tag, version, channel, releaseUrl: release.html_url, status: "already-published" }, null, 2)}\n`,
@@ -263,20 +334,9 @@ async function main(): Promise<void> {
   }
   await verifyPublishedAssets(release, expectedPaths);
 
-  const finalizeBody: { draft: boolean; prerelease: boolean; make_latest?: "true" } = {
-    draft: false,
-    prerelease,
-  };
-  if (!prerelease) {
-    finalizeBody.make_latest = "true";
-  }
-
-  release = await request<GitHubRelease>("PATCH", `/repos/${repository}/releases/${release.id}`, finalizeBody);
-  if (!release) {
-    throw new Error(`Release ${tag} disappeared after finalize`);
-  }
+  release = await finalizeRelease(repository, release, { prerelease, holdDraft });
   process.stdout.write(
-    `${JSON.stringify({ tag, version, channel, releaseUrl: release.html_url, status: "published" }, null, 2)}\n`,
+    `${JSON.stringify({ tag, version, channel, checksumsSha256, releaseId: release.id, releaseUrl: release.html_url, status: release.draft ? "draft" : "published" }, null, 2)}\n`,
   );
 }
 

@@ -1,4 +1,5 @@
 import * as assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,10 @@ import {
   appendChecksumsToReleaseNotes,
   createChecksums,
   findReleaseByTag,
+  finalizeRelease,
+  resumeRelease,
+  validateReleaseMode,
+  verifyResumeChecksums,
   type GitHubRelease,
   verifyPublishedAssets,
 } from "./publish-github-release";
@@ -417,4 +422,101 @@ test("generated release commits are excluded before changelog and bump planning"
     filterReleaseCommits(commits).map((commit) => commit.subject),
     ["feat(upgrade): add channel"],
   );
+});
+
+test("holding a verified draft does not finalize it or move GitHub latest", async () => {
+  const release: GitHubRelease = { id: 7, tag_name: "v0.46.0", draft: true, html_url: "draft" };
+  const mutations: unknown[] = [];
+  const result = await finalizeRelease("ONREZA/nrz-cli", release, { prerelease: false, holdDraft: true }, async <T>(_method: string, _path: string, body?: unknown) => {
+    mutations.push(body);
+    return { ...release, draft: false } as T;
+  });
+  assert.equal(result.draft, true);
+  assert.deepEqual(mutations, []);
+});
+
+
+test("resume verifies original assets before the only publication mutation", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "nrz-resume-"));
+  try {
+    const path = join(dir, "asset.tar.gz");
+    writeFileSync(path, "original");
+    const draft: GitHubRelease = { id: 8, tag_name: "v0.46.0", draft: true, html_url: "draft", assets: [{ id: 9, name: "asset.tar.gz" }] };
+    const mutations: string[] = [];
+    const requester = async <T>(method: string) => {
+      mutations.push(method);
+      return { ...draft, draft: false } as T;
+    };
+    const expected = { "asset.tar.gz": path };
+    const download = async () => new TextEncoder().encode("original");
+    await assert.rejects(resumeRelease("ONREZA/nrz-cli", null, expected, false, download, requester), /missing release/);
+    await assert.rejects(resumeRelease("ONREZA/nrz-cli", { ...draft, assets: [] }, expected, false, download, requester), /missing published asset/);
+    await assert.rejects(resumeRelease("ONREZA/nrz-cli", draft, expected, false, async () => new TextEncoder().encode("changed"), requester), /does not match/);
+    assert.deepEqual(mutations, []);
+    const published = await resumeRelease("ONREZA/nrz-cli", draft, expected, false, download, requester);
+    assert.equal(published.draft, false);
+    assert.deepEqual(mutations, ["PATCH"]);
+    mutations.length = 0;
+    await resumeRelease("ONREZA/nrz-cli", published, expected, false, download, requester);
+    assert.deepEqual(mutations, []);
+    await assert.rejects(finalizeRelease("ONREZA/nrz-cli", published, { prerelease: false, holdDraft: true }, requester), /already published/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("two phase publication requires exact identities and excludes simultaneous hold/resume", () => {
+  const revisions = { releaseRevision: "1".repeat(40), sourceRevision: "2".repeat(40), expectedChecksumsSha256: "3".repeat(64) };
+  for (const mode of [{ holdDraft: true, resumeExisting: false }, { holdDraft: false, resumeExisting: true }]) {
+    assert.throws(() => validateReleaseMode({ ...mode, expectedChecksumsSha256: "3".repeat(64) }), /exact release and source/);
+    assert.doesNotThrow(() => validateReleaseMode({ ...mode, ...revisions }));
+  }
+  assert.throws(() => validateReleaseMode({ holdDraft: true, resumeExisting: true, ...revisions }), /hold and resume/);
+  assert.doesNotThrow(() => validateReleaseMode({ holdDraft: false, resumeExisting: false }));
+});
+
+test("workflow input validation rejects combinations before release side effects", () => {
+  const script = join(import.meta.dir, "../../.github/scripts/validate-release-mode.sh");
+  const check = (selection: Record<string, string>) => Bun.spawnSync(["bash", script], { env: { ...process.env,
+    RELEASE_HOLD_DRAFT: "false", RELEASE_RESUME_VERSION: "", RELEASE_RETAG_VERSION: "", RELEASE_EXPLICIT_VERSION: "", RELEASE_EXPECTED_REVISION: "", RELEASE_CHANNEL: "stable", ...selection,
+  }, stdout: "pipe", stderr: "pipe" }).exitCode;
+  assert.equal(check({ RELEASE_HOLD_DRAFT: "true" }), 0);
+  const resume = { RELEASE_RESUME_VERSION: "0.46.0", RELEASE_EXPECTED_REVISION: "1".repeat(40), RELEASE_EXPECTED_CHECKSUMS_SHA256: "2".repeat(64) };
+  assert.equal(check(resume), 0);
+  for (const selection of [
+    { ...resume, RELEASE_EXPECTED_CHECKSUMS_SHA256: "" }, { ...resume, RELEASE_HOLD_DRAFT: "true" }, { ...resume, RELEASE_EXPECTED_REVISION: "" },
+    { ...resume, RELEASE_RETAG_VERSION: "0.45.1" }, { ...resume, RELEASE_EXPLICIT_VERSION: "0.46.0" },
+    { ...resume, RELEASE_CHANNEL: "beta" },
+  ]) assert.notEqual(check(selection), 0);
+});
+
+test("serialized release workflow never schedules npm on hold or builds on resume", () => {
+  const workflow = Bun.YAML.parse(readFileSync(join(import.meta.dir, "../../.github/workflows/release.yml"), "utf8")) as {
+    jobs: Record<string, { if?: string; steps: { name?: string; if?: string }[] }>;
+  };
+  assert.equal(workflow.jobs.prepare.if, "inputs.npm_tag_version == '' && inputs.resume_version == ''");
+  const steps = workflow.jobs.publish.steps;
+  for (const name of ["Setup Node.js", "Generate npm package", "Publish npm package"]) {
+    assert.equal(steps.find(step => step.name === name)?.if, "inputs.publish_npm && !inputs.hold_draft");
+  }
+  for (const name of ["Download all artifacts", "Package release archives", "Attest release archives"]) {
+    assert.equal(steps.find(step => step.name === name)?.if, "inputs.resume_version == ''");
+  }
+});
+
+
+test("resume rejects jointly replaced archives and checksums against the recorded hold digest", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nrz-resume-identity-"));
+  try {
+    const path = join(dir, "checksums-sha256.txt");
+    const original = "original checksums\n";
+    const digest = createHash("sha256").update(original).digest("hex");
+    writeFileSync(path, original);
+    assert.doesNotThrow(() => verifyResumeChecksums(path, original, digest));
+    const changed = "changed archives and matching new checksums\n";
+    writeFileSync(path, changed);
+    assert.throws(() => verifyResumeChecksums(path, changed, digest), /recorded hold digest/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -421,6 +421,11 @@ export class NrzCli {
     tag: string,
     channel = "stable",
     repository = "ONREZA/nrz-cli",
+    holdDraft = false,
+    resumeExisting = false,
+    releaseRevision = "",
+    sourceRevision = "",
+    expectedChecksumsSha256 = "",
   ): Promise<string> {
     requireChannel(channel);
     return (await bunContainer(source))
@@ -430,6 +435,11 @@ export class NrzCli {
       .withEnvVariable("NRZ_RELEASE_VERSION", version)
       .withEnvVariable("NRZ_RELEASE_TAG", tag)
       .withEnvVariable("NRZ_RELEASE_CHANNEL", channel)
+      .withEnvVariable("NRZ_RELEASE_HOLD_DRAFT", String(holdDraft))
+      .withEnvVariable("NRZ_RELEASE_RESUME_EXISTING", String(resumeExisting))
+      .withEnvVariable("NRZ_RELEASE_REVISION", releaseRevision)
+      .withEnvVariable("NRZ_RELEASE_SOURCE_REVISION", sourceRevision)
+      .withEnvVariable("NRZ_RELEASE_EXPECTED_CHECKSUMS_SHA256", expectedChecksumsSha256)
       .withExec(["bun", ".dagger/scripts/publish-github-release.ts"])
       .stdout();
   }

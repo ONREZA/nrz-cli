@@ -52,3 +52,18 @@ test("publishing refuses provenance from another release or modified contracts",
   }
   expect(() => verifyReleaseProvenance(root, null, expected)).toThrow("Missing");
 });
+
+
+test("held provenance binds the release commit and its original source, retained metadata stays readable", () => {
+  const root = resolve(import.meta.dir, "../..");
+  const expected = { version: "0.46.0", tag: "v0.46.0", channel: "stable" };
+  const metadata = { ...expected, sourceDirty: false, sourceRevision: "1".repeat(40), contracts: releaseContracts(root) };
+  expect(() => verifyReleaseProvenance(root, metadata, expected)).not.toThrow();
+  const identity = { ...expected, releaseRevision: "2".repeat(40), sourceRevision: metadata.sourceRevision };
+  expect(() => verifyReleaseProvenance(root, metadata, identity)).toThrow("does not match");
+  const held = { ...metadata, releaseRevision: identity.releaseRevision };
+  expect(() => verifyReleaseProvenance(root, held, identity)).not.toThrow();
+  for (const change of [{ releaseRevision: "3".repeat(40) }, { sourceRevision: "4".repeat(40) }]) {
+    expect(() => verifyReleaseProvenance(root, { ...held, ...change }, identity)).toThrow("does not match");
+  }
+});

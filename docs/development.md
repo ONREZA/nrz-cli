@@ -148,5 +148,21 @@ revision and whether it is dirty. Release preparation requires a clean checkout.
 `release-metadata.json`, published with the archives and their checksums, binds
 the OpenAPI, generator, shared contracts and Functions runtime used by the CLI.
 
+When the CLI requires a server writer upgrade, use the same release workflow
+in two phases. Dispatch with an explicit `version`, `hold_draft=true`, and
+`publish_npm=false`. It prepares the release commit/tag and verifies all four
+platform archives in a GitHub draft; GitHub latest and npm remain unchanged.
+Record the publisher's `releaseId`, exact tag commit and `checksumsSha256` output.
+
+After the compatible server is ready, dispatch the same workflow with
+`resume_version`, `expected_tag_revision`, and `expected_checksums_sha256` set to
+those recorded values, and `publish_npm=true`. Leave `version` empty and
+`hold_draft=false`. Resume verifies the original assets and tagged contracts,
+then finalizes the draft and publishes npm through the existing OIDC owner.
+It never prepares a new version, rebuilds, or replaces release assets. A retry
+may continue after GitHub finalization if the exact same tag, metadata and
+checksums remain intact. Missing or changed assets fail before publication.
+Normal releases retain the default single-phase behavior.
+
 User-facing compatibility changes and upgrade instructions are documented in
 [the migration guide](breaking-changes.md).

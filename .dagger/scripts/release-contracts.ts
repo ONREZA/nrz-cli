@@ -38,7 +38,7 @@ export function releaseContracts(root: string) {
 export function verifyReleaseProvenance(
   root: string,
   provenance: unknown,
-  expected: { version: string; tag: string; channel: string },
+  expected: { version: string; tag: string; channel: string; releaseRevision?: string; sourceRevision?: string },
 ): void {
   if (!provenance || typeof provenance !== "object") {
     throw new Error("Missing release provenance");
@@ -47,6 +47,8 @@ export function verifyReleaseProvenance(
   if (metadata.version !== expected.version || metadata.tag !== expected.tag ||
       metadata.channel !== expected.channel || metadata.sourceDirty !== false ||
       typeof metadata.sourceRevision !== "string" || !/^[a-f0-9]{40}$/.test(metadata.sourceRevision) ||
+      (expected.releaseRevision !== undefined && metadata.releaseRevision !== expected.releaseRevision) ||
+      (expected.sourceRevision !== undefined && metadata.sourceRevision !== expected.sourceRevision) ||
       JSON.stringify(metadata.contracts) !== JSON.stringify(releaseContracts(root))) {
     throw new Error("Release provenance does not match the selected release source and contracts");
   }
