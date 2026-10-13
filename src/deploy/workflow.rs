@@ -7,6 +7,28 @@ pub async fn run(
     workspace: Option<&str>,
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
+    run_mode(args, json, token, workspace, config, None).await
+}
+
+pub(super) async fn publish_admitted(
+    args: DeployArgs,
+    json: bool,
+    token: Option<&str>,
+    workspace: Option<&str>,
+    config: &ProjectConfig,
+    deployment_id: Uuid,
+) -> anyhow::Result<()> {
+    run_mode(args, json, token, workspace, config, Some(deployment_id)).await
+}
+
+async fn run_mode(
+    args: DeployArgs,
+    json: bool,
+    token: Option<&str>,
+    workspace: Option<&str>,
+    config: &ProjectConfig,
+    admitted_id: Option<Uuid>,
+) -> anyhow::Result<()> {
     let resume_deployment_id = args
         .resume_deployment
         .as_deref()
@@ -23,7 +45,8 @@ pub async fn run(
                 .into_anyhow()
             })
         })
-        .transpose()?;
+        .transpose()?
+        .or(admitted_id);
     edge_handoff::validate_resume_arguments(&args)?;
     let mut command_context = if resume_deployment_id.is_some() {
         crate::context::CommandContext::resolve_platform_root(&args.dir, config, json)?
@@ -272,9 +295,16 @@ pub async fn run(
             Uuid::now_v7().simple().to_string()
         });
         output::status(json, "~", "Admitting deployment...", output::Phase::Deploy);
-        let admitted = wire::admit(&client, &project_id, &context, branch, commit_sha)
-            .await
-            .map_err(|error| map_create_deployment_error(error, json))?;
+        let admitted = wire::admit(
+            &client,
+            &project_id,
+            &context,
+            branch,
+            commit_sha,
+            args.service_id.as_deref(),
+        )
+        .await
+        .map_err(|error| map_create_deployment_error(error, json))?;
         let materialized = match crate::execution_context::materialize_deployment(
             &client,
             &admitted.deployment.id,
@@ -468,7 +498,7 @@ pub async fn run(
                         "Deployment marked SKIPPED; install and build were not started",
                         output::Phase::Deploy,
                     );
-                    if json {
+                    if json && admitted_id.is_none() {
                         output::json_output(&SkippedDeployOutput {
                             deployment_id: &deployment.id,
                             status: "skipped",
@@ -536,6 +566,7 @@ pub async fn run(
                 json,
                 warnings: deploy_plan.warnings,
                 runtime_artifact_files,
+                emit_result: admitted_id.is_none(),
             })
             .await;
         }

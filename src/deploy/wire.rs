@@ -109,11 +109,16 @@ pub(super) async fn admit(
     context: &crate::execution_context::ExecutionContext,
     branch: String,
     commit_sha: String,
+    service_id: Option<&str>,
 ) -> anyhow::Result<AdmissionResponse> {
     let value = client
         .admit_deployment(
             project_id,
             nrz_api::AdmitRequestBody {
+                service_id: service_id
+                    .map(str::parse)
+                    .transpose()
+                    .context("invalid Service ID")?,
                 additional_properties: Default::default(),
                 protocol_version: crate::execution_context::EXECUTION_CONTEXT_PROTOCOL.to_string(),
                 environment_id: context

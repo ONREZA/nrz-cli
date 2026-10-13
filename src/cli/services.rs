@@ -13,10 +13,14 @@ pub enum ServicesCommand {
         #[arg(long)]
         project_id: uuid::Uuid,
     },
-    /// Create a distinct CLI Source for a Service
+    /// Create an independent Source for a Service (CLI by default, Git with --git-url)
     CreateSource {
         #[arg(long)]
         project_id: uuid::Uuid,
+        #[arg(long)]
+        git_url: Option<String>,
+        #[arg(long, requires = "git_url")]
+        git_connection_id: Option<uuid::Uuid>,
     },
     /// Create a Service using an explicit Source and source root
     Create(ServiceConfiguration),

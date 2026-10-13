@@ -51,7 +51,28 @@ pub async fn run(
 
     if args.list {
         let serving = client.environment_serving(&environment_id).await?;
-        let page = client.environment_releases(&environment_id).await?;
+        let page = client
+            .environment_releases_page(
+                &environment_id,
+                nrz_api::GetV1environmentsByIdReleasesRequestQuery {
+                    limit: Some("100".into()),
+                    before_created_at: args
+                        .before_created_at
+                        .as_deref()
+                        .map(str::parse)
+                        .transpose()
+                        .context("invalid release cursor timestamp")?,
+                    before_release_id: args.before_release_id,
+                    before_composition_created_at: args
+                        .before_composition_created_at
+                        .as_deref()
+                        .map(str::parse)
+                        .transpose()
+                        .context("invalid composition cursor timestamp")?,
+                    before_composition_id: args.before_composition_id,
+                },
+            )
+            .await?;
         if json {
             output::json_output(&serde_json::json!({
                 "environmentId": environment_id,
@@ -60,6 +81,7 @@ pub async fn run(
                 "releases": page.releases,
                 "compositions": page.compositions,
                 "nextCursor": page.next_cursor,
+                "nextCompositionCursor": page.next_composition_cursor,
             }));
         } else {
             eprintln!("Retained releases for {}:", context.environment_name);
@@ -95,6 +117,22 @@ pub async fn run(
             }
             if page.next_cursor.is_some() {
                 eprintln!("  More releases are available through the Environment releases API.");
+            }
+        }
+        if !json {
+            if let Some(cursor) = &page.next_cursor {
+                eprintln!(
+                    "More scalar releases: --before-created-at {} --before-release-id {}",
+                    cursor.created_at.to_rfc3339(),
+                    cursor.release_id
+                );
+            }
+            if let Some(cursor) = &page.next_composition_cursor {
+                eprintln!(
+                    "More compositions: --before-composition-created-at {} --before-composition-id {}",
+                    cursor.created_at.to_rfc3339(),
+                    cursor.composition_id
+                );
             }
         }
         return Ok(());

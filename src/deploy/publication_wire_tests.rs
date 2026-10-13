@@ -153,6 +153,7 @@ async fn admission_preserves_selection_and_rejects_another_scope() {
             &context,
             "feature/a".into(),
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            None,
         )
         .await;
         if changed_field.is_some() {
@@ -188,6 +189,7 @@ async fn admission_context_conflict_preserves_structured_error_without_retry() {
         &context,
         "feature/a".into(),
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+        None,
     )
     .await
     .unwrap_err();

@@ -105,7 +105,7 @@ pub(super) fn conform_functions_to_wire_contract(
     };
     let value =
         serde_json::to_value(&payload).context("failed to serialize functions publish payload")?;
-    let wire: nrz_api::SourceRequestBodyFunctions =
+    let wire: nrz_api::SourceRequestBody2Functions =
         serde_json::from_value(value).map_err(|error| {
             anyhow::anyhow!(
                 "functions publish payload does not match the server contract: {error}.\n\

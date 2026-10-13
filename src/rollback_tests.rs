@@ -28,7 +28,11 @@ fn serving(environment: &str) -> Value {
 
 #[tokio::test]
 async fn rollback_activates_exact_retained_release_with_generation_and_idempotency() {
-    for (target, option) in [(RELEASE, "--release-id"), (COMPOSITION, "--composition-id")] {
+    for (target, option, public_address) in [
+        (RELEASE, "--release-id", true),
+        (COMPOSITION, "--composition-id", true),
+        (COMPOSITION, "--composition-id", false),
+    ] {
         for finish_observation_early in [false, true] {
             let mut arguments = vec!["rollback", option, target];
             if finish_observation_early {
@@ -39,7 +43,11 @@ async fn rollback_activates_exact_retained_release_with_generation_and_idempoten
             let app = Router::new()
         .route(
             "/v1/environments/{id}/serving",
-            get(|| async { Json(serving(ENVIRONMENT)) }),
+            get(move || async move {
+                let mut observed = serving(ENVIRONMENT);
+                if !public_address { observed["address"] = Value::Null; }
+                Json(observed)
+            }),
         )
         .route(
             "/v1/environments/{id}/actions/activate-release",
@@ -93,14 +101,24 @@ async fn rollback_lists_releases_with_sha256_and_blake3_content_digests() {
                             "sizeBytes": 123
                         }],
                         "compositions": [{ "compositionId": COMPOSITION, "createdAt": "2026-09-12T00:00:00Z", "components": [{"serviceId":SERVICE,"deploymentId":OPERATION,"runtimeReleaseId":RELEASE,"contentDigest":digest}] }],
-                        "nextCursor": null
+                        "nextCursor": null,
+                        "nextCompositionCursor": null
                     }))
                 }
             }),
         );
         let (client, server) = serve_api(app).await;
 
-        let page = client.environment_releases(ENVIRONMENT).await.unwrap();
+        let page = client
+            .environment_releases_page(
+                ENVIRONMENT,
+                nrz_api::GetV1environmentsByIdReleasesRequestQuery {
+                    limit: Some("100".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         let output = serde_json::to_value(&page).unwrap();
 
         assert_eq!(page.releases.len(), 1);

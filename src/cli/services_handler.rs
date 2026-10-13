@@ -24,8 +24,19 @@ pub async fn run(
                 ServicesCommand::List { project_id } => {
                     serde_json::to_value(client.list_services(project_id).await?)?
                 }
-                ServicesCommand::CreateSource { project_id } => {
-                    serde_json::to_value(client.create_cli_source(project_id).await?)?
+                ServicesCommand::CreateSource {
+                    project_id,
+                    git_url,
+                    git_connection_id,
+                } => {
+                    let source = if let Some(url) = git_url {
+                        client
+                            .create_git_source(project_id, url, git_connection_id)
+                            .await?
+                    } else {
+                        client.create_cli_source(project_id).await?
+                    };
+                    serde_json::to_value(source)?
                 }
                 ServicesCommand::Create(configuration) => {
                     configure(&client, configuration, None).await?
