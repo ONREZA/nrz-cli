@@ -261,7 +261,9 @@ fn finalize_source_bundle_runtime_graph_with_targets(
             descriptors.push(descriptor);
         }
     }
-    let explicit_bindings = descriptors.len() != dependencies.len();
+    let network_contract = nrz_source_bundle::validate_source_network(manifest)
+        .map_err(RuntimeArtifactError::Invariant)?;
+    let explicit_bindings = network_contract || descriptors.len() != dependencies.len();
     if explicit_bindings {
         for layer in &mut runtime_layers {
             let name = layer["layerName"]
@@ -282,7 +284,7 @@ fn finalize_source_bundle_runtime_graph_with_targets(
     }
     finalize_runtime_artifact_graph(
         json!({
-            "schemaVersion": if explicit_bindings { RUNTIME_ARTIFACT_GRAPH_MOUNT_BINDINGS_SCHEMA_VERSION } else { RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION },
+            "schemaVersion": if network_contract { crate::RUNTIME_ARTIFACT_GRAPH_NETWORK_SCHEMA_VERSION } else if explicit_bindings { RUNTIME_ARTIFACT_GRAPH_MOUNT_BINDINGS_SCHEMA_VERSION } else { RUNTIME_ARTIFACT_GRAPH_V2_SCHEMA_VERSION },
             "application": {
                 "artifactId": source_logical_artifact_id,
                 "manifestDigest": logical_manifest_sha256,

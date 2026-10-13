@@ -5,7 +5,8 @@ use nrz_contract::codegen::{SchemaDocument, generate};
 
 const SCHEMAS: &[(&str, &str)] = &[
     ("onreza-rules-v1", "edge_rules"),
-    ("manifest-v1", "manifest"),
+    ("manifest-v1", "retained_manifest"),
+    ("manifest-v2", "manifest"),
     ("runtime-artifact-graph-v2", "runtime_artifact_graph"),
 ];
 

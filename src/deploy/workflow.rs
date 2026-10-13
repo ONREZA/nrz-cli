@@ -103,6 +103,9 @@ pub async fn run(
     // Fetch project settings from server if project_id is known
     let server_settings = if let Some(runner) = &runner_context {
         Some(runner.settings.clone())
+    } else if args.service_id.is_some() {
+        // The admitted runner snapshot selects this Service before building.
+        None
     } else if let Some(ref pid) = early_project_id {
         match crate::project_settings::fetch_for_effective_config(&client, pid).await? {
             crate::project_settings::ProjectSettingsFetch::Applied(info) => {
@@ -145,7 +148,43 @@ pub async fn run(
         command_context.effective.deploy_compute(),
     )?;
     if args.dry {
-        let deploy_plan = plan::build(plan::DeployPlanRequest {
+        let requires_service = args.service_id.is_some()
+            || command_context
+                .config
+                .services
+                .as_ref()
+                .is_some_and(|endpoints| {
+                    endpoints.iter().any(|endpoint| {
+                        endpoint
+                            .allow_from
+                            .iter()
+                            .any(|caller| caller.service_id.is_none())
+                    })
+                });
+        let service_id = if let Some(runner) = &runner_context {
+            runner.context.service_id.clone()
+        } else if requires_service {
+            let project_id = early_project_id.as_deref().context(
+                "dry-run caller declarations require a linked Product and exact Environment",
+            )?;
+            let selector = args
+                .environment
+                .as_deref()
+                .or(args.prod.then_some("production"));
+            crate::execution_context::resolve_for_service_mutation(
+                &client,
+                project_id,
+                &command_context.project_dir,
+                selector,
+                git_cmd(&["rev-parse", "--abbrev-ref", "HEAD"]).as_deref(),
+                args.service_id.as_deref(),
+            )
+            .await?
+            .service_id
+        } else {
+            String::new()
+        };
+        let mut deploy_plan = plan::build(plan::DeployPlanRequest {
             args: &args,
             command: &command_context,
             explicit_compute,
@@ -155,6 +194,7 @@ pub async fn run(
             platform_runner: edge_build_handoff.is_some(),
         })
         .await?;
+        deploy_plan.apply_endpoint_declarations(&command_context.config, &service_id)?;
         let source_bundle = deploy_plan.materialize_source_bundle(json, dependency_packaging)?;
         let explain = deploy_plan.explain(
             &command_context,
@@ -210,12 +250,13 @@ pub async fn run(
             .as_deref()
             .or(args.prod.then_some("production"));
         let preliminary_branch = git_cmd(&["rev-parse", "--abbrev-ref", "HEAD"]);
-        let context = crate::execution_context::resolve_for_mutation(
+        let context = crate::execution_context::resolve_for_service_mutation(
             &client,
             &project_id,
             &command_context.project_dir,
             selector,
             preliminary_branch.as_deref(),
+            args.service_id.as_deref(),
         )
         .await?;
         let branch = preliminary_branch
@@ -438,7 +479,7 @@ pub async fn run(
             }
         }
 
-        let deploy_plan = plan::build(plan::DeployPlanRequest {
+        let mut deploy_plan = plan::build(plan::DeployPlanRequest {
             args: &args,
             command: &command_context,
             explicit_compute,
@@ -456,6 +497,8 @@ pub async fn run(
         {
             emitter.info(BuildLogPhase::Detect, "Build output validated");
         }
+        deploy_plan
+            .apply_endpoint_declarations(&command_context.config, &execution_context.service_id)?;
         let upload_plan = deploy_plan.materialize_source_bundle(json, dependency_packaging)?;
         let runtime_artifact_files = deploy_plan.artifact.file_breakdown.clone();
         if let Some(publisher) = &edge_build_handoff {

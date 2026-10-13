@@ -133,6 +133,9 @@ impl SourceRuntimeReadiness {
 pub fn source_runtime_readiness(
     manifest: &SourceLogicalManifest,
 ) -> Result<Option<SourceRuntimeReadiness>, String> {
+    if crate::validate_source_network(manifest)? {
+        return Ok(None);
+    }
     let mut resolved: Option<Option<SourceRuntimeReadiness>> = None;
     for layer in &manifest.layers {
         let config = match layer.runtime_config.as_ref() {

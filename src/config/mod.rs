@@ -78,6 +78,7 @@ impl<'de> Deserialize<'de> for HealthCheckPathConfig {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ProjectConfig {
+    pub services: Option<Vec<AuthoredComputeEndpoint>>,
     pub project: ProjectSection,
     pub dev: DevSection,
     pub build: BuildSection,
@@ -85,6 +86,51 @@ pub struct ProjectConfig {
     pub db: DbSection,
     /// Environment variable declarations: `[env]` section.
     pub env: EnvSection,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthoredComputeEndpoint {
+    pub name: String,
+    pub exposure: String,
+    pub ports: Vec<nrz_source_bundle::ComputePort>,
+    pub readiness: nrz_source_bundle::ComputeEndpointReadiness,
+    #[serde(default)]
+    pub allow_from: Vec<AuthoredComputeCaller>,
+}
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthoredComputeCaller {
+    pub service_id: Option<String>,
+    pub layer_name: String,
+}
+impl AuthoredComputeEndpoint {
+    pub fn resolve(&self, service_id: &str) -> anyhow::Result<nrz_source_bundle::ComputeNetwork> {
+        let exposure = match self.exposure.as_str() {
+            "public" => "PUBLIC",
+            "private" => "PRIVATE",
+            _ => anyhow::bail!("endpoint exposure must be public or private"),
+        };
+        let network = nrz_source_bundle::ComputeNetwork {
+            schema_version: nrz_source_bundle::COMPUTE_NETWORK_SCHEMA_VERSION.into(),
+            exposure: exposure.into(),
+            ports: self.ports.clone(),
+            readiness: self.readiness.clone(),
+            allow_from: self
+                .allow_from
+                .iter()
+                .map(|caller| nrz_source_bundle::ComputeCaller {
+                    service_id: caller
+                        .service_id
+                        .clone()
+                        .unwrap_or_else(|| service_id.into()),
+                    layer_name: caller.layer_name.clone(),
+                })
+                .collect(),
+        };
+        network.validate().map_err(anyhow::Error::msg)?;
+        Ok(network)
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -413,6 +459,7 @@ impl ProjectConfig {
         declarations.extend(child.env.declarations);
 
         ProjectConfig {
+            services: child.services.or(parent.services),
             project: ProjectSection {
                 id: merge_project_string(child.project.id, parent.project.id),
                 name: merge_project_string(child.project.name, parent.project.name),

@@ -549,3 +549,88 @@ fn info_accepts_database_only_product_without_inventing_an_application() {
         assert!(result[key].is_null(), "{key}: {result}");
     }
 }
+
+#[test]
+fn services_discover_sources_and_configure_an_explicit_neighbor_service() {
+    let service = "00000000-0000-0000-0000-000000000004";
+    let source = "00000000-0000-0000-0000-000000000005";
+    let directory = tempfile::tempdir().unwrap();
+    let configured = json!({"serviceId":service,"sourceId":source,"name":"private-api","sourceRef":"release","rootDirectory":"services/api"});
+    let source_response =
+        json!({"sourceId":source,"sourceType":"CLI","gitUrl":null,"sourceUrl":null});
+    let listed = json!({"canManage":true,"sources":[source_response.clone()],"services":[{
+        "serviceId":service,"sourceId":source,"name":"private-api","sourceRef":"release","rootDirectory":"services/api",
+        "sourceType":"CLI","gitUrl":null,"sourceUrl":null,"deletionRequestedAt":null,"isDefault":false
+    }]});
+    for (arguments, response, method, path, expected_body) in [
+        (
+            vec!["list", "--project-id", PROJECT],
+            listed,
+            "GET",
+            format!("/v1/projects/{PROJECT}/services"),
+            None,
+        ),
+        (
+            vec!["create-source", "--project-id", PROJECT],
+            source_response,
+            "POST",
+            format!("/v1/projects/{PROJECT}/sources"),
+            Some(json!({"sourceType":"CLI"})),
+        ),
+        (
+            vec![
+                "create",
+                "--project-id",
+                PROJECT,
+                "--name",
+                "private-api",
+                "--source-id",
+                source,
+                "--source-ref",
+                "release",
+                "--root-directory",
+                "services/api",
+            ],
+            configured.clone(),
+            "POST",
+            format!("/v1/projects/{PROJECT}/services"),
+            Some(
+                json!({"name":"private-api","sourceId":source,"sourceRef":"release","rootDirectory":"services/api"}),
+            ),
+        ),
+        (
+            vec![
+                "update",
+                service,
+                "--project-id",
+                PROJECT,
+                "--name",
+                "private-api",
+                "--source-id",
+                source,
+                "--source-ref",
+                "release",
+                "--root-directory",
+                "services/api",
+            ],
+            configured,
+            "PATCH",
+            format!("/v1/projects/{PROJECT}/services/{service}"),
+            Some(
+                json!({"name":"private-api","sourceId":source,"sourceRef":"release","rootDirectory":"services/api"}),
+            ),
+        ),
+    ] {
+        let (api_url, requests) = project_api(response.clone());
+        let output = nrz()
+            .current_dir(directory.path())
+            .env("NRZ_API_URL", api_url)
+            .args(["--json", "--token", "test-token", "services"])
+            .args(arguments)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(stdout_json(&output), response);
+        assert_eq!(request(&requests, method, &path).body, expected_body);
+    }
+}

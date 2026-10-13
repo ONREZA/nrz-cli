@@ -308,15 +308,15 @@ fn selected_environment_api(variables: Value) -> Router {
             async move {
                 assert_eq!(id,PROJECT_ID);
                 assert_eq!(body,json!({"environment":"Production", "sourceRef":null, "selectionSource":"EXPLICIT"}));
-                Json(json!({"protocolVersion":"execution-context-v2", "context":context}))
+                Json(json!({"protocolVersion":"execution-context-v3", "context":context}))
             }
         }))
         .route("/v1/projects/{id}/execution-context/materialize", post(move |Json(body):Json<Value>| {
             let context = context.clone();
             let variables = variables.clone();
             async move {
-                assert_eq!(body,json!({"environmentId":ENVIRONMENT_ID, "sourceRef":null, "purpose":"EXEC", "selectionSource":"EXPLICIT"}));
-                Json(json!({"protocolVersion":"execution-context-v2", "context":context, "variables":variables, "secretKeys":[],
+                assert_eq!(body,json!({"environmentId":ENVIRONMENT_ID, "serviceId":"00000000-0000-0000-0000-000000000006", "sourceRef":null, "purpose":"EXEC", "selectionSource":"EXPLICIT"}));
+                Json(json!({"protocolVersion":"execution-context-v3", "context":context, "variables":variables, "secretKeys":[],
                     "snapshot":{"fingerprint":format!("v1:{}","a".repeat(64)), "resolvedAt":"2026-10-08T12:00:00Z", "source":"DESIRED_STATE", "deploymentId":null}}))
             }
         }))

@@ -1,5 +1,19 @@
 use super::*;
 
+fn build_json(temp: &tempfile::TempDir) -> serde_json::Value {
+    let output = nrz()
+        .current_dir(temp.path())
+        .args(["build", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    stdout_json(&output)
+}
+
 #[test]
 fn deploy_app_in_non_monorepo_fails() {
     let temp = tempfile::tempdir().unwrap();
@@ -189,18 +203,8 @@ fn standalone_build_preserves_declared_node_in_authored_compute_manifest() {
     fs::create_dir(temp.path().join(".onreza")).unwrap();
     fs::write(temp.path().join("onreza.toml"), "[build]\noutput_directory='.'\n[deploy]\nruntime='node'\nentry='server.js'\nargs=['literal argument']\n").unwrap();
     fs::write(temp.path().join("server.js"), "console.log('server')").unwrap();
-    fs::write(temp.path().join(".onreza/manifest.json"), r#"{"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js"}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#).unwrap();
-    let output = nrz()
-        .current_dir(temp.path())
-        .args(["build", "--json"])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-    let result = stdout_json(&output);
+    fs::write(temp.path().join(".onreza/manifest.json"), crate::network_fixture::manifest(r#"{"version":2,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js","runtime":{"network":"$PUBLIC_NETWORK"}}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#)).unwrap();
+    let result = build_json(&temp);
     assert_eq!(result["layers"][0]["target"], "COMPUTE");
     assert_eq!(result["manifestSource"], "file");
 }
@@ -215,7 +219,7 @@ fn standalone_build_runtime_failure_emits_only_one_error_object() {
     )
     .unwrap();
     fs::write(temp.path().join("server.js"), "console.log('server')").unwrap();
-    fs::write(temp.path().join(".onreza/manifest.json"), r#"{"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js","runtime":{"applicationRuntime":{"family":"NODE","args":[]}}}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#).unwrap();
+    fs::write(temp.path().join(".onreza/manifest.json"), crate::network_fixture::manifest(r#"{"version":2,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js","runtime":{"applicationRuntime":{"family":"NODE","args":[]},"network":"$PUBLIC_NETWORK"}}],"routes":[{"pattern":"^/.*$","layer":"server"}]}"#)).unwrap();
     let output = nrz()
         .current_dir(temp.path())
         .args(["build", "--json"])
@@ -278,17 +282,7 @@ fn standalone_build_static_separates_build_toolchain_from_process_launch() {
         "[build]\ntoolchain='node'\noutput_directory='.'\n[deploy]\ncompute='static'\n",
     )
     .unwrap();
-    let output = nrz()
-        .current_dir(temp.path())
-        .args(["build", "--json"])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-    let result = stdout_json(&output);
+    let result = build_json(&temp);
     assert_eq!(result["layers"][0]["target"], "STATIC");
     assert_eq!(result["manifestSource"], "generated");
 }

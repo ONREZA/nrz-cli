@@ -127,10 +127,10 @@ fn python_output_guard_uses_retained_layer_and_dependency_custody() {
         std::fs::create_dir_all(payload.parent().unwrap()).unwrap();
         std::fs::write(&payload, bytes).unwrap();
         let manifest = serde_json::from_value(serde_json::json!({
-            "version": 1,
+            "version": 2,
             "layers": [
-                {"name":"python","target":"COMPUTE","directory":".","entry":"main.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}},
-                {"name":"node","target":"COMPUTE","directory":"node","entry":"server.js","runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}},
+                {"name":"python","target":"COMPUTE","directory":".","entry":"main.py","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}},
+                {"name":"node","target":"COMPUTE","directory":"node","entry":"server.js","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-22"}},
                 {"name":"static","target":"STATIC","directory":"static"}
             ],
             "routes": [{"pattern":"^/.*$","layer":"python"}]
@@ -175,9 +175,9 @@ fn scanned_python_output(
     let artifact = crate::artifact::RuntimeArtifact {
         root_dir: project_dir.to_owned(),
         manifest: serde_json::from_value(serde_json::json!({
-            "version":1,"routes":[],"layers":[{
+            "version":2,"routes":[],"layers":[{
                 "name":"python","target":"COMPUTE","directory":".","entry":"main.py",
-                "runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}
+                "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}
             }]
         })).unwrap(),
         scan: crate::artifact::RuntimeArtifactScan::PythonRuntimeRoot(PythonMinor::default()),

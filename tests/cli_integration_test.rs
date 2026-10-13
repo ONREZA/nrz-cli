@@ -1,4 +1,6 @@
 //! End-to-end CLI tests. Commands run through pipes and expose JSON stdout.
+#[path = "support/network_fixture.rs"]
+mod network_fixture;
 mod support;
 use predicates::str::contains;
 use serde_json::json;

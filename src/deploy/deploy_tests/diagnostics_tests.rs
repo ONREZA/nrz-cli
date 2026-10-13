@@ -382,7 +382,7 @@ fn with_default_code_skips_io_errors_so_platform_faults_reach_sentry() {
 #[test]
 fn wire_manifest_contract_rejects_unknown_layer_fields() {
     let conformant = serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [{ "name": "static", "target": "STATIC", "directory": "." }],
         "routes": [{ "pattern": "^/.*", "layer": "static" }],
     });
@@ -394,7 +394,7 @@ fn wire_manifest_contract_rejects_unknown_layer_fields() {
     // A field the platform ManifestSchema does not define (e.g. the legacy `export`)
     // must be rejected at the wire instead of forwarded for the server to reject.
     let with_unknown = serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [{ "name": "static", "target": "STATIC", "directory": ".", "export": "esm" }],
         "routes": [{ "pattern": "^/.*", "layer": "static" }],
     });
@@ -408,13 +408,13 @@ fn wire_manifest_contract_rejects_unknown_layer_fields() {
 fn wire_manifest_contract_enforces_runtime_memory_bounds() {
     for memory_mb in [-1, 31, 8193] {
         let manifest = serde_json::json!({
-            "version": 1,
+            "version": 2,
             "layers": [{
                 "name": "app",
                 "target": "COMPUTE",
                 "directory": ".",
                 "entry": "server.js",
-                "runtime": { "memoryMb": memory_mb },
+                "runtime": {"network":crate::network_fixture::network(), "memoryMb": memory_mb },
             }],
             "routes": [{ "pattern": "^/.*", "layer": "app" }],
         });
@@ -426,13 +426,13 @@ fn wire_manifest_contract_enforces_runtime_memory_bounds() {
 
     for memory_mb in [32, 8192] {
         let manifest = serde_json::json!({
-            "version": 1,
+            "version": 2,
             "layers": [{
                 "name": "app",
                 "target": "COMPUTE",
                 "directory": ".",
                 "entry": "server.js",
-                "runtime": { "memoryMb": memory_mb },
+                "runtime": {"network":crate::network_fixture::network(), "memoryMb": memory_mb },
             }],
             "routes": [{ "pattern": "^/.*", "layer": "app" }],
         });
@@ -448,7 +448,7 @@ fn wire_manifest_contract_preserves_route_fallthrough_when() {
         { "type": "query", "name": "_rsc" },
     ]);
     let manifest = serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [{ "name": "static", "target": "STATIC", "directory": "." }],
         "routes": [{
             "pattern": "^/.*",
@@ -537,15 +537,15 @@ fn pre_source_mutations_use_the_stable_execution_contract() {
         pre_source_failure_body(2, PreSourceFailureCode::MaterializationFailed, None).unwrap();
 
     let value = serde_json::to_value(body).unwrap();
-    assert_eq!(value["protocolVersion"], "execution-context-v2");
+    assert_eq!(value["protocolVersion"], "execution-context-v3");
     assert_eq!(value["attempt"], 2);
     assert_eq!(value["errorCode"], "MATERIALIZATION_FAILED");
 
     let source = source_request_body(2,
         "019b8952-ca22-76f0-b134-88becec7c629".parse().unwrap(),
-        serde_json::json!({ "version": 1, "layers":[{"name":"static","target":"STATIC","directory":"."}], "routes":[{"pattern":"^/.*","layer":"static"}] }), None).unwrap();
+        serde_json::json!({ "version": 2, "layers":[{"name":"static","target":"STATIC","directory":"."}], "routes":[{"pattern":"^/.*","layer":"static"}] }), None).unwrap();
     let source_value = serde_json::to_value(source).unwrap();
-    assert_eq!(source_value["protocolVersion"], "execution-context-v2");
+    assert_eq!(source_value["protocolVersion"], "execution-context-v3");
     assert_eq!(source_value["attempt"], 2);
     assert_eq!(
         source_value["operationId"],

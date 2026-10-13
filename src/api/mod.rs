@@ -15,6 +15,7 @@ pub mod client;
 mod databases;
 mod deployments;
 mod domains;
+mod endpoints;
 mod environments;
 mod execution;
 mod functions;

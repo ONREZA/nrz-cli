@@ -30,6 +30,12 @@ static REGEX_DOMAIN_RESPONSE2ITEM_ZONE_NAME: std::sync::LazyLock<regex::Regex> =
         )
         .expect("invalid regex")
     });
+static REGEX_ENDPOINT200RESPONSE_ENDPOINT_DNS_TOKEN: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new("^[a-f0-9]{32}$").expect("invalid regex"));
+static REGEX_ENDPOINT200RESPONSE_ENDPOINT_NETWORK_PORT_NAME: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| {
+        regex::Regex::new("^[a-zA-Z0-9][a-zA-Z0-9_-]*$").expect("invalid regex")
+    });
 static REGEX_FAIL_BEFORE_SOURCE_REQUEST_BODY_DIAGNOSTIC_CODE: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[A-Z][A-Z0-9_]*$").expect("invalid regex"));
 static REGEX_FUNCTION_DECLARATION_NAME: std::sync::LazyLock<regex::Regex> =
@@ -3322,6 +3328,1683 @@ impl RemoteImageSourceAuthoring3 {
         serde::Serialize::serialize(value, serializer)
     }
 }
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsRequestPath {
+    pub id: uuid::Uuid,
+    pub service_id: uuid::Uuid,
+    pub environment_id: uuid::Uuid,
+}
+/// Read compute endpoint network intent and applied state
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsRequest {
+    pub path: GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsRequestPath,
+}
+impl GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<
+        GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse,
+    > {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Endpoint200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::Ok(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::BadRequest(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::Unauthorized(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::PaymentRequired(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::Forbidden(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::NotFound(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::RequestTimeout(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::Conflict(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::Gone(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::ContentTooLarge(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::UpgradeRequired(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::TooManyRequests(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::InternalServerError(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::ServiceUnavailable(
+                    data,
+                ),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(
+            GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::Unknown,
+        );
+    }
+}
+/// Response types for getV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpoints
+#[derive(Debug, Clone)]
+pub enum GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse {
+    ///200: Response for status 200
+    Ok(Endpoint200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ExportRequestBody {
+    #[validate(length(min = 1u64, max = 16u64))]
+    pub ports: Vec<String>,
+    #[serde(rename = "expectedGeneration")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub expected_generation: i64,
+    #[default(Some(false))]
+    pub revoke: Option<bool>,
+}
+#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportRequestPath
+{
+    pub id: uuid::Uuid,
+    pub service_id: uuid::Uuid,
+    pub environment_id: uuid::Uuid,
+    #[validate(length(min = 1u64, max = 64u64))]
+    pub layer_name: String,
+}
+/// Set or revoke scoped endpoint export
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportRequest {
+    #[validate(nested)]
+    pub path: PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportRequestPath,
+    #[validate(nested)]
+    pub body: ExportRequestBody,
+}
+impl
+    PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportRequest
+{
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<
+        PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse,
+    >{
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<IdResponse>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::Ok(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::BadRequest(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::Unauthorized(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::PaymentRequired(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::Forbidden(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::NotFound(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::RequestTimeout(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::Conflict(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::Gone(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::ContentTooLarge(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::UpgradeRequired(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::TooManyRequests(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::InternalServerError(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::ServiceUnavailable(
+                    data,
+                ),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(
+            PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::Unknown,
+        );
+    }
+}
+/// Response types for putV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExport
+#[derive(Debug, Clone)]
+pub enum PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse
+{
+    ///200: Response for status 200
+    Ok(IdResponse),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ImportRequestBody {
+    #[validate(length(min = 1u64, max = 16u64))]
+    pub ports: Vec<String>,
+    #[serde(rename = "expectedGeneration")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub expected_generation: i64,
+    #[default(Some(false))]
+    pub revoke: Option<bool>,
+    #[serde(rename = "exportId")]
+    pub export_id: uuid::Uuid,
+    #[serde(rename = "exportGeneration")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub export_generation: i64,
+}
+#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameImportRequestPath
+{
+    pub id: uuid::Uuid,
+    pub service_id: uuid::Uuid,
+    pub environment_id: uuid::Uuid,
+    #[validate(length(min = 1u64, max = 64u64))]
+    pub layer_name: String,
+}
+/// Set or revoke scoped endpoint import with both Product permissions
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameImportRequest {
+    #[validate(nested)]
+    pub path: PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameImportRequestPath,
+    #[validate(nested)]
+    pub body: ImportRequestBody,
+}
+impl
+    PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameImportRequest
+{
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<
+        PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse,
+    >{
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<IdResponse>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::Ok(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::BadRequest(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::Unauthorized(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::PaymentRequired(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::Forbidden(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::NotFound(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::RequestTimeout(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::Conflict(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::Gone(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::ContentTooLarge(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::UpgradeRequired(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::TooManyRequests(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::InternalServerError(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::ServiceUnavailable(
+                    data,
+                ),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(
+            PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::Unknown,
+        );
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct NetworkRequestBody {
+    #[serde(rename = "expectedGeneration")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub expected_generation: i64,
+    #[validate(nested)]
+    pub network: Endpoint200ResponseEndpointNetwork,
+    #[serde(rename = "publicRoutePreview")]
+    #[validate(length(max = 100u64), nested)]
+    #[default(Some(Default::default()))]
+    pub public_route_preview: Option<Vec<NetworkRequestBodyPublicRoutePreview>>,
+}
+#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkRequestPath
+{
+    pub id: uuid::Uuid,
+    pub service_id: uuid::Uuid,
+    pub environment_id: uuid::Uuid,
+    #[validate(length(min = 1u64, max = 64u64))]
+    pub layer_name: String,
+}
+/// Authorize endpoint network change with explicit public exposure preview
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkRequest {
+    #[validate(nested)]
+    pub path: PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkRequestPath,
+    #[validate(nested)]
+    pub body: NetworkRequestBody,
+}
+impl PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<
+        PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse,
+    > {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data = oas3_gen_support::Diagnostics::<
+                GenerationResponse,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::Ok(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError400,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::BadRequest(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError401,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::Unauthorized(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError402,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::PaymentRequired(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError403,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::Forbidden(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError404,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::NotFound(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError408,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::RequestTimeout(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError409,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::Conflict(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::GONE {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError410,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::Gone(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError413,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::ContentTooLarge(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError426,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::UpgradeRequired(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError429,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::TooManyRequests(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError500,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::InternalServerError(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError503,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::ServiceUnavailable(
+                    data,
+                ),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(
+            PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::Unknown,
+        );
+    }
+}
+/// Response types for putV1ProjectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetwork
+#[derive(Debug, Clone)]
+pub enum PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse
+{
+    ///200: Response for status 200
+    Ok(GenerationResponse),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ExposureRequestBody {
+    #[serde(rename = "expectedGeneration")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub expected_generation: i64,
+    pub exposure: Endpoint200ResponseEndpointNetworkExposure,
+    #[serde(rename = "publicRoutePreview")]
+    #[validate(length(max = 100u64), nested)]
+    #[default(Some(Default::default()))]
+    pub public_route_preview: Option<Vec<NetworkRequestBodyPublicRoutePreview>>,
+}
+#[derive(Debug, Clone, PartialEq, validator::Validate, oas3_gen_support::Default)]
+pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExposureRequestPath
+{
+    pub id: uuid::Uuid,
+    pub service_id: uuid::Uuid,
+    pub environment_id: uuid::Uuid,
+    #[validate(length(min = 1u64, max = 64u64))]
+    pub layer_name: String,
+}
+/// Authorize explicit endpoint exposure transition and future public routes
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExposureRequest {
+    #[validate(nested)]
+    pub path: PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExposureRequestPath,
+    #[validate(nested)]
+    pub body: ExposureRequestBody,
+}
+impl PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExposureRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<
+        PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse,
+    > {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data = oas3_gen_support::Diagnostics::<
+                GenerationResponse,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::Ok(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError400,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::BadRequest(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError401,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::Unauthorized(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError402,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::PaymentRequired(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError403,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::Forbidden(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError404,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::NotFound(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError408,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::RequestTimeout(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError409,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::Conflict(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::GONE {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError410,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::Gone(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError413,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::ContentTooLarge(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError426,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::UpgradeRequired(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError429,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::TooManyRequests(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError500,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::InternalServerError(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError503,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::ServiceUnavailable(
+                    data,
+                ),
+            );
+        }
+        let _ = req.bytes().await?;
+        return Ok(
+            PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::Unknown,
+        );
+    }
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct GetV1projectsByIdServicesRequestPath {
+    pub id: uuid::Uuid,
+}
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct GetV1projectsByIdServicesRequest {
+    pub path: GetV1projectsByIdServicesRequestPath,
+}
+impl GetV1projectsByIdServicesRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<GetV1projectsByIdServicesResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Service200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(GetV1projectsByIdServicesResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(GetV1projectsByIdServicesResponse::Unknown);
+    }
+}
+/// Response types for getV1ProjectsByIdServices
+#[derive(Debug, Clone)]
+pub enum GetV1projectsByIdServicesResponse {
+    ///200: Response for status 200
+    Ok(Service200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceRequestBody {
+    #[validate(length(min = 1u64, max = 128u64))]
+    pub name: String,
+    #[serde(rename = "sourceId")]
+    pub source_id: uuid::Uuid,
+    #[serde(rename = "sourceRef")]
+    #[validate(length(min = 1u64, max = 256u64))]
+    pub source_ref: String,
+    #[serde(rename = "rootDirectory")]
+    #[validate(length(min = 1u64, max = 1_024u64))]
+    pub root_directory: String,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1projectsByIdServicesRequestPath {
+    pub id: uuid::Uuid,
+}
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1projectsByIdServicesRequest {
+    pub path: PostV1projectsByIdServicesRequestPath,
+    #[validate(nested)]
+    pub body: ServiceRequestBody,
+}
+impl PostV1projectsByIdServicesRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1projectsByIdServicesResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Service200Response2>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PostV1projectsByIdServicesResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::InternalServerError(
+                data,
+            ));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1projectsByIdServicesResponse::Unknown);
+    }
+}
+/// Response types for postV1ProjectsByIdServices
+#[derive(Debug, Clone)]
+pub enum PostV1projectsByIdServicesResponse {
+    ///200: Response for status 200
+    Ok(Service200Response2),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct DeleteV1projectsByIdServicesByServiceIdRequestPath {
+    pub id: uuid::Uuid,
+    pub service_id: uuid::Uuid,
+}
+/// Requests explicit Service removal and runtime withdrawal. Product databases and KV data are preserved.
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct DeleteV1projectsByIdServicesByServiceIdRequest {
+    pub path: DeleteV1projectsByIdServicesByServiceIdRequestPath,
+}
+impl DeleteV1projectsByIdServicesByServiceIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<DeleteV1projectsByIdServicesByServiceIdResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Service200Response3>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::BadRequest(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Forbidden(
+                data,
+            ));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::NotFound(
+                data,
+            ));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Conflict(
+                data,
+            ));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Unknown);
+    }
+}
+/// Response types for deleteV1ProjectsByIdServicesByServiceId
+#[derive(Debug, Clone)]
+pub enum DeleteV1projectsByIdServicesByServiceIdResponse {
+    ///200: Response for status 200
+    Ok(Service200Response3),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PatchV1projectsByIdServicesByServiceIdRequestPath {
+    pub id: uuid::Uuid,
+    pub service_id: uuid::Uuid,
+}
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PatchV1projectsByIdServicesByServiceIdRequest {
+    pub path: PatchV1projectsByIdServicesByServiceIdRequestPath,
+    #[validate(nested)]
+    pub body: ServiceRequestBody,
+}
+impl PatchV1projectsByIdServicesByServiceIdRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1projectsByIdServicesResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Service200Response2>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PostV1projectsByIdServicesResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::InternalServerError(
+                data,
+            ));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1projectsByIdServicesResponse::Unknown);
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct SourceTypeRequestBody {
+    #[serde(rename = "sourceType")]
+    #[serde(deserialize_with = "SourceTypeRequestBody::deserialize_const_source_type")]
+    #[serde(serialize_with = "SourceTypeRequestBody::serialize_const_source_type")]
+    #[default("CLI".to_string())]
+    pub source_type: String,
+}
+impl SourceTypeRequestBody {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_source_type<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"CLI\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_source_type<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"CLI\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1projectsByIdSourcesRequestPath {
+    pub id: uuid::Uuid,
+}
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1projectsByIdSourcesRequest {
+    pub path: PostV1projectsByIdSourcesRequestPath,
+    pub body: SourceTypeRequestBody,
+}
+impl PostV1projectsByIdSourcesRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1projectsByIdSourcesResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Service200ResponseSource>::json_with_diagnostics(
+                    req,
+                )
+                .await?;
+            return Ok(PostV1projectsByIdSourcesResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::Forbidden(data));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::NotFound(data));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::Conflict(data));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1projectsByIdSourcesResponse::Unknown);
+    }
+}
+/// Response types for postV1ProjectsByIdSources
+#[derive(Debug, Clone)]
+pub enum PostV1projectsByIdSourcesResponse {
+    ///200: Response for status 200
+    Ok(Service200ResponseSource),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Serialize, validator::Validate, oas3_gen_support::Default)]
 pub struct GetV1projectsRequestQuery {
@@ -4065,139 +5748,6 @@ impl PatchV1projectsByIdRequest {
 pub enum PatchV1projectsByIdResponse {
     ///200: Response for status 200
     Ok(Project200Response5),
-    ///400: Response for status 400
-    BadRequest(ApiError400),
-    ///401: Response for status 401
-    Unauthorized(ApiError401),
-    ///402: Response for status 402
-    PaymentRequired(ApiError402),
-    ///403: Response for status 403
-    Forbidden(ApiError403),
-    ///404: Response for status 404
-    NotFound(ApiError404),
-    ///408: Response for status 408
-    RequestTimeout(ApiError408),
-    ///409: Response for status 409
-    Conflict(ApiError409),
-    ///410: Response for status 410
-    Gone(ApiError410),
-    ///413: Response for status 413
-    ContentTooLarge(ApiError413),
-    ///426: Response for status 426
-    UpgradeRequired(ApiError426),
-    ///429: Response for status 429
-    TooManyRequests(ApiError429),
-    ///500: Response for status 500
-    InternalServerError(ApiError500),
-    ///503: Response for status 503
-    ServiceUnavailable(ApiError503),
-    ///default: Unknown response
-    Unknown,
-}
-#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
-pub struct DeleteV1projectsByIdServicesByServiceIdRequestPath {
-    pub id: uuid::Uuid,
-    pub service_id: uuid::Uuid,
-}
-/// Requests explicit Service removal and runtime withdrawal. Product databases and KV data are preserved.
-#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
-pub struct DeleteV1projectsByIdServicesByServiceIdRequest {
-    pub path: DeleteV1projectsByIdServicesByServiceIdRequestPath,
-}
-impl DeleteV1projectsByIdServicesByServiceIdRequest {
-    /// Parse the HTTP response into the response enum.
-    pub async fn parse_response(
-        req: reqwest::Response,
-    ) -> anyhow::Result<DeleteV1projectsByIdServicesByServiceIdResponse> {
-        let status = req.status();
-        if status == http::StatusCode::OK {
-            let data =
-                oas3_gen_support::Diagnostics::<Service200Response>::json_with_diagnostics(req)
-                    .await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Ok(data));
-        }
-        if status == http::StatusCode::BAD_REQUEST {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::BadRequest(
-                data,
-            ));
-        }
-        if status == http::StatusCode::UNAUTHORIZED {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Unauthorized(data));
-        }
-        if status == http::StatusCode::PAYMENT_REQUIRED {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::PaymentRequired(data));
-        }
-        if status == http::StatusCode::FORBIDDEN {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Forbidden(
-                data,
-            ));
-        }
-        if status == http::StatusCode::NOT_FOUND {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::NotFound(
-                data,
-            ));
-        }
-        if status == http::StatusCode::REQUEST_TIMEOUT {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::RequestTimeout(data));
-        }
-        if status == http::StatusCode::CONFLICT {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Conflict(
-                data,
-            ));
-        }
-        if status == http::StatusCode::GONE {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Gone(data));
-        }
-        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::ContentTooLarge(data));
-        }
-        if status == http::StatusCode::UPGRADE_REQUIRED {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::UpgradeRequired(data));
-        }
-        if status == http::StatusCode::TOO_MANY_REQUESTS {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::TooManyRequests(data));
-        }
-        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::InternalServerError(data));
-        }
-        if status == http::StatusCode::SERVICE_UNAVAILABLE {
-            let data =
-                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
-            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::ServiceUnavailable(data));
-        }
-        let _ = req.bytes().await?;
-        return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::Unknown);
-    }
-}
-/// Response types for deleteV1ProjectsByIdServicesByServiceId
-#[derive(Debug, Clone)]
-pub enum DeleteV1projectsByIdServicesByServiceIdResponse {
-    ///200: Response for status 200
-    Ok(Service200Response),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -11671,6 +13221,8 @@ pub enum PostV1deploymentsByIdUploadCompleteResponse {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct ResolveRequestBody {
+    #[serde(rename = "serviceId")]
+    pub service_id: Option<uuid::Uuid>,
     #[validate(length(min = 1u64))]
     pub environment: String,
     #[serde(
@@ -11825,6 +13377,8 @@ pub enum PostV1projectsByIdExecutionContextResolveResponse {
 pub struct MaterializeRequestBody {
     #[serde(rename = "environmentId")]
     pub environment_id: uuid::Uuid,
+    #[serde(rename = "serviceId")]
+    pub service_id: Option<uuid::Uuid>,
     #[serde(
         default,
         with = "serde_with::rust::double_option",
@@ -15521,6 +17075,451 @@ impl EdgeRuleActionAuthoring3Object6 {
         serde::Serialize::serialize(value, serializer)
     }
 }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Endpoint200ResponseContext {
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "environmentId")]
+    pub environment_id: uuid::Uuid,
+    #[serde(rename = "workspaceEnvironmentId")]
+    pub workspace_environment_id: uuid::Uuid,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Endpoint200ResponseEndpointNetworkExposure {
+    #[serde(rename = "PUBLIC")]
+    #[default]
+    Public,
+    #[serde(rename = "PRIVATE")]
+    Private,
+}
+impl core::fmt::Display for Endpoint200ResponseEndpointNetworkExposure {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Public => write!(f, "PUBLIC"),
+            Self::Private => write!(f, "PRIVATE"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Endpoint200ResponseEndpointNetworkPortProtocol {
+    #[serde(rename = "http")]
+    #[default]
+    Http,
+    #[serde(rename = "grpc")]
+    Grpc,
+    #[serde(rename = "websocket")]
+    Websocket,
+    #[serde(rename = "tcp")]
+    Tcp,
+}
+impl core::fmt::Display for Endpoint200ResponseEndpointNetworkPortProtocol {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Http => write!(f, "http"),
+            Self::Grpc => write!(f, "grpc"),
+            Self::Websocket => write!(f, "websocket"),
+            Self::Tcp => write!(f, "tcp"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Endpoint200ResponseEndpointNetworkPortBinding {
+    #[serde(rename = "primary")]
+    #[default]
+    Primary,
+    #[serde(rename = "fixed")]
+    Fixed,
+}
+impl core::fmt::Display for Endpoint200ResponseEndpointNetworkPortBinding {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Primary => write!(f, "primary"),
+            Self::Fixed => write!(f, "fixed"),
+        }
+    }
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Endpoint200ResponseEndpointNetworkPort {
+    #[validate(
+        length(min = 1u64, max = 64u64),
+        regex(path = "REGEX_ENDPOINT200RESPONSE_ENDPOINT_NETWORK_PORT_NAME")
+    )]
+    pub name: String,
+    pub protocol: Endpoint200ResponseEndpointNetworkPortProtocol,
+    #[validate(range(min = 1i64, max = 65_535i64))]
+    pub port: i64,
+    pub binding: Endpoint200ResponseEndpointNetworkPortBinding,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Endpoint200ResponseEndpointNetworkReadinessProtocol {
+    #[serde(rename = "tcp")]
+    #[default]
+    Tcp,
+    #[serde(rename = "http")]
+    Http,
+}
+impl core::fmt::Display for Endpoint200ResponseEndpointNetworkReadinessProtocol {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Tcp => write!(f, "tcp"),
+            Self::Http => write!(f, "http"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Endpoint200ResponseEndpointNetworkReadiness {
+    pub protocol: Endpoint200ResponseEndpointNetworkReadinessProtocol,
+    #[validate(
+        length(min = 1u64, max = 64u64),
+        regex(path = "REGEX_ENDPOINT200RESPONSE_ENDPOINT_NETWORK_PORT_NAME")
+    )]
+    pub port: String,
+    #[validate(length(min = 1u64, max = 2_048u64))]
+    pub path: Option<String>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Endpoint200ResponseEndpointNetworkAllowFrom {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "layerName")]
+    #[validate(length(min = 1u64, max = 64u64))]
+    pub layer_name: String,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Endpoint200ResponseEndpointNetwork {
+    #[serde(rename = "schemaVersion")]
+    #[serde(
+        deserialize_with = "Endpoint200ResponseEndpointNetwork::deserialize_const_schema_version"
+    )]
+    #[serde(serialize_with = "Endpoint200ResponseEndpointNetwork::serialize_const_schema_version")]
+    #[default("COMPUTE_NETWORK_V1".to_string())]
+    pub schema_version: String,
+    pub exposure: Endpoint200ResponseEndpointNetworkExposure,
+    #[validate(length(min = 1u64, max = 16u64), nested)]
+    pub ports: Vec<Endpoint200ResponseEndpointNetworkPort>,
+    #[validate(nested)]
+    pub readiness: Endpoint200ResponseEndpointNetworkReadiness,
+    #[serde(rename = "allowFrom")]
+    #[validate(length(max = 128u64), nested)]
+    pub allow_from: Vec<Endpoint200ResponseEndpointNetworkAllowFrom>,
+}
+impl Endpoint200ResponseEndpointNetwork {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_schema_version<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String = serde_json::from_str::<String>("\"COMPUTE_NETWORK_V1\"")
+            .map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_schema_version<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String = serde_json::from_str::<String>("\"COMPUTE_NETWORK_V1\"")
+            .map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Endpoint200ResponseEndpointState {
+    #[serde(rename = "PENDING")]
+    #[default]
+    Pending,
+    #[serde(rename = "APPLIED")]
+    Applied,
+}
+impl core::fmt::Display for Endpoint200ResponseEndpointState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "PENDING"),
+            Self::Applied => write!(f, "APPLIED"),
+        }
+    }
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Endpoint200ResponseEndpointExport {
+    pub id: uuid::Uuid,
+    pub ports: Vec<String>,
+    #[validate(range(min = 1i64, max = 9_007_199_254_740_991i64))]
+    pub generation: i64,
+    pub revoked: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Endpoint200ResponseEndpoint {
+    #[serde(rename = "layerName")]
+    pub layer_name: String,
+    #[serde(rename = "dnsToken")]
+    #[validate(regex(path = "REGEX_ENDPOINT200RESPONSE_ENDPOINT_DNS_TOKEN"))]
+    pub dns_token: String,
+    #[validate(nested)]
+    pub network: Endpoint200ResponseEndpointNetwork,
+    #[serde(rename = "desiredGeneration")]
+    #[validate(range(min = 1i64, max = 9_007_199_254_740_991i64))]
+    pub desired_generation: i64,
+    pub state: Endpoint200ResponseEndpointState,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    #[validate(nested)]
+    pub export: Option<Endpoint200ResponseEndpointExport>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Endpoint200ResponseAvailableImport {
+    pub id: uuid::Uuid,
+    #[serde(rename = "exportId")]
+    pub export_id: uuid::Uuid,
+    #[validate(range(min = 1i64, max = 9_007_199_254_740_991i64))]
+    pub generation: i64,
+    #[serde(rename = "exportGeneration")]
+    #[validate(range(min = 1i64, max = 9_007_199_254_740_991i64))]
+    pub export_generation: i64,
+    pub ports: Vec<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Endpoint200ResponseAvailable {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "environmentId")]
+    pub environment_id: uuid::Uuid,
+    #[serde(rename = "productName")]
+    pub product_name: String,
+    #[serde(rename = "serviceName")]
+    pub service_name: String,
+    #[serde(rename = "layerName")]
+    pub layer_name: String,
+    #[validate(nested)]
+    pub network: Endpoint200ResponseEndpointNetwork,
+    #[validate(range(min = 1i64, max = 9_007_199_254_740_991i64))]
+    pub generation: i64,
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[serialize_always]
+    #[validate(nested)]
+    pub export: Option<Endpoint200ResponseEndpointExport>,
+    #[validate(nested)]
+    pub imports: Vec<Endpoint200ResponseAvailableImport>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Endpoint200Response {
+    pub context: Endpoint200ResponseContext,
+    #[validate(nested)]
+    pub endpoints: Vec<Endpoint200ResponseEndpoint>,
+    #[validate(nested)]
+    pub available: Vec<Endpoint200ResponseAvailable>,
+    #[serde(rename = "canManage")]
+    pub can_manage: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct IdResponse {
+    pub id: uuid::Uuid,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct NetworkRequestBodyPublicRoutePreview {
+    #[validate(length(min = 1u64, max = 64u64))]
+    pub layer: String,
+    #[validate(length(min = 1u64))]
+    pub pattern: String,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct GenerationResponse {
+    #[validate(range(min = 1i64, max = 9_007_199_254_740_991i64))]
+    pub generation: i64,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Service200ResponseService {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    pub name: String,
+    #[serde(rename = "sourceId")]
+    pub source_id: uuid::Uuid,
+    #[serde(rename = "sourceRef")]
+    pub source_ref: String,
+    #[serde(rename = "rootDirectory")]
+    pub root_directory: String,
+    #[serde(rename = "sourceType")]
+    pub source_type: String,
+    #[serde(deserialize_with = "Option::deserialize", rename = "gitUrl")]
+    #[serialize_always]
+    pub git_url: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "sourceUrl")]
+    #[serialize_always]
+    pub source_url: Option<String>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "deletionRequestedAt"
+    )]
+    #[serialize_always]
+    pub deletion_requested_at: Option<String>,
+    #[serde(rename = "isDefault")]
+    pub is_default: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Service200ResponseSource {
+    #[serde(rename = "sourceId")]
+    pub source_id: uuid::Uuid,
+    #[serde(rename = "sourceType")]
+    pub source_type: String,
+    #[serde(deserialize_with = "Option::deserialize", rename = "gitUrl")]
+    #[serialize_always]
+    pub git_url: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "sourceUrl")]
+    #[serialize_always]
+    pub source_url: Option<String>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Service200Response {
+    #[serde(rename = "canManage")]
+    pub can_manage: bool,
+    pub services: Vec<Service200ResponseService>,
+    pub sources: Vec<Service200ResponseSource>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Service200Response2 {
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    pub name: String,
+    #[serde(rename = "sourceId")]
+    pub source_id: uuid::Uuid,
+    #[serde(rename = "sourceRef")]
+    pub source_ref: String,
+    #[serde(rename = "rootDirectory")]
+    pub root_directory: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Service200Response3Status {
+    #[serde(rename = "REMOVING")]
+    #[default]
+    Removing,
+    #[serde(rename = "DELETED")]
+    Deleted,
+}
+impl core::fmt::Display for Service200Response3Status {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Removing => write!(f, "REMOVING"),
+            Self::Deleted => write!(f, "DELETED"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Service200Response3 {
+    #[serde(rename = "productId")]
+    pub product_id: uuid::Uuid,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    pub status: Service200Response3Status,
+    pub message: String,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Project200ResponseProjectDetectedComputeType {
     #[serde(rename = "STATIC")]
@@ -16320,35 +18319,6 @@ pub struct Project200Response5 {
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
-pub enum Service200ResponseStatus {
-    #[serde(rename = "REMOVING")]
-    #[default]
-    Removing,
-    #[serde(rename = "DELETED")]
-    Deleted,
-}
-impl core::fmt::Display for Service200ResponseStatus {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Removing => write!(f, "REMOVING"),
-            Self::Deleted => write!(f, "DELETED"),
-        }
-    }
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
-pub struct Service200Response {
-    #[serde(rename = "productId")]
-    pub product_id: uuid::Uuid,
-    #[serde(rename = "serviceId")]
-    pub service_id: uuid::Uuid,
-    pub status: Service200ResponseStatus,
-    pub message: String,
-    /// Additional properties not defined in the schema.
-    #[serde(flatten)]
-    #[default(Default::default())]
-    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
-}
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum DomainResponseItemDnsStatus {
     #[serde(rename = "PENDING")]
     #[default]
@@ -16718,6 +18688,42 @@ pub struct Release200ResponseRelease {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Release200ResponseCompositionComponent {
+    #[serde(rename = "serviceName")]
+    pub service_name: Option<String>,
+    #[serde(rename = "serviceId")]
+    pub service_id: uuid::Uuid,
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: uuid::Uuid,
+    #[serde(rename = "runtimeReleaseId")]
+    pub runtime_release_id: uuid::Uuid,
+    #[serde(rename = "contentDigest")]
+    #[validate(nested)]
+    pub content_digest: Release200ResponseReleaseContentDigest,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Release200ResponseComposition {
+    #[serde(rename = "compositionId")]
+    pub composition_id: uuid::Uuid,
+    #[serde(rename = "createdAt")]
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    #[validate(nested)]
+    pub components: Vec<Release200ResponseCompositionComponent>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
 pub struct Release200ResponseNextCursor {
     #[serde(rename = "createdAt")]
@@ -16736,6 +18742,9 @@ pub struct Release200ResponseNextCursor {
 pub struct Release200Response {
     #[validate(nested)]
     pub releases: Vec<Release200ResponseRelease>,
+    #[validate(nested)]
+    #[default(Default::default())]
+    pub compositions: Vec<Release200ResponseComposition>,
     #[serde(deserialize_with = "Option::deserialize", rename = "nextCursor")]
     #[serialize_always]
     pub next_cursor: Option<Release200ResponseNextCursor>,
@@ -19908,12 +21917,15 @@ pub enum Status200ResponseRuntimeArtifactGraphSchemaVersion {
     RuntimeArtifactGraphV20,
     #[serde(rename = "RUNTIME_ARTIFACT_GRAPH_V2.1")]
     RuntimeArtifactGraphV21,
+    #[serde(rename = "RUNTIME_ARTIFACT_GRAPH_V2.2")]
+    RuntimeArtifactGraphV22,
 }
 impl core::fmt::Display for Status200ResponseRuntimeArtifactGraphSchemaVersion {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::RuntimeArtifactGraphV20 => write!(f, "RUNTIME_ARTIFACT_GRAPH_V2.0"),
             Self::RuntimeArtifactGraphV21 => write!(f, "RUNTIME_ARTIFACT_GRAPH_V2.1"),
+            Self::RuntimeArtifactGraphV22 => write!(f, "RUNTIME_ARTIFACT_GRAPH_V2.2"),
         }
     }
 }
@@ -20336,9 +22348,16 @@ impl core::fmt::Display
 )]
 #[serde(deny_unknown_fields)]
 pub struct Status200ResponseRuntimeArtifactGraphRuntimeLayerRuntimeConfig {
+    #[validate(nested)]
+    pub network: Option<Endpoint200ResponseEndpointNetwork>,
     #[serde(rename = "runtimeFamily")]
     pub runtime_family:
         Option<Status200ResponseRuntimeArtifactGraphRuntimeLayerRuntimeConfigRuntimeFamily>,
+    #[serde(rename = "runtimePolicyLineage")]
+    #[validate(regex(
+        path = "REGEX_STATUS200RESPONSE_RUNTIME_ARTIFACT_GRAPH_RUNTIME_LAYER_RUNTIME_CONFIG_RUNTIME_POLICY_LINEAGE"
+    ))]
+    pub runtime_policy_lineage: Option<String>,
     #[serde(rename = "timeoutMs")]
     #[validate(
         range(
@@ -20356,11 +22375,6 @@ pub struct Status200ResponseRuntimeArtifactGraphRuntimeLayerRuntimeConfig {
         range(min = -9_007_199_254_740_991i64, max = 100i64, exclusive_min = 0i64)
     )]
     pub max_concurrency: Option<i64>,
-    #[serde(rename = "runtimePolicyLineage")]
-    #[validate(regex(
-        path = "REGEX_STATUS200RESPONSE_RUNTIME_ARTIFACT_GRAPH_RUNTIME_LAYER_RUNTIME_CONFIG_RUNTIME_POLICY_LINEAGE"
-    ))]
-    pub runtime_policy_lineage: Option<String>,
 }
 #[serde_with::skip_serializing_none]
 #[derive(
@@ -21835,7 +23849,7 @@ pub struct Resolve200Response {
     #[serde(rename = "protocolVersion")]
     #[serde(deserialize_with = "Resolve200Response::deserialize_const_protocol_version")]
     #[serde(serialize_with = "Resolve200Response::serialize_const_protocol_version")]
-    #[default("execution-context-v2".to_string())]
+    #[default("execution-context-v3".to_string())]
     pub protocol_version: String,
     #[validate(nested)]
     pub context: Resolve200ResponseContext,
@@ -21853,7 +23867,7 @@ impl Resolve200Response {
         deserializer: D,
     ) -> Result<String, D::Error> {
         let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let expected: String = serde_json::from_str::<String>("\"execution-context-v2\"")
+        let expected: String = serde_json::from_str::<String>("\"execution-context-v3\"")
             .map_err(serde::de::Error::custom)?;
         if value != expected {
             return Err(serde::de::Error::custom(
@@ -21875,7 +23889,7 @@ impl Resolve200Response {
         value: &String,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        let expected: String = serde_json::from_str::<String>("\"execution-context-v2\"")
+        let expected: String = serde_json::from_str::<String>("\"execution-context-v3\"")
             .map_err(serde::ser::Error::custom)?;
         if value != &expected {
             return Err(serde::ser::Error::custom(
@@ -21945,7 +23959,7 @@ pub struct Materialize200Response {
     #[serde(rename = "protocolVersion")]
     #[serde(deserialize_with = "Materialize200Response::deserialize_const_protocol_version")]
     #[serde(serialize_with = "Materialize200Response::serialize_const_protocol_version")]
-    #[default("execution-context-v2".to_string())]
+    #[default("execution-context-v3".to_string())]
     pub protocol_version: String,
     #[validate(nested)]
     pub context: Resolve200ResponseContext,
@@ -21968,7 +23982,7 @@ impl Materialize200Response {
         deserializer: D,
     ) -> Result<String, D::Error> {
         let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let expected: String = serde_json::from_str::<String>("\"execution-context-v2\"")
+        let expected: String = serde_json::from_str::<String>("\"execution-context-v3\"")
             .map_err(serde::de::Error::custom)?;
         if value != expected {
             return Err(serde::de::Error::custom(
@@ -21990,7 +24004,7 @@ impl Materialize200Response {
         value: &String,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        let expected: String = serde_json::from_str::<String>("\"execution-context-v2\"")
+        let expected: String = serde_json::from_str::<String>("\"execution-context-v3\"")
             .map_err(serde::ser::Error::custom)?;
         if value != &expected {
             return Err(serde::ser::Error::custom(
@@ -22105,7 +24119,7 @@ pub struct Admit200Response {
     #[serde(rename = "protocolVersion")]
     #[serde(deserialize_with = "Admit200Response::deserialize_const_protocol_version")]
     #[serde(serialize_with = "Admit200Response::serialize_const_protocol_version")]
-    #[default("execution-context-v2".to_string())]
+    #[default("execution-context-v3".to_string())]
     pub protocol_version: String,
     #[validate(nested)]
     pub context: Resolve200ResponseContext,
@@ -22127,7 +24141,7 @@ impl Admit200Response {
         deserializer: D,
     ) -> Result<String, D::Error> {
         let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let expected: String = serde_json::from_str::<String>("\"execution-context-v2\"")
+        let expected: String = serde_json::from_str::<String>("\"execution-context-v3\"")
             .map_err(serde::de::Error::custom)?;
         if value != expected {
             return Err(serde::de::Error::custom(
@@ -22149,7 +24163,7 @@ impl Admit200Response {
         value: &String,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        let expected: String = serde_json::from_str::<String>("\"execution-context-v2\"")
+        let expected: String = serde_json::from_str::<String>("\"execution-context-v3\"")
             .map_err(serde::ser::Error::custom)?;
         if value != &expected {
             return Err(serde::ser::Error::custom(
@@ -23150,6 +25164,8 @@ pub struct LayerKindObject2RuntimeApplicationRuntime {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 pub struct LayerKindObject2Runtime {
+    #[validate(nested)]
+    pub network: Option<Endpoint200ResponseEndpointNetwork>,
     #[serde(rename = "applicationRuntime")]
     #[validate(nested)]
     pub application_runtime: Option<LayerKindObject2RuntimeApplicationRuntime>,
@@ -23437,11 +25453,11 @@ pub struct SourceRequestBodyManifestPrerender {
 pub struct SourceRequestBodyManifest {
     #[serde(deserialize_with = "SourceRequestBodyManifest::deserialize_const_version")]
     #[serde(serialize_with = "SourceRequestBodyManifest::serialize_const_version")]
-    #[default(1f64)]
+    #[default(2f64)]
     pub version: f64,
     #[validate(length(min = 1u64, max = 10u64))]
     pub layers: Vec<LayerKind>,
-    #[validate(length(min = 1u64, max = 200u64), nested)]
+    #[validate(length(max = 200u64), nested)]
     pub routes: Vec<SourceRequestBodyManifestRoute>,
     #[validate(nested)]
     pub prerender: Option<SourceRequestBodyManifestPrerender>,
@@ -23456,7 +25472,7 @@ impl SourceRequestBodyManifest {
         deserializer: D,
     ) -> Result<f64, D::Error> {
         let value = <f64 as serde::Deserialize>::deserialize(deserializer)?;
-        let expected: f64 = serde_json::from_str::<f64>("1").map_err(serde::de::Error::custom)?;
+        let expected: f64 = serde_json::from_str::<f64>("2").map_err(serde::de::Error::custom)?;
         if value != expected {
             return Err(serde::de::Error::custom(
                 "value does not match schema const",
@@ -23477,7 +25493,7 @@ impl SourceRequestBodyManifest {
         value: &f64,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        let expected: f64 = serde_json::from_str::<f64>("1").map_err(serde::ser::Error::custom)?;
+        let expected: f64 = serde_json::from_str::<f64>("2").map_err(serde::ser::Error::custom)?;
         if value != &expected {
             return Err(serde::ser::Error::custom(
                 "value does not match schema const",

@@ -609,7 +609,7 @@ fn scan_and_bundle_preserve_physical_parent_paths_through_deep_directory_aliases
         Some("physical/real.txt")
     );
     assert_eq!(alias.content_hash, hash::sha256_hex(raw_target.as_bytes()));
-    let manifest = serde_json::from_value(serde_json::json!({"version":1,"layers":[{"name":"static","target":"STATIC","directory":"."}],"routes":[]})).unwrap();
+    let manifest = serde_json::from_value(serde_json::json!({"version":2,"layers":[{"name":"static","target":"STATIC","directory":"."}],"routes":[]})).unwrap();
     let plan =
         crate::artifact::source_bundle_v1::build_source_bundle_plan(dir.path(), &manifest, &files)
             .unwrap();

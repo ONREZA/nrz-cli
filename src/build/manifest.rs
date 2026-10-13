@@ -94,6 +94,8 @@ impl std::fmt::Display for LayerTarget {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<nrz_source_bundle::ComputeNetwork>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build_runtime_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub application_runtime: Option<nrz_source_bundle::ApplicationRuntimeIntent>,
@@ -242,13 +244,49 @@ pub fn load_and_validate(path: &Path) -> anyhow::Result<Manifest> {
 }
 
 pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
-    if manifest.version != 1 {
+    if manifest.version != 2 {
         anyhow::bail!(
-            "unsupported manifest version: {}. Expected 1.",
+            "unsupported manifest version: {}. Expected 2.",
             manifest.version
         );
     }
 
+    for layer in &manifest.layers {
+        if layer.target == LayerTarget::Compute {
+            let network = layer
+                .runtime
+                .as_ref()
+                .and_then(|r| r.network.as_ref())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("COMPUTE layer '{}' requires explicit network", layer.name)
+                })?;
+            network.validate().map_err(anyhow::Error::msg)?;
+            if network.exposure == "PUBLIC"
+                && !manifest
+                    .routes
+                    .iter()
+                    .any(|route| route.layer == layer.name)
+            {
+                anyhow::bail!(
+                    "PUBLIC endpoint '{}' requires an explicit public route",
+                    layer.name
+                );
+            }
+
+            if manifest.routes.iter().any(|r| r.layer == layer.name)
+                && (network.exposure == "PRIVATE"
+                    || !network.ports.iter().any(|p| {
+                        p.binding == "primary"
+                            && ["http", "grpc", "websocket"].contains(&p.protocol.as_str())
+                    }))
+            {
+                anyhow::bail!(
+                    "public route targets PRIVATE or non-HTTP endpoint '{}'; remove its public routes",
+                    layer.name
+                );
+            }
+        }
+    }
     // ── Layers ────────────────────────────────────────────────
 
     if manifest.layers.is_empty() {
@@ -366,7 +404,15 @@ pub fn validate(manifest: &Manifest) -> anyhow::Result<()> {
 
     // ── Routes ────────────────────────────────────────────────
 
-    if manifest.routes.is_empty() {
+    if manifest.routes.is_empty()
+        && !manifest.layers.iter().all(|l| {
+            l.target == LayerTarget::Compute
+                && l.runtime
+                    .as_ref()
+                    .and_then(|r| r.network.as_ref())
+                    .is_some_and(|n| n.exposure == "PRIVATE")
+        })
+    {
         anyhow::bail!("at least one route is required");
     }
     if manifest.routes.len() > MAX_ROUTES {
@@ -595,7 +641,7 @@ fn terminal_catch_all_route(layer: &str) -> Route {
 /// Auto-generate a minimal STATIC manifest for plain static deploys.
 pub fn generate_static_manifest() -> Manifest {
     Manifest {
-        version: 1,
+        version: 2,
         layers: vec![Layer {
             name: "site".to_string(),
             target: LayerTarget::Static,
@@ -616,20 +662,37 @@ pub fn generate_static_manifest() -> Manifest {
 /// `entry` — resolved entry point relative to output dir (e.g. "server.js").
 pub fn generate_compute_manifest(entry: &str) -> Manifest {
     Manifest {
-        version: 1,
+        version: 2,
         layers: vec![Layer {
             name: "server".to_string(),
             target: LayerTarget::Compute,
             directory: ".".to_string(),
             entry: Some(entry.to_string()),
             export_format: None,
-            runtime: None,
+            runtime: Some(RuntimeConfig {
+                network: Some(nrz_source_bundle::ComputeNetwork::public_default()),
+                ..Default::default()
+            }),
         }],
         routes: vec![terminal_catch_all_route("server")],
         prerender: None,
         middleware: None,
         edge_rules: None,
         meta: None,
+    }
+}
+
+fn generated_server_layer(server_entry: &str) -> Layer {
+    Layer {
+        name: "server".to_string(),
+        target: LayerTarget::Compute,
+        directory: ".".to_string(),
+        entry: Some(server_entry.to_string()),
+        export_format: None,
+        runtime: Some(RuntimeConfig {
+            network: Some(nrz_source_bundle::ComputeNetwork::public_default()),
+            ..Default::default()
+        }),
     }
 }
 
@@ -671,14 +734,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
         });
     }
 
-    layers.push(Layer {
-        name: "server".to_string(),
-        target: LayerTarget::Compute,
-        directory: ".".to_string(),
-        entry: Some(server_entry.to_string()),
-        export_format: None,
-        runtime: None,
-    });
+    layers.push(generated_server_layer(server_entry));
 
     let mut routes = vec![Route {
         pattern: "^/_next/static/.*$".to_string(),
@@ -707,7 +763,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
     routes.push(terminal_catch_all_route("server"));
 
     Manifest {
-        version: 1,
+        version: 2,
         layers,
         routes,
         prerender: None,
@@ -793,18 +849,11 @@ pub fn generate_nextjs_adapter_manifest_for_server(
         });
     }
 
-    layers.push(Layer {
-        name: "server".to_string(),
-        target: LayerTarget::Compute,
-        directory: ".".to_string(),
-        entry: Some(server_entry.to_string()),
-        export_format: None,
-        runtime: None,
-    });
+    layers.push(generated_server_layer(server_entry));
     routes.push(terminal_catch_all_route("server"));
 
     Manifest {
-        version: 1,
+        version: 2,
         layers,
         routes,
         prerender: (!prerender_pages.is_empty()).then(|| PrerenderConfig {
@@ -933,12 +982,15 @@ fn generate_ssr_manifest(config: SsrManifestConfig) -> Manifest {
         directory: config.server_dir.to_string(),
         entry: Some(config.server_entry.to_string()),
         export_format: None,
-        runtime: None,
+        runtime: Some(RuntimeConfig {
+            network: Some(nrz_source_bundle::ComputeNetwork::public_default()),
+            ..Default::default()
+        }),
     });
     routes.push(terminal_catch_all_route("server"));
 
     Manifest {
-        version: 1,
+        version: 2,
         layers,
         routes,
         prerender: None,

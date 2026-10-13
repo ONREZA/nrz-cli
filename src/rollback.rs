@@ -31,18 +31,19 @@ pub async fn run(
     config: &ProjectConfig,
 ) -> anyhow::Result<()> {
     ensure!(
-        args.list || args.release_id.is_some(),
-        "select a retained release with --release-id, or use --list"
+        args.list || args.release_id.is_some() || args.composition_id.is_some(),
+        "select --release-id, --composition-id, or --list"
     );
     let token = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&token)?;
     let project_id = config::resolve_project_id(args.project_id.as_deref(), config)?;
-    let context = execution_context::resolve_for_mutation(
+    let context = execution_context::resolve_for_service_mutation(
         &client,
         &project_id,
         Path::new(&args.dir),
         args.environment.as_deref(),
         None,
+        args.service_id.as_deref(),
     )
     .await
     .context("failed to resolve rollback environment")?;
@@ -57,6 +58,7 @@ pub async fn run(
                 "observedReleaseId": serving.observed.release_id,
                 "desiredGeneration": serving.desired.generation,
                 "releases": page.releases,
+                "compositions": page.compositions,
                 "nextCursor": page.next_cursor,
             }));
         } else {
@@ -74,6 +76,23 @@ pub async fn run(
                     marker,
                 );
             }
+            for composition in &page.compositions {
+                eprintln!(
+                    "  Composition {}  {}",
+                    composition.composition_id,
+                    composition.created_at.to_rfc3339()
+                );
+                for component in &composition.components {
+                    eprintln!(
+                        "    Service {} → deployment {} / runtime {} ({:?}:{})",
+                        component.service_id,
+                        component.deployment_id,
+                        component.runtime_release_id,
+                        component.content_digest.algorithm,
+                        component.content_digest.value
+                    );
+                }
+            }
             if page.next_cursor.is_some() {
                 eprintln!("  More releases are available through the Environment releases API.");
             }
@@ -81,7 +100,10 @@ pub async fn run(
         return Ok(());
     }
 
-    let release_id = args.release_id.context("missing --release-id")?;
+    let release_id = args
+        .composition_id
+        .or(args.release_id)
+        .context("missing retained target ID")?;
     let activation = activate_release(
         &client,
         &environment_id,

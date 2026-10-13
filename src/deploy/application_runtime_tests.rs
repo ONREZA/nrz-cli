@@ -107,6 +107,7 @@ fn fresh_local_bun_uses_measured_target_while_retained_claim_stays_immutable() {
     let original = context("BUN", "BUN");
     let mut manifest = crate::build::manifest::generate_compute_manifest("server.js");
     manifest.layers[0].runtime = Some(crate::build::manifest::RuntimeConfig {
+        network: Some(nrz_source_bundle::ComputeNetwork::public_default()),
         application_runtime: Some(original.application_runtime.as_ref().unwrap().intent()),
         build_runtime_version: Some("bun-1.4.2".into()),
         ..Default::default()
@@ -206,9 +207,9 @@ async fn local_output_binding_replaces_only_fresh_primary_claims() {
     std::fs::create_dir(directory.path().join(".onreza")).unwrap();
     std::fs::write(directory.path().join("server.js"), "export default 1").unwrap();
     std::fs::write(directory.path().join(".onreza/manifest.json"), serde_json::to_vec(&json!({
-        "version":1, "routes":[{"pattern":"^/.*$","layer":"server"}], "layers":[
+        "version":2, "routes":[{"pattern":"^/.*$","layer":"server"}], "layers":[
             {"name":"server", "target":"COMPUTE", "directory":".", "entry":"server.js",
-             "runtime":{"applicationRuntime":{"family":"BUN","args":[]},"buildRuntimeVersion":"bun-1.4.2"}}
+             "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"BUN","args":[]},"buildRuntimeVersion":"bun-1.4.2"}}
         ]
     })).unwrap()).unwrap();
     let original = context("BUN", "BUN");
@@ -267,9 +268,9 @@ async fn platform_retained_output_preserves_claims_after_policy_successor_admiss
         std::fs::create_dir_all(output_dir.join(".onreza")).unwrap();
         std::fs::write(output_dir.join("server.js"), "export default 1").unwrap();
         let mut authored = json!({
-            "version":1, "routes":[{"pattern":"^/.*$","layer":"server"}], "layers":[
+            "version":2, "routes":[{"pattern":"^/.*$","layer":"server"}], "layers":[
                 {"name":"server", "target":"COMPUTE", "directory":".", "entry":"server.js",
-                 "runtime":{"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":old_target}}
+                 "runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":old_target}}
             ]
         });
         if !retained_claim {

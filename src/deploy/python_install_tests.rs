@@ -174,9 +174,9 @@ async fn authored_install_qualifies_python_sibling_dependencies_under_node_prima
         .unwrap();
         std::fs::create_dir(project.path().join(".onreza")).unwrap();
         std::fs::write(project.path().join(".onreza/manifest.json"),serde_json::to_vec(&serde_json::json!({
-            "version":1,"routes":[{"pattern":"^/.*$","layer":"node"}],"layers":[
-                {"name":"node","target":"COMPUTE","directory":"api","entry":"server.js","runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
-                {"name":"python","target":"COMPUTE","directory":".","entry":"worker.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}}
+            "version":2,"routes":[{"pattern":"^/.*$","layer":"node"}],"layers":[
+                {"name":"node","target":"COMPUTE","directory":"api","entry":"server.js","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
+                {"name":"python","target":"COMPUTE","directory":".","entry":"worker.py","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}}
             ]
         })).unwrap()).unwrap();
         let mut config = nrz::config::ProjectConfig::default();
@@ -249,9 +249,9 @@ fn authored_python_dependency_guard_preserves_frozen_owners_and_builder_mode() {
         std::fs::create_dir_all(project.path().join(&relative).parent().unwrap()).unwrap();
         std::fs::write(project.path().join(&relative), b"\xcf\xfa\xed\xfeNATIVE").unwrap();
         let manifest=serde_json::from_value(serde_json::json!({
-            "version":1,"routes":[],"layers":[
-                {"name":"node","target":"COMPUTE","directory":"api","entry":"server.js","runtime":{"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
-                {"name":"python","target":"COMPUTE","directory":".","entry":"worker.py","runtime":{"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":minor.target()}}
+            "version":2,"routes":[],"layers":[
+                {"name":"node","target":"COMPUTE","directory":"api","entry":"server.js","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24"}},
+                {"name":"python","target":"COMPUTE","directory":".","entry":"worker.py","runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PRIVATE","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":minor.target()}}
             ]
         })).unwrap();
         let artifact = RuntimeArtifact {

@@ -10,6 +10,8 @@ use serde_json::{Value, json};
 
 const ENVIRONMENT: &str = "00000000-0000-4000-8000-000000000001";
 const RELEASE: &str = "00000000-0000-4000-8000-000000000002";
+const COMPOSITION: &str = "00000000-0000-4000-8000-000000000004";
+const SERVICE: &str = "00000000-0000-4000-8000-000000000005";
 const OPERATION: &str = "00000000-0000-4000-8000-000000000003";
 
 fn serving(environment: &str) -> Value {
@@ -26,14 +28,15 @@ fn serving(environment: &str) -> Value {
 
 #[tokio::test]
 async fn rollback_activates_exact_retained_release_with_generation_and_idempotency() {
-    for finish_observation_early in [false, true] {
-        let mut arguments = vec!["rollback", "--release-id", RELEASE];
-        if finish_observation_early {
-            arguments.push("--finish-observation-early");
-        }
-        let args = crate::cli::RollbackArgs::try_parse_from(arguments).unwrap();
-        assert_eq!(args.finish_observation_early, finish_observation_early);
-        let app = Router::new()
+    for (target, option) in [(RELEASE, "--release-id"), (COMPOSITION, "--composition-id")] {
+        for finish_observation_early in [false, true] {
+            let mut arguments = vec!["rollback", option, target];
+            if finish_observation_early {
+                arguments.push("--finish-observation-early");
+            }
+            let args = crate::cli::RollbackArgs::try_parse_from(arguments).unwrap();
+            assert_eq!(args.finish_observation_early, finish_observation_early);
+            let app = Router::new()
         .route(
             "/v1/environments/{id}/serving",
             get(|| async { Json(serving(ENVIRONMENT)) }),
@@ -43,7 +46,7 @@ async fn rollback_activates_exact_retained_release_with_generation_and_idempoten
             post(move |headers: HeaderMap, Json(body): Json<Value>| async move {
                 assert_eq!(
                     body,
-                    json!({"releaseId": RELEASE, "expectedGeneration": "7", "finishObservationEarly": finish_observation_early})
+                    json!({"releaseId": target, "expectedGeneration": "7", "finishObservationEarly": finish_observation_early})
                 );
                 let key = headers.get("idempotency-key").unwrap().to_str().unwrap();
                 let key_id = uuid::Uuid::parse_str(key).unwrap();
@@ -52,21 +55,22 @@ async fn rollback_activates_exact_retained_release_with_generation_and_idempoten
                 (
                     StatusCode::ACCEPTED,
                     Json(json!({
-                        "operationId": OPERATION, "releaseId": RELEASE,
+                        "operationId": OPERATION, "releaseId": target,
                         "desiredGeneration": "8", "status": "PENDING"
                     })),
                 )
             }),
         );
-        let (client, server) = serve_api(app).await;
-        let response =
-            activate_release(&client, ENVIRONMENT, RELEASE, args.finish_observation_early)
-                .await
-                .unwrap();
-        assert_eq!(response.operation_id.to_string(), OPERATION);
-        assert_eq!(response.release_id.to_string(), RELEASE);
-        assert_eq!(response.desired_generation, "8");
-        server.abort();
+            let (client, server) = serve_api(app).await;
+            let response =
+                activate_release(&client, ENVIRONMENT, target, args.finish_observation_early)
+                    .await
+                    .unwrap();
+            assert_eq!(response.operation_id.to_string(), OPERATION);
+            assert_eq!(response.release_id.to_string(), target);
+            assert_eq!(response.desired_generation, "8");
+            server.abort();
+        }
     }
 }
 
@@ -88,6 +92,7 @@ async fn rollback_lists_releases_with_sha256_and_blake3_content_digests() {
                             "contentDigest": digest,
                             "sizeBytes": 123
                         }],
+                        "compositions": [{ "compositionId": COMPOSITION, "createdAt": "2026-09-12T00:00:00Z", "components": [{"serviceId":SERVICE,"deploymentId":OPERATION,"runtimeReleaseId":RELEASE,"contentDigest":digest}] }],
                         "nextCursor": null
                     }))
                 }
@@ -102,6 +107,15 @@ async fn rollback_lists_releases_with_sha256_and_blake3_content_digests() {
         assert_eq!(output["releases"][0]["releaseId"], RELEASE);
         assert_eq!(output["releases"][0]["contentDigest"], digest);
         assert_eq!(output["releases"][0]["sizeBytes"], 123);
+        assert_eq!(output["compositions"][0]["compositionId"], COMPOSITION);
+        assert_eq!(
+            output["compositions"][0]["components"][0]["serviceId"],
+            SERVICE
+        );
+        assert_eq!(
+            output["compositions"][0]["components"][0]["contentDigest"],
+            digest
+        );
         server.abort();
     }
 }

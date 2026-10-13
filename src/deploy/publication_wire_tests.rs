@@ -19,7 +19,7 @@ async fn source_registration_retries_the_same_operation_and_snapshot() {
         })).with_state(Arc::clone(&requests));
     let (client, server) = serve_api(app).await;
     register_deployment_source(&client, DEPLOYMENT, 3,
-        json!({"version":1,"layers":[{"name":"static","target":"STATIC","directory":"."}],"routes":[{"pattern":"^/.*","layer":"static"}]}), None, true
+        json!({"version":2,"layers":[{"name":"static","target":"STATIC","directory":"."}],"routes":[{"pattern":"^/.*","layer":"static"}]}), None, true
     ).await.unwrap();
     let requests = requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
@@ -41,7 +41,7 @@ async fn skipped_build_requires_acceptance_for_the_requested_deployment() {
         let app = Router::new().route("/v1/deployments/{id}/execution-context/skip-before-source", post(move |Json(body):Json<Value>| {
             let response = response.clone();
             async move {
-                assert_eq!(body, json!({"protocolVersion":"execution-context-v2","attempt":2,"reason":"unchanged"}));
+                assert_eq!(body, json!({"protocolVersion":"execution-context-v3","attempt":2,"reason":"unchanged"}));
                 Json(response)
             }
         }));
@@ -119,7 +119,7 @@ fn expected_context_json() -> Value {
 }
 
 fn admission_request_json() -> Value {
-    json!({"protocolVersion":"execution-context-v2", "environmentId":context_json()["environmentId"],
+    json!({"protocolVersion":"execution-context-v3", "environmentId":context_json()["environmentId"],
         "selectionSource":"EXPLICIT", "branch":"feature/a", "commitSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "expectedContext":expected_context_json()})
 }
@@ -140,7 +140,7 @@ async fn admission_preserves_selection_and_rejects_another_scope() {
             assert_eq!(body,admission_request_json());
             let mut context = context_json();
             if let Some(field) = changed_field { context[field] = if field == "workspaceBindingGeneration" { json!("2") } else { json!(Uuid::nil()) }; }
-            Json(json!({"protocolVersion":"execution-context-v2","context":context,
+            Json(json!({"protocolVersion":"execution-context-v3","context":context,
                 "deployment":{"id":DEPLOYMENT,"attempt":2,"status":"BUILDING","url":null},
                 "snapshot":{"fingerprint":format!("v1:{}","a".repeat(64)),"resolvedAt":"2026-09-12T00:00:00Z"}}))
         }));

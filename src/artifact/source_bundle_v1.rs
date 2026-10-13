@@ -819,7 +819,7 @@ fn build_logical_manifest(
 
     Ok(SourceLogicalManifest {
         schema_version: SOURCE_BUNDLE_SCHEMA_VERSION.to_string(),
-        capabilities: Vec::new(),
+        capabilities: vec![nrz_source_bundle::COMPUTE_NETWORK_SCHEMA_VERSION.to_string()],
         files: logical_files,
         layers,
         routes,
@@ -927,6 +927,9 @@ fn runtime_config_value(
 ) -> Option<serde_json::Value> {
     let mut object = serde_json::Map::new();
     if let Some(runtime) = layer.runtime.as_ref() {
+        if let Some(network) = &runtime.network {
+            object.insert("network".into(), serde_json::json!(network));
+        }
         if let Some(version) = &runtime.build_runtime_version {
             object.insert("buildRuntimeVersion".into(), serde_json::json!(version));
         }
@@ -960,6 +963,11 @@ fn runtime_config_value(
         object.insert("runtimeFamily".to_string(), serde_json::json!("PYTHON"));
     }
     if layer.target == LayerTarget::Compute
+        && layer
+            .runtime
+            .as_ref()
+            .and_then(|r| r.network.as_ref())
+            .is_none()
         && let Some(readiness) = readiness
     {
         let readiness = match readiness {

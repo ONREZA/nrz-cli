@@ -5,13 +5,20 @@
   "description": "Internal immutable contract for one application artifact, bounded dependency materializations, and declared runtime layer mounts.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["runtimeArtifactGraph", "dependencyMaterializationManifest"],
+  "required": [
+    "runtimeArtifactGraph",
+    "dependencyMaterializationManifest"
+  ],
   "properties": {
     "runtimeArtifactGraph": {
       "type": "object",
       "properties": {
         "schemaVersion": {
-          "enum": ["RUNTIME_ARTIFACT_GRAPH_V2.0", "RUNTIME_ARTIFACT_GRAPH_V2.1"],
+          "enum": [
+            "RUNTIME_ARTIFACT_GRAPH_V2.0",
+            "RUNTIME_ARTIFACT_GRAPH_V2.1",
+            "RUNTIME_ARTIFACT_GRAPH_V2.2"
+          ],
           "type": "string"
         },
         "application": {
@@ -42,11 +49,19 @@
                   "maximum": 9007199254740991
                 }
               },
-              "required": ["mediaType", "digest", "size"],
+              "required": [
+                "mediaType",
+                "digest",
+                "size"
+              ],
               "additionalProperties": false
             }
           },
-          "required": ["artifactId", "manifestDigest", "blobDescriptor"],
+          "required": [
+            "artifactId",
+            "manifestDigest",
+            "blobDescriptor"
+          ],
           "additionalProperties": false
         },
         "dependencies": {
@@ -59,7 +74,10 @@
                 "pattern": "^[0-9a-f]{64}$"
               },
               "kind": {
-                "enum": ["JAVASCRIPT_NODE_MODULES", "PYTHON_SITE_PACKAGES"],
+                "enum": [
+                  "JAVASCRIPT_NODE_MODULES",
+                  "PYTHON_SITE_PACKAGES"
+                ],
                 "type": "string"
               },
               "mountPoint": {
@@ -85,11 +103,17 @@
                     "type": "string"
                   },
                   "architecture": {
-                    "enum": ["x86_64", "aarch64"],
+                    "enum": [
+                      "x86_64",
+                      "aarch64"
+                    ],
                     "type": "string"
                   },
                   "libc": {
-                    "enum": ["glibc", "musl"],
+                    "enum": [
+                      "glibc",
+                      "musl"
+                    ],
                     "type": "string"
                   },
                   "abi": {
@@ -153,7 +177,11 @@
                     "maximum": 9007199254740991
                   }
                 },
-                "required": ["mediaType", "digest", "size"],
+                "required": [
+                  "mediaType",
+                  "digest",
+                  "size"
+                ],
                 "additionalProperties": false
               }
             },
@@ -210,13 +238,18 @@
                           "maxLength": 512
                         }
                       },
-                      "required": ["materializationId", "mountPoint"],
+                      "required": [
+                        "materializationId",
+                        "mountPoint"
+                      ],
                       "additionalProperties": false
                     },
                     "maxItems": 8
                   }
                 },
-                "required": ["mounts"],
+                "required": [
+                  "mounts"
+                ],
                 "additionalProperties": false
               },
               "entrypoint": {
@@ -257,7 +290,10 @@
                     "type": "object",
                     "properties": {
                       "protocol": {
-                        "enum": ["TCP", "HTTP"],
+                        "enum": [
+                          "TCP",
+                          "HTTP"
+                        ],
                         "type": "string"
                       },
                       "path": {
@@ -266,18 +302,146 @@
                         "maxLength": 2048
                       }
                     },
-                    "required": ["protocol"],
+                    "required": [
+                      "protocol"
+                    ],
                     "additionalProperties": false
                   }
                 },
-                "required": ["profile", "args", "cwd"],
+                "required": [
+                  "profile",
+                  "args",
+                  "cwd"
+                ],
                 "additionalProperties": false
               },
               "runtimeConfig": {
                 "type": "object",
                 "properties": {
+                  "network": {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "const": "COMPUTE_NETWORK_V1",
+                        "type": "string"
+                      },
+                      "exposure": {
+                        "enum": [
+                          "PUBLIC",
+                          "PRIVATE"
+                        ],
+                        "type": "string"
+                      },
+                      "ports": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                            },
+                            "protocol": {
+                              "enum": [
+                                "http",
+                                "grpc",
+                                "websocket",
+                                "tcp"
+                              ],
+                              "type": "string"
+                            },
+                            "port": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 65535
+                            },
+                            "binding": {
+                              "enum": [
+                                "primary",
+                                "fixed"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "protocol",
+                            "port",
+                            "binding"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1,
+                        "maxItems": 16
+                      },
+                      "readiness": {
+                        "type": "object",
+                        "properties": {
+                          "protocol": {
+                            "enum": [
+                              "tcp",
+                              "http"
+                            ],
+                            "type": "string"
+                          },
+                          "port": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2048
+                          }
+                        },
+                        "required": [
+                          "protocol",
+                          "port"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "allowFrom": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "serviceId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "layerName": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            }
+                          },
+                          "required": [
+                            "serviceId",
+                            "layerName"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "maxItems": 128
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "exposure",
+                      "ports",
+                      "readiness",
+                      "allowFrom"
+                    ],
+                    "additionalProperties": false
+                  },
                   "runtimeFamily": {
-                    "enum": ["JAVASCRIPT", "PYTHON"],
+                    "enum": [
+                      "JAVASCRIPT",
+                      "PYTHON"
+                    ],
                     "type": "string"
                   },
                   "runtimePolicyLineage": {
@@ -306,7 +470,13 @@
                 "additionalProperties": false
               }
             },
-            "required": ["layerName", "applicationRoot", "dependencyMaterializationIds", "entrypoint", "runtimeConfig"],
+            "required": [
+              "layerName",
+              "applicationRoot",
+              "dependencyMaterializationIds",
+              "entrypoint",
+              "runtimeConfig"
+            ],
             "additionalProperties": false
           },
           "maxItems": 10
@@ -316,7 +486,13 @@
           "pattern": "^[0-9a-f]{64}$"
         }
       },
-      "required": ["schemaVersion", "application", "dependencies", "runtimeLayers", "graphDigest"],
+      "required": [
+        "schemaVersion",
+        "application",
+        "dependencies",
+        "runtimeLayers",
+        "graphDigest"
+      ],
       "additionalProperties": false
     },
     "dependencyMaterializationManifest": {
@@ -327,7 +503,10 @@
           "type": "string"
         },
         "kind": {
-          "enum": ["JAVASCRIPT_NODE_MODULES", "PYTHON_SITE_PACKAGES"],
+          "enum": [
+            "JAVASCRIPT_NODE_MODULES",
+            "PYTHON_SITE_PACKAGES"
+          ],
           "type": "string"
         },
         "compatibility": {
@@ -348,11 +527,17 @@
               "type": "string"
             },
             "architecture": {
-              "enum": ["x86_64", "aarch64"],
+              "enum": [
+                "x86_64",
+                "aarch64"
+              ],
               "type": "string"
             },
             "libc": {
-              "enum": ["glibc", "musl"],
+              "enum": [
+                "glibc",
+                "musl"
+              ],
               "type": "string"
             },
             "abi": {
@@ -449,7 +634,11 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["mediaType", "digest", "size"],
+          "required": [
+            "mediaType",
+            "digest",
+            "size"
+          ],
           "additionalProperties": false
         }
       },

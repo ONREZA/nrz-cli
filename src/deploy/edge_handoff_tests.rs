@@ -46,9 +46,9 @@ fn prepare_server_handoff(
 
 fn server_manifest() -> anyhow::Result<Manifest> {
     Ok(serde_json::from_value(serde_json::json!({
-        "version": 1,
-        "layers": [{"name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js"}],
-        "routes": []
+        "version": 2,
+        "layers": [{"name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js","runtime":{"network":crate::network_fixture::network()}}],
+        "routes": [{"pattern":"^/.*$","layer":"server"}]
     }))?)
 }
 
@@ -100,6 +100,7 @@ fn platform_resume_rejects_every_mutable_override() {
         verify: true,
         wait_timeout: 120,
         environment: Some("production".to_string()),
+        service_id: None,
         project_id: Some("project-1".to_string()),
         skip_build: true,
         skip_install: true,
@@ -146,14 +147,14 @@ fn publishes_archive_before_one_strict_atomic_descriptor() -> anyhow::Result<()>
     let output = tempdir()?;
     let source = b"console.log('ready');\n";
     let manifest: Manifest = serde_json::from_value(serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [{
             "name": "server",
             "target": "COMPUTE",
             "directory": ".",
             "entry": "server.js"
-        }],
-        "routes": []
+        ,"runtime":{"network":crate::network_fixture::network()}}],
+        "routes": [{"pattern":"^/.*$","layer":"server"}]
     }))?;
     let (plan, publisher) =
         prepare_server_handoff(project.path(), output.path(), &manifest, source)?;
@@ -199,12 +200,12 @@ fn handoff_rejects_a_source_graph_with_unowned_compute_entrypoint() -> anyhow::R
     let output = tempdir()?;
     let source = b"export default () => 'ready';\n";
     let manifest: Manifest = serde_json::from_value(serde_json::json!({
-        "version": 1,
+        "version": 2,
         "layers": [
-            {"name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js"},
-            {"name": "worker", "target": "COMPUTE", "directory": ".", "entry": "server.js"}
+            {"name": "server", "target": "COMPUTE", "directory": ".", "entry": "server.js","runtime":{"network":crate::network_fixture::network()}},
+            {"name": "worker", "target": "COMPUTE", "directory": ".", "entry": "server.js","runtime":{"network":crate::network_fixture::network()}}
         ],
-        "routes": []
+        "routes": [{"pattern":"^/.*$","layer":"server"}]
     }))?;
     let (plan, publisher) =
         prepare_server_handoff(project.path(), output.path(), &manifest, source)?;

@@ -47,9 +47,9 @@ async fn real_native_subdirectory_closure_uses_full_artifact_root() {
         );
     }
     let manifest = serde_json::json!({
-        "version": 1, "routes": [{"pattern": "^/.*$", "layer": "server"}],
+        "version": 2, "routes": [{"pattern": "^/.*$", "layer": "server"}],
         "layers": [{"name": "server", "target": "COMPUTE", "directory": "bin", "entry": "server",
-            "runtime": {"applicationRuntime": {"family": "EXECUTABLE", "args": ["$(id)", "two words"]},
+            "runtime": {"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime": {"family": "EXECUTABLE", "args": ["$(id)", "two words"]},
                         "buildRuntimeVersion": "native-linux-x86_64-glibc"}}]
     });
     std::fs::write(

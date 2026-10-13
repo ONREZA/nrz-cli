@@ -8,6 +8,8 @@ pub mod domains;
 pub mod domains_handler;
 #[cfg(test)]
 mod domains_handler_tests;
+pub mod endpoints;
+pub mod endpoints_handler;
 pub mod env;
 pub mod env_handler;
 #[cfg(test)]
@@ -38,6 +40,7 @@ pub use config::ConfigArgs;
 pub use db::DbArgs;
 pub use detect::DetectArgs;
 pub use domains::DomainsArgs;
+pub use endpoints::EndpointsArgs;
 pub use env::EnvArgs;
 pub use execution_context::ContextArgs;
 pub use functions::FunctionsArgs;
@@ -128,6 +131,9 @@ pub enum Command {
     /// Manage Product Services
     Services(ServicesArgs),
 
+    /// Manage Compute endpoint policies, exposure and sharing
+    Endpoints(EndpointsArgs),
+
     /// Manage protected preview URL access
     Preview(PreviewArgs),
 
@@ -207,11 +213,19 @@ pub struct LogsArgs {
 
 #[derive(Parser)]
 pub struct RollbackArgs {
-    /// Immutable release ID to activate; omit only when using --list
-    #[arg(long, conflicts_with = "list")]
+    /// Immutable retained runtime release ID to activate
+    #[arg(long, conflicts_with_all = ["list", "composition_id"])]
     pub release_id: Option<String>,
 
-    /// List retained releases for the selected environment
+    /// Immutable saved full composition ID to restore
+    #[arg(long, conflicts_with_all = ["list", "release_id"])]
+    pub composition_id: Option<String>,
+
+    /// Service used to resolve Environment context when no default Service exists
+    #[arg(long)]
+    pub service_id: Option<String>,
+
+    /// List retained releases and saved full compositions for the selected environment
     #[arg(long)]
     pub list: bool,
 
@@ -318,6 +332,10 @@ pub struct DeployArgs {
     /// Platform environment ID or exact name
     #[arg(long)]
     pub environment: Option<String>,
+
+    /// Exact Product Service ID; omitted uses the configured default Service
+    #[arg(long, conflicts_with = "resume_deployment")]
+    pub service_id: Option<String>,
 
     /// Project ID (skip interactive selection)
     #[arg(long)]

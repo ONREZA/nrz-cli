@@ -65,7 +65,7 @@ fn prunes_only_incompatible_optional_packages_before_manifest_identity_and_size(
             .iter()
             .all(|file| !file.path.starts_with("node_modules/native-musl/"))
     );
-    let manifest = serde_json::from_value(json!({"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js"}],"routes":[]})).unwrap();
+    let manifest = serde_json::from_value(json!({"version":2,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js","runtime":{"network":crate::network_fixture::network()}}],"routes":[]})).unwrap();
     let plan = build_source_bundle_plan_with_scan(
         dir.path(),
         &manifest,
@@ -288,7 +288,7 @@ fn shared_descendants_and_their_aliases_survive_archive_extraction() {
         prune_optional_native_dependencies(dir.path(), scan_dir(dir.path()).unwrap(), &target())
             .unwrap();
     assert_eq!(result.packages, 0);
-    let manifest = serde_json::from_value(json!({"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"index.js"}],"routes":[]})).unwrap();
+    let manifest = serde_json::from_value(json!({"version":2,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"index.js","runtime":{"network":crate::network_fixture::network()}}],"routes":[]})).unwrap();
     let plan = build_source_bundle_plan_with_scan(
         dir.path(),
         &manifest,
@@ -345,7 +345,7 @@ fn real_sharp_loads_and_encodes_an_image_from_the_pruned_source_archive() {
         result.packages >= 2,
         "fixture must include both incompatible sharp and libvips packages"
     );
-    let manifest = serde_json::from_value(json!({"version":1,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js"}],"routes":[]})).unwrap();
+    let manifest = serde_json::from_value(json!({"version":2,"layers":[{"name":"server","target":"COMPUTE","directory":".","entry":"server.js","runtime":{"network":crate::network_fixture::network()}}],"routes":[]})).unwrap();
     let plan = build_source_bundle_plan_with_scan(
         &fixture,
         &manifest,
