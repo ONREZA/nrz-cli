@@ -11,6 +11,8 @@ use support::cli::{nrz, stdout_json};
 mod build;
 #[path = "cli_integration/config.rs"]
 mod config;
+#[path = "cli_integration/deployment_set.rs"]
+mod deployment_set;
 #[path = "cli_integration/detect.rs"]
 mod detect;
 #[path = "cli_integration/dev.rs"]
