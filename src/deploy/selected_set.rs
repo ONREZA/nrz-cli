@@ -365,11 +365,9 @@ fn local_checkouts(values: &[String]) -> anyhow::Result<BTreeMap<Uuid, PathBuf>>
 }
 
 fn git_revision(root: &Path, arguments: &[&str]) -> Option<String> {
-    let result = Command::new("git")
-        .args(arguments)
-        .current_dir(root)
-        .output()
-        .ok()?;
+    let mut command = Command::new("git");
+    super::ignored_build::remove_git_repository_environment(&mut command);
+    let result = command.args(arguments).current_dir(root).output().ok()?;
     result
         .status
         .success()
