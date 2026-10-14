@@ -2,10 +2,11 @@
 mod support;
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{OriginalUri, State},
-    http::{Method, StatusCode},
+    http::{HeaderMap, Method, StatusCode},
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use serde_json::json;
 use std::{
@@ -23,6 +24,7 @@ struct EdgeBuildApiState {
     install_command: Option<String>,
     build_toolchain: serde_json::Value,
     output_directory: Option<String>,
+    ignored_build_behavior: &'static str,
 }
 
 impl EdgeBuildApiState {
@@ -83,7 +85,7 @@ async fn edge_build_runner_context(
             "buildCommandSource": if state.build_command.is_some() {"USER"} else {"PRESET"},
             "outputDirectory": state.output_directory,
             "outputDirectorySource": if state.build_command.is_some() {"USER"} else {"PRESET"},
-            "ignoredBuildBehavior": "AUTOMATIC",
+            "ignoredBuildBehavior": state.ignored_build_behavior,
             "ignoredBuildFolder": null,
             "ignoredBuildCommand": null
         }
@@ -181,6 +183,7 @@ fn spawn_edge_build_handoff_mock_with_commands(
         install_command,
         build_toolchain,
         output_directory,
+        ignored_build_behavior: "AUTOMATIC",
     };
     let app = Router::new()
         .route(
@@ -267,6 +270,232 @@ fn source_bundle_manifest(
         })
         .map(|entry| serde_json::from_reader(entry).unwrap())
         .unwrap()
+}
+
+#[test]
+fn local_sets_publish_before_activation_and_keep_one_terminal_json() {
+    for scenario in ["complete", "register-error", "prepare-error", "skip"] {
+        let project = tempfile::tempdir().unwrap();
+        fs::write(project.path().join("index.html"), "<h1>Local set</h1>").unwrap();
+        let context = edge_build_execution_context();
+        let deployment = uuid::Uuid::now_v7();
+        let operation = uuid::Uuid::now_v7();
+        let key = uuid::Uuid::now_v7();
+        let upload_session = uuid::Uuid::now_v7();
+        let service = context["serviceId"].as_str().unwrap();
+        let receipt = project
+            .path()
+            .join(format!(".onreza/deployment-sets/{key}.json"));
+        fs::create_dir_all(receipt.parent().unwrap()).unwrap();
+        let expected_context: serde_json::Map<String, serde_json::Value> = [
+            "workspaceId",
+            "productId",
+            "productEnvironmentId",
+            "workspaceEnvironmentId",
+            "workspaceBindingGeneration",
+            "serviceId",
+            "sourceId",
+        ]
+        .into_iter()
+        .map(|name| (name.to_string(), context[name].clone()))
+        .collect();
+        fs::write(&receipt, json!({
+            "projectId":context["projectId"], "environmentId":context["environmentId"],
+            "environmentSelector":"preview", "local":{service:project.path()}, "all":false,
+            "selectedServices":[service], "request":{
+                "protocolVersion":"execution-context-v3", "environmentId":context["environmentId"],
+                "expectedGeneration":"7", "idempotencyKey":key, "selection":{"kind":"SERVICES"},
+                "services":[{"mode":"LOCAL", "serviceId":service, "branch":"main",
+                    "commitSha":"0123456789abcdef0123456789abcdef01234567", "expectedContext":expected_context}]
+            }
+        }).to_string()).unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let state = EdgeBuildApiState {
+            deployment_id: deployment.to_string(),
+            requests: Arc::clone(&requests),
+            application_runtime: serde_json::Value::Null,
+            build_command: Some(String::new()),
+            install_command: Some(String::new()),
+            build_toolchain: json!({"family":"NODE"}),
+            output_directory: Some(".".into()),
+            ignored_build_behavior: if scenario == "skip" {
+                "NEVER"
+            } else {
+                "AUTOMATIC"
+            },
+        };
+        let admitted = json!({"operationId":operation,"generation":"8","status":"PENDING","replayed":true,
+            "deployments":[{"id":deployment,"serviceId":service,"status":"BUILDING"}]});
+        let published = Arc::new(Mutex::new(
+            json!({"request":null,"graph":null,"digest":null}),
+        ));
+        let prepare_state = Arc::clone(&published);
+        let upload_state = Arc::clone(&published);
+        let status_state = Arc::clone(&published);
+        let app = Router::new()
+            .route("/v1/projects/{id}/deployments/admit-set", post(move || {
+                let admitted = admitted.clone();
+                async move { Json(admitted) }
+            }))
+            .route("/v1/deployments/{id}/runner-context", get(edge_build_runner_context))
+            .route("/v1/deployments/{id}/execution-context/materialize", post(edge_build_materialize))
+            .route("/v1/deployments/{id}/source", post(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri, Json(body):Json<serde_json::Value>| async move {
+                state.record(Method::POST, &uri);
+                assert_eq!(body["attempt"],1);
+                assert_eq!(body["manifest"]["version"].as_f64(),Some(2.0));
+                if scenario == "register-error" {
+                    (StatusCode::BAD_REQUEST,Json(json!({"code":"EDGE_RULES_DIVERGED","message":"pull reviewed rules", "details":{"field":"edgeRules.remote-7"}}))).into_response()
+                } else {
+                    Json(json!({"id":deployment,"status":"UPLOADING","url":null})).into_response()
+                }
+            }))
+            .route("/v1/deployments/{id}/prepare-upload", post(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri, headers:HeaderMap, Json(body):Json<serde_json::Value>| {
+                let published = Arc::clone(&prepare_state);
+                async move {
+                state.record(Method::POST, &uri);
+                if scenario == "prepare-error" {
+                    return (StatusCode::FORBIDDEN,Json(json!({"code":"LIMIT_EXCEEDED","message":"source limit", "details":{"limitType":"maxArtifactFiles","current":2,"limit":1,"remaining":0}}))).into_response();
+                }
+                let source_artifact = nrz_source_bundle::compute_source_artifact_id(
+                    edge_build_execution_context()["workspaceId"].as_str().unwrap(),
+                    body["logicalManifestSha256"].as_str().unwrap(),
+                    body["sourceSha256"].as_str().unwrap(),None,
+                );
+                published.lock().unwrap()["request"]=body.clone();
+                Json(json!({"bucket":"fixture","expiresAt":"2099-01-01T00:00:00Z",
+                    "fastPath":false,"kind":"source-upload","requiredComplete":"upload-complete",
+                    "presignedPut":{"mode":"single","url":format!("http://{}/source/fixture",headers["host"].to_str().unwrap()),
+                        "contentLength":body["sourceSizeBytes"].as_str().unwrap().parse::<u64>().unwrap(),"sha256":body["sourceSha256"],
+                        "headers":{"content-type":"application/zstd","if-none-match":"*"}},
+                    "sourceArtifactId":source_artifact,"sourceObjectKey":"source/fixture","uploadSessionId":upload_session})).into_response()
+            }}))
+            .route("/source/fixture",put(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri, bytes:Bytes| {
+                let published = Arc::clone(&upload_state);
+                async move {
+                    state.record(Method::PUT,&uri);
+                    let request = published.lock().unwrap()["request"].clone();
+                    assert_eq!(nrz_source_bundle::sha256_hex(&bytes),request["sourceSha256"].as_str().unwrap());
+                    assert_eq!(bytes.len() as u64,request["sourceSizeBytes"].as_str().unwrap().parse::<u64>().unwrap());
+                    let decoder = zstd::Decoder::new(&bytes[..]).unwrap();
+                    let mut archive = tar::Archive::new(decoder);
+                    let manifest:nrz_source_bundle::SourceLogicalManifest = archive.entries().unwrap().map(Result::unwrap)
+                        .find(|entry|entry.path().unwrap().as_ref()==std::path::Path::new(nrz_source_bundle::SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH))
+                        .map(|entry|serde_json::from_reader(entry).unwrap()).unwrap();
+                    let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph(request["logicalManifestSha256"].as_str().unwrap(),request["sourceSha256"].as_str().unwrap(),bytes.len() as u64,&manifest).unwrap();
+                    let mut published = published.lock().unwrap();
+                    published["digest"]=json!(graph.graph_digest());
+                    published["graph"]=serde_json::to_value(graph.into_wire()).unwrap();
+                    StatusCode::OK
+                }
+            }))
+            .route("/v1/deployments/{id}/upload-complete", post(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri, Json(body):Json<serde_json::Value>| async move {
+                state.record(Method::POST, &uri);
+                assert_eq!(body["uploadSessionId"],upload_session.to_string());
+                Json(json!({"kind":"source-upload-completed","deploymentId":deployment,"uploadSessionId":upload_session}))
+            }))
+            .route("/v1/deployments/{id}/execution-context/skip-before-source", post(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri| async move {
+                state.record(Method::POST, &uri);
+                Json(json!({"id":deployment,"accepted":true}))
+            }))
+            .route("/v1/deployments/{id}/status", get(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri| {
+                state.record(Method::GET,&uri);
+                let published = status_state.lock().unwrap().clone();
+                async move {
+                Json(json!({"id":deployment,"status":if scenario == "skip" {"skipped"} else {"live"},
+                    "url":null,"production":false,"error":null,"errorCode":null,"errorDetails":null,
+                    "runtimeArtifactGraphDigest":published["digest"],"runtimeArtifactGraph":published["graph"],"createdAt":"2026-10-14T00:00:00Z","readyAt":null}))
+            }}))
+            .fallback(reject_unexpected_edge_build_request)
+            .with_state(state);
+        let api = support::api_mock::spawn(app);
+        let output = nrz()
+            .timeout(std::time::Duration::from_secs(20))
+            .current_dir(project.path())
+            .env("NRZ_API_URL", api)
+            .env("NRZ_LOG_UPLOAD", "0")
+            .env_remove("NRZ_RUNNER")
+            .env_remove("NRZ_EDGE_BUILD_HANDOFF")
+            .env_remove("ONREZA_OUTPUT_DIR")
+            .args([
+                "--json",
+                "--token",
+                "test-token",
+                "deploy-set",
+                "--project-id",
+                context["projectId"].as_str().unwrap(),
+                "--environment",
+                "preview",
+                "--service-id",
+                service,
+                "--local",
+                &format!("{service}={}", project.path().display()),
+                "--idempotency-key",
+                &key.to_string(),
+                "--wait-timeout",
+                "1",
+            ])
+            .output()
+            .unwrap();
+        let terminal = stdout_json(&output);
+        assert_eq!(
+            output.status.success(),
+            scenario == "complete",
+            "{scenario}: {terminal}, stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let calls = requests.lock().unwrap();
+        let called = |path: &str| {
+            calls
+                .iter()
+                .any(|call| call == &format!("POST /v1/deployments/{deployment}/{path}"))
+        };
+        if scenario == "complete" {
+            assert_eq!(terminal["status"], "live");
+            assert_eq!(terminal["operation"]["operationId"], operation.to_string());
+            assert!(called("source") && called("prepare-upload") && called("upload-complete"));
+            assert!(calls.iter().any(|call| call == "PUT /source/fixture"));
+            let sequence = [
+                format!("POST /v1/deployments/{deployment}/source"),
+                format!("POST /v1/deployments/{deployment}/prepare-upload"),
+                "PUT /source/fixture".into(),
+                format!("POST /v1/deployments/{deployment}/upload-complete"),
+                format!("GET /v1/deployments/{deployment}/status"),
+            ];
+            let positions =
+                sequence.map(|request| calls.iter().position(|call| call == &request).unwrap());
+            assert!(
+                positions.windows(2).all(|pair| pair[0] < pair[1]),
+                "publication order: {calls:?}"
+            );
+        } else {
+            assert_eq!(terminal["details"]["operationId"], operation.to_string());
+            assert_eq!(terminal["details"]["idempotencyKey"], key.to_string());
+            assert_eq!(
+                terminal["details"]["receipt"],
+                receipt.to_string_lossy().as_ref()
+            );
+            match scenario {
+                "register-error" => {
+                    assert_eq!(terminal["code"], "EDGE_RULES_DIVERGED");
+                    assert_eq!(terminal["details"]["field"], "edgeRules.remote-7");
+                    assert!(called("source"));
+                    assert!(!called("prepare-upload"));
+                }
+                "prepare-error" => {
+                    assert_eq!(terminal["code"], "LIMIT_EXCEEDED");
+                    assert_eq!(terminal["details"]["limit"].as_f64(), Some(1.0));
+                    assert!(called("prepare-upload"));
+                    assert!(!called("upload-complete"));
+                }
+                "skip" => {
+                    assert_eq!(terminal["code"], "DEPLOY_SKIPPED");
+                    assert!(called("execution-context/skip-before-source"));
+                    assert!(!called("source"));
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
 }
 
 #[test]

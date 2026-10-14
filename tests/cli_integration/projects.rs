@@ -654,10 +654,14 @@ fn endpoints_keep_machine_stdout_separate_from_human_output() {
 fn services_discover_sources_and_configure_an_explicit_neighbor_service() {
     let service = "00000000-0000-0000-0000-000000000004";
     let source = "00000000-0000-0000-0000-000000000005";
+    let connection = "00000000-0000-0000-0000-000000000006";
+    let git_url = "https://github.com/onreza/private-api.git";
     let directory = tempfile::tempdir().unwrap();
     let configured = json!({"serviceId":service,"sourceId":source,"name":"private-api","sourceRef":"release","rootDirectory":"services/api"});
     let source_response =
         json!({"sourceId":source,"sourceType":"CLI","gitUrl":null,"sourceUrl":null});
+    let git_source_response =
+        json!({"sourceId":source,"sourceType":"GIT","gitUrl":git_url,"sourceUrl":git_url});
     let listed = json!({"canManage":true,"sources":[source_response.clone()],"services":[{
         "serviceId":service,"sourceId":source,"name":"private-api","sourceRef":"release","rootDirectory":"services/api",
         "sourceType":"CLI","gitUrl":null,"sourceUrl":null,"deletionRequestedAt":null,"isDefault":false
@@ -676,6 +680,34 @@ fn services_discover_sources_and_configure_an_explicit_neighbor_service() {
             "POST",
             format!("/v1/projects/{PROJECT}/sources"),
             Some(json!({"sourceType":"CLI"})),
+        ),
+        (
+            vec![
+                "create-source",
+                "--project-id",
+                PROJECT,
+                "--git-url",
+                git_url,
+            ],
+            git_source_response.clone(),
+            "POST",
+            format!("/v1/projects/{PROJECT}/sources"),
+            Some(json!({"sourceType":"GIT","gitUrl":git_url})),
+        ),
+        (
+            vec![
+                "create-source",
+                "--project-id",
+                PROJECT,
+                "--git-url",
+                git_url,
+                "--git-connection-id",
+                connection,
+            ],
+            git_source_response,
+            "POST",
+            format!("/v1/projects/{PROJECT}/sources"),
+            Some(json!({"sourceType":"GIT","gitUrl":git_url,"gitConnectionId":connection})),
         ),
         (
             vec![
