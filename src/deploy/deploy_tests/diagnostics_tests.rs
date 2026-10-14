@@ -117,6 +117,10 @@ fn source_registration_edge_rules_divergence_is_actionable() {
     assert_eq!(diagnostic.code, "EDGE_RULES_DIVERGED");
     assert!(diagnostic.message.contains("nrz rules pull"));
     assert!(diagnostic.message.contains("--force-rules"));
+    assert_eq!(
+        diagnostic.details.as_ref().unwrap()["errorCode"],
+        "EDGE_RULES_DIVERGED"
+    );
 }
 
 #[test]

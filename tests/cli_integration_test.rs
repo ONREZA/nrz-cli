@@ -33,6 +33,8 @@ mod kv;
 mod platform;
 #[path = "cli_integration/projects.rs"]
 mod projects;
+#[path = "cli_integration/rollback.rs"]
+mod rollback;
 #[path = "cli_integration/rules.rs"]
 mod rules;
 
