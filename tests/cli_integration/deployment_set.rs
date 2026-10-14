@@ -123,7 +123,13 @@ fn fresh_sets_publish_exact_selection_and_git_identity_then_replay_the_saved_req
             let checkout = root.path().join("checkout");
             std::fs::create_dir(&checkout).unwrap();
             let git = |args: &[&str]| {
-                let output = std::process::Command::new("git")
+                let mut command = std::process::Command::new("git");
+                for (name, _) in std::env::vars_os() {
+                    if name.to_string_lossy().starts_with("GIT_") {
+                        command.env_remove(name);
+                    }
+                }
+                let output = command
                     .current_dir(&checkout)
                     .args([
                         "-c",
@@ -224,6 +230,8 @@ fn fresh_sets_publish_exact_selection_and_git_identity_then_replay_the_saved_req
                 command
                     .current_dir(root.path())
                     .env("NRZ_API_URL", &api)
+                    .env("GIT_DIR", root.path().join("foreign.git"))
+                    .env("GIT_WORK_TREE", root.path().join("foreign-worktree"))
                     .env_remove("NRZ_RUNNER")
                     .env_remove("NRZ_EDGE_BUILD_HANDOFF")
                     .env_remove("ONREZA_OUTPUT_DIR")
