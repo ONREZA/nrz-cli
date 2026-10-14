@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.47.0] - 2026-10-14
+
+### ✅ Testing
+
+- **deploy:** reject unavailable services ([87317f9](https://github.com/ONREZA/nrz-cli/commit/87317f96a06d80bdf1aa7e61905c2f62284289c2))
+- **deploy:** cover selected service workflows ([1bc4d29](https://github.com/ONREZA/nrz-cli/commit/1bc4d29195d7a019013b5ad8a6762791e0276682))
+
+### 🐛 Bug Fixes
+
+- **deploy:** isolate checkout git routing ([8fcd846](https://github.com/ONREZA/nrz-cli/commit/8fcd846aace207d5833820dd29aeb9a89e6ad2af))
+- **deploy:** preserve admitted set workflows ([953ee66](https://github.com/ONREZA/nrz-cli/commit/953ee6613f02cc79beee2b596c3abd8448aeab64))
+
+### ✨ Features
+
+- **cli:** deploy selected service sets ([61573ba](https://github.com/ONREZA/nrz-cli/commit/61573ba5fdf8481d79edadd4d2ce853c0d102c91))
+
 ## [0.46.0] - 2026-10-13
 
 ### 🐛 Bug Fixes
