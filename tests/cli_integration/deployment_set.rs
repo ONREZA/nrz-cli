@@ -326,3 +326,57 @@ fn fresh_sets_publish_exact_selection_and_git_identity_then_replay_the_saved_req
         }
     }
 }
+
+#[test]
+fn fresh_sets_reject_deleted_and_unknown_services_before_admission() {
+    let project = Uuid::now_v7();
+    let active = Uuid::now_v7();
+    let retired = Uuid::now_v7();
+    let unexpected = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&unexpected);
+    let app = Router::new()
+        .route("/v1/projects/{id}/services", get(move || async move {
+            Json(json!({"canManage":true,"sources":[],"services":([active,retired].map(|id|json!({
+                "serviceId":id,"sourceId":project,"name":id.to_string(),"sourceRef":"main","rootDirectory":".",
+                "sourceType":"GIT","gitUrl":null,"sourceUrl":null,"isDefault":id==active,
+                "deletionRequestedAt":if id==retired {Some("2026-10-14T00:00:00Z")} else {None}
+            })))}))
+        }))
+        .fallback(move || {
+            observed.fetch_add(1,Ordering::SeqCst);
+            async {(StatusCode::BAD_REQUEST,Json(json!({"code":"INVALID_INPUT","message":"unexpected admission work"})))}
+        });
+    let api = support::api_mock::spawn(app);
+    for selected in [retired, Uuid::now_v7()] {
+        let directory = tempfile::tempdir().unwrap();
+        let output = nrz()
+            .current_dir(directory.path())
+            .env("NRZ_API_URL", &api)
+            .args([
+                "--json",
+                "--token",
+                "test-token",
+                "deploy-set",
+                "--project-id",
+                &project.to_string(),
+                "--environment",
+                "production",
+                "--service-id",
+                &selected.to_string(),
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(
+            stdout_json(&output)["error"]
+                .as_str()
+                .unwrap()
+                .contains("selected Service is unavailable")
+        );
+    }
+    assert_eq!(
+        unexpected.load(Ordering::SeqCst),
+        0,
+        "unavailable Services must not resolve or admit a deployment"
+    );
+}
