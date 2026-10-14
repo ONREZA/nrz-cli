@@ -478,6 +478,13 @@ fn map_source_registration_error(error: anyhow::Error, json: bool, context: &str
         return error.context(context.to_string());
     };
     if let Some(mapped) = map_edge_rules_diverged_error(api_error, json, context) {
+        if !json {
+            let mut diagnostic =
+                crate::errors::CliError::new("EDGE_RULES_DIVERGED", format!("{mapped:#}"))
+                    .phase(output::Phase::Deploy);
+            diagnostic.details = api_error.details.clone();
+            return diagnostic.into_anyhow();
+        }
         return mapped;
     }
     let message = format_structured_api_failure(context, api_error);
@@ -568,6 +575,7 @@ async fn resume_deploy(request: ResumeDeployRequest<'_>) -> anyhow::Result<()> {
         project_id,
         deployment_attempt_id: &deployment_attempt_id,
         json,
+        emit_result,
         plan: &upload_plan,
         runtime_artifact_files: &runtime_artifact_files,
     })

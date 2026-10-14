@@ -14,6 +14,7 @@ pub(super) struct PrepareUploadAndCompleteRequest<'a> {
     pub(super) project_id: &'a str,
     pub(super) deployment_attempt_id: &'a str,
     pub(super) json: bool,
+    pub(super) emit_result: bool,
     pub(super) plan: &'a SourceBundlePlan,
     pub(super) runtime_artifact_files: &'a crate::artifact::RuntimeArtifactFileBreakdown,
 }
@@ -21,6 +22,7 @@ pub(super) struct PrepareUploadAndCompleteRequest<'a> {
 pub(super) async fn prepare_upload_and_complete(
     request: PrepareUploadAndCompleteRequest<'_>,
 ) -> anyhow::Result<()> {
+    let report_json_errors = request.json && request.emit_result;
     let deployment_id = parse_uuid("deployment id", request.deployment_id)?;
     let workspace_id = parse_uuid("workspace id", request.workspace_id)?;
     let project_id = parse_uuid("project id", request.project_id)?;
@@ -40,7 +42,9 @@ pub(super) async fn prepare_upload_and_complete(
         },
     )
     .await
-    .map_err(|error| map_publication_error(error, request.json, request.runtime_artifact_files))?;
+    .map_err(|error| {
+        map_publication_error(error, report_json_errors, request.runtime_artifact_files)
+    })?;
     let transport = request.client.source_publication_transport();
     let observer = CliPublicationObserver::new(request.json);
 
@@ -54,7 +58,9 @@ pub(super) async fn prepare_upload_and_complete(
         bundle: &bundle,
     })
     .await
-    .map_err(|error| map_publication_error(error, request.json, request.runtime_artifact_files))?;
+    .map_err(|error| {
+        map_publication_error(error, report_json_errors, request.runtime_artifact_files)
+    })?;
     Ok(())
 }
 
@@ -159,10 +165,13 @@ pub(super) fn map_publication_error(
                 details.as_ref().or(api_error.details.as_ref()),
             );
         }
-        if is_file_limit {
+        if matches!(
+            api_error.code.as_str(),
+            "LIMIT_EXCEEDED" | "SUBSCRIPTION_REQUIRED"
+        ) {
             let mut mapped =
                 crate::errors::CliError::new(&api_error.code, message).phase(output::Phase::Deploy);
-            if let Some(details) = details {
+            if let Some(details) = details.or_else(|| api_error.details.clone()) {
                 mapped = mapped.details(details);
             }
             return mapped.into_anyhow();

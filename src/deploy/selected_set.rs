@@ -70,92 +70,143 @@ pub(crate) async fn run(
                 )
             })?
     };
-    let jobs = admitted["deployments"]
-        .as_array()
-        .context("selected admission omitted jobs")?;
-    ensure!(
-        !jobs.is_empty() && admitted["operationId"].as_str().is_some(),
-        "selected admission omitted its operation"
-    );
-    let mut admitted_services = jobs
-        .iter()
-        .map(|job| {
-            job["serviceId"]
+    let result = async {
+        let jobs = admitted["deployments"]
+            .as_array()
+            .context("selected admission omitted jobs")?;
+        ensure!(
+            !jobs.is_empty() && admitted["operationId"].as_str().is_some(),
+            "selected admission omitted its operation"
+        );
+        let mut admitted_services = jobs
+            .iter()
+            .map(|job| {
+                job["serviceId"]
+                    .as_str()
+                    .context("job omitted Service identity")?
+                    .parse::<Uuid>()
+                    .context("invalid admitted Service identity")
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        admitted_services.sort();
+        ensure!(
+            admitted_services.windows(2).all(|pair| pair[0] != pair[1]),
+            "admission repeated a Service"
+        );
+        ensure!(
+            pending.all || admitted_services == pending.selected_services,
+            "admission changed the selected Service set"
+        );
+        ensure!(
+            pending
+                .local
+                .keys()
+                .all(|id| admitted_services.contains(id)),
+            "admission omitted a mapped local Source"
+        );
+        for job in jobs {
+            let service_id = job["serviceId"]
                 .as_str()
                 .context("job omitted Service identity")?
-                .parse::<Uuid>()
-                .context("invalid admitted Service identity")
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    admitted_services.sort();
-    ensure!(
-        admitted_services.windows(2).all(|pair| pair[0] != pair[1]),
-        "admission repeated a Service"
-    );
-    ensure!(
-        pending.all || admitted_services == pending.selected_services,
-        "admission changed the selected Service set"
-    );
-    ensure!(
-        pending
-            .local
-            .keys()
-            .all(|id| admitted_services.contains(id)),
-        "admission omitted a mapped local Source"
-    );
-    for job in jobs {
-        let service_id = job["serviceId"]
-            .as_str()
-            .context("job omitted Service identity")?
-            .parse::<Uuid>()?;
-        if let Some(path) = pending.local.get(&service_id) {
-            if job["status"] != "BUILDING" {
-                continue;
-            }
-            let deployment_id = job["id"]
-                .as_str()
-                .context("job omitted deployment identity")?
                 .parse::<Uuid>()?;
-            let config = nrz::config::ProjectConfig::default();
-            let deploy = crate::cli::DeployArgs::try_parse_from([
-                "deploy",
-                path.to_str().context("checkout path is not UTF-8")?,
-            ])?;
-            super::workflow::publish_admitted(deploy, json_mode, Some(&resolved_token), workspace, &config, deployment_id).await
-                .with_context(|| format!("Service {service_id} publication failed; admitted operation {} remains governed by server cancellation and recovery", admitted["operationId"]))?;
+            if let Some(path) = pending.local.get(&service_id) {
+                if job["status"] != "BUILDING" {
+                    continue;
+                }
+                let deployment_id = job["id"]
+                    .as_str()
+                    .context("job omitted deployment identity")?
+                    .parse::<Uuid>()?;
+                let config = nrz::config::ProjectConfig::default();
+                let deploy = crate::cli::DeployArgs::try_parse_from([
+                    "deploy",
+                    path.to_str().context("checkout path is not UTF-8")?,
+                ])?;
+                super::workflow::publish_admitted(
+                    deploy,
+                    json_mode,
+                    Some(&resolved_token),
+                    workspace,
+                    &config,
+                    deployment_id,
+                )
+                .await
+                .with_context(|| format!("Service {service_id} publication failed"))?;
+            }
         }
-    }
-    let anchor = jobs[0]["id"]
-        .as_str()
-        .context("selected admission omitted anchor identity")?;
-    let state = super::activation::wait_for_activation(
-        super::activation::ActivationWait {
-            deployment_id: anchor,
-            timeout: Duration::from_secs(args.wait_timeout.into()),
-        },
-        || async { client.deployment_status(anchor).await?.try_into() },
-        |_| {},
-    )
-    .await
-    .with_context(|| {
-        format!(
-            "Service set {} was admitted; retry receipt {} is preserved",
-            admitted["operationId"],
-            receipt.display()
+        let anchor = jobs[0]["id"]
+            .as_str()
+            .context("selected admission omitted anchor identity")?;
+        let state = super::activation::wait_for_activation(
+            super::activation::ActivationWait {
+                deployment_id: anchor,
+                timeout: Duration::from_secs(args.wait_timeout.into()),
+            },
+            || async { client.deployment_status(anchor).await?.try_into() },
+            |_| {},
         )
-    })?;
-    if json_mode {
-        output::json_output(
-            &json!({ "operation": admitted, "status": state.status, "receipt": receipt }),
-        );
-    } else {
-        output::success(
-            false,
-            format!("Service set {} is active", admitted["operationId"]),
-            output::Phase::Deploy,
-        );
+        .await?;
+        if json_mode {
+            output::json_output(
+                &json!({ "operation": admitted, "status": state.status, "receipt": receipt }),
+            );
+        } else {
+            output::success(
+                false,
+                format!("Service set {} is active", admitted["operationId"]),
+                output::Phase::Deploy,
+            );
+        }
+        Ok(())
     }
-    Ok(())
+    .await;
+    result.map_err(|error| with_set_recovery(error, &admitted["operationId"], key, &receipt))
+}
+
+fn with_set_recovery(
+    mut error: anyhow::Error,
+    operation_id: &Value,
+    key: Uuid,
+    receipt: &Path,
+) -> anyhow::Error {
+    if error.downcast_ref::<crate::errors::CliError>().is_none() {
+        let (code, details) =
+            if let Some(api) = error.downcast_ref::<crate::api::StructuredApiError>() {
+                (api.code.clone(), api.details.clone())
+            } else if let Some(api) = error
+                .downcast_ref::<nrz_source_publisher::SourcePublicationError>()
+                .and_then(nrz_source_publisher::SourcePublicationError::structured_control_plane)
+            {
+                (api.code.clone(), api.details.clone())
+            } else if let Some(coded) = error.downcast_ref::<output::CodedError>() {
+                (coded.code.clone(), None)
+            } else {
+                ("DEPLOY_SET_FAILED".into(), None)
+            };
+        let mut diagnostic =
+            crate::errors::CliError::new(code, format!("{error:#}")).phase(output::Phase::Deploy);
+        diagnostic.details = details;
+        error = diagnostic.with_source(error).into_anyhow();
+    }
+    let context = format!(
+        "Service set {operation_id} was admitted; retry --idempotency-key {key}; command receipt {} is preserved",
+        receipt.display()
+    );
+    if let Some(diagnostic) = error.downcast_mut::<crate::errors::CliError>() {
+        diagnostic.message = format!("{context}: {}", diagnostic.message);
+        let details = diagnostic.details.get_or_insert_with(|| json!({}));
+        if !details.is_object() {
+            *details = json!({"originalDetails": details.take()});
+        }
+        if let Some(details) = details.as_object_mut() {
+            details.insert("operationId".into(), operation_id.clone());
+            details.insert("idempotencyKey".into(), json!(key));
+            details.insert("receipt".into(), json!(receipt));
+        }
+        error
+    } else {
+        unreachable!("selected-set errors carry a terminal diagnostic")
+    }
 }
 
 async fn prepare_command(

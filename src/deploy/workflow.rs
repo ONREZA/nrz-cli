@@ -29,7 +29,7 @@ async fn run_mode(
     config: &ProjectConfig,
     admitted_id: Option<Uuid>,
 ) -> anyhow::Result<()> {
-    let resume_deployment_id = args
+    let runner_resume_deployment_id = args
         .resume_deployment
         .as_deref()
         .map(str::trim)
@@ -45,8 +45,8 @@ async fn run_mode(
                 .into_anyhow()
             })
         })
-        .transpose()?
-        .or(admitted_id);
+        .transpose()?;
+    let resume_deployment_id = runner_resume_deployment_id.or(admitted_id);
     edge_handoff::validate_resume_arguments(&args)?;
     let mut command_context = if resume_deployment_id.is_some() {
         crate::context::CommandContext::resolve_platform_root(&args.dir, config, json)?
@@ -68,8 +68,9 @@ async fn run_mode(
     // Verify auth early to avoid wasting time on build if token is invalid
     let tok = auth::resolve_token(token, workspace)?;
     let client = ApiClient::authenticated(&tok)?;
-    let edge_build_handoff =
-        edge_handoff::EdgeBuildHandoffOutput::from_process_environment(resume_deployment_id)?;
+    let edge_build_handoff = edge_handoff::EdgeBuildHandoffOutput::from_process_environment(
+        runner_resume_deployment_id,
+    )?;
     let dependency_packaging = if edge_build_handoff.is_some() {
         crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization
     } else {
@@ -550,7 +551,7 @@ async fn run_mode(
             deployment.attempt,
             deploy_plan.manifest_raw.clone(),
             conform_functions_to_wire_contract(deploy_plan.functions)?,
-            json,
+            json && admitted_id.is_none(),
         )
         .await?;
         source_registered = true;
@@ -626,6 +627,7 @@ async fn run_mode(
             project_id: &project_id,
             deployment_attempt_id: &deployment_attempt_id,
             json,
+            emit_result: true,
             plan: &upload_plan,
             runtime_artifact_files: &deploy_runtime_artifact_files,
         })

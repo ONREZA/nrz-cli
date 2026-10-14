@@ -66,6 +66,11 @@ impl CliError {
         anyhow::Error::new(self)
     }
 
+    pub(crate) fn with_source(mut self, error: anyhow::Error) -> Self {
+        self.source = Some(error.into_boxed_dyn_error());
+        self
+    }
+
     pub(crate) fn json(&self) -> CliErrorJson<'_> {
         CliErrorJson {
             error: &self.message,
