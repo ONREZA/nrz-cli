@@ -54,3 +54,37 @@ async fn generated_status_preserves_failure_authority_despite_unrecognized_diagn
         server.abort();
     }
 }
+
+#[test]
+fn generated_admission_optional_nullable_contract_preserves_old_server_responses() {
+    for admission in [None, Some(Value::Null)] {
+        let mut wire = status();
+        if let Some(admission) = admission {
+            wire["admission"] = admission;
+        }
+        let generated: nrz_api::Status200Response = serde_json::from_value(wire).unwrap();
+        let adapted: super::activation::DeploymentStatusResponse = generated.try_into().unwrap();
+        assert_eq!(adapted.status, "failed");
+        assert!(adapted.admission.is_none());
+    }
+}
+
+#[test]
+fn generated_status_adapter_accepts_server_admission_wire() {
+    let admission = json!({
+        "startedAt":"2026-10-15T12:00:00Z",
+        "lastProgressAt":"2026-10-15T12:00:25Z",
+        "waitingMembers":[{
+            "assignmentId":"00000000-0000-4000-8000-000000000001",
+            "phase":"WAITING_CAPACITY",
+            "startedAt":"2026-10-15T12:00:05Z",
+            "lastProgressAt":"2026-10-15T12:00:15Z"
+        }]
+    });
+    let mut wire = status();
+    wire["admission"] = admission.clone();
+    let generated: nrz_api::Status200Response = serde_json::from_value(wire).unwrap();
+    let adapted: super::activation::DeploymentStatusResponse = generated.try_into().unwrap();
+    assert_eq!(adapted.status, "failed");
+    assert_eq!(serde_json::to_value(adapted.admission).unwrap(), admission);
+}

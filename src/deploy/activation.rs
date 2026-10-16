@@ -67,7 +67,7 @@ where
                         "status response belongs to a different deployment",
                     ));
                 }
-                on_status(&status.status);
+                on_status(&activation_progress(&status, chrono::Utc::now()));
                 let code = match status.status.as_str() {
                     "live" => return Ok(status),
                     "failed" => Some("DEPLOY_FAILED"),
@@ -93,6 +93,7 @@ where
                         "lastKnownStatus": status.status,
                         "url": status.url,
                         "errorCode": status.error_code,
+                        "admission": status.admission,
                     }))
                     .into_anyhow());
                 }
@@ -110,12 +111,13 @@ where
     Err(CliError::new(
         "DEPLOY_WAIT_TIMEOUT",
         format!(
-            "stopped waiting for deployment {} after {}s; last known status: {}. URL: {}. \
+            "stopped waiting for deployment {} after {}s; last known status: {}. URL: {}.{} \
              The CLI did not cancel the deployment; it may still complete on the server.",
             request.deployment_id,
             request.timeout.as_secs(),
             status.unwrap_or("unknown"),
             url.unwrap_or("unavailable"),
+            admission_progress_suffix(last_status.as_ref()),
         ),
     )
     .phase(Phase::Deploy)
@@ -125,6 +127,7 @@ where
         "url": url,
         "waitTimeoutSeconds": request.timeout.as_secs(),
         "lastStatusReadError": last_read_error,
+        "admission": last_status.as_ref().and_then(|status|status.admission.as_ref()),
     }))
     .hint("Check this deployment in the dashboard before retrying. Use --wait-timeout SECONDS to wait longer on future deployments.")
     .into_anyhow())
@@ -138,8 +141,8 @@ fn status_read_error(
 ) -> anyhow::Error {
     let url = last_status.and_then(|status| status.url.as_deref());
     CliError::new(code, format!(
-        "could not read deployment {} status ({}): {}. The CLI did not cancel the deployment; check its status in the dashboard.",
-        request.deployment_id, url.unwrap_or("unavailable"), reason,
+        "could not read deployment {} status ({}): {}.{} The CLI did not cancel the deployment; check its status in the dashboard.",
+        request.deployment_id, url.unwrap_or("unavailable"), reason, admission_progress_suffix(last_status),
     ))
     .phase(Phase::Deploy)
     .details(serde_json::json!({
@@ -147,6 +150,7 @@ fn status_read_error(
         "lastKnownStatus": last_status.map(|status| status.status.as_str()),
         "url": url,
         "lastStatusReadError": reason,
+        "admission": last_status.and_then(|status|status.admission.as_ref()),
     }))
     .into_anyhow()
 }
@@ -162,6 +166,7 @@ pub(super) struct DeploymentStatusResponse {
     pub(super) error: Option<String>,
     pub(super) error_code: Option<String>,
     pub(super) error_details: Option<DeploymentErrorDetails>,
+    pub(super) admission: Option<nrz_api::Status200ResponseAdmission>,
     #[allow(dead_code)]
     pub(super) created_at: Option<String>,
     #[allow(dead_code)]
@@ -208,6 +213,7 @@ impl TryFrom<nrz_api::Status200Response> for DeploymentStatusResponse {
             error: value.error,
             error_code: value.error_code,
             error_details,
+            admission: value.admission.flatten(),
             created_at: Some(
                 value
                     .created_at
@@ -220,13 +226,81 @@ impl TryFrom<nrz_api::Status200Response> for DeploymentStatusResponse {
     }
 }
 
+fn admission_progress_suffix(status: Option<&DeploymentStatusResponse>) -> String {
+    status
+        .filter(|status| status.admission.is_some())
+        .map(|status| {
+            format!(
+                " Progress: {}.",
+                activation_progress(status, chrono::Utc::now())
+            )
+        })
+        .unwrap_or_default()
+}
+
+pub(super) fn activation_progress(
+    status: &DeploymentStatusResponse,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    use nrz_api::Status200ResponseAdmissionWaitingMemberPhase as Waiting;
+    let Some(admission) = &status.admission else {
+        return status.status.clone();
+    };
+    let age = |instant: chrono::DateTime<chrono::Utc>| {
+        now.signed_duration_since(instant).num_seconds().max(0)
+    };
+    if admission.waiting_members.is_empty() {
+        return format!(
+            "{}; admission {}s, last progress {}s ago",
+            status.status,
+            age(admission.started_at),
+            age(admission.last_progress_at)
+        );
+    }
+    let mut phases = [0; 4];
+    for member in &admission.waiting_members {
+        phases[match member.phase {
+            Waiting::WaitingPolicy => 0,
+            Waiting::WaitingPlacement => 1,
+            Waiting::WaitingCapacity => 2,
+            Waiting::WaitingRecipient => 3,
+        }] += 1;
+    }
+    let waiting = ["policy", "placement", "capacity", "recipient"]
+        .into_iter()
+        .zip(phases)
+        .filter(|(_, count)| *count > 0)
+        .map(|(phase, count)| format!("{phase} ({count})"))
+        .collect::<Vec<_>>();
+    let phase_age = admission
+        .waiting_members
+        .iter()
+        .map(|member| age(member.started_at))
+        .max()
+        .unwrap_or_else(|| age(admission.started_at));
+    let progress_age = admission
+        .waiting_members
+        .iter()
+        .map(|member| age(member.last_progress_at))
+        .max()
+        .unwrap_or_else(|| age(admission.last_progress_at));
+    format!(
+        "{}; waiting for {}; admission {}s, oldest phase {}s, oldest progress {}s ago",
+        status.status,
+        waiting.join(", "),
+        age(admission.started_at),
+        phase_age,
+        progress_age
+    )
+}
+
 pub(super) fn format_deployment_failure(error: &str, status: &DeploymentStatusResponse) -> String {
     let Some(details) = status
         .error_details
         .as_ref()
         .and_then(|details| details.runtime_startup_failure.as_ref())
     else {
-        return error.to_string();
+        return format!("{error}{}", admission_progress_suffix(Some(status)));
     };
 
     let mut lines = Vec::new();
@@ -294,5 +368,9 @@ pub(super) fn format_deployment_failure(error: &str, status: &DeploymentStatusRe
         lines.push(format!("Recent runtime output:\n{}", log_tail.trim()));
     }
 
-    lines.join("\n")
+    format!(
+        "{}{}",
+        lines.join("\n"),
+        admission_progress_suffix(Some(status))
+    )
 }

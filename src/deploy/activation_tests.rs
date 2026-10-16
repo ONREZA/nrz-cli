@@ -5,7 +5,8 @@ use clap::Parser;
 use tokio::time::Instant;
 
 use super::activation::{
-    ActivationWait, DeploymentStatusResponse, is_activation_observation_error, wait_for_activation,
+    ActivationWait, DeploymentStatusResponse, activation_progress, is_activation_observation_error,
+    wait_for_activation,
 };
 use crate::cli::{Cli, Command};
 use crate::errors::find_cli_error;
@@ -24,6 +25,84 @@ fn status(value: &str) -> DeploymentStatusResponse {
         "url": "https://current.example.test",
     }))
     .unwrap()
+}
+
+fn admitted_status(state: &str) -> DeploymentStatusResponse {
+    serde_json::from_value(serde_json::json!({
+        "id":"dep-1","status":state,"url":null,
+        "admission":{"startedAt":"2026-10-15T12:00:00Z","lastProgressAt":"2026-10-15T12:00:25Z",
+            "waitingMembers":[
+                {"assignmentId":"00000000-0000-4000-8000-000000000001","phase":"WAITING_POLICY","startedAt":"2026-10-15T12:00:05Z","lastProgressAt":"2026-10-15T12:00:15Z"},
+                {"assignmentId":"00000000-0000-4000-8000-000000000002","phase":"WAITING_CAPACITY","startedAt":"2026-10-15T12:00:20Z","lastProgressAt":"2026-10-15T12:00:25Z"}
+            ]}
+    })).unwrap()
+}
+
+#[test]
+fn progress_reports_typed_waiting_phases_and_oldest_member_ages() {
+    let now = "2026-10-15T12:00:30Z".parse().unwrap();
+    let progress = activation_progress(&admitted_status("smoke_testing"), now);
+    assert!(progress.contains("policy (1), capacity (1)"));
+    assert!(progress.contains("admission 30s, oldest phase 25s, oldest progress 15s ago"));
+    assert_eq!(
+        activation_progress(&status("ingesting"), now),
+        "ingesting",
+        "older servers retain status-only progress"
+    );
+}
+
+#[test]
+fn empty_waiting_members_preserve_lifecycle_and_general_progress() {
+    for state in ["smoke_testing", "live"] {
+        let mut status = admitted_status(state);
+        status.admission.as_mut().unwrap().waiting_members.clear();
+        let progress = activation_progress(&status, "2026-10-15T12:00:30Z".parse().unwrap());
+        assert_eq!(
+            progress,
+            format!("{state}; admission 30s, last progress 5s ago")
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn timeout_read_error_and_terminal_outcome_keep_typed_admission_details() {
+    for mode in ["timeout", "read_error", "terminal"] {
+        let mut calls = 0;
+        let error = wait_for_activation(
+            request(4),
+            || {
+                calls += 1;
+                if mode == "read_error" && calls > 1 {
+                    return ready(Err(anyhow::anyhow!("status unavailable")));
+                }
+                ready(Ok(admitted_status(if mode == "terminal" {
+                    "failed"
+                } else {
+                    "smoke_testing"
+                })))
+            },
+            |_| {},
+        )
+        .await
+        .unwrap_err();
+        let value = serde_json::to_value(find_cli_error(&error).unwrap().json()).unwrap();
+        assert_eq!(
+            value["details"]["admission"]["waitingMembers"][0]["phase"],
+            "WAITING_POLICY"
+        );
+        assert_eq!(
+            value["details"]["admission"]["startedAt"],
+            "2026-10-15T12:00:00Z"
+        );
+        assert_eq!(
+            value["code"],
+            match mode {
+                "timeout" => "DEPLOY_WAIT_TIMEOUT",
+                "read_error" => "DEPLOY_STATUS_UNAVAILABLE",
+                _ => "DEPLOY_FAILED",
+            }
+        );
+    }
 }
 
 #[test]

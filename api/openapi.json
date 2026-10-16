@@ -20578,6 +20578,66 @@
                         }
                       ]
                     },
+                    "admission": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "startedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "lastProgressAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "waitingMembers": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "assignmentId": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "phase": {
+                                    "enum": [
+                                      "WAITING_POLICY",
+                                      "WAITING_PLACEMENT",
+                                      "WAITING_CAPACITY",
+                                      "WAITING_RECIPIENT"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "startedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "lastProgressAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "assignmentId",
+                                  "phase",
+                                  "startedAt",
+                                  "lastProgressAt"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "startedAt",
+                            "lastProgressAt",
+                            "waitingMembers"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "runtimeArtifactGraphDigest": {
                       "anyOf": [
                         {

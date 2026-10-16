@@ -311,6 +311,7 @@ fn format_deployment_failure_includes_runtime_startup_details() {
         }),
         created_at: None,
         ready_at: None,
+        admission: None,
     };
 
     let msg = format_deployment_failure("Pre-warm failed", &status);

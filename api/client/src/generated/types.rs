@@ -22918,6 +22918,55 @@ pub struct ErrorResponse {
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Status200ResponseAdmissionWaitingMemberPhase {
+    #[serde(rename = "WAITING_POLICY")]
+    #[default]
+    WaitingPolicy,
+    #[serde(rename = "WAITING_PLACEMENT")]
+    WaitingPlacement,
+    #[serde(rename = "WAITING_CAPACITY")]
+    WaitingCapacity,
+    #[serde(rename = "WAITING_RECIPIENT")]
+    WaitingRecipient,
+}
+impl core::fmt::Display for Status200ResponseAdmissionWaitingMemberPhase {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::WaitingPolicy => write!(f, "WAITING_POLICY"),
+            Self::WaitingPlacement => write!(f, "WAITING_PLACEMENT"),
+            Self::WaitingCapacity => write!(f, "WAITING_CAPACITY"),
+            Self::WaitingRecipient => write!(f, "WAITING_RECIPIENT"),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Status200ResponseAdmissionWaitingMember {
+    #[serde(rename = "assignmentId")]
+    pub assignment_id: uuid::Uuid,
+    pub phase: Status200ResponseAdmissionWaitingMemberPhase,
+    #[serde(rename = "startedAt")]
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "lastProgressAt")]
+    pub last_progress_at: chrono::DateTime<chrono::Utc>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+pub struct Status200ResponseAdmission {
+    #[serde(rename = "startedAt")]
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "lastProgressAt")]
+    pub last_progress_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "waitingMembers")]
+    pub waiting_members: Vec<Status200ResponseAdmissionWaitingMember>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum Status200ResponseRuntimeArtifactGraphSchemaVersion {
     #[serde(rename = "RUNTIME_ARTIFACT_GRAPH_V2.0")]
     #[default]
@@ -23448,6 +23497,8 @@ pub struct Status200Response {
     #[serde(deserialize_with = "Option::deserialize", rename = "errorDetails")]
     #[serialize_always]
     pub error_details: Option<Box<T09>>,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub admission: Option<Option<Status200ResponseAdmission>>,
     #[serde(
         deserialize_with = "Option::deserialize",
         rename = "runtimeArtifactGraphDigest"
