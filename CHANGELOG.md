@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.47.1] - 2026-10-17
+
+### 🐛 Bug Fixes
+
+- **cli:** preserve remote detection semantics ([cda349b](https://github.com/ONREZA/nrz-cli/commit/cda349b05c9aec4f248791917bd50a96148e545f))
+- **deploy:** report admission wait progress ([402e36b](https://github.com/ONREZA/nrz-cli/commit/402e36b589d2261620c919b59aaaf76e354550d2))
+
 ## [0.47.0] - 2026-10-14
 
 ### ✅ Testing
