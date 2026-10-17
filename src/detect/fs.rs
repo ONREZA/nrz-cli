@@ -15,7 +15,7 @@ pub(super) const MAX_DETECTION_CONTENT_FILES: usize = 256;
 const MAX_DETECTION_PATH_BYTES: usize = 1024;
 pub(super) const MAX_DETECTION_PATH_DEPTH: usize = 64;
 pub(super) const MAX_DETECTION_FILE_CONTENT_BYTES: usize = 512 * 1024;
-const MAX_DETECTION_TOTAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
+pub(super) const MAX_DETECTION_TOTAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 
 /// Abstract filesystem for detection logic.
 pub trait Fs {
@@ -48,6 +48,44 @@ pub struct LocalFs {
 }
 
 impl LocalFs {
+    pub fn validate_content_limits(&self) -> anyhow::Result<()> {
+        let mut total = 0u64;
+        for path in DETECTION_CONTENT_FILES {
+            let rule = super::content::content_rule(path);
+            if matches!(rule.mode, super::content::ContentMode::Optional) {
+                continue;
+            }
+            let Some(full) = self.resolve_existing(path) else {
+                continue;
+            };
+            let metadata = std::fs::metadata(full)?;
+            if !metadata.is_file() {
+                continue;
+            }
+            if matches!(rule.mode, super::content::ContentMode::Prefix) {
+                total += self
+                    .read_file_prefix(path, rule.max_bytes)
+                    .map_or(0, |text| text.len()) as u64;
+                continue;
+            }
+            anyhow::ensure!(
+                metadata.len() <= rule.max_bytes as u64,
+                "detection file content exceeds {} bytes: {path}",
+                rule.max_bytes
+            );
+            let content = self
+                .read_file(path)
+                .ok_or_else(|| anyhow::anyhow!("could not read required detection file: {path}"))?;
+            total += content.len() as u64;
+        }
+        anyhow::ensure!(
+            total <= MAX_DETECTION_TOTAL_CONTENT_BYTES as u64,
+            "required detection file contents exceed {} bytes in total",
+            MAX_DETECTION_TOTAL_CONTENT_BYTES
+        );
+        Ok(())
+    }
+
     pub fn new(root: &Path) -> Self {
         let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         Self {
@@ -108,10 +146,20 @@ impl Fs for LocalFs {
         let mut bytes = Vec::with_capacity(max_bytes);
         std::fs::File::open(&full)
             .ok()?
-            .take(max_bytes as u64)
+            .take(max_bytes.saturating_add(1) as u64)
             .read_to_end(&mut bytes)
             .ok()?;
-        Some(String::from_utf8_lossy(&bytes).into_owned())
+        let truncated = bytes.len() > max_bytes;
+        bytes.truncate(max_bytes);
+        match std::str::from_utf8(&bytes) {
+            Ok(text) => Some(text.to_owned()),
+            Err(error) if truncated && error.error_len().is_none() => Some(
+                std::str::from_utf8(&bytes[..error.valid_up_to()])
+                    .ok()?
+                    .to_owned(),
+            ),
+            Err(_) => None,
+        }
     }
 
     fn list_dir(&self, path: &str) -> Vec<String> {
@@ -157,28 +205,28 @@ impl VirtualFs {
         }
         let manifest: VirtualFsManifest = serde_json::from_str(json)?;
         if manifest.tree.len() > MAX_DETECTION_TREE_ENTRIES {
-            anyhow::bail!(
-                "detection manifest contains too many tree entries (max {})",
-                MAX_DETECTION_TREE_ENTRIES
-            );
+            return Err(super::content::InputLimit::TreeEntries(MAX_DETECTION_TREE_ENTRIES).into());
         }
         if manifest.files.len() > MAX_DETECTION_CONTENT_FILES {
-            anyhow::bail!(
-                "detection manifest contains too many file contents (max {})",
-                MAX_DETECTION_CONTENT_FILES
+            return Err(
+                super::content::InputLimit::ContentFiles(MAX_DETECTION_CONTENT_FILES).into(),
             );
         }
-        let total_content_bytes = manifest.files.values().try_fold(0usize, |total, content| {
-            if content.len() > MAX_DETECTION_FILE_CONTENT_BYTES {
-                anyhow::bail!(
-                    "detection file content exceeds {} bytes",
-                    MAX_DETECTION_FILE_CONTENT_BYTES
-                );
-            }
-            total
-                .checked_add(content.len())
-                .ok_or_else(|| anyhow::anyhow!("detection file content size overflow"))
-        })?;
+        let total_content_bytes =
+            manifest
+                .files
+                .iter()
+                .try_fold(0usize, |total, (path, content)| {
+                    if content.len() > MAX_DETECTION_FILE_CONTENT_BYTES {
+                        anyhow::bail!(
+                            "detection file content exceeds {} bytes: {path}",
+                            MAX_DETECTION_FILE_CONTENT_BYTES,
+                        );
+                    }
+                    total
+                        .checked_add(content.len())
+                        .ok_or_else(|| anyhow::anyhow!("detection file content size overflow"))
+                })?;
         if total_content_bytes > MAX_DETECTION_TOTAL_CONTENT_BYTES {
             anyhow::bail!(
                 "detection file contents exceed {} bytes in total",
@@ -231,10 +279,10 @@ impl VirtualFs {
                     || super::native::is_go_detection_source_path(path))
             {
                 if files.len() == MAX_DETECTION_CONTENT_FILES {
-                    anyhow::bail!(
-                        "detection manifest requires too many file contents (max {})",
-                        MAX_DETECTION_CONTENT_FILES
-                    );
+                    return Err(super::content::InputLimit::ContentFiles(
+                        MAX_DETECTION_CONTENT_FILES,
+                    )
+                    .into());
                 }
                 files.push(path.clone());
             }
@@ -246,10 +294,7 @@ impl VirtualFs {
 
 fn validate_virtual_path(path: &str) -> anyhow::Result<String> {
     if path.len() > MAX_DETECTION_PATH_BYTES {
-        anyhow::bail!(
-            "detection manifest path exceeds {} bytes",
-            MAX_DETECTION_PATH_BYTES
-        );
+        return Err(super::content::InputLimit::PathBytes(MAX_DETECTION_PATH_BYTES).into());
     }
     let normalized = normalize_path(path).ok_or_else(|| {
         anyhow::anyhow!("detection manifest path must be relative and must not contain '..'")
@@ -259,10 +304,7 @@ fn validate_virtual_path(path: &str) -> anyhow::Result<String> {
         .filter(|segment| !segment.is_empty() && *segment != ".")
         .count();
     if depth > MAX_DETECTION_PATH_DEPTH {
-        anyhow::bail!(
-            "detection manifest path exceeds {} components",
-            MAX_DETECTION_PATH_DEPTH
-        );
+        return Err(super::content::InputLimit::PathDepth(MAX_DETECTION_PATH_DEPTH).into());
     }
     Ok(normalized)
 }

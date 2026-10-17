@@ -5,6 +5,40 @@ use super::fs::{Fs, LocalFs, VirtualFs};
 use super::types::PackageManagerType;
 
 #[test]
+fn authoritative_framework_is_applied_before_freezing_compiler_and_serving_mode() {
+    use super::types::{ComputeType, RuntimeType};
+    use nrz_source_bundle::{ApplicationRuntimeFamily, BuildToolchainFamily};
+    let fs = VirtualFs::from_json(
+        r#"{"tree":["go.mod","main.go"],"files":{"go.mod":"module example.org/app\n"}}"#,
+    )
+    .unwrap();
+    for supplied_override in [None, Some("go")] {
+        let config = if supplied_override.is_none() {
+            toml::from_str("[project]\nframework='go'\n").unwrap()
+        } else {
+            crate::config::ProjectConfig::default()
+        };
+        let mut detection = super::detect_with_fs(&fs);
+        assert_eq!(detection.suggested_compute, ComputeType::Static);
+        let context = resolve_and_bind_source_build_context(
+            &fs,
+            &mut detection,
+            &config,
+            supplied_override,
+            None,
+        )
+        .unwrap();
+        assert_eq!(detection.framework, "go");
+        assert_eq!(detection.suggested_compute, ComputeType::Process);
+        assert_eq!(detection.metadata.runtime.runtime_type, RuntimeType::Go);
+        assert_eq!(context.build_toolchain.family, BuildToolchainFamily::Native);
+        let launch = context.application_runtime.unwrap();
+        assert_eq!(launch.family, ApplicationRuntimeFamily::Executable);
+        assert_eq!(launch.entry.as_deref(), Some("server"));
+    }
+}
+
+#[test]
 fn independent_compilers_preserve_fresh_framework_build_hints() {
     for config_text in [
         "[build]\ntoolchain='python'\ncommand='python generate.py'\n[deploy]\ncompute='static'\n",

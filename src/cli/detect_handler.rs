@@ -27,7 +27,7 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
                 .collect()
         };
         if json {
-            output::json_output(&serde_json::json!({ "files": files }));
+            output::json_output(&detect::content::ContentRequest::new(files));
         } else {
             for f in files {
                 eprintln!("  {f}");
@@ -45,9 +45,8 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
         let vfs = read_detection_manifest()?;
 
         let mut result = detect::detect_with_fs(&vfs);
-        detect::application_runtime::resolve_and_bind_detection(&vfs, &mut result).map_err(
-            |error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")),
-        )?;
+        detect::application_runtime::resolve_and_bind_detection(&vfs, &mut result)
+            .map_err(runtime_detection_error)?;
         return output_result(&result, &args, json);
     }
 
@@ -56,12 +55,13 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
         .canonicalize()
         .with_context(|| format!("directory not found: {}", args.dir))?;
 
-    let mut result = detect::detect(&project_dir);
-    detect::application_runtime::resolve_and_bind_detection(
-        &detect::fs::LocalFs::new(&project_dir),
-        &mut result,
-    )
-    .map_err(|error| output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}")))?;
+    let local_fs = detect::fs::LocalFs::new(&project_dir);
+    local_fs
+        .validate_content_limits()
+        .map_err(invalid_detection_manifest)?;
+    let mut result = detect::detect_with_fs(&local_fs);
+    detect::application_runtime::resolve_and_bind_detection(&local_fs, &mut result)
+        .map_err(runtime_detection_error)?;
 
     // --save: persist framework to onreza.toml
     if args.save && result.framework != "other" {
@@ -84,6 +84,15 @@ pub fn run(args: DetectArgs, json: bool) -> anyhow::Result<()> {
     output_result(&result, &args, json)
 }
 
+fn runtime_detection_error(error: anyhow::Error) -> anyhow::Error {
+    let code = if error.is::<detect::content::EvidenceIncomplete>() {
+        "DETECTION_EVIDENCE_INCOMPLETE"
+    } else {
+        "APPLICATION_RUNTIME_INVALID"
+    };
+    output::coded_error(code, format!("{error:#}"))
+}
+
 fn read_detection_manifest() -> anyhow::Result<detect::fs::VirtualFs> {
     let mut input = String::new();
     std::io::stdin()
@@ -103,10 +112,12 @@ fn read_detection_manifest() -> anyhow::Result<detect::fs::VirtualFs> {
 }
 
 fn invalid_detection_manifest(error: anyhow::Error) -> anyhow::Error {
-    output::coded_error(
-        "DETECTION_INPUT_INVALID",
-        format!("invalid stdin detection manifest: {error:#}"),
-    )
+    let code = match error.downcast_ref::<detect::content::InputLimit>() {
+        Some(detect::content::InputLimit::ContentFiles(_)) => "DETECTION_FILE_COUNT_LIMIT",
+        Some(_) => "DETECTION_TREE_LIMIT",
+        None => "DETECTION_INPUT_INVALID",
+    };
+    output::coded_error(code, format!("invalid stdin detection manifest: {error:#}"))
 }
 
 fn output_result(

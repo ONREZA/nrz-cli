@@ -4,7 +4,7 @@ use super::fs::Fs;
 use super::package_json::PackageJson;
 use super::types::{PackageManagerInfo, PackageManagerType};
 
-const YARN_LOCK_HEADER_BYTES: usize = 4 * 1024;
+pub(super) const YARN_LOCK_HEADER_BYTES: usize = 4 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum YarnGeneration {

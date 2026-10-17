@@ -2,6 +2,7 @@
 //! frameworks, package managers, SSR features, and adapters.
 
 pub mod application_runtime;
+pub mod content;
 pub mod fs;
 pub mod monorepo;
 pub mod native;
@@ -212,7 +213,16 @@ fn detect_with_fs_and_framework_override(
     fs: &dyn Fs,
     framework_override: Option<&str>,
 ) -> DetectionResult {
-    let detected = detect_with_fs(fs);
+    let mut detected = detect_with_fs(fs);
+    apply_framework_override(fs, framework_override, &mut detected);
+    detected
+}
+
+fn apply_framework_override(
+    fs: &dyn Fs,
+    framework_override: Option<&str>,
+    detected: &mut DetectionResult,
+) {
     let Some(slug) = accepted_framework_override(framework_override) else {
         if let Some(slug) = normalize_framework_slug(framework_override) {
             tracing::warn!(
@@ -221,23 +231,25 @@ fn detect_with_fs_and_framework_override(
                 "configured framework preset is unknown to this CLI; using autodetection"
             );
         }
-        return detected;
+        return;
     };
 
     if detected.framework == slug {
-        return detected;
+        return;
     }
 
     if python::is_python_framework(&slug) {
-        return python::detect_configured_python_framework(fs, &slug);
+        *detected = python::detect_configured_python_framework(fs, &slug);
+        return;
     }
     if let Some(result) = native::detect_configured_native(fs, &slug) {
-        return result;
+        *detected = result;
+        return;
     }
 
     let preset = preset_for_slug(&slug).expect("accepted non-language framework has a preset");
 
-    detection_from_configured_preset(fs, preset, &detected)
+    *detected = detection_from_configured_preset(fs, preset, detected);
 }
 
 fn normalize_framework_slug(framework_override: Option<&str>) -> Option<String> {

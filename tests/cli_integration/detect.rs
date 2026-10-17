@@ -491,6 +491,61 @@ fn detect_needed_files_includes_server_entry_candidates() {
 }
 
 #[test]
+fn detection_content_policy_keeps_declarations_full_and_source_evidence_optional() {
+    let output = nrz()
+        .args(["detect", "--needed-files", "--stdin", "--json"])
+        .write_stdin(
+            json!({"tree":["onreza.toml","package.json","server.js","yarn.lock","main.py","index.html"],"files":{}})
+                .to_string(),
+        )
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let value = stdout_json(&output);
+    assert_eq!(
+        value["files"],
+        json!([
+            "index.html",
+            "main.py",
+            "onreza.toml",
+            "package.json",
+            "server.js",
+            "yarn.lock"
+        ])
+    );
+    assert_eq!(value["contentRules"]["onreza.toml"]["mode"], "full");
+    assert_eq!(value["contentRules"]["package.json"]["mode"], "full");
+    assert_eq!(value["contentRules"]["server.js"]["mode"], "optional");
+    assert_eq!(value["contentRules"]["main.py"]["mode"], "optional");
+    assert_eq!(value["contentRules"]["index.html"]["mode"], "optional");
+    assert_eq!(value["contentRules"]["server.js"]["maxBytes"], 512 * 1024);
+    assert_eq!(
+        value["contentRules"]["yarn.lock"],
+        json!({"mode":"prefix","maxBytes":4096})
+    );
+    assert_eq!(
+        value["limits"],
+        json!({"manifestBytes":4 * 1024 * 1024,"totalContentBytes":2 * 1024 * 1024})
+    );
+}
+
+#[test]
+fn local_detection_rejects_oversized_declarations_instead_of_ignoring_them() {
+    for path in ["onreza.toml", "package.json", "pyproject.toml"] {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join(path), " ".repeat(512 * 1024 + 1)).unwrap();
+        let output = nrz()
+            .args(["detect", directory.path().to_str().unwrap(), "--json"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let value = stdout_json(&output);
+        assert_eq!(value["code"], "DETECTION_INPUT_INVALID");
+        assert!(value["error"].as_str().unwrap().contains(path));
+    }
+}
+
+#[test]
 fn tree_aware_needed_files_preserves_local_go_detection() {
     for (path, tree) in [
         ("server.go", ["go.mod", "server.go"]),
@@ -569,7 +624,6 @@ fn tree_aware_needed_files_preserves_local_go_detection() {
 fn tree_aware_needed_files_reports_invalid_or_over_budget_manifests() {
     for manifest in [
         json!({"tree":["../outside.go"],"files":{}}),
-        json!({"tree":(0..257).map(|index|format!("cmd/server_{index}/main.go")).collect::<Vec<_>>(),"files":{}}),
         json!({"files":{"package.json":"{}","./package.json":"{\"main\":\"server.js\"}"}}),
         json!({"files":{"package.json":"{}",".\\package.json":"{}"}}),
         json!({"tree":["src/"],"files":{"src":"not a directory"}}),
@@ -590,6 +644,32 @@ fn tree_aware_needed_files_reports_invalid_or_over_budget_manifests() {
         .unwrap();
     assert!(!output.status.success());
     assert_eq!(stdout_json(&output)["code"], "DETECTION_INPUT_TOO_LARGE");
+}
+
+#[test]
+fn detect_tree_and_content_count_limits_are_correctable_input_failures() {
+    for (manifest, code) in [
+        (
+            json!({"tree":(0..257).map(|index|format!("cmd/server_{index}/main.go")).collect::<Vec<_>>(),"files":{}}),
+            "DETECTION_FILE_COUNT_LIMIT",
+        ),
+        (
+            json!({"tree":["x".repeat(1025)],"files":{}}),
+            "DETECTION_TREE_LIMIT",
+        ),
+        (
+            json!({"tree":vec!["file";100001],"files":{}}),
+            "DETECTION_TREE_LIMIT",
+        ),
+    ] {
+        let output = nrz()
+            .args(["detect", "--needed-files", "--stdin", "--json"])
+            .write_stdin(manifest.to_string())
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert_eq!(stdout_json(&output)["code"], code);
+    }
 }
 
 #[test]

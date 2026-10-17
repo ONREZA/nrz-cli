@@ -187,6 +187,44 @@ fn local_fs_skips_oversized_detection_files() {
 }
 
 #[test]
+fn local_and_virtual_prefix_reads_preserve_utf8_boundaries() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("yarn.lock"), "abc😀tail").unwrap();
+    let local = LocalFs::new(dir.path());
+    let remote = VirtualFs::from_json(r#"{"files":{"yarn.lock":"abc😀tail"}}"#).unwrap();
+    assert_eq!(local.read_file_prefix("yarn.lock", 6), Some("abc".into()));
+    assert_eq!(
+        local.read_file_prefix("yarn.lock", 6),
+        remote.read_file_prefix("yarn.lock", 6)
+    );
+}
+
+#[test]
+fn local_prefix_does_not_hide_an_incomplete_scalar_at_eof() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("yarn.lock"), b"__metadata:\n\xf0").unwrap();
+    assert!(
+        LocalFs::new(dir.path())
+            .read_file_prefix("yarn.lock", 4096)
+            .is_none()
+    );
+}
+
+#[test]
+fn local_admission_does_not_hide_an_unreadable_declaration() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("onreza.toml"), [0xff]).unwrap();
+    let error = LocalFs::new(dir.path())
+        .validate_content_limits()
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("could not read required detection file: onreza.toml")
+    );
+}
+
+#[test]
 fn virtual_fs_list_dir() {
     let json =
         r#"{"tree":["package.json","src/","src/app/","src/index.ts","README.md"],"files":{}}"#;

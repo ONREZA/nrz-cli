@@ -78,6 +78,19 @@ pub fn resolve_and_bind_detection(
         config.project.framework.as_deref(),
         None,
     )?;
+    super::content::require_runtime_evidence(
+        fs,
+        detection,
+        crate::config::normalize_authoritative_framework(config.project.framework.as_deref())
+            .is_some()
+            || config.deploy.runtime.is_some()
+            || config.deploy.entry.is_some()
+            || config
+                .deploy
+                .compute
+                .as_deref()
+                .is_some_and(|value| value.eq_ignore_ascii_case("static")),
+    )?;
     Ok(())
 }
 
@@ -603,6 +616,10 @@ pub fn resolve_and_bind_source_build_context(
     framework_override: Option<&str>,
     explicit_compute: Option<super::types::ComputeType>,
 ) -> anyhow::Result<SourceBuildContext> {
+    let framework_override = crate::config::normalize_authoritative_framework(
+        framework_override.or(config.project.framework.as_deref()),
+    );
+    super::apply_framework_override(fs, framework_override, detection);
     let build_toolchain = resolve_build_toolchain(detection, config)?;
     let static_serving = resolve_static_serving(detection, config, explicit_compute)?;
     let serving_framework = serving_framework(config, &detection.framework).to_string();

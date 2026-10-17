@@ -100,6 +100,31 @@ pub fn go_main_packages(fs: &dyn Fs) -> Vec<String> {
     packages
 }
 
+pub(super) fn unreadable_go_source(fs: &dyn Fs) -> Option<String> {
+    let directories = std::iter::once(String::new()).chain(
+        fs.list_dir("cmd")
+            .into_iter()
+            .map(|name| format!("cmd/{name}"))
+            .filter(|path| fs.is_dir(path)),
+    );
+    for directory in directories {
+        for name in fs.list_dir(&directory) {
+            let path = if directory.is_empty() {
+                name
+            } else {
+                format!("{directory}/{name}")
+            };
+            if is_go_detection_source_path(&path)
+                && fs.is_file(&path)
+                && fs.read_file(&path).is_none()
+            {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
 fn is_go_main_package(fs: &dyn Fs, directory: &str) -> bool {
     fs.list_dir(directory).into_iter().any(|name| {
         if !is_go_detection_filename(&name) {
