@@ -5,8 +5,12 @@ use nrz_source_bundle::{
     SourceBundleVerificationInput, canonical_source_logical_manifest_json,
     compute_logical_manifest_sha256, compute_source_artifact_id, sha256_hex,
     verify_source_bundle_bytes, verify_source_bundle_stream,
+    verify_source_bundle_stream_with_admission,
 };
 use serde_json::{Value, json};
+
+#[path = "support/source_bundle_admission.rs"]
+mod admission;
 
 const OWNER_WORKSPACE_ID: &str = "00000000-0000-0000-0000-000000000001";
 const FIXTURE_LOGICAL_MANIFEST_SHA256: &str =

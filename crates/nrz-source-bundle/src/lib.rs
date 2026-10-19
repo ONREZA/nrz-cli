@@ -43,9 +43,12 @@ pub use manifest::{
     source_runtime_readiness, summarize_logical_manifest, validate_source_route_headers,
 };
 pub use verifier::{
-    SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH, SourceBundleVerificationBudget,
-    SourceBundleVerificationFailure, SourceBundleVerificationInput, SourceBundleVerificationResult,
-    SourceBundleVerificationSummary, verify_source_bundle_bytes, verify_source_bundle_stream,
+    SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH, SOURCE_BUNDLE_VERIFIER_FIXED_MEMORY_BYTES,
+    SourceBundleVerificationBudget, SourceBundleVerificationFailure, SourceBundleVerificationInput,
+    SourceBundleVerificationMemory, SourceBundleVerificationResult,
+    SourceBundleVerificationSummary, source_bundle_verification_manifest_memory_bytes,
+    source_bundle_verifier_max_decoder_memory_bytes, verify_source_bundle_bytes,
+    verify_source_bundle_stream, verify_source_bundle_stream_with_admission,
 };
 
 mod network;
