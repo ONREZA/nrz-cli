@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.47.2] - 2026-10-19
+
+### 🐛 Bug Fixes
+
+- **deploy:** retry source upload conflicts ([5c531e5](https://github.com/ONREZA/nrz-cli/commit/5c531e5eaf1ee88b282aa908d7672ba90be71327))
+
 ## [0.47.1] - 2026-10-17
 
 ### 🐛 Bug Fixes
