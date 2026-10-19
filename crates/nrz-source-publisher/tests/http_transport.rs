@@ -196,6 +196,408 @@ async fn control_plane_client_does_not_follow_redirects() {
     handle.abort();
 }
 
+#[tokio::test]
+async fn recovered_unconditional_put_409_observes_committed_object_before_replay() {
+    let bytes = Bytes::from_static(b"committed source whose PUT response was lost");
+    let sha256 = sha256_hex(&bytes);
+    let state = ObjectState {
+        put_status: StatusCode::CONFLICT,
+        head_checksum: Some(
+            base64::engine::general_purpose::STANDARD.encode(hex::decode(&sha256).unwrap()),
+        ),
+        head_length: Some(bytes.len() as u64),
+        observed: Arc::new(Mutex::new(Vec::new())),
+    };
+    let first = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let observed = state.observed.clone();
+    let (base_url, handle) = serve(Router::new().route(
+        "/object",
+        any(move |request: Request| {
+            let state = state.clone();
+            let first = first.clone();
+            async move {
+                let lose_response = request.method() == Method::PUT
+                    && first.swap(false, std::sync::atomic::Ordering::SeqCst);
+                let response = object_handler(State(state), request).await;
+                if lose_response {
+                    std::future::pending::<()>().await;
+                }
+                response
+            }
+        }),
+    ))
+    .await;
+    let upload_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(100))
+        .build()
+        .unwrap();
+    let transport = HttpSourcePublicationTransport::from_clients(
+        &base_url,
+        reqwest::Client::new(),
+        upload_client,
+    );
+    let mut request = object_request(&base_url, bytes, sha256);
+    request.headers.if_none_match = None;
+
+    let result = transport
+        .put_object(request)
+        .await
+        .expect("409 must reconcile the committed recovered upload");
+
+    assert_eq!(result.e_tag, None);
+    let observed = observed.lock().unwrap();
+    assert_eq!(
+        observed
+            .iter()
+            .map(|r| r.method.clone())
+            .collect::<Vec<_>>(),
+        vec![Method::PUT, Method::PUT, Method::HEAD]
+    );
+    assert!(
+        observed
+            .iter()
+            .filter(|r| r.method == Method::PUT)
+            .all(|r| !r.headers.contains_key(IF_NONE_MATCH))
+    );
+    handle.abort();
+}
+
+#[tokio::test]
+async fn recovered_source_put_409_repairs_confirmed_incomplete_object() {
+    for mismatch in ["size", "checksum"] {
+        let bytes = Bytes::from(vec![b'x'; 46]);
+        let mut state = conflict_state(&bytes);
+        if mismatch == "size" {
+            state.head_length = Some(4);
+            state.head_checksum = None;
+        } else {
+            state.head_checksum = Some(
+                base64::engine::general_purpose::STANDARD
+                    .encode(hex::decode(sha256_hex(b"part")).unwrap()),
+            );
+        }
+        let observed = state.observed.clone();
+        let (url, handle) = serve_scripted_object(
+            state,
+            vec![StatusCode::CONFLICT, StatusCode::OK],
+            StatusCode::OK,
+            false,
+        )
+        .await;
+        let mut request = object_request(&url, bytes.clone(), sha256_hex(&bytes));
+        request.headers.if_none_match = None;
+
+        let result = transport(&url)
+            .put_object(request)
+            .await
+            .expect("authorized source overwrite must retry after a known partial object");
+
+        assert_eq!(result.e_tag.as_deref(), Some("fixture-etag"));
+        assert_exact_payload_replayed_after_head(&observed, &bytes, None);
+        handle.abort();
+    }
+}
+
+#[tokio::test]
+async fn conditional_put_409_observes_matching_object_without_replay() {
+    let bytes = Bytes::from_static(b"conditional source");
+    let state = conflict_state(&bytes);
+    let observed = state.observed.clone();
+    let (url, handle) = serve_object(state).await;
+    let result = transport(&url)
+        .put_object(object_request(&url, bytes.clone(), sha256_hex(&bytes)))
+        .await
+        .unwrap();
+    assert_eq!(result.e_tag, None);
+    assert_eq!(methods(&observed), vec![Method::PUT, Method::HEAD]);
+    handle.abort();
+}
+
+#[tokio::test]
+async fn put_409_retries_only_after_confirmed_head_absence() {
+    let bytes = Bytes::from_static(b"absent source");
+    let state = conflict_state(&bytes);
+    let observed = state.observed.clone();
+    let (url, handle) = serve_scripted_object(
+        state,
+        vec![StatusCode::CONFLICT, StatusCode::OK],
+        StatusCode::NOT_FOUND,
+        false,
+    )
+    .await;
+    let result = transport(&url)
+        .put_object(object_request(&url, bytes.clone(), sha256_hex(&bytes)))
+        .await
+        .unwrap();
+    assert_eq!(result.e_tag.as_deref(), Some("fixture-etag"));
+    assert_exact_payload_replayed_after_head(&observed, &bytes, Some("*"));
+    handle.abort();
+}
+
+#[tokio::test]
+async fn put_409_with_persistent_absence_or_authorized_mismatch_exhausts_finite_attempts() {
+    for known_mismatch in [false, true] {
+        let bytes = Bytes::from_static(b"still incomplete source");
+        let mut state = conflict_state(&bytes);
+        if known_mismatch {
+            state.head_length = Some(4);
+        }
+        let observed = state.observed.clone();
+        let (url, handle) = serve_scripted_object(
+            state,
+            vec![StatusCode::CONFLICT],
+            if known_mismatch {
+                StatusCode::OK
+            } else {
+                StatusCode::NOT_FOUND
+            },
+            false,
+        )
+        .await;
+        let mut request = object_request(&url, bytes.clone(), sha256_hex(&bytes));
+        if known_mismatch {
+            request.headers.if_none_match = None;
+        }
+        let error = transport(&url).put_object(request).await.unwrap_err();
+        assert!(
+            matches!(error,SourcePublicationError::ObjectUpload(ref message) if message.contains("exhausted after 8 attempts"))
+        );
+        assert_eq!(
+            methods(&observed),
+            [Method::PUT, Method::HEAD]
+                .into_iter()
+                .cycle()
+                .take(16)
+                .collect::<Vec<_>>()
+        );
+        handle.abort();
+    }
+}
+
+#[tokio::test]
+async fn put_409_mismatched_or_missing_metadata_never_accepts_or_overwrites() {
+    for conditional in [false, true] {
+        for mismatch in ["size", "checksum", "missing-checksum", "malformed-checksum"] {
+            if !conditional && matches!(mismatch, "size" | "checksum") {
+                continue;
+            }
+            let bytes = Bytes::from_static(b"expected source");
+            let mut state = conflict_state(&bytes);
+            match mismatch {
+                "size" => state.head_length = Some(bytes.len() as u64 + 1),
+                "checksum" => {
+                    state.head_checksum =
+                        Some(base64::engine::general_purpose::STANDARD.encode([0_u8; 32]))
+                }
+                "malformed-checksum" => state.head_checksum = Some("not-base64".to_string()),
+                _ => state.head_checksum = None,
+            }
+            let observed = state.observed.clone();
+            let (url, handle) = serve_object(state).await;
+            let mut request = object_request(&url, bytes.clone(), sha256_hex(&bytes));
+            if !conditional {
+                request.headers.if_none_match = None;
+            }
+            let error = transport(&url).put_object(request).await.unwrap_err();
+            assert_eq!(
+                matches!(error, SourcePublicationError::ConditionalUploadConflict(_)),
+                conditional && matches!(mismatch, "size" | "checksum")
+            );
+            assert_eq!(methods(&observed), vec![Method::PUT, Method::HEAD]);
+            handle.abort();
+        }
+    }
+}
+
+#[tokio::test]
+async fn put_409_transient_or_timed_out_head_never_replays_put() {
+    for timeout in [false, true] {
+        let bytes = Bytes::from_static(b"uncertain source");
+        let state = conflict_state(&bytes);
+        let observed = state.observed.clone();
+        let (url, handle) = serve_scripted_object(
+            state,
+            vec![StatusCode::CONFLICT],
+            if timeout {
+                StatusCode::OK
+            } else {
+                StatusCode::SERVICE_UNAVAILABLE
+            },
+            timeout,
+        )
+        .await;
+        let upload_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(100))
+            .build()
+            .unwrap();
+        let transport = HttpSourcePublicationTransport::from_clients(
+            &url,
+            reqwest::Client::new(),
+            upload_client,
+        );
+        let mut request = object_request(&url, bytes.clone(), sha256_hex(&bytes));
+        request.headers.if_none_match = None;
+        let error = transport.put_object(request).await.unwrap_err();
+        assert!(
+            matches!(error, SourcePublicationError::ObjectUpload(ref message) if message.contains("HEAD exhausted after 4 attempts"))
+        );
+        let requests = methods(&observed);
+        if timeout {
+            // A timed-out request can fail before the server receives it.
+            assert_eq!(requests.first(), Some(&Method::PUT));
+            assert!((2..=5).contains(&requests.len()));
+            assert!(requests[1..].iter().all(|method| *method == Method::HEAD));
+        } else {
+            assert_eq!(
+                requests,
+                vec![
+                    Method::PUT,
+                    Method::HEAD,
+                    Method::HEAD,
+                    Method::HEAD,
+                    Method::HEAD
+                ]
+            );
+        }
+        handle.abort();
+    }
+}
+
+#[tokio::test]
+async fn put_409_without_verify_head_preserves_failure_and_part_etag_requirement() {
+    let bytes = Bytes::from_static(b"multipart part");
+    let state = conflict_state(&bytes);
+    let observed = state.observed.clone();
+    let (url, handle) = serve_object(state).await;
+    let mut request = object_request(&url, bytes.clone(), sha256_hex(&bytes));
+    request.verify_head = None;
+    let error = transport(&url).put_object(request).await.unwrap_err();
+    assert!(matches!(error, SourcePublicationError::ObjectUpload(_)));
+    assert_eq!(methods(&observed), vec![Method::PUT]);
+    handle.abort();
+}
+
+#[tokio::test]
+async fn runtime_file_409_reuses_head_but_never_takes_source_overwrite_recovery() {
+    use nrz_source_publisher::{RuntimeArtifactPublicationTransport, RuntimeFileUploadRequest};
+    use std::io::Write;
+    for known_mismatch in [false, true] {
+        let bytes = Bytes::from_static(b"runtime dependency image");
+        let mut state = conflict_state(&bytes);
+        if known_mismatch {
+            state.head_length = Some(4);
+        }
+        let observed = state.observed.clone();
+        let (url, handle) = serve_object(state).await;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(&bytes).unwrap();
+        let mut request = object_request(&url, bytes.clone(), sha256_hex(&bytes));
+        if known_mismatch {
+            request.headers.if_none_match = None;
+        }
+        let result = transport(&url)
+            .put_runtime_file(RuntimeFileUploadRequest {
+                url: request.url,
+                path: file.path().to_path_buf(),
+                content_length: bytes.len() as u64,
+                sha256: request.sha256,
+                headers: request.headers,
+                verify_head: request.verify_head,
+            })
+            .await;
+        if known_mismatch {
+            assert!(matches!(
+                result,
+                Err(SourcePublicationError::ObjectUpload(_))
+            ));
+        } else {
+            assert_eq!(result.unwrap().e_tag, None);
+        }
+        assert_eq!(methods(&observed), vec![Method::PUT, Method::HEAD]);
+        handle.abort();
+    }
+}
+
+fn assert_exact_payload_replayed_after_head(
+    observed: &Mutex<Vec<ObservedRequest>>,
+    bytes: &Bytes,
+    if_none_match: Option<&str>,
+) {
+    assert_eq!(
+        methods(observed),
+        vec![Method::PUT, Method::HEAD, Method::PUT]
+    );
+    for request in observed
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|r| r.method == Method::PUT)
+    {
+        assert_eq!(request.body, *bytes);
+        assert_eq!(
+            request
+                .headers
+                .get(IF_NONE_MATCH)
+                .map(|v| v.to_str().unwrap()),
+            if_none_match
+        );
+    }
+}
+
+fn conflict_state(bytes: &Bytes) -> ObjectState {
+    ObjectState {
+        put_status: StatusCode::CONFLICT,
+        head_checksum: Some(
+            base64::engine::general_purpose::STANDARD
+                .encode(hex::decode(sha256_hex(bytes)).unwrap()),
+        ),
+        head_length: Some(bytes.len() as u64),
+        observed: Arc::new(Mutex::new(Vec::new())),
+    }
+}
+fn methods(observed: &Mutex<Vec<ObservedRequest>>) -> Vec<Method> {
+    observed
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|r| r.method.clone())
+        .collect()
+}
+async fn serve_scripted_object(
+    state: ObjectState,
+    put_statuses: Vec<StatusCode>,
+    head_status: StatusCode,
+    stall_head: bool,
+) -> (String, tokio::task::JoinHandle<()>) {
+    let statuses = Arc::new(Mutex::new(std::collections::VecDeque::from(put_statuses)));
+    serve(Router::new().route(
+        "/object",
+        any(move |request: Request| {
+            let state = state.clone();
+            let statuses = statuses.clone();
+            async move {
+                let is_put = request.method() == Method::PUT;
+                let mut response = object_handler(State(state), request).await;
+                if is_put {
+                    let mut statuses = statuses.lock().unwrap();
+                    *response.status_mut() = if statuses.len() > 1 {
+                        statuses.pop_front().unwrap()
+                    } else {
+                        statuses[0]
+                    };
+                } else {
+                    if stall_head {
+                        std::future::pending::<()>().await;
+                    }
+                    *response.status_mut() = head_status;
+                }
+                response
+            }
+        }),
+    ))
+    .await
+}
+
 fn object_request(base_url: &str, bytes: Bytes, sha256: String) -> ObjectUploadRequest {
     ObjectUploadRequest {
         url: format!("{base_url}/object"),

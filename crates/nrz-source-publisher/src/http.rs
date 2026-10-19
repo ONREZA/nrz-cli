@@ -171,25 +171,69 @@ impl HttpSourcePublicationTransport {
                             "conditional create returned 412 without verifyHead".to_string(),
                         )
                     })?;
-                    match self.verify_existing_object(verify).await? {
+                    match self.verify_existing_object(verify, false).await? {
                         HeadVerification::Matches => {
                             return Ok(ObjectUploadResult { e_tag: None });
                         }
-                        HeadVerification::Conflicts(reason) => {
+                        HeadVerification::Mismatch(reason)
+                        | HeadVerification::Unverifiable(reason) => {
                             return Err(SourcePublicationError::ConditionalUploadConflict(reason));
+                        }
+                        HeadVerification::Missing => {
+                            return Err(SourcePublicationError::ObjectUpload(
+                                "conditional HEAD returned no object".to_string(),
+                            ));
                         }
                     }
                 }
                 Ok(response) => {
                     let status = response.status();
                     let retry_after = parse_retry_after(response.headers());
-                    let body = response.text().await.unwrap_or_default();
-                    if !is_transient_status(status) {
-                        return Err(SourcePublicationError::ObjectUpload(explain_s3_failure(
-                            status, &body,
-                        )));
+                    if let Some(verify) =
+                        verify_head.filter(|_| status == reqwest::StatusCode::CONFLICT)
+                    {
+                        drop(response);
+                        // A lost PUT response may precede 409, including recovered overwrite plans.
+                        match self.verify_existing_object(verify, true).await? {
+                            HeadVerification::Matches => {
+                                return Ok(ObjectUploadResult { e_tag: None });
+                            }
+                            HeadVerification::Missing => {
+                                ("HTTP 409 after confirmed HEAD 404".to_string(), retry_after)
+                            }
+                            HeadVerification::Mismatch(reason)
+                                if artifact_kind == "source_bundle"
+                                    && matches!(payload, UploadPayload::Bytes(_))
+                                    && headers.if_none_match.is_none() =>
+                            {
+                                (
+                                    format!("HTTP 409 after confirmed source mismatch: {reason}"),
+                                    retry_after,
+                                )
+                            }
+                            HeadVerification::Mismatch(reason)
+                                if headers.if_none_match.as_deref() == Some("*") =>
+                            {
+                                return Err(SourcePublicationError::ConditionalUploadConflict(
+                                    reason,
+                                ));
+                            }
+                            HeadVerification::Mismatch(reason)
+                            | HeadVerification::Unverifiable(reason) => {
+                                return Err(SourcePublicationError::ObjectUpload(format!(
+                                    "conflicting recovered upload: {reason}"
+                                )));
+                            }
+                        }
+                    } else {
+                        let body = response.text().await.unwrap_or_default();
+                        if !is_transient_status(status) {
+                            return Err(SourcePublicationError::ObjectUpload(explain_s3_failure(
+                                status, &body,
+                            )));
+                        }
+                        (format!("HTTP {status}"), retry_after)
                     }
-                    (format!("HTTP {status}"), retry_after)
                 }
                 Err(error) => {
                     if !is_ambiguous_transport(&error) {
@@ -223,6 +267,7 @@ impl HttpSourcePublicationTransport {
     async fn verify_existing_object(
         &self,
         verify: &ObjectHeadVerification,
+        return_missing: bool,
     ) -> Result<HeadVerification, SourcePublicationError> {
         let expected_checksum = sha256_hex_to_base64(&verify.sha256)?;
         let started = Instant::now();
@@ -232,6 +277,11 @@ impl HttpSourcePublicationTransport {
             let outcome = self.upload_client.head(&verify.url).send().await;
             let (reason, retry_after) = match outcome {
                 Ok(response) if response.status().is_success() => break response,
+                Ok(response)
+                    if return_missing && response.status() == reqwest::StatusCode::NOT_FOUND =>
+                {
+                    return Ok(HeadVerification::Missing);
+                }
                 Ok(response) => {
                     let status = response.status();
                     if status != reqwest::StatusCode::NOT_FOUND && !is_transient_status(status) {
@@ -274,12 +324,12 @@ impl HttpSourcePublicationTransport {
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse::<u64>().ok())
         else {
-            return Ok(HeadVerification::Conflicts(
+            return Ok(HeadVerification::Unverifiable(
                 "HEAD returned no Content-Length".to_string(),
             ));
         };
         if content_length != verify.content_length {
-            return Ok(HeadVerification::Conflicts(format!(
+            return Ok(HeadVerification::Mismatch(format!(
                 "size mismatch: expected {}, got {content_length}",
                 verify.content_length
             )));
@@ -289,12 +339,20 @@ impl HttpSourcePublicationTransport {
             .get("x-amz-checksum-sha256")
             .and_then(|value| value.to_str().ok())
         else {
-            return Ok(HeadVerification::Conflicts(
+            return Ok(HeadVerification::Unverifiable(
                 "HEAD returned no x-amz-checksum-sha256".to_string(),
             ));
         };
+        if base64::engine::general_purpose::STANDARD
+            .decode(checksum)
+            .map_or(true, |bytes| bytes.len() != 32)
+        {
+            return Ok(HeadVerification::Unverifiable(
+                "HEAD returned malformed x-amz-checksum-sha256".to_string(),
+            ));
+        }
         if checksum != expected_checksum {
-            return Ok(HeadVerification::Conflicts("SHA-256 mismatch".to_string()));
+            return Ok(HeadVerification::Mismatch("SHA-256 mismatch".to_string()));
         }
         Ok(HeadVerification::Matches)
     }
@@ -457,5 +515,7 @@ fn explain_s3_failure(status: reqwest::StatusCode, body: &str) -> String {
 
 enum HeadVerification {
     Matches,
-    Conflicts(String),
+    Missing,
+    Mismatch(String),
+    Unverifiable(String),
 }
