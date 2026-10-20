@@ -82,20 +82,10 @@ pub(super) fn resolve_runtime_artifact_with_manifest_source(
         &manifest,
         detection,
     ) else {
-        let javascript_layer = manifest.layers.iter().any(|layer| {
-            layer.target == build_manifest::LayerTarget::Compute
-                && layer
-                    .runtime
-                    .as_ref()
-                    .and_then(|runtime| runtime.application_runtime.as_ref())
-                    .is_some_and(|runtime| {
-                        matches!(
-                            runtime.family,
-                            nrz_source_bundle::ApplicationRuntimeFamily::Node
-                                | nrz_source_bundle::ApplicationRuntimeFamily::Bun
-                        )
-                    })
-        });
+        let javascript_layer = manifest
+            .layers
+            .iter()
+            .any(crate::artifact::is_javascript_compute_layer);
         let dependency_root =
             if javascript_output_owns_dependencies(project_dir, &build_output_dir, detection) {
                 build_output_dir.clone()
@@ -518,19 +508,7 @@ fn javascript_runtime_dependency_roots(
 ) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     for layer in &manifest.layers {
-        if layer.target != build_manifest::LayerTarget::Compute
-            || !layer
-                .runtime
-                .as_ref()
-                .and_then(|runtime| runtime.application_runtime.as_ref())
-                .is_some_and(|runtime| {
-                    matches!(
-                        runtime.family,
-                        nrz_source_bundle::ApplicationRuntimeFamily::Node
-                            | nrz_source_bundle::ApplicationRuntimeFamily::Bun
-                    )
-                })
-        {
+        if !crate::artifact::is_javascript_compute_layer(layer) {
             continue;
         }
         let Some(entry) = &layer.entry else {
@@ -816,20 +794,10 @@ pub(super) fn is_node_project_runtime_candidate(
                     | nrz_source_bundle::ApplicationRuntimeFamily::Bun
             )
         });
-    let typed_javascript = manifest.layers.iter().any(|layer| {
-        layer.target == build_manifest::LayerTarget::Compute
-            && layer
-                .runtime
-                .as_ref()
-                .and_then(|runtime| runtime.application_runtime.as_ref())
-                .is_some_and(|intent| {
-                    matches!(
-                        intent.family,
-                        nrz_source_bundle::ApplicationRuntimeFamily::Node
-                            | nrz_source_bundle::ApplicationRuntimeFamily::Bun
-                    )
-                })
-    });
+    let typed_javascript = manifest
+        .layers
+        .iter()
+        .any(crate::artifact::is_javascript_compute_layer);
     if !primary_javascript
         && !typed_javascript
         && !matches!(
