@@ -12,6 +12,7 @@ mod access;
 mod activation;
 #[cfg(test)]
 mod activation_tests;
+mod runtime_diagnostics;
 mod selected_set;
 #[cfg(test)]
 mod status_wire_tests;
@@ -505,6 +506,17 @@ fn map_source_registration_error(error: anyhow::Error, json: bool, context: &str
 }
 
 fn format_structured_api_failure(context: &str, error: &crate::api::StructuredApiError) -> String {
+    if error.code == "RUNTIME_PREPARATION_LIMIT"
+        && let Some(details) = error.details.as_ref()
+        && details.get("category").and_then(serde_json::Value::as_str) == Some("PREPARATION_LIMIT")
+        && let Ok(limit) =
+            serde_json::from_value::<runtime_diagnostics::PreparationLimit>(details.clone())
+    {
+        return format!(
+            "{context}: {}\nRuntime diagnostics: {limit}; retryable: false",
+            error.message
+        );
+    }
     let fields = error
         .details
         .as_ref()

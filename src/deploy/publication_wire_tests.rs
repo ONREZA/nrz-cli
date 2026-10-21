@@ -7,6 +7,59 @@ use std::sync::{Arc, Mutex};
 const DEPLOYMENT: &str = "00000000-0000-0000-0000-000000000001";
 
 #[tokio::test]
+async fn source_registration_preparation_limit_preserves_human_and_json_diagnostics() {
+    let required = u128::MAX.to_string();
+    let details = json!({"category":"PREPARATION_LIMIT","metric":"SOURCE_ARCHIVE_BYTES",
+        "required":required,"limit":"1048576","profileId":"edge-standard-v1"});
+    let body = json!({"code":"RUNTIME_PREPARATION_LIMIT","message":"Preparation limit exceeded","details":details});
+    let requests = Arc::new(Mutex::new(0));
+    let app = Router::new().route(
+        "/v1/deployments/{id}/source",
+        post({
+            let requests = Arc::clone(&requests);
+            move || {
+                let body = body.clone();
+                let requests = Arc::clone(&requests);
+                async move {
+                    *requests.lock().unwrap() += 1;
+                    (StatusCode::UNPROCESSABLE_ENTITY, Json(body))
+                }
+            }
+        }),
+    );
+    let (client, server) = serve_api(app).await;
+    for json_mode in [false, true] {
+        let error = register_deployment_source(&client, DEPLOYMENT, 3,
+            json!({"version":2,"layers":[{"name":"static","target":"STATIC","directory":"."}],"routes":[{"pattern":"^/.*","layer":"static"}]}), None, json_mode
+        ).await.unwrap_err();
+        let diagnostic = pre_source_failure_diagnostic(&error, None).unwrap();
+        assert_eq!(diagnostic.code, "RUNTIME_PREPARATION_LIMIT");
+        assert_eq!(diagnostic.details.as_ref(), Some(&details));
+        assert!(
+            diagnostic.message.contains("SOURCE_ARCHIVE_BYTES"),
+            "{}",
+            diagnostic.message
+        );
+        assert!(
+            diagnostic.message.contains(&required),
+            "{}",
+            diagnostic.message
+        );
+        assert!(
+            diagnostic.message.contains("1048576"),
+            "{}",
+            diagnostic.message
+        );
+    }
+    assert_eq!(
+        *requests.lock().unwrap(),
+        2,
+        "permanent rejection must not retry unchanged input"
+    );
+    server.abort();
+}
+
+#[tokio::test]
 async fn source_registration_retries_the_same_operation_and_snapshot() {
     let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
     let app = Router::new().route("/v1/deployments/{id}/source", post(

@@ -296,6 +296,7 @@ fn format_deployment_failure_includes_runtime_startup_details() {
         error_details: Some(DeploymentErrorDetails {
             runtime_startup_failure: Some(RuntimeStartupFailureDetails {
                 code: Some("port_mismatch".to_string()),
+                kind: None,
                 message: Some("Your app is listening on port 3000.".to_string()),
                 check_type: Some("tcp".to_string()),
                 health_path: None,
@@ -307,7 +308,11 @@ fn format_deployment_failure_includes_runtime_startup_details() {
                 process_entry: Some("server.js".to_string()),
                 log_tail: Some("server started on 3000".to_string()),
                 retry_after_seconds: None,
+                preparation_limit: None,
+                authority_head: None,
             }),
+            retryable: None,
+            profile_id: None,
         }),
         created_at: None,
         ready_at: None,

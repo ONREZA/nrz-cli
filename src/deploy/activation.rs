@@ -1,8 +1,12 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::time::Duration;
 use tokio::time::{Instant, sleep, timeout_at};
 
+use super::runtime_diagnostics::{
+    AuthorityHead, PreparationLimit, deserialize_optional, deserialize_profile_id,
+    deserialize_runtime_integer, deserialize_runtime_ports,
+};
 use crate::api::classify_api_retry;
 use crate::errors::{CliError, find_cli_error};
 use crate::output::Phase;
@@ -93,6 +97,7 @@ where
                         "lastKnownStatus": status.status,
                         "url": status.url,
                         "errorCode": status.error_code,
+                        "errorDetails": status.error_details,
                         "admission": status.admission,
                     }))
                     .into_anyhow());
@@ -173,28 +178,62 @@ pub(super) struct DeploymentStatusResponse {
     pub(super) ready_at: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct DeploymentErrorDetails {
     pub(super) runtime_startup_failure: Option<RuntimeStartupFailureDetails>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(super) retryable: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_profile_id",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(super) profile_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RuntimeStartupFailureDetails {
     pub(super) code: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(super) kind: Option<String>,
     pub(super) message: Option<String>,
     pub(super) check_type: Option<String>,
     pub(super) health_path: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_runtime_integer")]
     pub(super) expected_port: Option<u16>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_runtime_ports")]
     pub(super) detected_ports: Vec<u16>,
+    #[serde(default, deserialize_with = "deserialize_runtime_integer")]
     pub(super) timeout_seconds: Option<u64>,
+    #[serde(default, deserialize_with = "deserialize_runtime_integer")]
     pub(super) attempts: Option<u32>,
     pub(super) last_error: Option<String>,
     pub(super) process_entry: Option<String>,
     pub(super) log_tail: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_runtime_integer")]
     pub(super) retry_after_seconds: Option<u64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(super) preparation_limit: Option<PreparationLimit>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(super) authority_head: Option<AuthorityHead>,
 }
 
 impl TryFrom<nrz_api::Status200Response> for DeploymentStatusResponse {
@@ -352,7 +391,20 @@ pub(super) fn format_deployment_failure(error: &str, status: &DeploymentStatusRe
     if let Some(last_error) = details.last_error.as_deref() {
         facts.push(format!("last readiness error: {last_error}"));
     }
-    if let Some(retry_after) = details.retry_after_seconds {
+    if let Some(limit) = &details.preparation_limit {
+        facts.push(limit.to_string());
+    }
+    let retryable = status
+        .error_details
+        .as_ref()
+        .and_then(|details| details.retryable);
+    if let Some(retryable) = retryable {
+        facts.push(format!("retryable: {retryable}"));
+    }
+    if let Some(retry_after) = details
+        .retry_after_seconds
+        .filter(|_| retryable != Some(false))
+    {
         facts.push(format!("retry after: {retry_after}s"));
     }
 
