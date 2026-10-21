@@ -3,8 +3,8 @@ set -eu
 
 version="$(jq -r '.engineVersion | sub("^v"; "")' dagger.json)"
 case "$version" in
-  0.21.9)
-    expected_sha256="33eea0b08d6be444bada18e64b2216459100d6070abcb4b5345cee40c9fff982"
+  0.21.10)
+    expected_sha256="f9ee083767dd12cdac583f9db3fedbebbbb3064f69152998be1f121d1a6cc103"
     ;;
   *)
     echo "No reviewed Dagger checksum for version $version" >&2

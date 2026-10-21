@@ -804,7 +804,7 @@ fn version_probes_observe_exact_toolchain_versions() {
     assert_eq!(
         compiler_version(
             NativeRecipe::DartServer,
-            "Dart SDK version: 3.13.5 (stable) on linux_x64"
+            "Dart SDK version: 3.13.6 (stable) on linux_x64"
         )
         .unwrap(),
         serde_json::from_str::<serde_json::Value>(include_str!(
@@ -815,24 +815,24 @@ fn version_probes_observe_exact_toolchain_versions() {
             .unwrap()
     );
     assert_eq!(
-        compiler_version(NativeRecipe::GoServer, "go version go1.27.1 linux/amd64").unwrap(),
-        "1.27.1"
+        compiler_version(NativeRecipe::GoServer, "go version go1.27.3 linux/amd64").unwrap(),
+        "1.27.3"
     );
     assert_eq!(
         compiler_version(
             NativeRecipe::HugoStatic,
-            "hugo v0.167.0-abcdef linux/amd64 BuildDate=2026-09-28"
+            "hugo v0.168.0-abcdef linux/amd64 BuildDate=2026-09-28"
         )
         .unwrap(),
-        "0.167.0"
+        "0.168.0"
     );
     assert_eq!(
         compiler_version(
             NativeRecipe::FlutterWeb,
-            r#"{"frameworkVersion":"3.47.6","channel":"stable"}"#
+            r#"{"frameworkVersion":"3.47.7","channel":"stable"}"#
         )
         .unwrap(),
-        "3.47.6"
+        "3.47.7"
     );
     assert!(compiler_version(NativeRecipe::GoServer, "not go").is_err());
 }
@@ -995,7 +995,7 @@ async fn real_go_executable_reads_artifact_assets_and_literal_argv() {
 }
 
 #[tokio::test]
-#[ignore = "requires Linux, pinned Dart 3.13.5 and a C compiler; executes the archived native bundle"]
+#[ignore = "requires Linux, pinned Dart 3.13.6 and a C compiler; executes the archived native bundle"]
 async fn real_dart_bundle_reads_artifact_assets_and_literal_argv() {
     let project = tempfile::tempdir().unwrap();
     copy_fixture(&fixture_root().join("native-dart"), project.path());

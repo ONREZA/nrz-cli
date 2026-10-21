@@ -33,7 +33,7 @@ impl Account {
         let bytes = request_bytes(request);
         let previous = self
             .current
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
                 current.checked_add(bytes).filter(|next| *next <= limit)
             })
             .map_err(|_| deferred())?;

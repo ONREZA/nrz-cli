@@ -103,7 +103,7 @@ uuid = { version = "1", features = ["v5", "v7"] }
 libc = "0.2"
 
 # Wheel member qualification and Windows uv archive extraction
-zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "9.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }

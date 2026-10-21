@@ -12,7 +12,7 @@ experiments:
 cache:
   cas:
     maxSize: "5gb"
-  sharedWorktreeCache: true
+  unstable_sharedWorktreeCache: true
 
 pipeline:
   logRunningCommand: true

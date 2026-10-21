@@ -14,7 +14,7 @@
     }
   },
   "installers": {
-    "uv": "0.12.23",
+    "uv": "0.13.4",
     "poetry": "2.5.1",
     "poetryExport": "1.10.1",
     "packaging": "26.3"

@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use nrz_source_bundle::{PythonMinor, python_toolchain_versions};
 
-const QUALIFIED_UV_VERSION: &str = "0.12.23";
+const QUALIFIED_UV_VERSION: &str = "0.13.4";
 const UV_RELEASE_ORIGIN: &str = "https://github.com";
 const MAX_UV_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_UV_BINARY_BYTES: u64 = 96 * 1024 * 1024;
@@ -664,7 +664,7 @@ pub(super) fn qualify_portable_application_wheels(
             if entry.is_dir() {
                 continue;
             }
-            let name = entry.name().to_owned();
+            let name = entry.name()?.into_owned();
             if has_native_python_extension(&name)
                 || nrz_runtime_artifact::has_native_payload_header(&mut entry)?
             {
@@ -1076,32 +1076,32 @@ pub(super) fn artifact_for(os: &str, arch: &str) -> anyhow::Result<UvArtifact> {
         ("linux", "x86_64") => Ok(UvArtifact {
             target: "x86_64-unknown-linux-musl",
             archive_name: "uv-x86_64-unknown-linux-musl.tar.gz",
-            archive_sha256: "1cff8783850e794470aadb73f54b749542a511fc57b0ce6468b64bd3852e0ade",
-            binary_sha256: "ff3eba23dad69edbf72f5dc5e95c865a20091bd26514032f55909282f2b55bdd",
+            archive_sha256: "28d4385f9f9d1d1c7654d85b3855e0e2615b2f6cc13136a2edff858bbdc16ff1",
+            binary_sha256: "060107fb993ccfa5da73d31ca230f071d69494f0919d366cc40e0fe4494dc5d2",
             binary_name: "uv",
             format: ArchiveFormat::TarGz,
         }),
         ("macos", "x86_64") => Ok(UvArtifact {
             target: "x86_64-apple-darwin",
             archive_name: "uv-x86_64-apple-darwin.tar.gz",
-            archive_sha256: "960da44cb4b73685206ddd250b19e0a117fa41095710c1038f081f5cb613efb4",
-            binary_sha256: "566a27247ff63f72260ed10c241fe4cf815b6c1b9439e17bdc808cf2d1c0d80f",
+            archive_sha256: "7be2dcd316122f4b3e5a0a7889f6248266c14425374e105ff7dc9779184603a6",
+            binary_sha256: "fefe521430a02cc6a2e07da9b870b9a516d7fa42e6586d8bf5dcfb85b6bcaf39",
             binary_name: "uv",
             format: ArchiveFormat::TarGz,
         }),
         ("macos", "aarch64") => Ok(UvArtifact {
             target: "aarch64-apple-darwin",
             archive_name: "uv-aarch64-apple-darwin.tar.gz",
-            archive_sha256: "50487ae565ccd96e499056b4674d438f4c53170202617b4c759defe0c6a1b544",
-            binary_sha256: "2f7be1879e3337eef20875c0f80ef033337305d0405efc5d72642d6292f66b3b",
+            archive_sha256: "e0b1d4743ce64c55d9f0f4a444afa6b81125680070ee04e853fcd0f6c1ebf8f1",
+            binary_sha256: "cd510bf93fddcbf0799eb0b7bd9aae87e850a5596aeb4594c12aba72fd4e388b",
             binary_name: "uv",
             format: ArchiveFormat::TarGz,
         }),
         ("windows", "x86_64") => Ok(UvArtifact {
             target: "x86_64-pc-windows-msvc",
             archive_name: "uv-x86_64-pc-windows-msvc.zip",
-            archive_sha256: "75d05de6762778c31ee183398de7dd15093fad0ed90b1f236d8205ea5ec00c90",
-            binary_sha256: "70742ae9bd9f64f984fd69126662cfda5c03558bcb40075b2263833e4075f744",
+            archive_sha256: "ccec7508a07d9933d7cb1261880633efcf1f30d6e6eddab21823f1dae6f23225",
+            binary_sha256: "b9d9656370ee1812e53e985d8bbb81870038106df98ef34cb45bcf4e0fe0df17",
             binary_name: "uv.exe",
             format: ArchiveFormat::Zip,
         }),

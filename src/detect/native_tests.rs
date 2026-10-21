@@ -380,7 +380,15 @@ fn real_go_discovery_matches_qualified_linux_amd64_compilation() {
         .unwrap();
     assert_eq!(
         String::from_utf8(observed.stdout).unwrap().trim(),
-        "go version go1.27.1 linux/amd64"
+        format!(
+            "go version go{} linux/amd64",
+            serde_json::from_str::<serde_json::Value>(include_str!(
+                "../../assets/native-toolchains.json"
+            ))
+            .unwrap()["go"]
+                .as_str()
+                .unwrap()
+        )
     );
     let oracle = tempfile::tempdir().unwrap();
     let oracle_source = oracle.path().join("tags.go");

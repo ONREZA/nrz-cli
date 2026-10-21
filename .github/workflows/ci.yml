@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.1.0
         with:
           fetch-depth: 0
 
@@ -30,7 +30,7 @@ jobs:
           auto-install: true
           auto-setup: true
 
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           cache-on-failure: true
       - uses: actions/cache@v6.1.0
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.1.0
 
       - name: Install musl tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -70,7 +70,7 @@ jobs:
           toolchain: '1.98'
           targets: x86_64-unknown-linux-musl
 
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           cache-on-failure: true
 
@@ -83,13 +83,13 @@ jobs:
     runs-on: ubuntu-26.04
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.1.0
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Check commits
-        uses: cocogitto/cocogitto-action@v4
+        uses: cocogitto/cocogitto-action@v4.1.0
         with:
           command: check
           args: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} --ignore-merge-commits

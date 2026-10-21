@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v6.1.0
         with:
           fetch-depth: 0
           # Mutate the tested PR head so --in-diff refers to exact source lines.
@@ -36,7 +36,7 @@ jobs:
         with:
           auto-install: true
           auto-setup: true
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           cache-on-failure: true
       - name: Build the PR diff

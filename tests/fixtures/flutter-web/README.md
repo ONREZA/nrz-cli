@@ -1,6 +1,6 @@
 # Flutter Web qualification fixture
 
-The fixture uses Flutter 3.47.6 with its pinned engine and Dart 3.13.5.
+The fixture uses Flutter 3.47.7 with its pinned engine and Dart 3.13.5.
 `pub get --enforce-lockfile` followed by `build web --release --no-pub` produces
 `build/web`. The ignored CLI fixture test verifies the real build, unchanged Pub
 lock, bootstrap, JavaScript entry, and asset manifest. This does not qualify a
