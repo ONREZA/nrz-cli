@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::normalize_source_path;
 
 // Linux limits a single path lookup to 40 symlink expansions, including revisits.
-const MAX_SYMLINK_EXPANSIONS: usize = 40;
+pub(crate) const MAX_SYMLINK_EXPANSIONS: usize = 40;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SourcePathGraphError {

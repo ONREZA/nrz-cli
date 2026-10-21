@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::future::Future;
 use std::io;
 use std::sync::{Arc, Mutex};
 
@@ -11,15 +12,21 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio_util::io::StreamReader;
 
+#[path = "zstd_frames.rs"]
+mod zstd_frames;
+pub use zstd_frames::source_bundle_verifier_max_decoder_memory_bytes;
+#[path = "verification_memory.rs"]
+mod verification_memory;
+pub use verification_memory::source_bundle_verification_manifest_memory_bytes;
+
 use crate::path_graph::{SourceArchivePathIndex, SourcePathGraphError};
 use crate::pax::encode_pax_record;
 
 use crate::manifest::{
     SOURCE_BUNDLE_V1_SCHEMA_VERSION, SourceBundleSummary, SourceLogicalManifest,
     SourceLogicalManifestEntryType, SourceLogicalManifestFile,
-    canonical_source_logical_manifest_json, compute_logical_manifest_sha256,
-    compute_source_artifact_id, normalize_source_path, sha256_hex, source_runtime_readiness,
-    summarize_logical_manifest,
+    canonical_source_logical_manifest_json, compute_source_artifact_id, normalize_source_path,
+    sha256_hex, source_runtime_readiness, summarize_logical_manifest,
 };
 
 const TAR_BLOCK_SIZE: usize = 512;
@@ -41,6 +48,8 @@ const METADATA_PREFIX: &str = ".__onreza/";
 pub const SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH: &str = ".__onreza/logical-manifest.json";
 const MAX_METADATA_OVERHEAD_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_LOGICAL_MANIFEST_BYTES: u64 = 512 * 1024 * 1024;
+/// Decoder output, pending TAR chunk, buffered compressed input, and parser/header state.
+pub const SOURCE_BUNDLE_VERIFIER_FIXED_MEMORY_BYTES: u64 = 2 * 65_536 + 8192 + 4096;
 
 #[derive(Debug, Clone)]
 pub struct SourceBundleVerificationInput {
@@ -128,6 +137,60 @@ where
     S: Stream<Item = Result<Bytes, E>> + Send + Unpin + 'static,
     E: fmt::Display + Send + Sync + 'static,
 {
+    verify_source_bundle_stream_inner(
+        StreamingTarVerifier::new(input),
+        compressed_stream,
+        false,
+        |_| std::future::ready(Ok(())),
+    )
+    .await
+}
+
+/// Verify while reserving parser memory and each standard Zstandard frame's decoder.
+/// Parser guards live until verification ends; decoder guards live for one frame.
+/// The caller also accounts for SOURCE_BUNDLE_VERIFIER_FIXED_MEMORY_BYTES and its source stream.
+/// Growth callbacks must try admission and return a retryable error instead of waiting while
+/// earlier parser/decoder credit is held. Retain parser credit while consuming the returned Value.
+pub async fn verify_source_bundle_stream_with_admission<S, E, F, Fut, Guard>(
+    input: SourceBundleVerificationInput,
+    compressed_stream: S,
+    reserve: F,
+) -> Result<SourceBundleVerificationResult, SourceBundleVerificationFailure>
+where
+    S: Stream<Item = Result<Bytes, E>> + Send + Unpin + 'static,
+    E: fmt::Display + Send + Sync + 'static,
+    F: FnMut(SourceBundleVerificationMemory) -> Fut,
+    Fut: Future<Output = Result<Guard, SourceBundleVerificationFailure>>,
+{
+    verify_source_bundle_stream_inner(
+        StreamingTarVerifier::new(input),
+        compressed_stream,
+        true,
+        reserve,
+    )
+    .await
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceBundleVerificationMemory {
+    Parser { bytes: u64 },
+    Decoder { bytes: u64 },
+}
+
+async fn verify_source_bundle_stream_inner<S, E, F, Fut, Guard>(
+    mut tar_verifier: StreamingTarVerifier,
+    compressed_stream: S,
+    admit_frames: bool,
+    mut reserve_decoder: F,
+) -> Result<SourceBundleVerificationResult, SourceBundleVerificationFailure>
+where
+    S: Stream<Item = Result<Bytes, E>> + Send + Unpin + 'static,
+    E: fmt::Display + Send + Sync + 'static,
+    F: FnMut(SourceBundleVerificationMemory) -> Fut,
+    Fut: Future<Output = Result<Guard, SourceBundleVerificationFailure>>,
+{
+    tar_verifier.memory_admission = admit_frames;
+    let mut parser_memory = Vec::new();
     let source_hasher = Arc::new(Mutex::new(Sha256::new()));
     let hasher = Arc::clone(&source_hasher);
     let stream = compressed_stream.map(move |item| match item {
@@ -144,29 +207,42 @@ where
             error.to_string(),
         )),
     });
-    let reader = StreamReader::new(stream);
-    let mut decoder = ZstdDecoder::new(BufReader::new(reader));
-    decoder.multiple_members(true);
-    let mut tar_verifier = StreamingTarVerifier::new(input.clone());
-    let mut buffer = vec![0_u8; 65_536];
-
-    loop {
-        match decoder.read(&mut buffer).await {
-            Ok(0) => break,
-            Ok(n) => tar_verifier.push(&buffer[..n])?,
-            Err(error) => {
-                if error.kind() == io::ErrorKind::ConnectionAborted {
-                    return Err(failure(
-                        "SOURCE_OBJECT_READ_FAILED",
-                        "SOURCE_BUNDLE_V1 source object stream failed during verification",
-                    ));
-                }
-                return Err(failure(
-                    "SOURCE_ZSTD_DECODE_FAILED",
-                    format!("SOURCE_BUNDLE_V1 archive is not valid zstd: {error}"),
-                ));
-            }
+    let mut reader = BufReader::new(StreamReader::new(stream));
+    if admit_frames {
+        let mut saw_frame = false;
+        while let Some((header, decoder_bytes)) =
+            zstd_frames::read_frame_header(&mut reader).await?
+        {
+            saw_frame = true;
+            let _decoder_memory = reserve_decoder(SourceBundleVerificationMemory::Decoder {
+                bytes: decoder_bytes,
+            })
+            .await?;
+            let mut decoder = ZstdDecoder::new(header.as_slice().chain(&mut reader));
+            verify_decoded_tar(
+                &mut decoder,
+                &mut tar_verifier,
+                &mut reserve_decoder,
+                &mut parser_memory,
+            )
+            .await?;
         }
+        if !saw_frame {
+            return Err(source_decode_failure(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "zstd stream did not finish",
+            )));
+        }
+    } else {
+        let mut decoder = ZstdDecoder::new(reader);
+        decoder.multiple_members(true);
+        verify_decoded_tar(
+            &mut decoder,
+            &mut tar_verifier,
+            &mut reserve_decoder,
+            &mut parser_memory,
+        )
+        .await?;
     }
 
     let actual_source_sha = {
@@ -175,7 +251,7 @@ where
             .expect("source bundle hasher mutex poisoned");
         hex::encode(hasher.clone().finalize())
     };
-    if actual_source_sha != input.source_sha256 {
+    if actual_source_sha != tar_verifier.input.source_sha256 {
         return Err(failure(
             "SOURCE_SHA_MISMATCH",
             "Uploaded source object SHA-256 does not match prepare-upload metadata",
@@ -185,19 +261,67 @@ where
     tar_verifier.finish()
 }
 
+async fn verify_decoded_tar<R, F, Fut, Guard>(
+    decoder: &mut R,
+    verifier: &mut StreamingTarVerifier,
+    reserve: &mut F,
+    parser_memory: &mut Vec<Guard>,
+) -> Result<(), SourceBundleVerificationFailure>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    F: FnMut(SourceBundleVerificationMemory) -> Fut,
+    Fut: Future<Output = Result<Guard, SourceBundleVerificationFailure>>,
+{
+    let mut buffer = vec![0_u8; 65_536];
+    loop {
+        let size = decoder
+            .read(&mut buffer)
+            .await
+            .map_err(source_decode_failure)?;
+        if size == 0 {
+            return Ok(());
+        }
+        verifier.push(&buffer[..size])?;
+        while let Some((bytes, _)) = verifier.pending_memory {
+            let guard = reserve(SourceBundleVerificationMemory::Parser {
+                bytes: bytes.saturating_add(4 * std::mem::size_of::<Guard>() as u64),
+            })
+            .await?;
+            parser_memory.push(guard);
+            verifier.admit_pending_memory()?;
+            verifier.push(&[])?;
+        }
+        tokio::task::consume_budget().await;
+    }
+}
+
+fn source_decode_failure(error: io::Error) -> SourceBundleVerificationFailure {
+    if error.kind() == io::ErrorKind::ConnectionAborted {
+        return failure(
+            "SOURCE_OBJECT_READ_FAILED",
+            "SOURCE_BUNDLE_V1 source object stream failed during verification",
+        );
+    }
+    failure(
+        "SOURCE_ZSTD_DECODE_FAILED",
+        format!("SOURCE_BUNDLE_V1 archive is not valid zstd: {error}"),
+    )
+}
+
 struct PreparedVerification {
     logical_manifest: Value,
     summary: SourceBundleSummary,
     expected: HashMap<String, SourceLogicalManifestFile>,
     max_expanded_bytes: u64,
+    max_pax_body_bytes: u64,
 }
 
 fn prepare_verification(
     input: &SourceBundleVerificationInput,
     logical_manifest: Value,
-    logical_manifest_body_bytes: u64,
+    canonical_manifest: &[u8],
 ) -> Result<PreparedVerification, SourceBundleVerificationFailure> {
-    let actual_logical_manifest_sha = compute_logical_manifest_sha256(&logical_manifest);
+    let actual_logical_manifest_sha = sha256_hex(canonical_manifest);
     if actual_logical_manifest_sha != input.logical_manifest_sha256 {
         return Err(failure(
             "SOURCE_LOGICAL_MANIFEST_SHA_MISMATCH",
@@ -205,8 +329,8 @@ fn prepare_verification(
         ));
     }
 
-    let manifest: SourceLogicalManifest = serde_json::from_value(logical_manifest.clone())
-        .map_err(|error| {
+    let manifest: SourceLogicalManifest =
+        serde_json::from_slice(canonical_manifest).map_err(|error| {
             failure(
                 "SOURCE_LOGICAL_MANIFEST_INVALID",
                 format!("Logical manifest payload is invalid: {error}"),
@@ -296,15 +420,18 @@ fn prepare_verification(
 
     let logical_static_bytes = u64::try_from(summary.logical_static_bytes).unwrap_or(u64::MAX);
     let artifact_size_bytes = u64::try_from(summary.artifact_size_bytes).unwrap_or(u64::MAX);
+    let logical_manifest_body_bytes = canonical_manifest.len() as u64;
+    let (structural_bytes, pax_body_bytes) = tar_structural_overhead_bytes(&expected);
     Ok(PreparedVerification {
         summary,
         max_expanded_bytes: logical_static_bytes
             .saturating_add(artifact_size_bytes)
-            .saturating_add(tar_structural_overhead_bytes(&expected))
+            .saturating_add(structural_bytes)
             .saturating_add(TAR_BLOCK_SIZE as u64)
             .saturating_add(logical_manifest_body_bytes)
             .saturating_add(tar_padding_bytes(logical_manifest_body_bytes))
             .saturating_add(MAX_METADATA_OVERHEAD_BYTES),
+        max_pax_body_bytes: pax_body_bytes.saturating_add(MAX_METADATA_OVERHEAD_BYTES),
         expected,
         logical_manifest,
     })
@@ -347,8 +474,11 @@ fn validate_manifest_entry(
     Ok(())
 }
 
-fn tar_structural_overhead_bytes(expected: &HashMap<String, SourceLogicalManifestFile>) -> u64 {
+fn tar_structural_overhead_bytes(
+    expected: &HashMap<String, SourceLogicalManifestFile>,
+) -> (u64, u64) {
     let mut overhead = (TAR_BLOCK_SIZE as u64).saturating_mul(TAR_END_BLOCK_COUNT);
+    let mut total_pax_body_bytes = 0_u64;
     for (path, file) in expected {
         overhead = overhead
             .saturating_add(TAR_BLOCK_SIZE as u64)
@@ -368,13 +498,14 @@ fn tar_structural_overhead_bytes(expected: &HashMap<String, SourceLogicalManifes
                 fields.push(("linkpath", link_target));
             }
             let pax_body_bytes = encode_pax_record(&fields).len() as u64;
+            total_pax_body_bytes = total_pax_body_bytes.saturating_add(pax_body_bytes);
             overhead = overhead
                 .saturating_add(TAR_BLOCK_SIZE as u64)
                 .saturating_add(pax_body_bytes)
                 .saturating_add(tar_padding_bytes(pax_body_bytes));
         }
     }
-    overhead
+    (overhead, total_pax_body_bytes)
 }
 
 fn tar_padding_bytes(size: u64) -> u64 {
@@ -454,9 +585,19 @@ struct StreamingTarVerifier {
     entry: Option<StreamingEntry>,
     pending_pax: Option<PaxHeaders>,
     decompressed_bytes: u64,
+    pax_body_bytes: u64,
     seen: HashSet<String>,
     prepared: Option<PreparedVerification>,
     manifest_seen: bool,
+    memory_admission: bool,
+    pending_memory: Option<(u64, MemoryStage)>,
+    manifest_decode_admitted: bool,
+}
+
+#[derive(Clone, Copy)]
+enum MemoryStage {
+    Body,
+    ManifestDecode,
 }
 
 impl StreamingTarVerifier {
@@ -468,10 +609,40 @@ impl StreamingTarVerifier {
             entry: None,
             pending_pax: None,
             decompressed_bytes: 0,
+            pax_body_bytes: 0,
             seen: HashSet::new(),
             prepared: None,
             manifest_seen: false,
+            memory_admission: false,
+            pending_memory: None,
+            manifest_decode_admitted: false,
         }
+    }
+
+    fn admit_pending_memory(&mut self) -> Result<(), SourceBundleVerificationFailure> {
+        let (_, stage) = self
+            .pending_memory
+            .take()
+            .expect("pending parser memory admission");
+        match stage {
+            MemoryStage::Body => {
+                let entry = self.entry.as_mut().expect("buffered archive entry");
+                entry
+                    .pax_body
+                    .try_reserve_exact(entry.remaining)
+                    .map_err(|_| {
+                        failure(
+                            "SOURCE_EXPANSION_LIMIT",
+                            "SOURCE_BUNDLE_V1 metadata cannot fit in memory",
+                        )
+                    })?;
+            }
+            MemoryStage::ManifestDecode => {
+                self.manifest_decode_admitted = true;
+                self.finish_entry()?;
+            }
+        }
+        Ok(())
     }
 
     fn push(&mut self, chunk: &[u8]) -> Result<(), SourceBundleVerificationFailure> {
@@ -493,9 +664,7 @@ impl StreamingTarVerifier {
         self.process()
     }
 
-    fn finish(
-        &mut self,
-    ) -> Result<SourceBundleVerificationResult, SourceBundleVerificationFailure> {
+    fn finish(mut self) -> Result<SourceBundleVerificationResult, SourceBundleVerificationFailure> {
         self.process()?;
         if self.state != TarState::Done {
             return Err(failure(
@@ -503,12 +672,16 @@ impl StreamingTarVerifier {
                 "SOURCE_BUNDLE_V1 tar archive ended before a zero block",
             ));
         }
-        let prepared = self.prepared.as_ref().ok_or_else(|| {
-            failure(
-                "SOURCE_LOGICAL_MANIFEST_MISSING",
-                "SOURCE_BUNDLE_V1 archive is missing embedded logical manifest metadata",
-            )
-        })?;
+        let prepared = self
+            .prepared
+            .take()
+            .filter(|_| self.manifest_seen)
+            .ok_or_else(|| {
+                failure(
+                    "SOURCE_LOGICAL_MANIFEST_MISSING",
+                    "SOURCE_BUNDLE_V1 archive is missing embedded logical manifest metadata",
+                )
+            })?;
         for path in prepared.expected.keys() {
             if !self.seen.contains(path) {
                 return Err(failure(
@@ -523,12 +696,15 @@ impl StreamingTarVerifier {
                 logical_static_bytes: prepared.summary.logical_static_bytes,
                 artifact_size_bytes: prepared.summary.artifact_size_bytes,
             },
-            logical_manifest: prepared.logical_manifest.clone(),
+            logical_manifest: prepared.logical_manifest,
         })
     }
 
     fn process(&mut self) -> Result<(), SourceBundleVerificationFailure> {
         loop {
+            if self.pending_memory.is_some() {
+                return Ok(());
+            }
             match self.state {
                 TarState::Done => {
                     if contains_non_zero(&self.buffer) {
@@ -653,12 +829,24 @@ impl StreamingTarVerifier {
                     "Consecutive PAX headers describe the same archive entry",
                 ));
             }
+            let max_pax_body_bytes = self
+                .prepared
+                .as_ref()
+                .expect("manifest prepared before PAX")
+                .max_pax_body_bytes;
+            self.pax_body_bytes = self.pax_body_bytes.saturating_add(size as u64);
+            if self.pax_body_bytes > max_pax_body_bytes {
+                return Err(failure(
+                    "SOURCE_EXPANSION_LIMIT",
+                    "SOURCE_BUNDLE_V1 PAX metadata exceeds the logical manifest metadata budget",
+                ));
+            }
             self.entry = Some(StreamingEntry {
                 kind: EntryKind::Pax,
                 path: String::new(),
                 remaining: size,
                 padding_remaining,
-                pax_body: Vec::with_capacity(size.min(4096)),
+                pax_body: Vec::new(),
                 hasher: None,
                 expected_sha256: None,
             });
@@ -667,6 +855,9 @@ impl StreamingTarVerifier {
                 self.finish_entry()?;
             } else {
                 self.state = TarState::Body;
+                if self.memory_admission {
+                    self.pending_memory = Some((3 * size as u64, MemoryStage::Body));
+                }
             }
             return Ok(());
         }
@@ -718,7 +909,7 @@ impl StreamingTarVerifier {
                 path: normalized,
                 remaining: size,
                 padding_remaining,
-                pax_body: Vec::with_capacity(size.min(4096)),
+                pax_body: Vec::new(),
                 hasher: None,
                 expected_sha256: None,
             });
@@ -727,6 +918,10 @@ impl StreamingTarVerifier {
                 self.finish_entry()?;
             } else {
                 self.state = TarState::Body;
+                if self.memory_admission {
+                    // Account for raw bytes, serde unescape scratch, and preflight's active map keys.
+                    self.pending_memory = Some((4 * size as u64, MemoryStage::Body));
+                }
             }
             return Ok(());
         }
@@ -861,6 +1056,13 @@ impl StreamingTarVerifier {
                 self.pending_pax = Some(parse_pax(&entry.pax_body)?);
             }
             EntryKind::LogicalManifest => {
+                if self.memory_admission && !self.manifest_decode_admitted {
+                    self.pending_memory = Some((
+                        source_bundle_verification_manifest_memory_bytes(&entry.pax_body)?,
+                        MemoryStage::ManifestDecode,
+                    ));
+                    return Ok(());
+                }
                 let logical_manifest: Value =
                     serde_json::from_slice(&entry.pax_body).map_err(|error| {
                         failure(
@@ -878,7 +1080,7 @@ impl StreamingTarVerifier {
                 let prepared = prepare_verification(
                     &self.input,
                     logical_manifest,
-                    u64::try_from(entry.pax_body.len()).unwrap_or(u64::MAX),
+                    canonical_manifest.as_bytes(),
                 )?;
                 self.prepared = Some(prepared);
             }
@@ -1078,3 +1280,7 @@ fn manifest_budget_failure(
         ),
     }
 }
+
+#[cfg(test)]
+#[path = "verifier_tests.rs"]
+mod tests;
