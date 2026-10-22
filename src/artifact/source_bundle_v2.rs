@@ -55,15 +55,15 @@ pub(crate) fn freeze_source_bundle(
                 .context("Source V2 requires the retained or admitted runtime target")?;
             let launch =
                 nrz_runtime_artifact::source_layer_launch_for_target(Some(runtime), Some(target))?;
-            ensure!(
-                matches!(
-                    launch.profile,
-                    nrz_runtime_artifact::RuntimeProfile::Node22
-                        | nrz_runtime_artifact::RuntimeProfile::Node24
-                        | nrz_runtime_artifact::RuntimeProfile::Node26
+            let family = match launch.profile {
+                nrz_runtime_artifact::RuntimeProfile::Bun => "BUN",
+                nrz_runtime_artifact::RuntimeProfile::Node22
+                | nrz_runtime_artifact::RuntimeProfile::Node24
+                | nrz_runtime_artifact::RuntimeProfile::Node26 => "NODE",
+                _ => anyhow::bail!(
+                    "Source V2 requires an explicit application runtime for this launcher"
                 ),
-                "Source V2 requires an explicit application runtime for this launcher"
-            );
+            };
             layer
                 .runtime_config
                 .as_mut()
@@ -71,7 +71,7 @@ pub(crate) fn freeze_source_bundle(
                 .context("Source V2 runtime configuration must be an object")?
                 .insert(
                     "applicationRuntime".into(),
-                    serde_json::json!({"family":"NODE","args":launch.args}),
+                    serde_json::json!({"family":family,"args":launch.args}),
                 );
         }
         if let Some(serde_json::Value::Object(runtime)) = &mut layer.runtime_config
