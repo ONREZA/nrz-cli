@@ -1,5 +1,6 @@
 use super::{
-    NativeExecutableRequirements, qualified_system_path, qualified_versions, version_definitions,
+    NativeClosureReadBudget, NativeClosureReadLimits, NativeExecutableRequirements,
+    qualified_system_path, qualified_versions, version_definitions,
 };
 use crate::ArtifactRoot;
 use goblin::elf::{Elf, dynamic, program_header};
@@ -157,6 +158,125 @@ fn native_closure_rejects_changed_provider_bytes_even_with_identical_elf_metadat
     );
     // The replacement's ELF/version metadata alone still meets the native contract.
     artifact.check().unwrap();
+}
+
+#[test]
+fn bounded_native_closure_rejects_oversized_regular_files_before_reading() {
+    let artifact = Artifact::new();
+    let root = ArtifactRoot::open(&artifact.0).unwrap();
+    let mut budget = NativeClosureReadBudget::new(NativeClosureReadLimits {
+        max_file_bytes: 4096,
+        max_total_bytes: u64::MAX,
+    });
+    let entry = std::fs::File::create(artifact.0.join("server")).unwrap();
+    // A sparse regular file must be rejected by opened-handle metadata, before
+    // allocating its payload or attempting to parse its invalid ELF contents.
+    entry.set_len(256 * 1024 * 1024).unwrap();
+    let error = NativeExecutableRequirements::verify_rooted_artifact_closure_bounded(
+        &root,
+        Path::new("server"),
+        Path::new(""),
+        &mut budget,
+        |_, _| panic!("oversized file must not reach the byte identity callback"),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("file exceeds its byte limit"));
+    assert_eq!(budget.used_bytes(), 0);
+}
+
+#[test]
+fn bounded_native_closure_charges_entry_and_every_provider_read() {
+    let artifact = Artifact::new();
+    std::fs::create_dir(artifact.0.join("lib")).unwrap();
+    std::fs::write(
+        artifact.0.join("server"),
+        versioned_elf(
+            Some(("libfoo.so", "FOO_1")),
+            None,
+            Some("$ORIGIN/lib"),
+            true,
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        artifact.0.join("lib/libfoo.so"),
+        versioned_elf(None, Some("FOO_1"), None, false),
+    )
+    .unwrap();
+    let root = ArtifactRoot::open(&artifact.0).unwrap();
+    for (total_limit, reads, accepted) in [
+        (4095, 0, false),
+        (8191, 1, false),
+        (12287, 2, false),
+        (12288, 3, true),
+    ] {
+        let mut budget = NativeClosureReadBudget::new(NativeClosureReadLimits {
+            max_file_bytes: 4096,
+            max_total_bytes: total_limit,
+        });
+        let mut checked = Vec::new();
+        let result = NativeExecutableRequirements::verify_rooted_artifact_closure_bounded(
+            &root,
+            Path::new("server"),
+            Path::new(""),
+            &mut budget,
+            |path, bytes| {
+                checked.push(path.to_owned());
+                assert_eq!(bytes.len(), 4096);
+                Ok(())
+            },
+        );
+        assert_eq!(checked.len(), reads);
+        assert_eq!(budget.used_bytes(), reads as u64 * 4096);
+        if accepted {
+            let (_, members) = result.unwrap();
+            assert_eq!(members, [Path::new("lib/libfoo.so"), Path::new("server")]);
+            assert_eq!(
+                checked,
+                ["server", "lib/libfoo.so", "lib/libfoo.so"].map(PathBuf::from)
+            );
+        } else {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("aggregate byte limit")
+            );
+        }
+    }
+}
+
+#[test]
+fn bounded_native_closures_share_one_aggregate_budget() {
+    let artifact = Artifact::new();
+    std::fs::write(
+        artifact.0.join("server"),
+        versioned_elf(None, None, None, true),
+    )
+    .unwrap();
+    let root = ArtifactRoot::open(&artifact.0).unwrap();
+    let mut budget = NativeClosureReadBudget::new(NativeClosureReadLimits {
+        max_file_bytes: 4096,
+        max_total_bytes: 8191,
+    });
+    NativeExecutableRequirements::verify_rooted_artifact_closure_bounded(
+        &root,
+        Path::new("server"),
+        Path::new(""),
+        &mut budget,
+        |_, _| Ok(()),
+    )
+    .unwrap();
+    let error = NativeExecutableRequirements::verify_rooted_artifact_closure_bounded(
+        &root,
+        Path::new("server"),
+        Path::new(""),
+        &mut budget,
+        |_, _| panic!("second closure must be denied before reading"),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("aggregate byte limit"));
+    assert_eq!(budget.used_bytes(), 4096);
 }
 
 // Valid file-backed ELF metadata without section headers, as permitted by the

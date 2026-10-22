@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+#[path = "handoff_v2.rs"]
+mod v2;
+pub use v2::*;
+
 pub const EDGE_BUILD_HANDOFF_V1_SCHEMA_VERSION: &str = "EDGE_BUILD_HANDOFF_V1.0";
 pub const EDGE_BUILD_HANDOFF_V1_FILE: &str = "edge-build-handoff-v1.json";
 pub const EDGE_BUILD_SOURCE_BUNDLE_V1_FILE: &str = "source-bundle-v1.tar.zst";

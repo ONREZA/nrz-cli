@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "DEPENDENCY_MATERIALIZATION_V1.0",
+  "kind": "JAVASCRIPT_NODE_MODULES",
+  "compatibility": {
+    "runtimeFamily": "bun",
+    "runtimeVersion": "1.4.2",
+    "os": "linux",
+    "architecture": "x86_64",
+    "libc": "glibc",
+    "abi": "glibc-2.42",
+    "packageManager": "bun",
+    "packageManagerVersion": "1.4.2",
+    "runnerRootfsDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "buildPolicyGeneration": 1
+  },
+  "logicalTreeDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "expandedFileCount": 1,
+  "expandedBytes": 1,
+  "regularFileCount": 1,
+  "symlinkCount": 0,
+  "nativeObjectCount": 0,
+  "canonicalizationPolicyDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "generatorDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "blobDescriptor": {
+    "mediaType": "application/vnd.onreza.dependency.erofs.v1",
+    "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "size": 4096
+  }
+}

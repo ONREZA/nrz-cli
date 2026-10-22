@@ -49,6 +49,8 @@
   "postV1DeploymentsByIdRuntimeArtifactsComplete",
   "postV1DeploymentsByIdRuntimeArtifactsPrepare",
   "postV1DeploymentsByIdSource",
+  "postV1DeploymentsByIdSourceV2Metadata",
+  "postV1DeploymentsByIdStaticSourceV2Admit",
   "postV1DeploymentsByIdUploadComplete",
   "postV1DeploymentsByIdUploadFailed",
   "postV1DeploymentsSet",

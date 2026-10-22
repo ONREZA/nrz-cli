@@ -9,9 +9,10 @@ mod pax;
 pub mod python;
 pub use python::{PythonMinor, PythonToolchainVersions, python_toolchain_versions};
 pub mod source_build_context;
+pub mod source_bundle_v2;
 pub mod verifier;
 
-pub use path_graph::{SourceArchivePathIndex, SourcePathGraphError};
+pub use path_graph::{PathWorkBudget, PathWorkError, SourceArchivePathIndex, SourcePathGraphError};
 pub use pax::encode_pax_record;
 
 pub use source_build_context::{
@@ -30,9 +31,11 @@ pub use dependency::{
     PYTHON_314_SITE_PACKAGES_ROOT, dependency_source_tree_specs, extract_dependency_source_trees,
 };
 pub use handoff::{
-    EDGE_BUILD_HANDOFF_V1_FILE, EDGE_BUILD_HANDOFF_V1_SCHEMA_VERSION,
-    EDGE_BUILD_SOURCE_BUNDLE_V1_FILE, EdgeBuildHandoffV1, EdgeBuildSourceBundleV1,
-    SOURCE_BUNDLE_V1_MEDIA_TYPE,
+    EDGE_BUILD_HANDOFF_V1_FILE, EDGE_BUILD_HANDOFF_V1_SCHEMA_VERSION, EDGE_BUILD_HANDOFF_V2_FILE,
+    EDGE_BUILD_HANDOFF_V2_SCHEMA_VERSION, EDGE_BUILD_SOURCE_BUNDLE_V1_FILE,
+    EDGE_BUILD_SOURCE_MANIFEST_V2_FILE, EDGE_BUILD_SOURCE_TREE_V2_DIRECTORY, EdgeBuildBindingV2,
+    EdgeBuildHandoffV1, EdgeBuildHandoffV2, EdgeBuildSourceBundleV1, EdgeBuildSourceManifestV2,
+    EdgeBuildSourceTreeV2, SOURCE_BUNDLE_V1_MEDIA_TYPE,
 };
 pub use manifest::{
     RUNTIME_READINESS_CONFIG_KEY, RouteFallthroughCondition, SOURCE_BUNDLE_V1_SCHEMA_VERSION,

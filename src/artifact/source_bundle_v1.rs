@@ -186,16 +186,16 @@ pub(crate) struct SourceLogicalManifestRoute {
 }
 
 #[derive(Debug, Clone)]
-struct SourceBundleEntry {
-    path: String,
-    size: u64,
-    sha256: String,
-    executable: bool,
-    kind: SourceBundleEntryKind,
+pub(super) struct SourceBundleEntry {
+    pub(super) path: String,
+    pub(super) size: u64,
+    pub(super) sha256: String,
+    pub(super) executable: bool,
+    pub(super) kind: SourceBundleEntryKind,
 }
 
 #[derive(Debug, Clone)]
-enum SourceBundleEntryKind {
+pub(super) enum SourceBundleEntryKind {
     File {
         source_path: PathBuf,
         root: ArtifactRoot,
@@ -431,7 +431,7 @@ fn source_entries(
     source_entries_rooted(&ArtifactRoot::open(output_dir)?, files, scan)
 }
 
-fn source_entries_rooted(
+pub(super) fn source_entries_rooted(
     root: &ArtifactRoot,
     files: &[FileEntry],
     scan: &RuntimeArtifactScan,
@@ -743,7 +743,7 @@ fn relative_symlink_target(path: &str, target: &str) -> anyhow::Result<String> {
     Ok(relative.join("/"))
 }
 
-fn build_logical_manifest(
+pub(super) fn build_logical_manifest(
     manifest: &Manifest,
     entries: &[SourceBundleEntry],
     scan: &RuntimeArtifactScan,

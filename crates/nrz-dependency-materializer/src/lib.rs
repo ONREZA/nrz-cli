@@ -1,14 +1,35 @@
-//! Trusted canonical EROFS materialization for final runtime dependency trees.
+//! Trusted dependency materialization and private V2 application packages.
 //!
-//! The caller must stop the untrusted build cell and transfer the staging tree
-//! to a trusted, private ownership boundary before invoking this crate. All
+//! Dependency image generation requires the caller to stop the untrusted build
+//! cell and transfer the staging tree to a trusted, private ownership boundary. All
 //! sibling trees supplied through RuntimeMounts must remain in that boundary
 //! throughout materialization. This crate validates the closed tree, normalizes filesystem metadata, generates a
 //! self-contained image with a pinned `erofs-utils` toolchain, scans all image
 //! data with `fsck.erofs`, and emits the shared runtime artifact contract.
+//!
+//! V2 content preparation copies mutable inputs into new private inodes; its
+//! custody and proof boundary are documented in [`source_v2_preparation`].
+//! [`application_package`] builds independently checked role images and verity
+//! packages without granting publication, native compatibility or READY authority.
 
+mod application_erofs_metadata;
+mod application_erofs_readback;
+pub mod application_erofs_tools;
+pub mod application_package;
+mod application_verity;
 mod source_bundle;
+pub mod source_v2_dependencies;
+pub mod source_v2_materialization;
+pub mod source_v2_preparation;
+pub mod source_v2_runtime;
 mod tool_executor;
+
+#[cfg(test)]
+#[path = "../tests/support/application_erofs_image.rs"]
+mod application_erofs_image;
+#[cfg(test)]
+#[path = "../tests/support/pending_cleanup.rs"]
+mod pending_cleanup;
 
 pub use source_bundle::{
     MaterializedRuntimeDependency, MaterializedSourceBundleRuntime,
@@ -16,7 +37,8 @@ pub use source_bundle::{
     SourceBundleMaterializationRequest, materialize_source_bundle_runtime,
 };
 pub use tool_executor::{
-    ErofsToolExecutionError, ErofsToolExecutor, ErofsToolInvocation, ErofsToolKind, ErofsToolOutput,
+    ErofsToolExecutionError, ErofsToolExecutor, ErofsToolInvocation, ErofsToolKind,
+    ErofsToolOutput, PendingErofsToolCleanup,
 };
 
 use std::collections::HashSet;
@@ -214,6 +236,9 @@ impl ErofsToolchain {
         Ok(toolchain)
     }
 
+    /// On pending tool cleanup, the partial image stays in executor custody.
+    /// The source trees remain caller-owned: retain their complete owner and
+    /// reservations through the tool error until the executor proves cleanup.
     pub fn materialize(
         &self,
         request: DependencyMaterializationRequest<'_>,
@@ -257,7 +282,7 @@ impl ErofsToolchain {
         }
         let partial = PartialImage::new(partial_path.clone());
 
-        let mkfs_output = self.executor.execute(ErofsToolInvocation {
+        let mkfs_output = match self.executor.execute(ErofsToolInvocation {
             kind: ErofsToolKind::Mkfs,
             executable: &self.mkfs_erofs,
             arguments: [
@@ -286,17 +311,29 @@ impl ErofsToolchain {
             source_tree: Some(&source_tree),
             image_path: &partial_path,
             max_output_bytes: request.limits.max_expanded_bytes,
-        })?;
+        }) {
+            Ok(output) => output,
+            Err(error) => {
+                error.retain_until_cleanup(partial);
+                return Err(error.into());
+            }
+        };
         require_tool_success("mkfs.erofs", &mkfs_output)?;
 
-        let fsck_output = self.executor.execute(ErofsToolInvocation {
+        let fsck_output = match self.executor.execute(ErofsToolInvocation {
             kind: ErofsToolKind::Fsck,
             executable: &self.fsck_erofs,
             arguments: vec!["--extract".into(), partial_path.as_os_str().to_os_string()],
             source_tree: None,
             image_path: &partial_path,
             max_output_bytes: request.limits.max_expanded_bytes,
-        })?;
+        }) {
+            Ok(output) => output,
+            Err(error) => {
+                error.retain_until_cleanup(partial);
+                return Err(error.into());
+            }
+        };
         require_tool_success("fsck.erofs --extract", &fsck_output)?;
 
         let inspection_after_generation = inspect_dependency_tree_with_scope(

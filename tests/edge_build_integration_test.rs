@@ -1,4 +1,6 @@
 //! Edge runner handoff contract against the real CLI binary.
+#[path = "edge_build/source_v2.rs"]
+mod source_v2;
 mod support;
 use axum::{
     Json, Router,
@@ -18,6 +20,7 @@ use support::cli::{nrz, stdout_json};
 #[derive(Clone)]
 struct EdgeBuildApiState {
     deployment_id: String,
+    retry_count: u32,
     requests: Arc<Mutex<Vec<String>>>,
     application_runtime: serde_json::Value,
     build_command: Option<String>,
@@ -66,7 +69,7 @@ async fn edge_build_runner_context(
         "context": edge_build_execution_context(),
         "deployment": {
             "id": state.deployment_id,
-            "attempt": 1,
+            "attempt": state.retry_count,
             "status": "BUILDING",
             "branch": "main",
             "commitSha": "0123456789abcdef0123456789abcdef01234567",
@@ -113,6 +116,37 @@ async fn edge_build_materialize(
     }))
 }
 
+async fn edge_build_source_v2_metadata(
+    State(state): State<EdgeBuildApiState>,
+    uri: OriginalUri,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    state.record(Method::POST, &uri);
+    let body: nrz_api::MetadatumRequestBody = serde_json::from_value(body).unwrap();
+    assert_eq!(body.protocol_version, "execution-context-v3");
+    assert_eq!(body.attempt, i64::from(state.retry_count));
+    assert_eq!(
+        body.operation_id,
+        uuid::Uuid::new_v5(
+            &state.deployment_id.parse().unwrap(),
+            format!("onreza:deployment-source:{}", state.retry_count).as_bytes()
+        )
+    );
+    assert!(!body.manifest.layers.is_empty());
+    let functions = body
+        .functions
+        .expect("CLI preserves the explicit Functions snapshot");
+    assert_eq!(functions.origin, "DEPLOYMENT");
+    assert_eq!(functions.functions, Some(Vec::new()));
+    assert!(functions.edge_rules.is_none());
+    assert!(
+        functions
+            .generated_edge_rule_sets
+            .is_none_or(|sets| sets.is_empty())
+    );
+    Json(json!({"id":state.deployment_id,"attempt":body.attempt,"registered":true}))
+}
+
 async fn reject_unexpected_edge_build_request(
     State(state): State<EdgeBuildApiState>,
     method: Method,
@@ -127,6 +161,21 @@ async fn reject_unexpected_edge_build_request(
 
 fn spawn_edge_build_handoff_mock(deployment_id: &str) -> (String, Arc<Mutex<Vec<String>>>) {
     spawn_edge_build_handoff_mock_with_intent(deployment_id, serde_json::Value::Null)
+}
+
+fn spawn_edge_build_handoff_mock_with_retry_count(
+    deployment_id: &str,
+    retry_count: u32,
+) -> (String, Arc<Mutex<Vec<String>>>) {
+    spawn_edge_build_handoff_mock_with_commands(
+        deployment_id,
+        serde_json::Value::Null,
+        json!({"family":"NODE"}),
+        None,
+        None,
+        None,
+        retry_count,
+    )
 }
 
 fn spawn_edge_build_handoff_mock_with_intent(
@@ -160,9 +209,11 @@ fn spawn_edge_build_handoff_mock_with_build(
         install_command,
         build_command,
         None,
+        1,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_edge_build_handoff_mock_with_commands(
     deployment_id: &str,
     application_runtime: serde_json::Value,
@@ -170,6 +221,7 @@ fn spawn_edge_build_handoff_mock_with_commands(
     install_command: Option<String>,
     build_command: Option<String>,
     output_directory: Option<&str>,
+    retry_count: u32,
 ) -> (String, Arc<Mutex<Vec<String>>>) {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let output_directory = output_directory
@@ -177,6 +229,7 @@ fn spawn_edge_build_handoff_mock_with_commands(
         .or_else(|| build_command.as_ref().map(|_| ".".into()));
     let state = EdgeBuildApiState {
         deployment_id: deployment_id.to_string(),
+        retry_count,
         requests: Arc::clone(&requests),
         application_runtime,
         build_command,
@@ -193,6 +246,10 @@ fn spawn_edge_build_handoff_mock_with_commands(
         .route(
             "/v1/deployments/{deployment_id}/execution-context/materialize",
             post(edge_build_materialize),
+        )
+        .route(
+            "/v1/deployments/{deployment_id}/source-v2/metadata",
+            post(edge_build_source_v2_metadata),
         )
         .fallback(reject_unexpected_edge_build_request)
         .with_state(state);
@@ -312,6 +369,7 @@ fn local_sets_publish_before_activation_and_keep_one_terminal_json() {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let state = EdgeBuildApiState {
             deployment_id: deployment.to_string(),
+            retry_count: 1,
             requests: Arc::clone(&requests),
             application_runtime: serde_json::Value::Null,
             build_command: Some(String::new()),
@@ -1029,6 +1087,7 @@ fn fresh_hono_dist_handoff_keeps_primary_lineage_through_runtime_relocation() {
             Some("true".into()),
             Some("bun run build".into()),
             Some("dist"),
+            1,
         );
         let project = tempfile::tempdir().unwrap();
         let output = tempfile::tempdir().unwrap();
@@ -1136,6 +1195,7 @@ fn fresh_python_module_handoff_keeps_project_owned_bootstrap_with_dist_output() 
         Some("true".into()),
         Some(String::new()),
         Some("dist"),
+        1,
     );
     let project = tempfile::tempdir().unwrap();
     let output = tempfile::tempdir().unwrap();
@@ -1217,6 +1277,7 @@ fn fresh_python_dependencies_use_resolved_minors_without_rejecting_requested_lin
             Some(if fresh_install { "true" } else { "" }.into()),
             Some(if fresh_build { "true" } else { "" }.into()),
             None,
+            1,
         );
         let project = tempfile::tempdir().unwrap();
         let output = tempfile::tempdir().unwrap();

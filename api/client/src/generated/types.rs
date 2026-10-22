@@ -12,7 +12,11 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 static REGEX_ACTIVATE_RELEASE_REQUEST_BODY_EXPECTED_GENERATION: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^(0|[1-9][0-9]*)$").expect("invalid regex"));
-static REGEX_ADMIT_REQUEST_BODY_COMMIT_SHA: std::sync::LazyLock<regex::Regex> =
+static REGEX_ADMIT200RESPONSE_NODE_ID: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new("^[A-Za-z0-9_-]+$").expect("invalid regex"));
+static REGEX_ADMIT200RESPONSE_WRITER_GENERATION: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new("^[1-9][0-9]{0,19}$").expect("invalid regex"));
+static REGEX_ADMIT_REQUEST_BODY2_COMMIT_SHA: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| regex::Regex::new("^[0-9a-f]+$").expect("invalid regex"));
 static REGEX_ATTACHMENT_REQUEST_BODY_ENV_VAR_NAME: std::sync::LazyLock<regex::Regex> =
     std::sync::LazyLock::new(|| {
@@ -203,7 +207,9 @@ impl ApiError400 {
 }
 /// Standard ONREZA API error response for VALIDATION_ERROR.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ApiErrorValidationError {
     #[doc(hidden)]
@@ -213,22 +219,33 @@ pub struct ApiErrorValidationError {
     /// Human-readable localized error message.
     pub message: String,
     /// Validation failure details.
+    #[validate(nested)]
     pub details: Option<ApiErrorValidationDetails>,
 }
 /// Validation failure details.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ApiErrorValidationDetails {
     pub field: Option<String>,
     pub fields: Option<Vec<ApiErrorValidationDetailsField>>,
     pub file: Option<String>,
     pub source: Option<String>,
+    #[serde(rename = "limitBytes")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub limit_bytes: Option<i64>,
+    #[serde(rename = "actualBytes")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub actual_bytes: Option<i64>,
     pub issues: Option<Vec<ApiErrorValidationDetailsIssue>>,
 }
 /// Standard ONREZA API error response for INVALID_INPUT.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ApiErrorInvalidInput {
     #[doc(hidden)]
@@ -238,6 +255,7 @@ pub struct ApiErrorInvalidInput {
     /// Human-readable localized error message.
     pub message: String,
     /// Validation failure details.
+    #[validate(nested)]
     pub details: Option<ApiErrorValidationDetails>,
 }
 /// Standard ONREZA API error response for FUNCTION_PUBLISH_FAILED.
@@ -290,7 +308,9 @@ pub struct ApiErrorFunctionPublishFailureDetails {
 }
 /// Standard ONREZA API error response for EDGE_RULES_DIVERGED.
 #[serde_with::skip_serializing_none]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 #[serde(deny_unknown_fields)]
 pub struct ApiErrorEdgeRulesDiverged {
     #[doc(hidden)]
@@ -300,6 +320,7 @@ pub struct ApiErrorEdgeRulesDiverged {
     /// Human-readable localized error message.
     pub message: String,
     /// Validation failure details.
+    #[validate(nested)]
     pub details: Option<ApiErrorValidationDetails>,
 }
 /// Standard ONREZA API error response for HTTP 401.
@@ -637,6 +658,7 @@ pub enum ApiError403 {
     PlanCuSizeExceeded(ApiErrorPlanCuSizeExceeded),
     DatabaseLimitReached(ApiErrorDatabaseLimitReached),
     BranchLimitReached(ApiErrorBranchLimitReached),
+    DatabaseAccessBlocked(ApiErrorDatabaseAccessBlocked),
 }
 impl ApiError403 {
     pub const DISCRIMINATOR_FIELD: &'static str = "code";
@@ -662,6 +684,7 @@ impl serde::Serialize for ApiError403 {
             Self::PlanCuSizeExceeded(v) => v.serialize(serializer),
             Self::DatabaseLimitReached(v) => v.serialize(serializer),
             Self::BranchLimitReached(v) => v.serialize(serializer),
+            Self::DatabaseAccessBlocked(v) => v.serialize(serializer),
         }
     }
 }
@@ -704,6 +727,9 @@ impl<'de> serde::Deserialize<'de> for ApiError403 {
                 .map_err(serde::de::Error::custom),
             Some("BRANCH_LIMIT_REACHED") => serde_json::from_value(value)
                 .map(Self::BranchLimitReached)
+                .map_err(serde::de::Error::custom),
+            Some("DATABASE_ACCESS_BLOCKED") => serde_json::from_value(value)
+                .map(Self::DatabaseAccessBlocked)
                 .map_err(serde::de::Error::custom),
             None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
             Some(other) => Err(serde::de::Error::custom(format!(
@@ -780,6 +806,13 @@ impl ApiError403 {
     /// Standard ONREZA API error response for BRANCH_LIMIT_REACHED.
     pub fn branch_limit_reached(message: String) -> Self {
         Self::BranchLimitReached(ApiErrorBranchLimitReached {
+            message,
+            ..Default::default()
+        })
+    }
+    /// Standard ONREZA API error response for DATABASE_ACCESS_BLOCKED.
+    pub fn database_access_blocked(message: String) -> Self {
+        Self::DatabaseAccessBlocked(ApiErrorDatabaseAccessBlocked {
             message,
             ..Default::default()
         })
@@ -1031,6 +1064,18 @@ pub struct ApiErrorBranchLimitReached {
     /// Quota or plan-limit failure details.
     #[validate(nested)]
     pub details: Option<ApiErrorLimitDetails>,
+}
+/// Standard ONREZA API error response for DATABASE_ACCESS_BLOCKED.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct ApiErrorDatabaseAccessBlocked {
+    #[doc(hidden)]
+    #[serde(default, skip_deserializing)]
+    #[default(Some("DATABASE_ACCESS_BLOCKED"))]
+    pub code: Option<&'static str>,
+    /// Human-readable localized error message.
+    pub message: String,
 }
 /// Standard ONREZA API error response for HTTP 404.
 #[derive(Debug, Clone, PartialEq)]
@@ -1952,6 +1997,97 @@ pub struct ApiErrorQueryTooLarge {
     pub code: Option<&'static str>,
     /// Human-readable localized error message.
     pub message: String,
+}
+/// Standard ONREZA API error response for HTTP 422.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ApiError422 {
+    ArtifactPublicationFailed(ApiErrorRuntimeArtifactPublicationFailed),
+    PreparationLimit(ApiErrorRuntimePreparationLimit),
+}
+impl ApiError422 {
+    pub const DISCRIMINATOR_FIELD: &'static str = "code";
+}
+impl Default for ApiError422 {
+    fn default() -> Self {
+        Self::ArtifactPublicationFailed(<ApiErrorRuntimeArtifactPublicationFailed>::default())
+    }
+}
+impl serde::Serialize for ApiError422 {
+    fn serialize<S>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::ArtifactPublicationFailed(v) => v.serialize(serializer),
+            Self::PreparationLimit(v) => v.serialize(serializer),
+        }
+    }
+}
+impl<'de> serde::Deserialize<'de> for ApiError422 {
+    fn deserialize<D>(deserializer: D) -> core::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value
+            .get(Self::DISCRIMINATOR_FIELD)
+            .and_then(|v| v.as_str())
+        {
+            Some("RUNTIME_ARTIFACT_PUBLICATION_FAILED") => serde_json::from_value(value)
+                .map(Self::ArtifactPublicationFailed)
+                .map_err(serde::de::Error::custom),
+            Some("RUNTIME_PREPARATION_LIMIT") => serde_json::from_value(value)
+                .map(Self::PreparationLimit)
+                .map_err(serde::de::Error::custom),
+            None => Err(serde::de::Error::missing_field(Self::DISCRIMINATOR_FIELD)),
+            Some(other) => Err(serde::de::Error::custom(format!(
+                "Unknown discriminator value '{}' for field '{}'",
+                other, "code"
+            ))),
+        }
+    }
+}
+impl ApiError422 {
+    /// Standard ONREZA API error response for RUNTIME_ARTIFACT_PUBLICATION_FAILED.
+    pub fn artifact_publication_failed(message: String) -> Self {
+        Self::ArtifactPublicationFailed(ApiErrorRuntimeArtifactPublicationFailed {
+            message,
+            ..Default::default()
+        })
+    }
+    /// Standard ONREZA API error response for RUNTIME_PREPARATION_LIMIT.
+    pub fn preparation_limit(message: String) -> Self {
+        Self::PreparationLimit(ApiErrorRuntimePreparationLimit {
+            message,
+            ..Default::default()
+        })
+    }
+}
+/// Standard ONREZA API error response for RUNTIME_ARTIFACT_PUBLICATION_FAILED.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct ApiErrorRuntimeArtifactPublicationFailed {
+    #[doc(hidden)]
+    #[serde(default, skip_deserializing)]
+    #[default(Some("RUNTIME_ARTIFACT_PUBLICATION_FAILED"))]
+    pub code: Option<&'static str>,
+    /// Human-readable localized error message.
+    pub message: String,
+}
+/// Standard ONREZA API error response for RUNTIME_PREPARATION_LIMIT.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(deny_unknown_fields)]
+pub struct ApiErrorRuntimePreparationLimit {
+    #[doc(hidden)]
+    #[serde(default, skip_deserializing)]
+    #[default(Some("RUNTIME_PREPARATION_LIMIT"))]
+    pub code: Option<&'static str>,
+    /// Human-readable localized error message.
+    pub message: String,
+    /// Explicit fallback for error codes that return code-specific but unstructured details.
+    pub details: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 /// Standard ONREZA API error response for HTTP 426.
 #[derive(Debug, Clone, PartialEq)]
@@ -3333,6 +3469,309 @@ impl RemoteImageSourceAuthoring3 {
         serde::Serialize::serialize(value, serializer)
     }
 }
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct FunctionPublishSpec3 {
+    #[validate(nested)]
+    pub source: Source,
+    #[validate(nested)]
+    pub declaration: FunctionDeclaration3,
+    #[validate(length(min = 1u64, max = 7u64))]
+    pub handlers: Vec<FunctionHandler3>,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct FunctionDeclaration3 {
+    #[validate(
+        length(min = 1u64, max = 64u64),
+        regex(path = "REGEX_FUNCTION_DECLARATION_NAME")
+    )]
+    pub name: String,
+    #[validate(length(max = 1_000u64), nested)]
+    pub triggers: Vec<FunctionDeclaredTrigger3>,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct FunctionDeclaredTrigger3 {
+    #[validate(length(min = 1u64, max = 128u64))]
+    pub name: String,
+    #[serde(rename = "type")]
+    pub r#type: FunctionDeclaredTriggerType,
+    #[serde(default, with = "serde_with::rust::double_option")]
+    pub config: Option<Option<Box<T012>>>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum T012 {
+    String(String),
+    Number(f64),
+    Boolean(bool),
+    Array(Vec<T012>),
+    Object(std::collections::HashMap<String, Box<T012>>),
+    Null,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum FunctionHandler3 {
+    #[serde(rename = "fetch")]
+    #[default]
+    Fetch,
+    #[serde(rename = "request")]
+    Request,
+    #[serde(rename = "response")]
+    Response,
+    #[serde(rename = "observe")]
+    Observe,
+    #[serde(rename = "manual")]
+    Manual,
+    #[serde(rename = "queue")]
+    Queue,
+    #[serde(rename = "scheduled")]
+    Scheduled,
+}
+impl core::fmt::Display for FunctionHandler3 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Fetch => write!(f, "fetch"),
+            Self::Request => write!(f, "request"),
+            Self::Response => write!(f, "response"),
+            Self::Observe => write!(f, "observe"),
+            Self::Manual => write!(f, "manual"),
+            Self::Queue => write!(f, "queue"),
+            Self::Scheduled => write!(f, "scheduled"),
+        }
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct EdgeRuleSetAuthoring4 {
+    #[serde(rename = "schemaVersion")]
+    #[serde(deserialize_with = "EdgeRuleSetAuthoring4::deserialize_const_schema_version")]
+    #[serde(serialize_with = "EdgeRuleSetAuthoring4::serialize_const_schema_version")]
+    #[default("EDGE_RULE_SET_V1".to_string())]
+    pub schema_version: String,
+    #[validate(nested)]
+    pub rules: Vec<EdgeRuleAuthoring4>,
+    #[serde(rename = "imageSources")]
+    #[validate(length(max = 128u64), nested)]
+    pub image_sources: Option<Vec<RemoteImageSourceAuthoring4>>,
+    #[validate(nested)]
+    pub source: Option<EdgeRuleSetAuthoringSource>,
+}
+impl EdgeRuleSetAuthoring4 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_schema_version<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String = serde_json::from_str::<String>("\"EDGE_RULE_SET_V1\"")
+            .map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_schema_version<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String = serde_json::from_str::<String>("\"EDGE_RULE_SET_V1\"")
+            .map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct EdgeRuleAuthoring4 {
+    #[validate(length(min = 1u64))]
+    pub id: String,
+    #[validate(length(min = 1u64))]
+    pub name: Option<String>,
+    pub enabled: Option<bool>,
+    #[validate(nested)]
+    pub condition: Option<EdgeRuleAuthoringCondition>,
+    pub action: EdgeRuleActionAuthoring4,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum EdgeRuleActionAuthoring4 {
+    #[default]
+    Type(EdgeRuleActionAuthoringType),
+    Type2(EdgeRuleActionAuthoringType2),
+    Type3(EdgeRuleActionAuthoringType3),
+    Object(EdgeRuleActionAuthoringObject),
+    Object2(EdgeRuleActionAuthoringObject2),
+    Object3(EdgeRuleActionAuthoringObject3),
+    Object4(EdgeRuleActionAuthoringObject4),
+    Object5(EdgeRuleActionAuthoringObject5),
+    Type4(EdgeRuleActionAuthoringType4),
+    Object6(EdgeRuleActionAuthoring4Object6),
+    Object7(EdgeRuleActionAuthoringObject7),
+}
+impl EdgeRuleActionAuthoring4 {
+    pub fn r#type(r#type: String) -> Self {
+        Self::Type(EdgeRuleActionAuthoringType {
+            r#type,
+            ..Default::default()
+        })
+    }
+    pub fn type2(r#type: String) -> Self {
+        Self::Type2(EdgeRuleActionAuthoringType2 {
+            r#type,
+            ..Default::default()
+        })
+    }
+    pub fn type3() -> Self {
+        Self::Type3(EdgeRuleActionAuthoringType3::default())
+    }
+    pub fn object(target: String) -> Self {
+        Self::Object(EdgeRuleActionAuthoringObject {
+            target,
+            ..Default::default()
+        })
+    }
+    pub fn object2(target: String) -> Self {
+        Self::Object2(EdgeRuleActionAuthoringObject2 {
+            target,
+            ..Default::default()
+        })
+    }
+    pub fn object3(headers: std::collections::HashMap<String, String>) -> Self {
+        Self::Object3(EdgeRuleActionAuthoringObject3 {
+            headers,
+            ..Default::default()
+        })
+    }
+    pub fn object4(headers: Vec<String>) -> Self {
+        Self::Object4(EdgeRuleActionAuthoringObject4 {
+            headers,
+            ..Default::default()
+        })
+    }
+    pub fn object5(ttl_seconds: i64) -> Self {
+        Self::Object5(EdgeRuleActionAuthoringObject5 {
+            ttl_seconds,
+            ..Default::default()
+        })
+    }
+    pub fn type4(r#type: String) -> Self {
+        Self::Type4(EdgeRuleActionAuthoringType4 {
+            r#type,
+            ..Default::default()
+        })
+    }
+    pub fn object6(steps: Vec<StepKind4>) -> Self {
+        Self::Object6(EdgeRuleActionAuthoring4Object6 {
+            steps,
+            ..Default::default()
+        })
+    }
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct PipelineHandleStep4 {
+    #[validate(length(min = 1u64, max = 64u64))]
+    pub handle: String,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteImageSourceAuthoring4 {
+    #[validate(
+        length(min = 1u64, max = 128u64),
+        regex(path = "REGEX_REMOTE_IMAGE_SOURCE_AUTHORING_ID")
+    )]
+    pub id: String,
+    #[validate(length(min = 1u64, max = 255u64))]
+    pub name: Option<String>,
+    #[serde(deserialize_with = "RemoteImageSourceAuthoring4::deserialize_const_protocol")]
+    #[serde(serialize_with = "RemoteImageSourceAuthoring4::serialize_const_protocol")]
+    #[default("https".to_string())]
+    pub protocol: String,
+    #[validate(length(min = 1u64, max = 256u64))]
+    pub hostname: String,
+    #[validate(length(min = 1u64, max = 1_024u64))]
+    pub pathname: String,
+    #[validate(length(max = 2_048u64))]
+    pub search: Option<String>,
+    pub enabled: Option<bool>,
+}
+impl RemoteImageSourceAuthoring4 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_protocol<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"https\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_protocol<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"https\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
 #[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
 pub struct GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsRequestPath {
     pub id: uuid::Uuid,
@@ -3443,6 +3882,15 @@ impl GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsReq
                 ),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -3508,6 +3956,8 @@ pub enum GetV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpoint
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -3655,6 +4105,15 @@ impl
                 ),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -3721,6 +4180,8 @@ pub enum PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpoint
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -3869,6 +4330,15 @@ impl
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(
                 PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::ContentTooLarge(
+                    data,
+                ),
+            );
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameExportResponse::UnprocessableEntity(
                     data,
                 ),
             );
@@ -4071,6 +4541,17 @@ impl PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByL
                 ),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError422,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data = oas3_gen_support::Diagnostics::<
                 ApiError426,
@@ -4145,6 +4626,8 @@ pub enum PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpoint
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -4311,6 +4794,17 @@ impl PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByL
                 ),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError422,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PutV1projectsByIdServicesByServiceIdEnvironmentsByEnvironmentIdEndpointsByLayerNameNetworkResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data = oas3_gen_support::Diagnostics::<
                 ApiError426,
@@ -4426,6 +4920,11 @@ impl GetV1projectsByIdServicesRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1projectsByIdServicesResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdServicesResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -4473,6 +4972,8 @@ pub enum GetV1projectsByIdServicesResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -4567,6 +5068,13 @@ impl PostV1projectsByIdServicesRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1projectsByIdServicesResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::UnprocessableEntity(
+                data,
+            ));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -4616,6 +5124,8 @@ pub enum PostV1projectsByIdServicesResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -4702,6 +5212,11 @@ impl DeleteV1projectsByIdServicesByServiceIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdServicesByServiceIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -4749,6 +5264,8 @@ pub enum DeleteV1projectsByIdServicesByServiceIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -4827,6 +5344,13 @@ impl PatchV1projectsByIdServicesByServiceIdRequest {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1projectsByIdServicesResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdServicesResponse::UnprocessableEntity(
+                data,
+            ));
         }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
@@ -4943,6 +5467,11 @@ impl PostV1projectsByIdSourcesRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1projectsByIdSourcesResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdSourcesResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -4990,6 +5519,8 @@ pub enum PostV1projectsByIdSourcesResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -5073,6 +5604,11 @@ impl GetV1projectsRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1projectsResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -5120,6 +5656,8 @@ pub enum GetV1projectsResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -5259,6 +5797,11 @@ impl PostV1projectsRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1projectsResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -5306,6 +5849,8 @@ pub enum PostV1projectsResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -5383,6 +5928,11 @@ impl GetV1projectsByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1projectsByIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -5430,6 +5980,8 @@ pub enum GetV1projectsByIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -5507,6 +6059,11 @@ impl DeleteV1projectsByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1projectsByIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -5554,6 +6111,8 @@ pub enum DeleteV1projectsByIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -5715,6 +6274,11 @@ impl PatchV1projectsByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PatchV1projectsByIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PatchV1projectsByIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -5762,6 +6326,8 @@ pub enum PatchV1projectsByIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -5865,6 +6431,11 @@ impl PostV1projectsByIdDetectionRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1projectsByIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -5954,6 +6525,11 @@ impl GetV1domainsByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1domainsByIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1domainsByIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -6001,6 +6577,8 @@ pub enum GetV1domainsByIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -6086,6 +6664,13 @@ impl DeleteV1domainsByIdPlatformSubdomainsByDomainIdRequest {
                 DeleteV1domainsByIdPlatformSubdomainsByDomainIdResponse::ContentTooLarge(data),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                DeleteV1domainsByIdPlatformSubdomainsByDomainIdResponse::UnprocessableEntity(data),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -6141,6 +6726,8 @@ pub enum DeleteV1domainsByIdPlatformSubdomainsByDomainIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -6218,6 +6805,11 @@ impl GetV1environmentsByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1environmentsByIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -6265,6 +6857,8 @@ pub enum GetV1environmentsByIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -6358,6 +6952,13 @@ impl GetV1environmentsByIdReleasesRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1environmentsByIdReleasesResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdReleasesResponse::UnprocessableEntity(
+                data,
+            ));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -6409,6 +7010,8 @@ pub enum GetV1environmentsByIdReleasesResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -6486,6 +7089,13 @@ impl GetV1environmentsByIdServingRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1environmentsByIdServingResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1environmentsByIdServingResponse::UnprocessableEntity(
+                data,
+            ));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -6537,6 +7147,8 @@ pub enum GetV1environmentsByIdServingResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -6670,6 +7282,13 @@ impl PostV1environmentsByIdActionsActivateReleaseRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1environmentsByIdActionsActivateReleaseResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1environmentsByIdActionsActivateReleaseResponse::UnprocessableEntity(data),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -6721,6 +7340,8 @@ pub enum PostV1environmentsByIdActionsActivateReleaseResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -6817,6 +7438,11 @@ impl PostV1deploymentsSetRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1deploymentsSetResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -6864,6 +7490,8 @@ pub enum PostV1deploymentsSetResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -6941,6 +7569,11 @@ impl GetV1deploymentsByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1deploymentsByIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1deploymentsByIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -6988,6 +7621,8 @@ pub enum GetV1deploymentsByIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -7082,6 +7717,11 @@ impl GetV1deploymentsProjectByProjectIdRequest {
                 data,
             ));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1deploymentsProjectByProjectIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -7133,6 +7773,8 @@ pub enum GetV1deploymentsProjectByProjectIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -7209,6 +7851,11 @@ impl GetV1buildLogSessionsWorkspacePolicyRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1buildLogSessionsWorkspacePolicyResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1buildLogSessionsWorkspacePolicyResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -7256,6 +7903,8 @@ pub enum GetV1buildLogSessionsWorkspacePolicyResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -7355,6 +8004,11 @@ impl PostV1buildLogSessionsRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1buildLogSessionsResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1buildLogSessionsResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -7402,6 +8056,8 @@ pub enum PostV1buildLogSessionsResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -7495,6 +8151,11 @@ impl PostV1buildLogSessionsByIdEventsRequest {
                 data,
             ));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1buildLogSessionsByIdEventsResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -7546,6 +8207,8 @@ pub enum PostV1buildLogSessionsByIdEventsResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -7648,6 +8311,11 @@ impl PostV1buildLogSessionsByIdFinishRequest {
                 data,
             ));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1buildLogSessionsByIdFinishResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -7699,6 +8367,8 @@ pub enum PostV1buildLogSessionsByIdFinishResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -7769,6 +8439,13 @@ impl GetV1workspaceDomainsDomainsRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1workspaceDomainsDomainsResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1workspaceDomainsDomainsResponse::UnprocessableEntity(
+                data,
+            ));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -7820,6 +8497,8 @@ pub enum GetV1workspaceDomainsDomainsResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -7903,6 +8582,11 @@ impl GetV1workspaceDomainsDomainsByZoneIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1workspaceDomainsDomainsByZoneIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1workspaceDomainsDomainsByZoneIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -7950,6 +8634,8 @@ pub enum GetV1workspaceDomainsDomainsByZoneIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -8031,6 +8717,13 @@ impl PostV1workspaceDomainsDomainsByZoneIdVerifyRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1workspaceDomainsDomainsByZoneIdVerifyResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1workspaceDomainsDomainsByZoneIdVerifyResponse::UnprocessableEntity(data),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -8082,6 +8775,8 @@ pub enum PostV1workspaceDomainsDomainsByZoneIdVerifyResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -8191,6 +8886,13 @@ impl PostV1workspaceDomainsDomainsByZoneIdHostnamesRequest {
                 PostV1workspaceDomainsDomainsByZoneIdHostnamesResponse::ContentTooLarge(data),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1workspaceDomainsDomainsByZoneIdHostnamesResponse::UnprocessableEntity(data),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -8246,6 +8948,8 @@ pub enum PostV1workspaceDomainsDomainsByZoneIdHostnamesResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -8356,6 +9060,15 @@ impl DeleteV1workspaceDomainsDomainsByZoneIdHostnamesByBindingIdRequest {
                 ),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                DeleteV1workspaceDomainsDomainsByZoneIdHostnamesByBindingIdResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -8419,6 +9132,8 @@ pub enum DeleteV1workspaceDomainsDomainsByZoneIdHostnamesByBindingIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -8509,6 +9224,11 @@ impl PostV1previewAccessByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1previewAccessByIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1previewAccessByIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -8556,6 +9276,8 @@ pub enum PostV1previewAccessByIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -8639,6 +9361,11 @@ impl DeleteV1previewAccessByIdBySecretIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1previewAccessByIdBySecretIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1previewAccessByIdBySecretIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -8686,6 +9413,8 @@ pub enum DeleteV1previewAccessByIdBySecretIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -8805,6 +9534,15 @@ impl GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsReq
                 ),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -8870,6 +9608,8 @@ pub enum GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunction
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -9039,6 +9779,17 @@ impl PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsBy
                 ),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data = oas3_gen_support::Diagnostics::<
+                ApiError422,
+            >::json_with_diagnostics(req)
+                .await?;
+            return Ok(
+                PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsByFunctionIdRevisionsByRevisionIdTestInvokeResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data = oas3_gen_support::Diagnostics::<
                 ApiError426,
@@ -9113,6 +9864,8 @@ pub enum PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctio
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -9257,6 +10010,15 @@ impl PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsPu
                 ),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctionsPublishResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -9322,6 +10084,8 @@ pub enum PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdFunctio
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -9443,6 +10207,15 @@ impl GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRulesReq
                 ),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRulesResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -9508,6 +10281,8 @@ pub enum GetV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRule
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -9690,6 +10465,15 @@ impl PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRulesSt
                 ),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRulesStatusResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -9755,6 +10539,8 @@ pub enum PostV1projectsByIdFunctionActivationsEnvironmentsByEnvironmentIdEdgeRul
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -9854,6 +10640,13 @@ impl PutV1computeConfigByProjectIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PutV1computeConfigByProjectIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PutV1computeConfigByProjectIdResponse::UnprocessableEntity(
+                data,
+            ));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -9905,6 +10698,8 @@ pub enum PutV1computeConfigByProjectIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -9976,6 +10771,11 @@ impl GetV1kaikiDatabasesRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1kaikiDatabasesResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -10023,6 +10823,8 @@ pub enum GetV1kaikiDatabasesResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -10127,6 +10929,11 @@ impl PostV1kaikiDatabasesRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1kaikiDatabasesResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kaikiDatabasesResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -10174,6 +10981,8 @@ pub enum PostV1kaikiDatabasesResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -10251,6 +11060,11 @@ impl GetV1kaikiDatabasesByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1kaikiDatabasesByIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -10298,6 +11112,8 @@ pub enum GetV1kaikiDatabasesByIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -10374,6 +11190,13 @@ impl DeleteV1kaikiDatabasesByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1kaikiDatabasesByIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kaikiDatabasesByIdResponse::UnprocessableEntity(
+                data,
+            ));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -10423,6 +11246,8 @@ pub enum DeleteV1kaikiDatabasesByIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -10519,6 +11344,11 @@ impl PatchV1kaikiDatabasesByIdRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PatchV1kaikiDatabasesByIdResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PatchV1kaikiDatabasesByIdResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -10566,6 +11396,8 @@ pub enum PatchV1kaikiDatabasesByIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -10642,6 +11474,13 @@ impl PostV1kaikiDatabasesByIdStartRequest {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1kaikiDatabasesByIdStopResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kaikiDatabasesByIdStopResponse::UnprocessableEntity(
+                data,
+            ));
         }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
@@ -10737,6 +11576,13 @@ impl PostV1kaikiDatabasesByIdStopRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1kaikiDatabasesByIdStopResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kaikiDatabasesByIdStopResponse::UnprocessableEntity(
+                data,
+            ));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -10788,6 +11634,8 @@ pub enum PostV1kaikiDatabasesByIdStopResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -10873,6 +11721,11 @@ impl GetV1kaikiDatabasesByIdConnectionRequest {
                 data,
             ));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdConnectionResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -10924,6 +11777,8 @@ pub enum GetV1kaikiDatabasesByIdConnectionResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -11007,6 +11862,11 @@ impl GetV1kaikiDatabasesByIdBranchesRequest {
                 data,
             ));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdBranchesResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -11060,6 +11920,8 @@ pub enum GetV1kaikiDatabasesByIdBranchesResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -11161,6 +12023,11 @@ impl PostV1kaikiDatabasesByIdBranchesRequest {
                 data,
             ));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -11212,6 +12079,8 @@ pub enum PostV1kaikiDatabasesByIdBranchesResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -11297,6 +12166,11 @@ impl GetV1kaikiDatabasesByIdBranchesByBranchIdRequest {
             return Ok(PostV1kaikiDatabasesByIdBranchesResponse::ContentTooLarge(
                 data,
             ));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1kaikiDatabasesByIdBranchesResponse::UnprocessableEntity(data));
         }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
@@ -11393,6 +12267,13 @@ impl DeleteV1kaikiDatabasesByIdBranchesByBranchIdRequest {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1kaikiDatabasesByIdResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1kaikiDatabasesByIdResponse::UnprocessableEntity(
+                data,
+            ));
         }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
@@ -11496,6 +12377,11 @@ impl GetV1kaikiDatabasesByIdBranchesByBranchIdConnectionRequest {
             return Ok(GetV1kaikiDatabasesByIdConnectionResponse::ContentTooLarge(
                 data,
             ));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1kaikiDatabasesByIdConnectionResponse::UnprocessableEntity(data));
         }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
@@ -11634,6 +12520,13 @@ impl PatchV1kaikiDatabasesByIdAttachmentsByProjectIdRequest {
                 PatchV1kaikiDatabasesByIdAttachmentsByProjectIdResponse::ContentTooLarge(data),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PatchV1kaikiDatabasesByIdAttachmentsByProjectIdResponse::UnprocessableEntity(data),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -11689,6 +12582,8 @@ pub enum PatchV1kaikiDatabasesByIdAttachmentsByProjectIdResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -11757,6 +12652,11 @@ impl GetV1userRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1userResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1userResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -11804,6 +12704,8 @@ pub enum GetV1userResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -11873,6 +12775,11 @@ impl GetV1workspaceRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1workspaceResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1workspaceResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -11920,6 +12827,8 @@ pub enum GetV1workspaceResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -11989,6 +12898,11 @@ impl PostV1deviceRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1deviceResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deviceResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -12036,6 +12950,8 @@ pub enum PostV1deviceResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -12123,6 +13039,11 @@ impl PostV1deviceTokenRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1deviceTokenResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deviceTokenResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -12170,6 +13091,8 @@ pub enum PostV1deviceTokenResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -12247,6 +13170,13 @@ impl GetV1deploymentsByIdStatusRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1deploymentsByIdStatusResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1deploymentsByIdStatusResponse::UnprocessableEntity(
+                data,
+            ));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -12296,6 +13226,8 @@ pub enum GetV1deploymentsByIdStatusResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -12513,6 +13445,11 @@ impl PostV1deploymentsByIdPrepareUploadRequest {
                 data,
             ));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdPrepareUploadResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -12564,6 +13501,8 @@ pub enum PostV1deploymentsByIdPrepareUploadResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -12661,6 +13600,13 @@ impl PostV1deploymentsByIdRuntimeArtifactsPrepareRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1deploymentsByIdRuntimeArtifactsPrepareResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1deploymentsByIdRuntimeArtifactsPrepareResponse::UnprocessableEntity(data),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -12712,6 +13658,8 @@ pub enum PostV1deploymentsByIdRuntimeArtifactsPrepareResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -12799,6 +13747,13 @@ impl PostV1deploymentsByIdRuntimeArtifactsCompleteRequest {
                 PostV1deploymentsByIdRuntimeArtifactsCompleteResponse::ContentTooLarge(data),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1deploymentsByIdRuntimeArtifactsCompleteResponse::UnprocessableEntity(data),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -12854,6 +13809,8 @@ pub enum PostV1deploymentsByIdRuntimeArtifactsCompleteResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -13010,6 +13967,11 @@ impl PostV1deploymentsByIdMultipartCompleteRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1deploymentsByIdMultipartCompleteResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdMultipartCompleteResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -13057,6 +14019,8 @@ pub enum PostV1deploymentsByIdMultipartCompleteResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -13215,6 +14179,11 @@ impl PostV1deploymentsByIdUploadFailedRequest {
                 data,
             ));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdUploadFailedResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -13266,6 +14235,8 @@ pub enum PostV1deploymentsByIdUploadFailedResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -13425,6 +14396,11 @@ impl PostV1deploymentsByIdUploadCompleteRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1deploymentsByIdUploadCompleteResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdUploadCompleteResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -13472,6 +14448,228 @@ pub enum PostV1deploymentsByIdUploadCompleteResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct AdmitRequestBody {
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: uuid::Uuid,
+    #[serde(rename = "operationId")]
+    pub operation_id: uuid::Uuid,
+    #[serde(rename = "cliIdempotencyKey")]
+    pub cli_idempotency_key: uuid::Uuid,
+    #[serde(rename = "cliAttemptId")]
+    pub cli_attempt_id: uuid::Uuid,
+    #[serde(rename = "protocolVersion")]
+    #[serde(deserialize_with = "AdmitRequestBody::deserialize_const_protocol_version")]
+    #[serde(serialize_with = "AdmitRequestBody::serialize_const_protocol_version")]
+    #[default(2f64)]
+    pub protocol_version: f64,
+    #[serde(rename = "packageProfile")]
+    #[validate(length(min = 1u64))]
+    pub package_profile: String,
+    #[validate(nested)]
+    pub manifest: Release200ResponseReleaseContentDigest,
+    #[serde(rename = "manifestSizeBytes")]
+    #[validate(range(min = 1i64, max = 536_870_912i64))]
+    pub manifest_size_bytes: i64,
+    #[serde(rename = "fileCount")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub file_count: i64,
+    #[serde(rename = "logicalStaticBytes")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub logical_static_bytes: i64,
+    #[serde(rename = "artifactBytes")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub artifact_bytes: i64,
+    #[serde(rename = "maxFileSize")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub max_file_size: i64,
+    #[serde(rename = "cliEndpointId")]
+    #[validate(regex(path = "REGEX_PREPARE_UPLOAD_REQUEST_BODY_LOGICAL_MANIFEST_SHA256"))]
+    pub cli_endpoint_id: String,
+}
+impl AdmitRequestBody {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_protocol_version<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<f64, D::Error> {
+        let value = <f64 as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: f64 = serde_json::from_str::<f64>("2").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_protocol_version<S: serde::Serializer>(
+        value: &f64,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: f64 = serde_json::from_str::<f64>("2").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1deploymentsByIdStaticSourceV2admitRequestPath {
+    pub id: uuid::Uuid,
+}
+/// Creates or replays a Source V2 operation with a scoped transfer grant when ingress is configured.
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1deploymentsByIdStaticSourceV2admitRequest {
+    pub path: PostV1deploymentsByIdStaticSourceV2admitRequestPath,
+    #[validate(nested)]
+    pub body: AdmitRequestBody,
+}
+impl PostV1deploymentsByIdStaticSourceV2admitRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1deploymentsByIdStaticSourceV2admitResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Admit200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::BadRequest(data));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::Unauthorized(data));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::Forbidden(
+                data,
+            ));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::NotFound(
+                data,
+            ));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::Conflict(
+                data,
+            ));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::UnprocessableEntity(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1deploymentsByIdStaticSourceV2admitResponse::Unknown);
+    }
+}
+/// Response types for postV1DeploymentsByIdStaticSourceV2Admit
+#[derive(Debug, Clone)]
+pub enum PostV1deploymentsByIdStaticSourceV2admitResponse {
+    ///200: Response for status 200
+    Ok(Admit200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -13579,6 +14777,13 @@ impl PostV1projectsByIdExecutionContextResolveRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1projectsByIdExecutionContextResolveResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1projectsByIdExecutionContextResolveResponse::UnprocessableEntity(data),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -13628,6 +14833,8 @@ pub enum PostV1projectsByIdExecutionContextResolveResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -13735,6 +14942,13 @@ impl PostV1projectsByIdExecutionContextMaterializeRequest {
                 PostV1projectsByIdExecutionContextMaterializeResponse::ContentTooLarge(data),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1projectsByIdExecutionContextMaterializeResponse::UnprocessableEntity(data),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -13790,6 +15004,8 @@ pub enum PostV1projectsByIdExecutionContextMaterializeResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -13805,7 +15021,7 @@ pub enum PostV1projectsByIdExecutionContextMaterializeResponse {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct AdmitRequestBody {
+pub struct AdmitRequestBody2 {
     #[serde(rename = "serviceId")]
     pub service_id: Option<uuid::Uuid>,
     #[serde(rename = "protocolVersion")]
@@ -13820,14 +15036,14 @@ pub struct AdmitRequestBody {
     #[serde(rename = "commitSha")]
     #[validate(
         length(min = 7u64, max = 40u64),
-        regex(path = "REGEX_ADMIT_REQUEST_BODY_COMMIT_SHA")
+        regex(path = "REGEX_ADMIT_REQUEST_BODY2_COMMIT_SHA")
     )]
     pub commit_sha: String,
     #[serde(rename = "selectionSource")]
     pub selection_source: ResolveRequestBodySelectionSource,
     #[serde(rename = "expectedContext")]
     #[validate(nested)]
-    pub expected_context: Option<AdmitRequestBodyExpectedContext>,
+    pub expected_context: Option<AdmitRequestBody2ExpectedContext>,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
@@ -13842,7 +15058,7 @@ pub struct PostV1projectsByIdDeploymentsAdmitRequestPath {
 pub struct PostV1projectsByIdDeploymentsAdmitRequest {
     pub path: PostV1projectsByIdDeploymentsAdmitRequestPath,
     #[validate(nested)]
-    pub body: AdmitRequestBody,
+    pub body: AdmitRequestBody2,
 }
 impl PostV1projectsByIdDeploymentsAdmitRequest {
     /// Parse the HTTP response into the response enum.
@@ -13852,7 +15068,7 @@ impl PostV1projectsByIdDeploymentsAdmitRequest {
         let status = req.status();
         if status == http::StatusCode::OK {
             let data =
-                oas3_gen_support::Diagnostics::<Admit200Response>::json_with_diagnostics(req)
+                oas3_gen_support::Diagnostics::<Admit200Response2>::json_with_diagnostics(req)
                     .await?;
             return Ok(PostV1projectsByIdDeploymentsAdmitResponse::Ok(data));
         }
@@ -13909,6 +15125,11 @@ impl PostV1projectsByIdDeploymentsAdmitRequest {
                 data,
             ));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdDeploymentsAdmitResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -13941,7 +15162,7 @@ impl PostV1projectsByIdDeploymentsAdmitRequest {
 #[derive(Debug, Clone)]
 pub enum PostV1projectsByIdDeploymentsAdmitResponse {
     ///200: Response for status 200
-    Ok(Admit200Response),
+    Ok(Admit200Response2),
     ///400: Response for status 400
     BadRequest(ApiError400),
     ///401: Response for status 401
@@ -13960,6 +15181,8 @@ pub enum PostV1projectsByIdDeploymentsAdmitResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -14058,6 +15281,11 @@ impl PostV1projectsByIdDeploymentsAdmitSetRequest {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1deploymentsSetResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsSetResponse::UnprocessableEntity(data));
         }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
@@ -14159,6 +15387,11 @@ impl GetV1deploymentsByIdRunnerContextRequest {
                 data,
             ));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1deploymentsByIdRunnerContextResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -14210,6 +15443,8 @@ pub enum GetV1deploymentsByIdRunnerContextResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -14302,6 +15537,13 @@ impl PostV1deploymentsByIdExecutionContextMaterializeRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(
                 PostV1projectsByIdExecutionContextMaterializeResponse::ContentTooLarge(data),
+            );
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1projectsByIdExecutionContextMaterializeResponse::UnprocessableEntity(data),
             );
         }
         if status == http::StatusCode::UPGRADE_REQUIRED {
@@ -14440,6 +15682,15 @@ impl PostV1deploymentsByIdExecutionContextFailBeforeSourceRequest {
                 ),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1deploymentsByIdExecutionContextFailBeforeSourceResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -14503,6 +15754,8 @@ pub enum PostV1deploymentsByIdExecutionContextFailBeforeSourceResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -14615,6 +15868,15 @@ impl PostV1deploymentsByIdExecutionContextSkipBeforeSourceRequest {
                 ),
             );
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(
+                PostV1deploymentsByIdExecutionContextFailBeforeSourceResponse::UnprocessableEntity(
+                    data,
+                ),
+            );
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -14659,6 +15921,169 @@ impl PostV1deploymentsByIdExecutionContextSkipBeforeSourceRequest {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
+pub struct MetadatumRequestBody {
+    #[serde(rename = "protocolVersion")]
+    pub protocol_version: String,
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub attempt: i64,
+    #[serde(rename = "operationId")]
+    pub operation_id: uuid::Uuid,
+    #[validate(nested)]
+    pub manifest: MetadatumRequestBodyManifest,
+    #[validate(nested)]
+    pub functions: Option<MetadatumRequestBodyFunctions>,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+#[derive(Debug, Clone, PartialEq, oas3_gen_support::Default)]
+pub struct PostV1deploymentsByIdSourceV2metadataRequestPath {
+    pub id: uuid::Uuid,
+}
+/// Register immutable Source V2 deployment metadata
+#[derive(Debug, Clone, validator::Validate, oas3_gen_support::Default)]
+pub struct PostV1deploymentsByIdSourceV2metadataRequest {
+    pub path: PostV1deploymentsByIdSourceV2metadataRequestPath,
+    #[validate(nested)]
+    pub body: MetadatumRequestBody,
+}
+impl PostV1deploymentsByIdSourceV2metadataRequest {
+    /// Parse the HTTP response into the response enum.
+    pub async fn parse_response(
+        req: reqwest::Response,
+    ) -> anyhow::Result<PostV1deploymentsByIdSourceV2metadataResponse> {
+        let status = req.status();
+        if status == http::StatusCode::OK {
+            let data =
+                oas3_gen_support::Diagnostics::<Metadatum200Response>::json_with_diagnostics(req)
+                    .await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::Ok(data));
+        }
+        if status == http::StatusCode::BAD_REQUEST {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError400>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::BadRequest(
+                data,
+            ));
+        }
+        if status == http::StatusCode::UNAUTHORIZED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError401>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::Unauthorized(
+                data,
+            ));
+        }
+        if status == http::StatusCode::PAYMENT_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError402>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::PaymentRequired(data));
+        }
+        if status == http::StatusCode::FORBIDDEN {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError403>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::Forbidden(
+                data,
+            ));
+        }
+        if status == http::StatusCode::NOT_FOUND {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError404>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::NotFound(
+                data,
+            ));
+        }
+        if status == http::StatusCode::REQUEST_TIMEOUT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError408>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::RequestTimeout(data));
+        }
+        if status == http::StatusCode::CONFLICT {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError409>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::Conflict(
+                data,
+            ));
+        }
+        if status == http::StatusCode::GONE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError410>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::Gone(data));
+        }
+        if status == http::StatusCode::PAYLOAD_TOO_LARGE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::ContentTooLarge(data));
+        }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::UnprocessableEntity(data));
+        }
+        if status == http::StatusCode::UPGRADE_REQUIRED {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::UpgradeRequired(data));
+        }
+        if status == http::StatusCode::TOO_MANY_REQUESTS {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError429>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::TooManyRequests(data));
+        }
+        if status == http::StatusCode::INTERNAL_SERVER_ERROR {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError500>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::InternalServerError(data));
+        }
+        if status == http::StatusCode::SERVICE_UNAVAILABLE {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError503>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceV2metadataResponse::ServiceUnavailable(data));
+        }
+        let _ = req.bytes().await?;
+        return Ok(PostV1deploymentsByIdSourceV2metadataResponse::Unknown);
+    }
+}
+/// Response types for postV1DeploymentsByIdSourceV2Metadata
+#[derive(Debug, Clone)]
+pub enum PostV1deploymentsByIdSourceV2metadataResponse {
+    ///200: Response for status 200
+    Ok(Metadatum200Response),
+    ///400: Response for status 400
+    BadRequest(ApiError400),
+    ///401: Response for status 401
+    Unauthorized(ApiError401),
+    ///402: Response for status 402
+    PaymentRequired(ApiError402),
+    ///403: Response for status 403
+    Forbidden(ApiError403),
+    ///404: Response for status 404
+    NotFound(ApiError404),
+    ///408: Response for status 408
+    RequestTimeout(ApiError408),
+    ///409: Response for status 409
+    Conflict(ApiError409),
+    ///410: Response for status 410
+    Gone(ApiError410),
+    ///413: Response for status 413
+    ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
+    ///426: Response for status 426
+    UpgradeRequired(ApiError426),
+    ///429: Response for status 429
+    TooManyRequests(ApiError429),
+    ///500: Response for status 500
+    InternalServerError(ApiError500),
+    ///503: Response for status 503
+    ServiceUnavailable(ApiError503),
+    ///default: Unknown response
+    Unknown,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
 pub struct SourceRequestBody2 {
     #[serde(rename = "protocolVersion")]
     pub protocol_version: String,
@@ -14667,7 +16092,7 @@ pub struct SourceRequestBody2 {
     #[serde(rename = "operationId")]
     pub operation_id: uuid::Uuid,
     #[validate(nested)]
-    pub manifest: SourceRequestBody2Manifest,
+    pub manifest: MetadatumRequestBodyManifest,
     #[validate(nested)]
     pub functions: Option<SourceRequestBody2Functions>,
     /// Additional properties not defined in the schema.
@@ -14743,6 +16168,13 @@ impl PostV1deploymentsByIdSourceRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1deploymentsByIdSourceResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1deploymentsByIdSourceResponse::UnprocessableEntity(
+                data,
+            ));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -14794,6 +16226,8 @@ pub enum PostV1deploymentsByIdSourceResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -14886,6 +16320,13 @@ impl GetV1projectsByIdRuntimeLogsRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1projectsByIdRuntimeLogsResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdRuntimeLogsResponse::UnprocessableEntity(
+                data,
+            ));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -14937,6 +16378,8 @@ pub enum GetV1projectsByIdRuntimeLogsResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -15022,6 +16465,11 @@ impl GetV1projectsByIdEnvRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(GetV1projectsByIdEnvResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(GetV1projectsByIdEnvResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -15069,6 +16517,8 @@ pub enum GetV1projectsByIdEnvResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -15180,6 +16630,11 @@ impl PostV1projectsByIdEnvRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(PostV1projectsByIdEnvResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(PostV1projectsByIdEnvResponse::UnprocessableEntity(data));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -15227,6 +16682,8 @@ pub enum PostV1projectsByIdEnvResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -15315,6 +16772,13 @@ impl DeleteV1projectsByIdEnvByKeyRequest {
                 oas3_gen_support::Diagnostics::<ApiError413>::json_with_diagnostics(req).await?;
             return Ok(DeleteV1projectsByIdEnvByKeyResponse::ContentTooLarge(data));
         }
+        if status == http::StatusCode::UNPROCESSABLE_ENTITY {
+            let data =
+                oas3_gen_support::Diagnostics::<ApiError422>::json_with_diagnostics(req).await?;
+            return Ok(DeleteV1projectsByIdEnvByKeyResponse::UnprocessableEntity(
+                data,
+            ));
+        }
         if status == http::StatusCode::UPGRADE_REQUIRED {
             let data =
                 oas3_gen_support::Diagnostics::<ApiError426>::json_with_diagnostics(req).await?;
@@ -15366,6 +16830,8 @@ pub enum DeleteV1projectsByIdEnvByKeyResponse {
     Gone(ApiError410),
     ///413: Response for status 413
     ContentTooLarge(ApiError413),
+    ///422: Response for status 422
+    UnprocessableEntity(ApiError422),
     ///426: Response for status 426
     UpgradeRequired(ApiError426),
     ///429: Response for status 429
@@ -17416,6 +18882,80 @@ pub struct EdgeRuleActionAuthoring3Object6 {
     pub steps: Vec<StepKind3>,
 }
 impl EdgeRuleActionAuthoring3Object6 {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_type<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"pipeline\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_type<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"pipeline\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, oas3_gen_support::Default)]
+#[serde(untagged)]
+pub enum StepKind4 {
+    #[default]
+    Object(StepKindObject),
+    PipelineHandleStep4(PipelineHandleStep4),
+}
+impl StepKind4 {
+    pub fn pipeline_handle_step4(handle: String) -> Self {
+        Self::PipelineHandleStep4(PipelineHandleStep4 {
+            handle,
+            ..Default::default()
+        })
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct EdgeRuleActionAuthoring4Object6 {
+    #[serde(rename = "type")]
+    #[serde(deserialize_with = "EdgeRuleActionAuthoring4Object6::deserialize_const_type")]
+    #[serde(serialize_with = "EdgeRuleActionAuthoring4Object6::serialize_const_type")]
+    #[default("pipeline".to_string())]
+    pub r#type: String,
+    #[serde(rename = "override")]
+    pub r#override: Option<bool>,
+    #[serde(rename = "inheritGate")]
+    pub inherit_gate: Option<bool>,
+    #[validate(length(min = 1u64))]
+    pub steps: Vec<StepKind4>,
+}
+impl EdgeRuleActionAuthoring4Object6 {
     #[allow(
         clippy::float_cmp,
         reason = "JSON Schema constants require exact equality"
@@ -19817,7 +21357,7 @@ pub struct SetRequestBodySelectionObjectService {
     #[serde(rename = "commitSha")]
     #[validate(
         length(min = 7u64, max = 40u64),
-        regex(path = "REGEX_ADMIT_REQUEST_BODY_COMMIT_SHA")
+        regex(path = "REGEX_ADMIT_REQUEST_BODY2_COMMIT_SHA")
     )]
     pub commit_sha: Option<String>,
 }
@@ -20722,6 +22262,28 @@ pub struct DomainResponse2 {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Domain200ResponseZoneDelegationCheckState {
+    #[serde(rename = "match")]
+    #[default]
+    Match,
+    #[serde(rename = "mismatch")]
+    Mismatch,
+    #[serde(rename = "disagreement")]
+    Disagreement,
+    #[serde(rename = "unavailable")]
+    Unavailable,
+}
+impl core::fmt::Display for Domain200ResponseZoneDelegationCheckState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Match => write!(f, "match"),
+            Self::Mismatch => write!(f, "mismatch"),
+            Self::Disagreement => write!(f, "disagreement"),
+            Self::Unavailable => write!(f, "unavailable"),
+        }
+    }
+}
 #[serde_with::skip_serializing_none]
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
@@ -20746,6 +22308,18 @@ pub struct Domain200ResponseZone {
     )]
     #[serialize_always]
     pub delegation_checked_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "delegationCheckState"
+    )]
+    #[serialize_always]
+    pub delegation_check_state: Option<Domain200ResponseZoneDelegationCheckState>,
+    #[serde(
+        deserialize_with = "Option::deserialize",
+        rename = "delegationRefreshRequestedAt"
+    )]
+    #[serialize_always]
+    pub delegation_refresh_requested_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(deserialize_with = "Option::deserialize", rename = "syncFailure")]
     #[serialize_always]
     #[validate(nested)]
@@ -24837,6 +26411,181 @@ impl UploadComplete200Response {
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
+pub enum Admit200ResponseState {
+    #[serde(rename = "ACTIVE")]
+    #[default]
+    Active,
+    #[serde(rename = "CLOSED")]
+    Closed,
+}
+impl core::fmt::Display for Admit200ResponseState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Active => write!(f, "ACTIVE"),
+            Self::Closed => write!(f, "CLOSED"),
+        }
+    }
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Admit200ResponseInput {
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: uuid::Uuid,
+    #[serde(rename = "projectId")]
+    pub project_id: uuid::Uuid,
+    #[serde(rename = "environmentId")]
+    pub environment_id: uuid::Uuid,
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: uuid::Uuid,
+    #[serde(rename = "deploymentAttempt")]
+    #[validate(range(min = 1i64, max = 2_147_483_647i64))]
+    pub deployment_attempt: i64,
+    #[serde(rename = "cliAttemptId")]
+    pub cli_attempt_id: uuid::Uuid,
+    #[serde(rename = "protocolVersion")]
+    #[serde(deserialize_with = "Admit200ResponseInput::deserialize_const_protocol_version")]
+    #[serde(serialize_with = "Admit200ResponseInput::serialize_const_protocol_version")]
+    #[default(2f64)]
+    pub protocol_version: f64,
+    #[serde(rename = "packageProfile")]
+    #[validate(length(min = 1u64))]
+    pub package_profile: String,
+    #[validate(nested)]
+    pub manifest: Release200ResponseReleaseContentDigest,
+    #[serde(rename = "manifestSizeBytes")]
+    #[validate(range(min = 1i64, max = 536_870_912i64))]
+    pub manifest_size_bytes: i64,
+    #[serde(rename = "fileCount")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub file_count: i64,
+    #[serde(rename = "logicalStaticBytes")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub logical_static_bytes: i64,
+    #[serde(rename = "artifactBytes")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub artifact_bytes: i64,
+    #[serde(rename = "maxFileSize")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub max_file_size: i64,
+    #[serde(rename = "cliEndpointId")]
+    #[validate(regex(path = "REGEX_PREPARE_UPLOAD_REQUEST_BODY_LOGICAL_MANIFEST_SHA256"))]
+    pub cli_endpoint_id: String,
+}
+impl Admit200ResponseInput {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_protocol_version<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<f64, D::Error> {
+        let value = <f64 as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: f64 = serde_json::from_str::<f64>("2").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_protocol_version<S: serde::Serializer>(
+        value: &f64,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: f64 = serde_json::from_str::<f64>("2").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Admit200Response {
+    #[serde(rename = "operationId")]
+    pub operation_id: uuid::Uuid,
+    #[serde(rename = "cliIdempotencyKey")]
+    pub cli_idempotency_key: uuid::Uuid,
+    pub state: Admit200ResponseState,
+    #[validate(nested)]
+    pub input: Admit200ResponseInput,
+    #[serde(rename = "inputDigest")]
+    #[validate(regex(path = "REGEX_PREPARE_UPLOAD_REQUEST_BODY_LOGICAL_MANIFEST_SHA256"))]
+    pub input_digest: String,
+    #[serde(rename = "writerGeneration")]
+    #[validate(regex(path = "REGEX_ADMIT200RESPONSE_WRITER_GENERATION"))]
+    pub writer_generation: String,
+    #[serde(rename = "installationId")]
+    pub installation_id: uuid::Uuid,
+    #[serde(rename = "assignmentId")]
+    pub assignment_id: uuid::Uuid,
+    #[serde(rename = "assignmentGeneration")]
+    #[validate(regex(path = "REGEX_ADMIT200RESPONSE_WRITER_GENERATION"))]
+    pub assignment_generation: String,
+    #[serde(rename = "nodeIncarnationId")]
+    pub node_incarnation_id: uuid::Uuid,
+    #[serde(rename = "nodeId")]
+    #[validate(
+        length(min = 1u64, max = 128u64),
+        regex(path = "REGEX_ADMIT200RESPONSE_NODE_ID")
+    )]
+    pub node_id: String,
+    #[serde(rename = "nodeBootId")]
+    pub node_boot_id: uuid::Uuid,
+    #[serde(rename = "identityGeneration")]
+    #[validate(regex(path = "REGEX_ADMIT200RESPONSE_WRITER_GENERATION"))]
+    pub identity_generation: String,
+    #[serde(rename = "receiverInstanceId")]
+    pub receiver_instance_id: uuid::Uuid,
+    #[serde(rename = "receiverSessionId")]
+    pub receiver_session_id: uuid::Uuid,
+    #[serde(rename = "receiverEndpointId")]
+    #[validate(regex(path = "REGEX_PREPARE_UPLOAD_REQUEST_BODY_LOGICAL_MANIFEST_SHA256"))]
+    pub receiver_endpoint_id: String,
+    #[serde(rename = "profileDigest")]
+    #[validate(regex(path = "REGEX_PREPARE_UPLOAD_REQUEST_BODY_LOGICAL_MANIFEST_SHA256"))]
+    pub profile_digest: String,
+    #[serde(rename = "observationId")]
+    pub observation_id: uuid::Uuid,
+    #[serde(rename = "observedAt")]
+    pub observed_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "observationValidUntil")]
+    pub observation_valid_until: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    #[serde(rename = "reservedBusinessBytes")]
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub reserved_business_bytes: i64,
+    #[serde(deserialize_with = "Option::deserialize", rename = "terminalReason")]
+    #[serialize_always]
+    pub terminal_reason: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize", rename = "terminalAt")]
+    #[serialize_always]
+    pub terminal_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(rename = "receiverDirectAddresses")]
+    #[validate(length(min = 1u64, max = 8u64))]
+    pub receiver_direct_addresses: Option<Vec<String>>,
+    #[serde(rename = "transferGrant")]
+    #[validate(length(min = 1u64))]
+    pub transfer_grant: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, oas3_gen_support::Default)]
 pub enum ResolveRequestBodySelectionSource {
     #[serde(rename = "EXPLICIT")]
     #[default]
@@ -25075,7 +26824,7 @@ impl Materialize200Response {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct AdmitRequestBodyExpectedContext {
+pub struct AdmitRequestBody2ExpectedContext {
     #[serde(rename = "workspaceId")]
     pub workspace_id: uuid::Uuid,
     #[serde(rename = "productId")]
@@ -25100,12 +26849,12 @@ pub struct AdmitRequestBodyExpectedContext {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct Admit200ResponseDeployment {
+pub struct Admit200Response2Deployment {
     pub id: uuid::Uuid,
     #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
     pub attempt: i64,
-    #[serde(deserialize_with = "Admit200ResponseDeployment::deserialize_const_status")]
-    #[serde(serialize_with = "Admit200ResponseDeployment::serialize_const_status")]
+    #[serde(deserialize_with = "Admit200Response2Deployment::deserialize_const_status")]
+    #[serde(serialize_with = "Admit200Response2Deployment::serialize_const_status")]
     #[default("BUILDING".to_string())]
     pub status: String,
     #[serde(deserialize_with = "Option::deserialize")]
@@ -25116,7 +26865,7 @@ pub struct Admit200ResponseDeployment {
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
-impl Admit200ResponseDeployment {
+impl Admit200Response2Deployment {
     #[allow(
         clippy::float_cmp,
         reason = "JSON Schema constants require exact equality"
@@ -25160,7 +26909,7 @@ impl Admit200ResponseDeployment {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct Admit200ResponseSnapshot {
+pub struct Admit200Response2Snapshot {
     #[validate(regex(path = "REGEX_MATERIALIZE200RESPONSE_SNAPSHOT_FINGERPRINT"))]
     pub fingerprint: String,
     #[serde(rename = "resolvedAt")]
@@ -25173,24 +26922,24 @@ pub struct Admit200ResponseSnapshot {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct Admit200Response {
+pub struct Admit200Response2 {
     #[serde(rename = "protocolVersion")]
-    #[serde(deserialize_with = "Admit200Response::deserialize_const_protocol_version")]
-    #[serde(serialize_with = "Admit200Response::serialize_const_protocol_version")]
+    #[serde(deserialize_with = "Admit200Response2::deserialize_const_protocol_version")]
+    #[serde(serialize_with = "Admit200Response2::serialize_const_protocol_version")]
     #[default("execution-context-v3".to_string())]
     pub protocol_version: String,
     #[validate(nested)]
     pub context: Resolve200ResponseContext,
     #[validate(nested)]
-    pub deployment: Admit200ResponseDeployment,
+    pub deployment: Admit200Response2Deployment,
     #[validate(nested)]
-    pub snapshot: Admit200ResponseSnapshot,
+    pub snapshot: Admit200Response2Snapshot,
     /// Additional properties not defined in the schema.
     #[serde(flatten)]
     #[default(Default::default())]
     pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
 }
-impl Admit200Response {
+impl Admit200Response2 {
     #[allow(
         clippy::float_cmp,
         reason = "JSON Schema constants require exact equality"
@@ -25271,12 +27020,12 @@ pub struct ServiceKindObject {
     #[serde(rename = "commitSha")]
     #[validate(
         length(min = 7u64, max = 40u64),
-        regex(path = "REGEX_ADMIT_REQUEST_BODY_COMMIT_SHA")
+        regex(path = "REGEX_ADMIT_REQUEST_BODY2_COMMIT_SHA")
     )]
     pub commit_sha: String,
     #[serde(rename = "expectedContext")]
     #[validate(nested)]
-    pub expected_context: AdmitRequestBodyExpectedContext,
+    pub expected_context: AdmitRequestBody2ExpectedContext,
 }
 impl ServiceKindObject {
     #[allow(
@@ -25339,7 +27088,7 @@ pub struct ServiceKindObject2 {
     #[serde(rename = "commitSha")]
     #[validate(
         length(min = 7u64, max = 40u64),
-        regex(path = "REGEX_ADMIT_REQUEST_BODY_COMMIT_SHA")
+        regex(path = "REGEX_ADMIT_REQUEST_BODY2_COMMIT_SHA")
     )]
     pub commit_sha: Option<String>,
 }
@@ -26646,7 +28395,7 @@ impl FallthroughWhenKind {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct SourceRequestBody2ManifestRoute {
+pub struct MetadatumRequestBodyManifestRoute {
     #[validate(length(min = 1u64, max = 500u64))]
     pub pattern: String,
     #[validate(length(min = 1u64))]
@@ -26672,7 +28421,7 @@ pub struct SourceRequestBody2ManifestRoute {
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
-pub struct SourceRequestBody2ManifestPrerender {
+pub struct MetadatumRequestBodyManifestPrerender {
     #[validate(length(min = 1u64))]
     pub layer: String,
     pub pages: std::collections::HashMap<String, serde_json::Value>,
@@ -26686,20 +28435,20 @@ pub struct SourceRequestBody2ManifestPrerender {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 #[serde(deny_unknown_fields)]
-pub struct SourceRequestBody2Manifest {
-    #[serde(deserialize_with = "SourceRequestBody2Manifest::deserialize_const_version")]
-    #[serde(serialize_with = "SourceRequestBody2Manifest::serialize_const_version")]
+pub struct MetadatumRequestBodyManifest {
+    #[serde(deserialize_with = "MetadatumRequestBodyManifest::deserialize_const_version")]
+    #[serde(serialize_with = "MetadatumRequestBodyManifest::serialize_const_version")]
     #[default(2f64)]
     pub version: f64,
     #[validate(length(min = 1u64, max = 10u64))]
     pub layers: Vec<LayerKind>,
     #[validate(length(max = 200u64), nested)]
-    pub routes: Vec<SourceRequestBody2ManifestRoute>,
+    pub routes: Vec<MetadatumRequestBodyManifestRoute>,
     #[validate(nested)]
-    pub prerender: Option<SourceRequestBody2ManifestPrerender>,
+    pub prerender: Option<MetadatumRequestBodyManifestPrerender>,
     pub meta: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
-impl SourceRequestBody2Manifest {
+impl MetadatumRequestBodyManifest {
     #[allow(
         clippy::float_cmp,
         reason = "JSON Schema constants require exact equality"
@@ -26743,7 +28492,7 @@ impl SourceRequestBody2Manifest {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 #[serde(deny_unknown_fields)]
-pub struct SourceRequestBody2FunctionsGeneratedEdgeRuleSet {
+pub struct MetadatumRequestBodyFunctionsGeneratedEdgeRuleSet {
     #[validate(length(min = 1u64, max = 128u64))]
     pub producer: String,
     #[validate(length(min = 1u64, max = 128u64))]
@@ -26757,9 +28506,9 @@ pub struct SourceRequestBody2FunctionsGeneratedEdgeRuleSet {
     Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
 )]
 #[serde(deny_unknown_fields)]
-pub struct SourceRequestBody2Functions {
-    #[serde(deserialize_with = "SourceRequestBody2Functions::deserialize_const_origin")]
-    #[serde(serialize_with = "SourceRequestBody2Functions::serialize_const_origin")]
+pub struct MetadatumRequestBodyFunctions {
+    #[serde(deserialize_with = "MetadatumRequestBodyFunctions::deserialize_const_origin")]
+    #[serde(serialize_with = "MetadatumRequestBodyFunctions::serialize_const_origin")]
     #[default("DEPLOYMENT".to_string())]
     pub origin: String,
     #[validate(length(max = 1_000u64), nested)]
@@ -26767,6 +28516,140 @@ pub struct SourceRequestBody2Functions {
     #[serde(rename = "edgeRules")]
     #[validate(nested)]
     pub edge_rules: Option<EdgeRuleSetAuthoring3>,
+    #[serde(rename = "edgeRulesForce")]
+    #[default(Some(false))]
+    pub edge_rules_force: Option<bool>,
+    #[serde(rename = "generatedEdgeRuleSets")]
+    #[validate(nested)]
+    pub generated_edge_rule_sets: Option<Vec<MetadatumRequestBodyFunctionsGeneratedEdgeRuleSet>>,
+}
+impl MetadatumRequestBodyFunctions {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_origin<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: String =
+            serde_json::from_str::<String>("\"DEPLOYMENT\"").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_origin<S: serde::Serializer>(
+        value: &String,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: String =
+            serde_json::from_str::<String>("\"DEPLOYMENT\"").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+pub struct Metadatum200Response {
+    pub id: uuid::Uuid,
+    #[validate(range(min = 0i64, max = 9_007_199_254_740_991i64))]
+    pub attempt: i64,
+    #[serde(deserialize_with = "Metadatum200Response::deserialize_const_registered")]
+    #[serde(serialize_with = "Metadatum200Response::serialize_const_registered")]
+    #[default(true)]
+    pub registered: bool,
+    /// Additional properties not defined in the schema.
+    #[serde(flatten)]
+    #[default(Default::default())]
+    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,
+}
+impl Metadatum200Response {
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn deserialize_const_registered<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<bool, D::Error> {
+        let value = <bool as serde::Deserialize>::deserialize(deserializer)?;
+        let expected: bool =
+            serde_json::from_str::<bool>("true").map_err(serde::de::Error::custom)?;
+        if value != expected {
+            return Err(serde::de::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        Ok(value)
+    }
+    #[allow(
+        clippy::ref_option,
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde field serializers receive a reference"
+    )]
+    #[allow(
+        clippy::float_cmp,
+        reason = "JSON Schema constants require exact equality"
+    )]
+    fn serialize_const_registered<S: serde::Serializer>(
+        value: &bool,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let expected: bool =
+            serde_json::from_str::<bool>("true").map_err(serde::ser::Error::custom)?;
+        if value != &expected {
+            return Err(serde::ser::Error::custom(
+                "value does not match schema const",
+            ));
+        }
+        serde::Serialize::serialize(value, serializer)
+    }
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct SourceRequestBody2FunctionsGeneratedEdgeRuleSet {
+    #[validate(length(min = 1u64, max = 128u64))]
+    pub producer: String,
+    #[validate(length(min = 1u64, max = 128u64))]
+    pub version: Option<String>,
+    #[serde(rename = "edgeRules")]
+    #[validate(nested)]
+    pub edge_rules: EdgeRuleSetAuthoring4,
+}
+#[serde_with::skip_serializing_none]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, validator::Validate, oas3_gen_support::Default,
+)]
+#[serde(deny_unknown_fields)]
+pub struct SourceRequestBody2Functions {
+    #[serde(deserialize_with = "SourceRequestBody2Functions::deserialize_const_origin")]
+    #[serde(serialize_with = "SourceRequestBody2Functions::serialize_const_origin")]
+    #[default("DEPLOYMENT".to_string())]
+    pub origin: String,
+    #[validate(length(max = 1_000u64), nested)]
+    pub functions: Option<Vec<FunctionPublishSpec3>>,
+    #[serde(rename = "edgeRules")]
+    #[validate(nested)]
+    pub edge_rules: Option<EdgeRuleSetAuthoring4>,
     #[serde(rename = "edgeRulesForce")]
     #[default(Some(false))]
     pub edge_rules_force: Option<bool>,

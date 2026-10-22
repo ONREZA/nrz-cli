@@ -6,6 +6,7 @@ license = "MIT"
 description = "Shared runtime artifact graph identity used by nrz CLI binary builds"
 
 [dependencies]
+blake3 = "1"
 cap-fs-ext = "4.0.3"
 cap-std = "4.0.3"
 hex = "0.4"

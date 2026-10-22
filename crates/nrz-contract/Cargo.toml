@@ -12,6 +12,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["serde"] }
 
+[dev-dependencies]
+blake3 = "1"
+
 [features]
 codegen = ["dep:typify", "dep:schemars08", "dep:prettyplease", "dep:syn", "dep:quote", "dep:proc-macro2", "dep:anyhow"]
 
@@ -47,4 +50,9 @@ optional = true
 [[bin]]
 name = "gen-contract"
 path = "src/bin/gen_contract.rs"
+required-features = ["codegen"]
+
+[[bin]]
+name = "export-artifact-schemas"
+path = "src/bin/export_artifact_schemas.rs"
 required-features = ["codegen"]

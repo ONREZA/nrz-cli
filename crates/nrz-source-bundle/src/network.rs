@@ -143,12 +143,26 @@ pub fn layer_compute_network(
 
 /// Retained V1 has no network capability. New writers require a complete declaration.
 pub fn validate_source_network(manifest: &SourceLogicalManifest) -> Result<bool, String> {
-    let declared = manifest
-        .capabilities
+    validate_source_network_layers(
+        &manifest.capabilities,
+        &manifest.layers,
+        manifest
+            .routes
+            .iter()
+            .map(|route| route.layer_name.as_str()),
+    )
+}
+
+pub(crate) fn validate_source_network_layers<'a>(
+    capabilities: &[String],
+    layers: &[crate::SourceLogicalManifestLayer],
+    route_layers: impl Iterator<Item = &'a str> + Clone,
+) -> Result<bool, String> {
+    let declared = capabilities
         .iter()
         .any(|c| c == COMPUTE_NETWORK_SCHEMA_VERSION);
     let mut names = HashSet::new();
-    for layer in &manifest.layers {
+    for layer in layers {
         if declared
             && (layer.name.is_empty()
                 || layer.name.chars().count() > 64
@@ -167,18 +181,11 @@ pub fn validate_source_network(manifest: &SourceLogicalManifest) -> Result<bool,
             return Err("network declarations must cover every COMPUTE layer".into());
         }
         if let Some(network) = network {
-            if network.exposure == "PUBLIC"
-                && !manifest
-                    .routes
-                    .iter()
-                    .any(|route| route.layer_name == layer.name)
+            if network.exposure == "PUBLIC" && !route_layers.clone().any(|name| name == layer.name)
             {
                 return Err("PUBLIC endpoint requires an explicit public route".into());
             }
-            if manifest
-                .routes
-                .iter()
-                .any(|route| route.layer_name == layer.name)
+            if route_layers.clone().any(|name| name == layer.name)
                 && (network.exposure == "PRIVATE"
                     || !network.ports.iter().any(|port| {
                         port.binding == "primary"
@@ -190,8 +197,8 @@ pub fn validate_source_network(manifest: &SourceLogicalManifest) -> Result<bool,
         }
     }
     if declared
-        && manifest.routes.is_empty()
-        && manifest.layers.iter().any(|layer| {
+        && route_layers.clone().next().is_none()
+        && layers.iter().any(|layer| {
             layer.target != "COMPUTE"
                 || !layer_compute_network(layer.runtime_config.as_ref())
                     .ok()

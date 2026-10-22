@@ -41,8 +41,8 @@ pub fn detect_native(fs: &dyn Fs) -> Option<DetectionResult> {
     // Hugo modules use go.mod; the generator owns the output contract.
     let recipe = if hugo_config(fs).is_some() {
         NativeRecipe::HugoStatic
-    } else if let Some(pubspec) = pubspec(fs) {
-        if is_flutter(&pubspec) {
+    } else if let Some(is_flutter) = pubspec(fs) {
+        if is_flutter {
             // A mobile-only Flutter project has no qualified web build input.
             if !fs.exists("web/index.html") {
                 return None;
@@ -65,17 +65,8 @@ pub fn detect_configured_native(fs: &dyn Fs, framework: &str) -> Option<Detectio
     Some(detection(fs, native_recipe(framework)?, true))
 }
 
-fn pubspec(fs: &dyn Fs) -> Option<serde_yaml_ng::Value> {
-    serde_yaml_ng::from_str(&fs.read_file("pubspec.yaml")?).ok()
-}
-
-fn is_flutter(pubspec: &serde_yaml_ng::Value) -> bool {
-    pubspec
-        .get("dependencies")
-        .and_then(|dependencies| dependencies.get("flutter"))
-        .and_then(|flutter| flutter.get("sdk"))
-        .and_then(serde_yaml_ng::Value::as_str)
-        == Some("flutter")
+fn pubspec(fs: &dyn Fs) -> Option<bool> {
+    super::pubspec::flutter_dependency(&fs.read_file("pubspec.yaml")?)
 }
 
 pub fn dart_entries(fs: &dyn Fs) -> Vec<String> {

@@ -530,47 +530,110 @@ async fn run_mode(
         }
         deploy_plan
             .apply_endpoint_declarations(&command_context.config, &execution_context.service_id)?;
-        let upload_plan = deploy_plan.materialize_source_bundle(json, dependency_packaging)?;
-        let runtime_artifact_files = deploy_plan.artifact.file_breakdown.clone();
-        if let Some(publisher) = &edge_build_handoff {
-            let handoff = publisher.publish(&upload_plan)?;
+        let direct_v2 = edge_build_handoff.is_none()
+            && resume_deployment_id.is_none()
+            && ingress_v2::enabled()?;
+        let handoff_v2 = edge_build_handoff
+            .as_ref()
+            .is_some_and(|publisher| publisher.is_v2());
+        if let Some(publisher) = &edge_build_handoff
+            && handoff_v2
+        {
+            // Reject an invalid producer binding before any metadata mutation.
+            publisher.validate_v2_binding(
+                &deployment.id,
+                &execution_context.product_environment_id,
+                deployment.attempt,
+            )?;
+        }
+        if handoff_v2 || direct_v2 {
+            register_deployment_source_v2_metadata(
+                &client,
+                &admitted_deployment_id,
+                deployment.attempt,
+                deploy_plan.manifest_raw.clone(),
+                conform_functions_to_wire_contract(deploy_plan.functions.take())?,
+                json && admitted_id.is_none(),
+            )
+            .await?;
+        }
+        if let Some(publisher) = &edge_build_handoff
+            && publisher.is_v2()
+        {
+            let handoff = publisher.publish_v2(
+                &deploy_plan,
+                &deployment.id,
+                &execution_context.product_environment_id,
+                deployment.attempt,
+            )?;
             if json {
                 output::json_output(&handoff);
             } else {
                 output::success(
                     false,
-                    "Edge build handoff published for trusted Agent verification",
+                    "Source V2 handoff published for trusted Agent verification",
                     output::Phase::Deploy,
                 );
             }
             return Ok(());
         }
-        register_deployment_source(
-            &client,
-            &admitted_deployment_id,
-            deployment.attempt,
-            deploy_plan.manifest_raw.clone(),
-            conform_functions_to_wire_contract(deploy_plan.functions)?,
-            json && admitted_id.is_none(),
-        )
-        .await?;
-        source_registered = true;
-
-        // ── Resume mode: builder calls us with an existing deployment ID ──
-        if resume_deployment_id.is_some() {
-            return resume_deploy(ResumeDeployRequest {
-                client: &client,
-                deployment_id: &deployment.id,
-                workspace_id: &execution_context.workspace_id,
-                project_id: &project_id,
-                upload_plan,
-                json,
-                warnings: deploy_plan.warnings,
-                runtime_artifact_files,
-                emit_result: admitted_id.is_none(),
-            })
-            .await;
-        }
+        let runtime_artifact_files = deploy_plan.artifact.file_breakdown.clone();
+        let upload_plan = if direct_v2 {
+            ingress_v2::publish(
+                &client,
+                &deploy_plan,
+                ingress_v2::PublicationScope {
+                    deployment_id: &deployment.id,
+                    workspace_id: &execution_context.workspace_id,
+                    project_id: &project_id,
+                    environment_id: &execution_context.product_environment_id,
+                    attempt: deployment.attempt,
+                },
+                &mut source_registered,
+            )
+            .await?;
+            None
+        } else {
+            let upload_plan = deploy_plan.materialize_source_bundle(json, dependency_packaging)?;
+            if let Some(publisher) = &edge_build_handoff {
+                let handoff = publisher.publish(&upload_plan)?;
+                if json {
+                    output::json_output(&handoff);
+                } else {
+                    output::success(
+                        false,
+                        "Edge build handoff published for trusted Agent verification",
+                        output::Phase::Deploy,
+                    );
+                }
+                return Ok(());
+            }
+            register_deployment_source(
+                &client,
+                &admitted_deployment_id,
+                deployment.attempt,
+                deploy_plan.manifest_raw.clone(),
+                conform_functions_to_wire_contract(deploy_plan.functions.take())?,
+                json && admitted_id.is_none(),
+            )
+            .await?;
+            source_registered = true;
+            if resume_deployment_id.is_some() {
+                return resume_deploy(ResumeDeployRequest {
+                    client: &client,
+                    deployment_id: &deployment.id,
+                    workspace_id: &execution_context.workspace_id,
+                    project_id: &project_id,
+                    upload_plan,
+                    json,
+                    warnings: deploy_plan.warnings,
+                    runtime_artifact_files,
+                    emit_result: admitted_id.is_none(),
+                })
+                .await;
+            }
+            Some(upload_plan)
+        };
 
         // ── Normal flow continues below ─────────────────────────────────
 
@@ -602,36 +665,38 @@ async fn run_mode(
             });
         }
 
-        output::success(
-            json,
-            format!(
-                "SOURCE_BUNDLE_V1 archive ready ({}, sha256: {}...)",
-                format_u64_bytes(upload_plan.source_size_bytes),
-                &upload_plan.source_sha256[..12]
-            ),
-            output::Phase::Deploy,
-        );
-        let deployment_attempt_id = Uuid::now_v7().to_string();
+        if let Some(upload_plan) = &upload_plan {
+            output::success(
+                json,
+                format!(
+                    "SOURCE_BUNDLE_V1 archive ready ({}, sha256: {}...)",
+                    format_u64_bytes(upload_plan.source_size_bytes),
+                    &upload_plan.source_sha256[..12]
+                ),
+                output::Phase::Deploy,
+            );
+            let deployment_attempt_id = Uuid::now_v7().to_string();
 
-        if let Some(emitter) = build_log_session
-            .as_ref()
-            .and_then(BuildLogSession::emitter)
-        {
-            emitter.info(BuildLogPhase::Upload, "Uploading deployment source bundle");
+            if let Some(emitter) = build_log_session
+                .as_ref()
+                .and_then(BuildLogSession::emitter)
+            {
+                emitter.info(BuildLogPhase::Upload, "Uploading deployment source bundle");
+            }
+
+            prepare_upload_and_complete(PrepareUploadAndCompleteRequest {
+                client: &client,
+                deployment_id: &deployment.id,
+                workspace_id: &execution_context.workspace_id,
+                project_id: &project_id,
+                deployment_attempt_id: &deployment_attempt_id,
+                json,
+                emit_result: true,
+                plan: upload_plan,
+                runtime_artifact_files: &deploy_runtime_artifact_files,
+            })
+            .await?;
         }
-
-        prepare_upload_and_complete(PrepareUploadAndCompleteRequest {
-            client: &client,
-            deployment_id: &deployment.id,
-            workspace_id: &execution_context.workspace_id,
-            project_id: &project_id,
-            deployment_attempt_id: &deployment_attempt_id,
-            json,
-            emit_result: true,
-            plan: &upload_plan,
-            runtime_artifact_files: &deploy_runtime_artifact_files,
-        })
-        .await?;
         if let Some(emitter) = build_log_session
             .as_ref()
             .and_then(BuildLogSession::emitter)

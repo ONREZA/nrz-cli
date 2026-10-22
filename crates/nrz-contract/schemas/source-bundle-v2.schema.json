@@ -1,0 +1,560 @@
+{
+  "$id": "https://docs.onreza.ru/schemas/source-bundle-v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "definitions": {
+    "ApplicationRuntime": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "$ref": "#/definitions/RuntimeArgument"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "family": {
+          "$ref": "#/definitions/ApplicationRuntimeFamily"
+        }
+      },
+      "required": [
+        "args",
+        "family"
+      ],
+      "type": "object"
+    },
+    "ApplicationRuntimeFamily": {
+      "enum": [
+        "BUN",
+        "NODE",
+        "PYTHON",
+        "EXECUTABLE"
+      ],
+      "type": "string"
+    },
+    "BlobDigest": {
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "$ref": "#/definitions/DigestAlgorithm"
+        },
+        "value": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "algorithm",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Capability": {
+      "enum": [
+        "COMPUTE_NETWORK_V1"
+      ],
+      "type": "string"
+    },
+    "ConditionName": {
+      "maxLength": 64,
+      "minLength": 1,
+      "type": "string"
+    },
+    "ConditionValue": {
+      "maxLength": 512,
+      "type": "string"
+    },
+    "DigestAlgorithm": {
+      "enum": [
+        "BLAKE3"
+      ],
+      "type": "string"
+    },
+    "FallthroughCondition": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "$ref": "#/definitions/ConditionName"
+            },
+            "type": {
+              "enum": [
+                "header"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/definitions/ConditionValue"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "$ref": "#/definitions/ConditionName"
+            },
+            "type": {
+              "enum": [
+                "query"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/definitions/ConditionValue"
+            }
+          },
+          "required": [
+            "name",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FileEntry": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "blobDigest": {
+              "$ref": "#/definitions/BlobDigest"
+            },
+            "contentType": {
+              "type": "string"
+            },
+            "entryType": {
+              "enum": [
+                "file"
+              ],
+              "type": "string"
+            },
+            "executable": {
+              "type": "boolean"
+            },
+            "layerName": {
+              "$ref": "#/definitions/LayerName"
+            },
+            "path": {
+              "$ref": "#/definitions/NonEmptyString"
+            },
+            "role": {
+              "$ref": "#/definitions/FileRole"
+            },
+            "size": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "blobDigest",
+            "entryType",
+            "executable",
+            "path",
+            "role",
+            "size"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "contentType": {
+              "type": "string"
+            },
+            "entryType": {
+              "enum": [
+                "symlink"
+              ],
+              "type": "string"
+            },
+            "layerName": {
+              "$ref": "#/definitions/LayerName"
+            },
+            "linkTarget": {
+              "$ref": "#/definitions/NonEmptyString"
+            },
+            "path": {
+              "$ref": "#/definitions/NonEmptyString"
+            },
+            "role": {
+              "$ref": "#/definitions/FileRole"
+            },
+            "size": {
+              "format": "uint64",
+              "maximum": 0,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "entryType",
+            "linkTarget",
+            "path",
+            "role",
+            "size"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FileRole": {
+      "enum": [
+        "static",
+        "compute",
+        "prerender",
+        "dependency",
+        "config"
+      ],
+      "type": "string"
+    },
+    "HttpMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "PATCH",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "type": "string"
+    },
+    "Layer": {
+      "additionalProperties": false,
+      "properties": {
+        "entrypoint": {
+          "$ref": "#/definitions/NonEmptyString"
+        },
+        "name": {
+          "$ref": "#/definitions/LayerName"
+        },
+        "rootPath": {
+          "$ref": "#/definitions/NonEmptyString"
+        },
+        "runtimeConfig": {
+          "$ref": "#/definitions/RuntimeConfig"
+        },
+        "target": {
+          "$ref": "#/definitions/LayerTarget"
+        }
+      },
+      "required": [
+        "name",
+        "target"
+      ],
+      "type": "object"
+    },
+    "LayerName": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
+      "type": "string"
+    },
+    "LayerTarget": {
+      "enum": [
+        "STATIC",
+        "COMPUTE"
+      ],
+      "type": "string"
+    },
+    "Network": {
+      "additionalProperties": false,
+      "properties": {
+        "allowFrom": {
+          "items": {
+            "$ref": "#/definitions/NetworkAllowFrom"
+          },
+          "maxItems": 128,
+          "type": "array"
+        },
+        "exposure": {
+          "$ref": "#/definitions/NetworkExposure"
+        },
+        "ports": {
+          "items": {
+            "$ref": "#/definitions/NetworkPort"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        },
+        "readiness": {
+          "$ref": "#/definitions/NetworkReadiness"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/NetworkSchemaVersion"
+        }
+      },
+      "required": [
+        "allowFrom",
+        "exposure",
+        "ports",
+        "readiness",
+        "schemaVersion"
+      ],
+      "type": "object"
+    },
+    "NetworkAllowFrom": {
+      "additionalProperties": false,
+      "properties": {
+        "layerName": {
+          "$ref": "#/definitions/LayerName"
+        },
+        "serviceId": {
+          "format": "uuid",
+          "pattern": "^(?!00000000-0000-0000-0000-000000000000$)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layerName",
+        "serviceId"
+      ],
+      "type": "object"
+    },
+    "NetworkExposure": {
+      "enum": [
+        "PUBLIC",
+        "PRIVATE"
+      ],
+      "type": "string"
+    },
+    "NetworkPort": {
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "#/definitions/PortBinding"
+        },
+        "name": {
+          "$ref": "#/definitions/PortName"
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "protocol": {
+          "$ref": "#/definitions/NetworkProtocol"
+        }
+      },
+      "required": [
+        "binding",
+        "name",
+        "port",
+        "protocol"
+      ],
+      "type": "object"
+    },
+    "NetworkProtocol": {
+      "enum": [
+        "http",
+        "grpc",
+        "websocket",
+        "tcp"
+      ],
+      "type": "string"
+    },
+    "NetworkReadiness": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": "string"
+        },
+        "port": {
+          "$ref": "#/definitions/PortName"
+        },
+        "protocol": {
+          "$ref": "#/definitions/NetworkReadinessProtocol"
+        }
+      },
+      "required": [
+        "port",
+        "protocol"
+      ],
+      "type": "object"
+    },
+    "NetworkReadinessProtocol": {
+      "enum": [
+        "tcp",
+        "http"
+      ],
+      "type": "string"
+    },
+    "NetworkSchemaVersion": {
+      "enum": [
+        "COMPUTE_NETWORK_V1"
+      ],
+      "type": "string"
+    },
+    "NonEmptyString": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "PortBinding": {
+      "enum": [
+        "primary",
+        "fixed"
+      ],
+      "type": "string"
+    },
+    "PortName": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+      "type": "string"
+    },
+    "Route": {
+      "additionalProperties": false,
+      "properties": {
+        "fallthroughWhen": {
+          "items": {
+            "$ref": "#/definitions/FallthroughCondition"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        },
+        "headers": {
+          "additionalProperties": {
+            "maxLength": 8192,
+            "type": "string"
+          },
+          "maxProperties": 128,
+          "propertyNames": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[!#$%&'*+\\-.^`|~0-9A-Za-z]+$",
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "layerName": {
+          "$ref": "#/definitions/LayerName"
+        },
+        "methods": {
+          "items": {
+            "$ref": "#/definitions/HttpMethod"
+          },
+          "type": "array"
+        },
+        "pattern": {
+          "$ref": "#/definitions/NonEmptyString"
+        },
+        "priority": {
+          "format": "int32",
+          "maximum": 2147483647,
+          "minimum": -2147483648,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "layerName",
+        "pattern"
+      ],
+      "type": "object"
+    },
+    "RuntimeArgument": {
+      "maxLength": 4096,
+      "pattern": "^[^\\u0000]*$",
+      "type": "string"
+    },
+    "RuntimeConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "applicationRuntime": {
+          "$ref": "#/definitions/ApplicationRuntime"
+        },
+        "buildRuntimeVersion": {
+          "pattern": "^(bun-1\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)|node-(22|24|26)|python-3\\.(12|13|14)|native-linux-x86_64-glibc)$",
+          "type": "string"
+        },
+        "memoryMb": {
+          "format": "uint64",
+          "maximum": 8192,
+          "minimum": 32,
+          "type": "integer"
+        },
+        "network": {
+          "$ref": "#/definitions/Network"
+        },
+        "runtimePolicyLineage": {
+          "pattern": "^(BUN:CURRENT|NODE:[1-9][0-9]{0,8}|PYTHON:[1-9][0-9]{0,8}\\.(0|[1-9][0-9]{0,8}))$",
+          "type": "string"
+        },
+        "timeoutMs": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "SchemaVersion": {
+      "enum": [
+        "SOURCE_BUNDLE_V2.0"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "Canonical source manifest metadata. Structural verification and trusted budgets are required in addition to this schema; file contents and publication authority are verified separately.",
+  "properties": {
+    "capabilities": {
+      "items": {
+        "$ref": "#/definitions/Capability"
+      },
+      "type": "array"
+    },
+    "entrypoints": {
+      "items": {
+        "$ref": "#/definitions/NonEmptyString"
+      },
+      "type": "array"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/definitions/FileEntry"
+      },
+      "type": "array"
+    },
+    "layers": {
+      "items": {
+        "$ref": "#/definitions/Layer"
+      },
+      "maxItems": 10,
+      "type": "array"
+    },
+    "routes": {
+      "items": {
+        "$ref": "#/definitions/Route"
+      },
+      "maxItems": 200,
+      "type": "array"
+    },
+    "schemaVersion": {
+      "$ref": "#/definitions/SchemaVersion"
+    }
+  },
+  "required": [
+    "capabilities",
+    "entrypoints",
+    "files",
+    "layers",
+    "routes",
+    "schemaVersion"
+  ],
+  "title": "ONREZA Source Bundle V2",
+  "type": "object"
+}

@@ -19,9 +19,9 @@ impl TryFrom<nrz_api::RunnerContext200Response> for RunnerContextResponse {
     }
 }
 
-impl TryFrom<nrz_api::Admit200Response> for AdmissionResponse {
+impl TryFrom<nrz_api::Admit200Response2> for AdmissionResponse {
     type Error = anyhow::Error;
-    fn try_from(value: nrz_api::Admit200Response) -> anyhow::Result<Self> {
+    fn try_from(value: nrz_api::Admit200Response2) -> anyhow::Result<Self> {
         Ok(Self {
             context: value.context.into(),
             deployment: AdmissionDeployment {
@@ -114,7 +114,7 @@ pub(super) async fn admit(
     let value = client
         .admit_deployment(
             project_id,
-            nrz_api::AdmitRequestBody {
+            nrz_api::AdmitRequestBody2 {
                 service_id: service_id
                     .map(str::parse)
                     .transpose()
@@ -127,7 +127,7 @@ pub(super) async fn admit(
                     .context("invalid environment ID")?,
                 branch,
                 commit_sha,
-                expected_context: Some(nrz_api::AdmitRequestBodyExpectedContext {
+                expected_context: Some(nrz_api::AdmitRequestBody2ExpectedContext {
                     workspace_id: context
                         .workspace_id
                         .parse()

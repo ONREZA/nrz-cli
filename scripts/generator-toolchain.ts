@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rename, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rename, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { gitEnvironment } from "./git-environment";
 
@@ -18,7 +18,7 @@ export async function generatorBinary(root: string): Promise<string> {
     const source = resolve(localSource);
     const target = resolve(root, ".cache/tools/oas3-gen-local");
     await runTool(["cargo", "build", "--manifest-path", resolve(source, "Cargo.toml"),
-      "--target-dir", target, "--locked", "-p", "oas3-gen", "-j", "2"], root);
+      "--target-dir", target, "--locked", "-p", "oas3-gen", "-j", "2"], source);
     return resolve(target, "debug/oas3-gen");
   }
   const lock = JSON.parse(await readFile(resolve(root, "api/generator.lock.json"), "utf8")) as {
@@ -32,7 +32,9 @@ export async function generatorBinary(root: string): Promise<string> {
   const binary = resolve(cache, "target/debug/oas3-gen");
   if (await Bun.file(binary).exists()) return binary;
   await mkdir(cacheRoot, { recursive: true });
-  const temporary = await mkdtemp(resolve(cacheRoot, "build-"));
+  // Cargo walks parent configuration; isolate upstream tools from project patches.
+  const temporary = await mkdtemp("/var/tmp/nrz-openapi-generator-");
+  const installed = await mkdtemp(resolve(cacheRoot, "install-"));
   try {
     await runTool(["git", "init", "--quiet", temporary], root);
     await runTool(["git", "fetch", "--depth=1", lock.repository, lock.revision], temporary);
@@ -40,10 +42,12 @@ export async function generatorBinary(root: string): Promise<string> {
     await runTool(["git", "apply", "--check", patch], temporary);
     await runTool(["git", "apply", patch], temporary);
     await runTool(["cargo", "build", "--locked", "-p", "oas3-gen", "-j", "2"], temporary);
-    await rename(temporary, cache);
+    await mkdir(resolve(installed, "target/debug"), { recursive: true });
+    await cp(resolve(temporary, "target/debug/oas3-gen"), resolve(installed, "target/debug/oas3-gen"));
+    await rename(installed, cache);
     return binary;
-  } catch (error) {
+  } finally {
     await rm(temporary, { recursive: true, force: true });
-    throw error;
+    await rm(installed, { recursive: true, force: true });
   }
 }

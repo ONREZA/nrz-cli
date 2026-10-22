@@ -35,6 +35,9 @@ pub struct ErofsToolOutput {
     pub stderr: Vec<u8>,
 }
 
+/// Ordinary errors and all output certify that workers have stopped and closed
+/// writable handles. Without that proof, return a pending-cleanup error so the
+/// caller can retain its complete source/output owner and resource reservations.
 pub trait ErofsToolExecutor: Send + Sync {
     fn execute(
         &self,
@@ -42,10 +45,30 @@ pub trait ErofsToolExecutor: Send + Sync {
     ) -> Result<ErofsToolOutput, ErofsToolExecutionError>;
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("{message}")]
+/// Owns the executor's pending-cleanup error/handoff. Retention must be infallible
+/// and transfer resources into an independent cleanup registry, releasing them
+/// only after cleanup proof. Dropping this wrapper closes the handoff, without
+/// releasing retained resources. Never retain the enclosing tool error itself.
+pub trait PendingErofsToolCleanup: std::error::Error + Send + Sync {
+    fn retain(&self, resource: Box<dyn Send>);
+}
+
+#[derive(Debug)]
 pub struct ErofsToolExecutionError {
     message: String,
+    pending_cleanup: Option<Box<dyn PendingErofsToolCleanup>>,
+}
+
+impl std::fmt::Display for ErofsToolExecutionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ErofsToolExecutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.pending_cleanup.as_deref().map(|pending| pending as _)
+    }
 }
 
 impl ErofsToolExecutionError {
@@ -53,6 +76,31 @@ impl ErofsToolExecutionError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            pending_cleanup: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_pending_cleanup(
+        message: impl Into<String>,
+        pending: impl PendingErofsToolCleanup + 'static,
+    ) -> Self {
+        Self {
+            message: message.into(),
+            pending_cleanup: Some(Box::new(pending)),
+        }
+    }
+
+    #[must_use]
+    pub fn cleanup_pending(&self) -> bool {
+        self.pending_cleanup.is_some()
+    }
+
+    /// Transfer caller-owned custody/reservations before dropping a pending error.
+    /// Ordinary errors immediately drop the resource; their cleanup is complete.
+    pub fn retain_until_cleanup<T: Send + 'static>(&self, resource: T) {
+        if let Some(pending) = &self.pending_cleanup {
+            pending.retain(Box::new(resource));
         }
     }
 }

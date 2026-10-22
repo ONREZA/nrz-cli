@@ -205,9 +205,15 @@ pub fn validate_build_runtime_version(
 pub fn source_application_runtime(
     manifest: &SourceLogicalManifest,
 ) -> Result<Option<ApplicationRuntimeFamily>, String> {
+    source_application_runtime_layers(&manifest.layers)
+}
+
+pub(crate) fn source_application_runtime_layers(
+    layers: &[crate::SourceLogicalManifestLayer],
+) -> Result<Option<ApplicationRuntimeFamily>, String> {
     let mut family = None;
     let mut mixed = false;
-    for layer in &manifest.layers {
+    for layer in layers {
         let Some(intent) = layer_application_runtime(layer.runtime_config.as_ref())? else {
             continue;
         };

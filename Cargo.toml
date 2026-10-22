@@ -76,6 +76,7 @@ futures = "0.3"
 
 # Hashing (synthetic commit SHA, SOURCE_BUNDLE_V1 content/address planning)
 sha2 = "0.11"
+blake3 = "1"
 
 # Base64 (encoding SHA-256 for `x-amz-checksum-sha256` PUT header)
 base64 = "0.23"
@@ -88,7 +89,7 @@ percent-encoding = "2"
 
 # Config (onreza.toml + onreza.rules.toml authoring → JSON transport)
 toml = "1"
-serde_yaml_ng = "0.10"
+serde-saphyr = { version = "2", default-features = false, features = ["deserialize"] }
 pep508_rs = "=0.9.2"
 
 anyhow = "1"
@@ -116,6 +117,10 @@ reqwest = { version = "0.13", features = ["json"] }
 # Keep large artifact verification fast in dev and inherited test builds.
 opt-level = 3
 
+[profile.dev.package.serde-saphyr]
+# Keep bounded YAML recursion within the normal test and worker thread stack.
+opt-level = 1
+
 [profile.release]
 # Fast release builds with minimal size/perf trade-off
 # - thin LTO: ~2-3x faster than full LTO, ~5-10% larger binary
@@ -130,3 +135,12 @@ strip = true
 inherits = "release"
 lto = true
 codegen-units = 1
+
+# Keep the blob adapter on the same reviewed private transport implementation.
+[patch.crates-io]
+bao-tree = { git = "https://github.com/ONREZA/bao-tree", rev = "aafb02a0239ed3a45bdde91403e170738924ad28" }
+iroh-tickets = { git = "https://github.com/ONREZA/iroh-tickets", rev = "0aa7ba6987c6f5ecb7221946c445d5d71354b5ab" }
+iroh = { git = "https://github.com/ONREZA/iroh", rev = "672d73df8ca359e720f1779ac2a6f9b0383906a8" }
+iroh-base = { git = "https://github.com/ONREZA/iroh", rev = "672d73df8ca359e720f1779ac2a6f9b0383906a8" }
+iroh-relay = { git = "https://github.com/ONREZA/iroh", rev = "672d73df8ca359e720f1779ac2a6f9b0383906a8" }
+iroh-dns = { git = "https://github.com/ONREZA/iroh", rev = "672d73df8ca359e720f1779ac2a6f9b0383906a8" }

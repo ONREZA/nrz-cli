@@ -5,6 +5,7 @@ use goblin::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
+    io::Read,
     path::{Component, Path, PathBuf},
     sync::OnceLock,
 };
@@ -18,6 +19,35 @@ pub struct NativeExecutableRequirements {
     pub interpreter: Option<String>,
     pub libraries: Vec<String>,
     pub library_paths: Vec<String>,
+}
+
+/// Bounds raw file buffers, not ELF parser allocation overhead. Every read,
+/// including a repeated provider/version check, consumes the aggregate budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NativeClosureReadLimits {
+    pub max_file_bytes: u64,
+    pub max_total_bytes: u64,
+}
+
+/// Shared byte admission across one or more native closures.
+#[derive(Debug)]
+pub struct NativeClosureReadBudget {
+    limits: NativeClosureReadLimits,
+    used_bytes: u64,
+}
+
+impl NativeClosureReadBudget {
+    pub const fn new(limits: NativeClosureReadLimits) -> Self {
+        Self {
+            limits,
+            used_bytes: 0,
+        }
+    }
+
+    /// Bytes admitted for reading, including failed reads or identity checks.
+    pub const fn used_bytes(&self) -> u64 {
+        self.used_bytes
+    }
 }
 
 /// Validate the supported executable format, returning its library requirements.
@@ -192,6 +222,30 @@ impl NativeExecutableRequirements {
         root: &ArtifactRoot,
         executable_path: &Path,
         launch_cwd: &Path,
+        check_bytes: F,
+    ) -> Result<(Self, Vec<PathBuf>), RuntimeArtifactError>
+    where
+        F: FnMut(&Path, &[u8]) -> Result<(), RuntimeArtifactError>,
+    {
+        Self::verify_rooted_artifact_closure_bounded(
+            root,
+            executable_path,
+            launch_cwd,
+            &mut NativeClosureReadBudget::new(NativeClosureReadLimits {
+                max_file_bytes: u64::MAX,
+                max_total_bytes: u64::MAX,
+            }),
+            check_bytes,
+        )
+    }
+
+    /// Admit each opened regular file's size before allocating or reading it.
+    /// The caller still verifies byte identity; acquiring a root does not freeze files.
+    pub fn verify_rooted_artifact_closure_bounded<F>(
+        root: &ArtifactRoot,
+        executable_path: &Path,
+        launch_cwd: &Path,
+        budget: &mut NativeClosureReadBudget,
         mut check_bytes: F,
     ) -> Result<(Self, Vec<PathBuf>), RuntimeArtifactError>
     where
@@ -207,6 +261,7 @@ impl NativeExecutableRequirements {
         let mut reader = NativeArtifactReader {
             root,
             check_bytes: &mut check_bytes,
+            budget,
         };
         let requirements = inspect_closure(
             &mut reader,
@@ -636,6 +691,7 @@ fn loader_paths(
 struct NativeArtifactReader<'a, F> {
     root: &'a ArtifactRoot,
     check_bytes: &'a mut F,
+    budget: &'a mut NativeClosureReadBudget,
 }
 
 impl<F> NativeArtifactReader<'_, F>
@@ -643,7 +699,37 @@ where
     F: FnMut(&Path, &[u8]) -> Result<(), RuntimeArtifactError>,
 {
     fn read(&mut self, path: &Path) -> Result<Vec<u8>, RuntimeArtifactError> {
-        let bytes = self.root.read(path).map_err(fs_error)?;
+        let mut file = self.root.open_file(path).map_err(fs_error)?;
+        let length = file.metadata().map_err(fs_error)?.len();
+        if length > self.budget.limits.max_file_bytes {
+            return invariant("native closure file exceeds its byte limit");
+        }
+        self.budget.used_bytes = self
+            .budget
+            .used_bytes
+            .checked_add(length)
+            .filter(|total| *total <= self.budget.limits.max_total_bytes)
+            .ok_or_else(|| {
+                RuntimeArtifactError::Invariant(
+                    "native closure exceeds its aggregate byte limit".into(),
+                )
+            })?;
+        let length = usize::try_from(length).map_err(|_| {
+            RuntimeArtifactError::Invariant("native closure file exceeds addressable memory".into())
+        })?;
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(length).map_err(|error| {
+            RuntimeArtifactError::Invariant(format!(
+                "native closure file allocation failed: {error}"
+            ))
+        })?;
+        bytes.resize(length, 0);
+        file.read_exact(&mut bytes).map_err(fs_error)?;
+        if file.read(&mut [0]).map_err(fs_error)? != 0
+            || file.metadata().map_err(fs_error)?.len() != length as u64
+        {
+            return invariant("native closure file length changed during read");
+        }
         (self.check_bytes)(path, &bytes)?;
         Ok(bytes)
     }
@@ -703,6 +789,9 @@ where
     } else {
         runpaths
     };
+    // Retain only owned requirements while descending, not each ancestor's file buffer.
+    drop(elf);
+    drop(bytes);
     for library in &requirements.libraries {
         let mut resolved = None;
         for directory in &search {

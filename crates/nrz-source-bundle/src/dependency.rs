@@ -197,23 +197,17 @@ pub fn extract_dependency_source_trees(
                     }
                     _ => DependencySourceTreeError::Manifest(error.to_string()),
                 })?;
-                let (required, resolved) = paths.resolve_symlink(&path).map_err(|error| {
-                    let reason = match error {
-                        SourcePathGraphError::UnsafeTarget(_) => "escapes archive root",
-                        _ => "escapes its allowed layer roots",
-                    };
-                    DependencySourceTreeError::Manifest(format!(
-                        "dependency symlink {reason}: {path} -> {link_target} ({error})"
-                    ))
-                })?;
-                let owned = &owned_paths[tree.layer_name.as_str()];
-                if !dependency_symlink_target_is_allowed(&groups, &source_root, &resolved)
-                    || required.iter().any(|path| !owned.contains(path))
-                {
-                    return Err(DependencySourceTreeError::Manifest(format!(
-                        "dependency symlink escapes its allowed layer roots: {path} -> {link_target}"
-                    )));
-                }
+                validate_dependency_source_symlink(
+                    &path,
+                    &link_target,
+                    paths.resolve_symlink(&path),
+                    &source_root,
+                    &tree.layer_name,
+                    groups
+                        .iter()
+                        .map(|(root, group)| (root.as_str(), group.layer_name.as_str())),
+                    |path| owned_paths[tree.layer_name.as_str()].contains(path),
+                )?;
                 create_dependency_symlink(&link_target, &output)
                     .map_err(|source| io_error("create dependency symlink", &output, source))?;
             }
@@ -258,11 +252,13 @@ fn dependency_groups(
     {
         let path =
             normalize_source_path(&file.path).map_err(DependencySourceTreeError::Manifest)?;
-        let source_root = dependency_source_root(&path).ok_or_else(|| {
-            DependencySourceTreeError::Manifest(format!(
-                "dependency file is not inside a supported dependency root: {path}"
-            ))
-        })?;
+        let source_root = dependency_source_root(&path)
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                DependencySourceTreeError::Manifest(format!(
+                    "dependency file is not inside a supported dependency root: {path}"
+                ))
+            })?;
         if dependency_relative_path(&source_root, &path)?
             .as_os_str()
             .is_empty()
@@ -303,21 +299,24 @@ fn expected_dependency_file<'a>(
     path: &str,
 ) -> Option<(String, &'a SourceLogicalManifestFile)> {
     let source_root = dependency_source_root(path)?;
-    let group = groups.get(&source_root)?;
+    let group = groups.get(source_root)?;
     let file = group.files.get(path)?;
-    Some((source_root, *file))
+    Some((source_root.to_owned(), *file))
 }
 
-fn dependency_source_root(path: &str) -> Option<String> {
+/// Supported physical dependency root, borrowed from the declared source path.
+/// Nested node_modules belong to their outermost materialized root.
+pub fn dependency_source_root(path: &str) -> Option<&str> {
     if let Some(minor) = crate::PythonMinor::for_dependency_path(path) {
-        return Some(minor.site_packages_root().to_string());
+        return Some(&path[..minor.site_packages_root().len()]);
     }
-    let mut parts = Vec::new();
+    let mut offset = 0;
     for segment in path.split('/') {
-        parts.push(segment);
+        offset += segment.len();
         if segment == "node_modules" {
-            return Some(parts.join("/"));
+            return Some(&path[..offset]);
         }
+        offset += 1;
     }
     None
 }
@@ -483,32 +482,40 @@ fn path_is_within(path: &str, root: &str) -> bool {
     path == root || path.starts_with(&format!("{root}/"))
 }
 
-fn dependency_symlink_target_is_allowed(
-    groups: &BTreeMap<String, DependencyGroup<'_>>,
+/// Check physical dependency traversal against roots and paths owned by one layer.
+/// `owns_path` includes declared dependency entries and their implicit parents.
+/// Resolution comes from the shared path index over the complete source inventory.
+pub fn validate_dependency_source_symlink<'a>(
+    path: &str,
+    link_target: &str,
+    resolution: Result<(Vec<&str>, String), SourcePathGraphError>,
     source_root: &str,
-    resolved: &str,
-) -> bool {
-    if path_is_within(resolved, source_root) {
-        return true;
+    layer_name: &str,
+    roots: impl IntoIterator<Item = (&'a str, &'a str)>,
+    owns_path: impl Fn(&str) -> bool,
+) -> Result<(), DependencySourceTreeError> {
+    validate_dependency_link_target(path, link_target)?;
+    let (required, resolved) = resolution.map_err(|error| {
+        let reason = match error {
+            SourcePathGraphError::UnsafeTarget(_) => "escapes archive root",
+            _ => "escapes its allowed layer roots",
+        };
+        DependencySourceTreeError::Manifest(format!(
+            "dependency symlink {reason}: {path} -> {link_target} ({error})"
+        ))
+    })?;
+    let allowed_target = path_is_within(&resolved, source_root)
+        || dependency_source_root(&resolved).is_some_and(|target_root| {
+            roots
+                .into_iter()
+                .any(|(root, owner)| root == target_root && owner == layer_name)
+        });
+    if !allowed_target || !owns_path(&resolved) || required.iter().any(|path| !owns_path(path)) {
+        return Err(DependencySourceTreeError::Manifest(format!(
+            "dependency symlink escapes its allowed layer roots: {path} -> {link_target}"
+        )));
     }
-
-    let Some(source_group) = groups.get(source_root) else {
-        return false;
-    };
-    let Some(target_root) = dependency_source_root(resolved) else {
-        return false;
-    };
-    let Some(target_group) = groups.get(&target_root) else {
-        return false;
-    };
-    if source_group.layer_name != target_group.layer_name {
-        return false;
-    }
-
-    target_group
-        .files
-        .keys()
-        .any(|path| path_is_within(path, resolved))
+    Ok(())
 }
 
 fn io_error(

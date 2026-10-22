@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::ensure;
 
 pub(super) async fn register_deployment_source(
     client: &ApiClient,
@@ -7,6 +8,53 @@ pub(super) async fn register_deployment_source(
     manifest: serde_json::Value,
     functions: Option<serde_json::Value>,
     json: bool,
+) -> anyhow::Result<()> {
+    register_source(
+        client,
+        deployment_id,
+        attempt,
+        manifest,
+        functions,
+        json,
+        Registration::Legacy,
+    )
+    .await
+}
+
+pub(super) async fn register_deployment_source_v2_metadata(
+    client: &ApiClient,
+    deployment_id: &str,
+    attempt: u32,
+    manifest: serde_json::Value,
+    functions: Option<serde_json::Value>,
+    json: bool,
+) -> anyhow::Result<()> {
+    register_source(
+        client,
+        deployment_id,
+        attempt,
+        manifest,
+        functions,
+        json,
+        Registration::FamilyMetadata,
+    )
+    .await
+}
+
+#[derive(Clone, Copy)]
+enum Registration {
+    Legacy,
+    FamilyMetadata,
+}
+
+async fn register_source(
+    client: &ApiClient,
+    deployment_id: &str,
+    attempt: u32,
+    manifest: serde_json::Value,
+    functions: Option<serde_json::Value>,
+    json: bool,
+    registration: Registration,
 ) -> anyhow::Result<()> {
     let namespace = Uuid::parse_str(deployment_id).context("deployment ID is not a valid UUID")?;
     let operation_id = Uuid::new_v5(
@@ -25,18 +73,33 @@ pub(super) async fn register_deployment_source(
                 SOURCE_REGISTRATION_RETRY_BUDGET
             );
         }
-        let response = tokio::time::timeout(
-            SOURCE_REGISTRATION_REQUEST_TIMEOUT.min(remaining),
-            client.register_source(deployment_id, body.clone()),
-        )
-        .await;
-        match response {
-            Ok(Ok(response)) => {
-                if response.id != namespace || response.status != "UPLOADING" {
-                    bail!("deployment source registration returned an unexpected state");
+        let response =
+            tokio::time::timeout(SOURCE_REGISTRATION_REQUEST_TIMEOUT.min(remaining), async {
+                match registration {
+                    Registration::Legacy => {
+                        let response = client.register_source(deployment_id, body.clone()).await?;
+                        ensure!(
+                            response.id == namespace && response.status == "UPLOADING",
+                            "deployment source registration returned an unexpected state"
+                        );
+                    }
+                    Registration::FamilyMetadata => {
+                        let response = client
+                            .register_source_v2_metadata(deployment_id, body.clone())
+                            .await?;
+                        ensure!(
+                            response.id == namespace
+                                && response.attempt == i64::from(attempt)
+                                && response.registered,
+                            "deployment source metadata registration returned an unexpected state"
+                        );
+                    }
                 }
-                return Ok(());
-            }
+                Ok::<_, anyhow::Error>(())
+            })
+            .await;
+        match response {
+            Ok(Ok(())) => return Ok(()),
             Ok(Err(error)) => {
                 let Some(retry) = classify_api_retry(&error) else {
                     return Err(map_source_registration_error(

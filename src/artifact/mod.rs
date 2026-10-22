@@ -12,6 +12,7 @@ mod native_dependencies_tests;
 #[cfg(test)]
 mod python_build_boundary_tests;
 pub(crate) mod source_bundle_v1;
+pub(crate) mod source_bundle_v2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

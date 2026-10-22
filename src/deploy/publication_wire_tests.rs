@@ -6,6 +6,20 @@ use std::sync::{Arc, Mutex};
 
 const DEPLOYMENT: &str = "00000000-0000-0000-0000-000000000001";
 
+fn source_config_json() -> Value {
+    json!({"version":2,"layers":[{"name":"static","target":"STATIC","directory":"."}],"routes":[{"pattern":"^/.*","layer":"static"}]})
+}
+
+fn assert_source_retries(requests: &[Value]) {
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0], requests[1]);
+    assert_eq!(requests[0]["attempt"], 3);
+    assert_eq!(
+        requests[0]["operationId"],
+        Uuid::new_v5(&DEPLOYMENT.parse().unwrap(), b"onreza:deployment-source:3").to_string()
+    );
+}
+
 #[tokio::test]
 async fn source_registration_preparation_limit_preserves_human_and_json_diagnostics() {
     let required = u128::MAX.to_string();
@@ -71,17 +85,36 @@ async fn source_registration_retries_the_same_operation_and_snapshot() {
             } else { Json(json!({"id":DEPLOYMENT,"status":"UPLOADING","url":null})).into_response() }
         })).with_state(Arc::clone(&requests));
     let (client, server) = serve_api(app).await;
-    register_deployment_source(&client, DEPLOYMENT, 3,
-        json!({"version":2,"layers":[{"name":"static","target":"STATIC","directory":"."}],"routes":[{"pattern":"^/.*","layer":"static"}]}), None, true
-    ).await.unwrap();
-    let requests = requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0], requests[1]);
-    assert_eq!(requests[0]["attempt"], 3);
-    assert_eq!(
-        requests[0]["operationId"],
-        Uuid::new_v5(&DEPLOYMENT.parse().unwrap(), b"onreza:deployment-source:3").to_string()
-    );
+    register_deployment_source(&client, DEPLOYMENT, 3, source_config_json(), None, true)
+        .await
+        .unwrap();
+    assert_source_retries(&requests.lock().unwrap());
+    server.abort();
+}
+
+#[tokio::test]
+async fn source_v2_metadata_retries_without_the_legacy_upload_transition() {
+    let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let app = Router::new().route("/v1/deployments/{id}/source-v2/metadata", post(
+        |State(requests):State<Arc<Mutex<Vec<Value>>>>, Json(body):Json<Value>| async move {
+            let mut received = requests.lock().unwrap();
+            received.push(body);
+            if received.len() == 1 {
+                (StatusCode::TOO_MANY_REQUESTS, [("retry-after","0")], Json(json!({"message":"busy"}))).into_response()
+            } else { Json(json!({"id":DEPLOYMENT,"attempt":3,"registered":true})).into_response() }
+        })).with_state(Arc::clone(&requests));
+    let (client, server) = serve_api(app).await;
+    register_deployment_source_v2_metadata(
+        &client,
+        DEPLOYMENT,
+        3,
+        source_config_json(),
+        None,
+        true,
+    )
+    .await
+    .unwrap();
+    assert_source_retries(&requests.lock().unwrap());
     server.abort();
 }
 

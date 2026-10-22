@@ -626,6 +626,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -871,6 +881,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -1131,6 +1151,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -1517,6 +1547,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -1781,6 +1821,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -2079,6 +2129,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -2308,6 +2368,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -2556,6 +2626,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -2760,6 +2840,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -3012,6 +3102,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -3426,6 +3526,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -3817,6 +3927,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -4810,6 +4930,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -5278,6 +5408,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -5460,6 +5600,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -5704,6 +5854,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -6229,6 +6389,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -6418,6 +6588,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -6914,6 +7094,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -7315,6 +7505,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -7697,6 +7897,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -7928,6 +8138,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -8269,6 +8489,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -9279,6 +9509,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -9575,6 +9815,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -9743,6 +9993,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -10135,6 +10395,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -10426,6 +10696,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -10822,6 +11102,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -11139,6 +11429,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -11266,6 +11566,33 @@
                             }
                           ]
                         },
+                        "delegationCheckState": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "match",
+                                "mismatch",
+                                "disagreement",
+                                "unavailable"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "delegationRefreshRequestedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "syncFailure": {
                           "anyOf": [
                             {
@@ -11375,6 +11702,8 @@
                         "status",
                         "delegated",
                         "delegationCheckedAt",
+                        "delegationCheckState",
+                        "delegationRefreshRequestedAt",
                         "syncFailure",
                         "lastSyncedAt",
                         "nextProvisionAt",
@@ -11834,6 +12163,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -12040,6 +12379,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -12294,6 +12643,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -12481,6 +12840,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -12758,6 +13127,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -12951,6 +13330,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -13126,6 +13515,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -13585,6 +13984,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -13829,6 +14238,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -14004,6 +14423,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -14205,6 +14634,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -14473,6 +14912,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -15270,6 +15719,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -15645,6 +16104,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -16362,6 +16831,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -16743,6 +17222,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -16921,6 +17410,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -17158,6 +17657,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -17387,6 +17896,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -17680,6 +18199,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -17854,6 +18383,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -18305,6 +18844,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -18736,6 +19285,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -18923,6 +19482,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -19221,6 +19790,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -19556,6 +20135,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -19745,6 +20334,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -20039,6 +20638,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -20225,6 +20834,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -20443,6 +21062,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -21267,6 +21896,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -21785,6 +22424,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -22786,6 +23435,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -23684,6 +24343,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -23982,6 +24651,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -24257,6 +24936,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -24626,6 +25315,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -24668,6 +25367,664 @@
           }
         },
         "operationId": "postV1DeploymentsByIdUploadComplete"
+      }
+    },
+    "/v1/deployments/{id}/static-source-v2/admit": {
+      "post": {
+        "operationId": "postV1DeploymentsByIdStaticSourceV2Admit",
+        "summary": "Admit static source publication metadata",
+        "description": "Creates or replays a Source V2 operation with a scoped transfer grant when ingress is configured.",
+        "tags": [
+          "Deployments"
+        ],
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deploymentId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    "not": {
+                      "const": "00000000-0000-0000-0000-000000000000",
+                      "type": "string"
+                    }
+                  },
+                  "operationId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    "not": {
+                      "const": "00000000-0000-0000-0000-000000000000",
+                      "type": "string"
+                    }
+                  },
+                  "cliIdempotencyKey": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    "not": {
+                      "const": "00000000-0000-0000-0000-000000000000",
+                      "type": "string"
+                    }
+                  },
+                  "cliAttemptId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    "not": {
+                      "const": "00000000-0000-0000-0000-000000000000",
+                      "type": "string"
+                    }
+                  },
+                  "protocolVersion": {
+                    "const": 2,
+                    "type": "number"
+                  },
+                  "packageProfile": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "manifest": {
+                    "type": "object",
+                    "properties": {
+                      "algorithm": {
+                        "enum": [
+                          "SHA256",
+                          "BLAKE3"
+                        ],
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      }
+                    },
+                    "required": [
+                      "algorithm",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "manifestSizeBytes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 536870912
+                  },
+                  "fileCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "logicalStaticBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "artifactBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "maxFileSize": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "cliEndpointId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "not": {
+                      "const": "0000000000000000000000000000000000000000000000000000000000000000",
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "deploymentId",
+                  "operationId",
+                  "cliIdempotencyKey",
+                  "cliAttemptId",
+                  "protocolVersion",
+                  "packageProfile",
+                  "manifest",
+                  "manifestSizeBytes",
+                  "fileCount",
+                  "logicalStaticBytes",
+                  "artifactBytes",
+                  "maxFileSize",
+                  "cliEndpointId"
+                ],
+                "additionalProperties": false,
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operationId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                      "not": {
+                        "const": "00000000-0000-0000-0000-000000000000",
+                        "type": "string"
+                      }
+                    },
+                    "cliIdempotencyKey": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                      "not": {
+                        "const": "00000000-0000-0000-0000-000000000000",
+                        "type": "string"
+                      }
+                    },
+                    "state": {
+                      "enum": [
+                        "ACTIVE",
+                        "CLOSED"
+                      ],
+                      "type": "string"
+                    },
+                    "input": {
+                      "type": "object",
+                      "properties": {
+                        "workspaceId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                          "not": {
+                            "const": "00000000-0000-0000-0000-000000000000",
+                            "type": "string"
+                          }
+                        },
+                        "projectId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                          "not": {
+                            "const": "00000000-0000-0000-0000-000000000000",
+                            "type": "string"
+                          }
+                        },
+                        "environmentId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                          "not": {
+                            "const": "00000000-0000-0000-0000-000000000000",
+                            "type": "string"
+                          }
+                        },
+                        "deploymentId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                          "not": {
+                            "const": "00000000-0000-0000-0000-000000000000",
+                            "type": "string"
+                          }
+                        },
+                        "deploymentAttempt": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 2147483647
+                        },
+                        "cliAttemptId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                          "not": {
+                            "const": "00000000-0000-0000-0000-000000000000",
+                            "type": "string"
+                          }
+                        },
+                        "protocolVersion": {
+                          "const": 2,
+                          "type": "number"
+                        },
+                        "packageProfile": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "manifest": {
+                          "type": "object",
+                          "properties": {
+                            "algorithm": {
+                              "enum": [
+                                "SHA256",
+                                "BLAKE3"
+                              ],
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            }
+                          },
+                          "required": [
+                            "algorithm",
+                            "value"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "manifestSizeBytes": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 536870912
+                        },
+                        "fileCount": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "logicalStaticBytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "artifactBytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "maxFileSize": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "cliEndpointId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$",
+                          "not": {
+                            "const": "0000000000000000000000000000000000000000000000000000000000000000",
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "workspaceId",
+                        "projectId",
+                        "environmentId",
+                        "deploymentId",
+                        "deploymentAttempt",
+                        "cliAttemptId",
+                        "protocolVersion",
+                        "packageProfile",
+                        "manifest",
+                        "manifestSizeBytes",
+                        "fileCount",
+                        "logicalStaticBytes",
+                        "artifactBytes",
+                        "maxFileSize",
+                        "cliEndpointId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "inputDigest": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "writerGeneration": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,19}$"
+                    },
+                    "installationId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                      "not": {
+                        "const": "00000000-0000-0000-0000-000000000000",
+                        "type": "string"
+                      }
+                    },
+                    "assignmentId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                      "not": {
+                        "const": "00000000-0000-0000-0000-000000000000",
+                        "type": "string"
+                      }
+                    },
+                    "assignmentGeneration": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,19}$"
+                    },
+                    "nodeIncarnationId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                      "not": {
+                        "const": "00000000-0000-0000-0000-000000000000",
+                        "type": "string"
+                      }
+                    },
+                    "nodeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "nodeBootId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                      "not": {
+                        "const": "00000000-0000-0000-0000-000000000000",
+                        "type": "string"
+                      }
+                    },
+                    "identityGeneration": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]{0,19}$"
+                    },
+                    "receiverInstanceId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                      "not": {
+                        "const": "00000000-0000-0000-0000-000000000000",
+                        "type": "string"
+                      }
+                    },
+                    "receiverSessionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                      "not": {
+                        "const": "00000000-0000-0000-0000-000000000000",
+                        "type": "string"
+                      }
+                    },
+                    "receiverEndpointId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$",
+                      "not": {
+                        "const": "0000000000000000000000000000000000000000000000000000000000000000",
+                        "type": "string"
+                      }
+                    },
+                    "profileDigest": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "observationId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                      "not": {
+                        "const": "00000000-0000-0000-0000-000000000000",
+                        "type": "string"
+                      }
+                    },
+                    "observedAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time",
+                      "pattern": "Z$"
+                    },
+                    "observationValidUntil": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time",
+                      "pattern": "Z$"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "maxLength": 64,
+                      "format": "date-time",
+                      "pattern": "Z$"
+                    },
+                    "reservedBusinessBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "terminalReason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "terminalAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 64,
+                          "format": "date-time",
+                          "pattern": "Z$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "receiverDirectAddresses": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "minItems": 1,
+                      "maxItems": 8
+                    },
+                    "transferGrant": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "operationId",
+                    "cliIdempotencyKey",
+                    "state",
+                    "input",
+                    "inputDigest",
+                    "writerGeneration",
+                    "installationId",
+                    "assignmentId",
+                    "assignmentGeneration",
+                    "nodeIncarnationId",
+                    "nodeId",
+                    "nodeBootId",
+                    "identityGeneration",
+                    "receiverInstanceId",
+                    "receiverSessionId",
+                    "receiverEndpointId",
+                    "profileDigest",
+                    "observationId",
+                    "observedAt",
+                    "observationValidUntil",
+                    "expiresAt",
+                    "reservedBusinessBytes",
+                    "terminalReason",
+                    "terminalAt"
+                  ],
+                  "additionalProperties": false,
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/projects/{id}/execution-context/resolve": {
@@ -24946,6 +26303,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -25334,6 +26701,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -25764,6 +27141,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -26166,6 +27553,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -26871,6 +28268,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -27229,6 +28636,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -27546,6 +28963,16 @@
                               },
                               "source": {
                                 "type": "string"
+                              },
+                              "limitBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "actualBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
                               },
                               "issues": {
                                 "type": "array",
@@ -27961,6 +29388,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -28180,6 +29617,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -28224,9 +29671,10 @@
         "operationId": "postV1DeploymentsByIdExecutionContextSkipBeforeSource"
       }
     },
-    "/v1/deployments/{id}/source": {
+    "/v1/deployments/{id}/source-v2/metadata": {
       "post": {
-        "summary": "Register admitted deployment source",
+        "operationId": "postV1DeploymentsByIdSourceV2Metadata",
+        "summary": "Register immutable Source V2 deployment metadata",
         "tags": [
           "Execution Context"
         ],
@@ -28769,6 +30217,714 @@
                       "type": "string",
                       "format": "uuid"
                     },
+                    "attempt": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "registered": {
+                      "const": true,
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "attempt",
+                    "registered"
+                  ],
+                  "$schema": "https://json-schema.org/draft/2020-12/schema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError400"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError401"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Response for status 402",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError402"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError403"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError404"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Response for status 408",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError408"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError409"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError410"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Response for status 426",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError426"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Response for status 429",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError429"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError500"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError503"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/deployments/{id}/source": {
+      "post": {
+        "summary": "Register admitted deployment source",
+        "tags": [
+          "Execution Context"
+        ],
+        "security": [
+          {
+            "sessionCookieAuth": []
+          },
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "protocolVersion": {
+                    "type": "string"
+                  },
+                  "attempt": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "operationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "manifest": {
+                    "type": "object",
+                    "properties": {
+                      "version": {
+                        "const": 2,
+                        "type": "number"
+                      },
+                      "layers": {
+                        "type": "array",
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                                },
+                                "directory": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256
+                                },
+                                "target": {
+                                  "const": "STATIC",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "name",
+                                "directory",
+                                "target"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64,
+                                  "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                                },
+                                "directory": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256
+                                },
+                                "target": {
+                                  "const": "COMPUTE",
+                                  "type": "string"
+                                },
+                                "entry": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 512
+                                },
+                                "runtime": {
+                                  "type": "object",
+                                  "properties": {
+                                    "network": {
+                                      "type": "object",
+                                      "properties": {
+                                        "schemaVersion": {
+                                          "const": "COMPUTE_NETWORK_V1",
+                                          "type": "string"
+                                        },
+                                        "exposure": {
+                                          "enum": [
+                                            "PUBLIC",
+                                            "PRIVATE"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "ports": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "name": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 64,
+                                                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                              },
+                                              "protocol": {
+                                                "enum": [
+                                                  "http",
+                                                  "grpc",
+                                                  "websocket",
+                                                  "tcp"
+                                                ],
+                                                "type": "string"
+                                              },
+                                              "port": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                                "maximum": 65535
+                                              },
+                                              "binding": {
+                                                "enum": [
+                                                  "primary",
+                                                  "fixed"
+                                                ],
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "name",
+                                              "protocol",
+                                              "port",
+                                              "binding"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "minItems": 1,
+                                          "maxItems": 16
+                                        },
+                                        "readiness": {
+                                          "type": "object",
+                                          "properties": {
+                                            "protocol": {
+                                              "enum": [
+                                                "tcp",
+                                                "http"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "port": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 64,
+                                              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                                            },
+                                            "path": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 2048
+                                            }
+                                          },
+                                          "required": [
+                                            "protocol",
+                                            "port"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "allowFrom": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "serviceId": {
+                                                "type": "string",
+                                                "format": "uuid",
+                                                "pattern": "^(?!00000000-0000-0000-0000-000000000000$)"
+                                              },
+                                              "layerName": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 64,
+                                                "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$"
+                                              }
+                                            },
+                                            "required": [
+                                              "serviceId",
+                                              "layerName"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "maxItems": 128
+                                        }
+                                      },
+                                      "required": [
+                                        "schemaVersion",
+                                        "exposure",
+                                        "ports",
+                                        "readiness",
+                                        "allowFrom"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "applicationRuntime": {
+                                      "type": "object",
+                                      "properties": {
+                                        "family": {
+                                          "enum": [
+                                            "BUN",
+                                            "NODE",
+                                            "PYTHON",
+                                            "EXECUTABLE"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "args": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "maxLength": 4096,
+                                            "pattern": "^[^\\u0000]*$"
+                                          },
+                                          "maxItems": 64
+                                        }
+                                      },
+                                      "required": [
+                                        "family",
+                                        "args"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "buildRuntimeVersion": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128
+                                    },
+                                    "timeoutMs": {
+                                      "type": "integer",
+                                      "minimum": -9007199254740991,
+                                      "maximum": 9007199254740991,
+                                      "exclusiveMinimum": 0
+                                    },
+                                    "memoryMb": {
+                                      "type": "integer",
+                                      "minimum": 32,
+                                      "maximum": 8192
+                                    },
+                                    "maxConcurrency": {
+                                      "type": "integer",
+                                      "minimum": -9007199254740991,
+                                      "maximum": 9007199254740991,
+                                      "exclusiveMinimum": 0
+                                    }
+                                  },
+                                  "required": []
+                                }
+                              },
+                              "required": [
+                                "name",
+                                "directory",
+                                "target",
+                                "entry"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "minItems": 1,
+                        "maxItems": 10
+                      },
+                      "routes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "pattern": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500
+                            },
+                            "layer": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "priority": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991,
+                              "default": 0
+                            },
+                            "revalidate": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 31536000,
+                              "exclusiveMinimum": 0
+                            },
+                            "methods": {
+                              "type": "array",
+                              "items": {
+                                "enum": [
+                                  "GET",
+                                  "POST",
+                                  "PUT",
+                                  "DELETE",
+                                  "PATCH",
+                                  "HEAD",
+                                  "OPTIONS"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "headers": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "pattern": "^[!#$%&'*+\\-.^`|~0-9A-Za-z]+$"
+                              },
+                              "additionalProperties": {
+                                "type": "string",
+                                "maxLength": 8192
+                              },
+                              "maxProperties": 128
+                            },
+                            "fallthrough": {
+                              "type": "boolean"
+                            },
+                            "fallthroughWhen": {
+                              "type": "array",
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "const": "header",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64
+                                      },
+                                      "value": {
+                                        "type": "string",
+                                        "maxLength": 512
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "name"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "const": "query",
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 64
+                                      },
+                                      "value": {
+                                        "type": "string",
+                                        "maxLength": 512
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "name"
+                                    ]
+                                  }
+                                ]
+                              },
+                              "minItems": 1,
+                              "maxItems": 16
+                            }
+                          },
+                          "required": [
+                            "pattern",
+                            "layer"
+                          ]
+                        },
+                        "maxItems": 200
+                      },
+                      "prerender": {
+                        "type": "object",
+                        "properties": {
+                          "layer": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "pages": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string",
+                              "pattern": "^/"
+                            },
+                            "additionalProperties": {
+                              "type": "object",
+                              "properties": {
+                                "html": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "data": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "html"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "layer",
+                          "pages"
+                        ]
+                      },
+                      "meta": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      }
+                    },
+                    "required": [
+                      "version",
+                      "layers",
+                      "routes"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "functions": {
+                    "type": "object",
+                    "properties": {
+                      "origin": {
+                        "const": "DEPLOYMENT",
+                        "type": "string"
+                      },
+                      "functions": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/components/schemas/FunctionPublishSpec3"
+                        },
+                        "maxItems": 1000
+                      },
+                      "edgeRules": {
+                        "$ref": "#/components/schemas/EdgeRuleSetAuthoring4"
+                      },
+                      "edgeRulesForce": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "generatedEdgeRuleSets": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "producer": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "version": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "edgeRules": {
+                              "$ref": "#/components/schemas/EdgeRuleSetAuthoring4"
+                            }
+                          },
+                          "required": [
+                            "producer",
+                            "edgeRules"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "origin"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "protocolVersion",
+                  "attempt",
+                  "operationId",
+                  "manifest"
+                ],
+                "$schema": "https://json-schema.org/draft/2020-12/schema"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
                     "status": {
                       "const": "UPLOADING",
                       "type": "string"
@@ -28880,6 +31036,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError413"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
                 }
               }
             }
@@ -29444,6 +31610,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -29785,6 +31961,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -30081,6 +32267,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -30292,6 +32488,16 @@
               }
             }
           },
+          "422": {
+            "description": "Response for status 422",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError422"
+                }
+              }
+            }
+          },
           "426": {
             "description": "Response for status 426",
             "content": {
@@ -30449,6 +32655,16 @@
           },
           "source": {
             "type": "string"
+          },
+          "limitBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "actualBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           },
           "issues": {
             "type": "array",
@@ -30912,6 +33128,9 @@
           },
           {
             "$ref": "#/components/schemas/ApiErrorBranchLimitReached"
+          },
+          {
+            "$ref": "#/components/schemas/ApiErrorDatabaseAccessBlocked"
           }
         ],
         "discriminator": {
@@ -30926,7 +33145,8 @@
             "ENV_MATERIALIZATION_BLOCKED": "#/components/schemas/ApiErrorEnvMaterializationBlocked",
             "PLAN_CU_SIZE_EXCEEDED": "#/components/schemas/ApiErrorPlanCuSizeExceeded",
             "DATABASE_LIMIT_REACHED": "#/components/schemas/ApiErrorDatabaseLimitReached",
-            "BRANCH_LIMIT_REACHED": "#/components/schemas/ApiErrorBranchLimitReached"
+            "BRANCH_LIMIT_REACHED": "#/components/schemas/ApiErrorBranchLimitReached",
+            "DATABASE_ACCESS_BLOCKED": "#/components/schemas/ApiErrorDatabaseAccessBlocked"
           }
         },
         "description": "Standard ONREZA API error response for HTTP 403."
@@ -31377,6 +33597,25 @@
           }
         },
         "description": "Standard ONREZA API error response for BRANCH_LIMIT_REACHED."
+      },
+      "ApiErrorDatabaseAccessBlocked": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "const": "DATABASE_ACCESS_BLOCKED",
+            "description": "Stable machine-readable ONREZA API error code."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable localized error message."
+          }
+        },
+        "description": "Standard ONREZA API error response for DATABASE_ACCESS_BLOCKED."
       },
       "ApiError404": {
         "type": "object",
@@ -32121,6 +34360,66 @@
           }
         },
         "description": "Standard ONREZA API error response for QUERY_TOO_LARGE."
+      },
+      "ApiError422": {
+        "type": "object",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ApiErrorRuntimeArtifactPublicationFailed"
+          },
+          {
+            "$ref": "#/components/schemas/ApiErrorRuntimePreparationLimit"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "code",
+          "mapping": {
+            "RUNTIME_ARTIFACT_PUBLICATION_FAILED": "#/components/schemas/ApiErrorRuntimeArtifactPublicationFailed",
+            "RUNTIME_PREPARATION_LIMIT": "#/components/schemas/ApiErrorRuntimePreparationLimit"
+          }
+        },
+        "description": "Standard ONREZA API error response for HTTP 422."
+      },
+      "ApiErrorRuntimeArtifactPublicationFailed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "const": "RUNTIME_ARTIFACT_PUBLICATION_FAILED",
+            "description": "Stable machine-readable ONREZA API error code."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable localized error message."
+          }
+        },
+        "description": "Standard ONREZA API error response for RUNTIME_ARTIFACT_PUBLICATION_FAILED."
+      },
+      "ApiErrorRuntimePreparationLimit": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "const": "RUNTIME_PREPARATION_LIMIT",
+            "description": "Stable machine-readable ONREZA API error code."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable localized error message."
+          },
+          "details": {
+            "$ref": "#/components/schemas/ApiErrorGenericDetails"
+          }
+        },
+        "description": "Standard ONREZA API error response for RUNTIME_PREPARATION_LIMIT."
       },
       "ApiError426": {
         "type": "object",
@@ -36731,6 +39030,966 @@
         "additionalProperties": false
       },
       "RemoteImageSourceAuthoring3": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "protocol": {
+            "const": "https",
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "pathname": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "search": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "protocol",
+          "hostname",
+          "pathname"
+        ],
+        "additionalProperties": false
+      },
+      "FunctionPublishSpec3": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "pattern": "\\.nrz-fn\\.(?:ts|tsx|js|jsx|mjs)$",
+                "description": "Relative self-contained function entry path. Must not contain path traversal, null bytes or node_modules segments, and must end with *.nrz-fn.ts/js/mjs."
+              },
+              "contentText": {
+                "type": "string",
+                "maxLength": 131072,
+                "description": "UTF-8 function source text. ONREZA Functions v1 accepts at most 131072 bytes per entry file."
+              }
+            },
+            "required": [
+              "path",
+              "contentText"
+            ]
+          },
+          "declaration": {
+            "$ref": "#/components/schemas/FunctionDeclaration3"
+          },
+          "handlers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FunctionHandler3"
+            },
+            "minItems": 1,
+            "maxItems": 7
+          }
+        },
+        "required": [
+          "source",
+          "declaration",
+          "handlers"
+        ],
+        "additionalProperties": false
+      },
+      "FunctionDeclaration3": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9]+(?:[a-z0-9-]*[a-z0-9])?$"
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FunctionDeclaredTrigger3"
+            },
+            "maxItems": 1000
+          }
+        },
+        "required": [
+          "name",
+          "triggers"
+        ],
+        "additionalProperties": false
+      },
+      "FunctionDeclaredTrigger3": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "type": {
+            "enum": [
+              "manual",
+              "queue",
+              "scheduled"
+            ],
+            "type": "string"
+          },
+          "config": {
+            "$ref": "#/components/schemas/012"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "012": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/012"
+            }
+          },
+          {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/012"
+            }
+          }
+        ]
+      },
+      "FunctionHandler3": {
+        "enum": [
+          "fetch",
+          "request",
+          "response",
+          "observe",
+          "manual",
+          "queue",
+          "scheduled"
+        ],
+        "type": "string"
+      },
+      "EdgeRuleSetAuthoring4": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "const": "EDGE_RULE_SET_V1",
+            "type": "string"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EdgeRuleAuthoring4"
+            }
+          },
+          "imageSources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RemoteImageSourceAuthoring4"
+            },
+            "maxItems": 128
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "enum": [
+                  "build",
+                  "ui"
+                ],
+                "type": "string"
+              },
+              "revisionId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "origin"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "rules"
+        ],
+        "additionalProperties": false
+      },
+      "EdgeRuleAuthoring4": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "condition": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "exact",
+                      "prefix",
+                      "glob"
+                    ],
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "methods": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "DELETE",
+                    "PATCH",
+                    "HEAD",
+                    "OPTIONS"
+                  ],
+                  "type": "string"
+                }
+              },
+              "host": {
+                "type": "string",
+                "minLength": 1
+              },
+              "headers": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "query": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "cookies": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "geo": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 2
+                }
+              },
+              "asn": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4294967295
+                }
+              },
+              "device": {
+                "enum": [
+                  "desktop",
+                  "mobile",
+                  "tablet",
+                  "bot"
+                ],
+                "type": "string"
+              },
+              "sourceIpCidrs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "method": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "DELETE",
+                    "PATCH",
+                    "HEAD",
+                    "OPTIONS"
+                  ],
+                  "type": "string"
+                }
+              },
+              "any": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "enum": [
+                            "exact",
+                            "prefix",
+                            "glob"
+                          ],
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "methods": {
+                      "type": "array",
+                      "items": {
+                        "enum": [
+                          "GET",
+                          "POST",
+                          "PUT",
+                          "DELETE",
+                          "PATCH",
+                          "HEAD",
+                          "OPTIONS"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "host": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "headers": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "query": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "cookies": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "geo": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 2,
+                        "maxLength": 2
+                      }
+                    },
+                    "asn": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 4294967295
+                      }
+                    },
+                    "device": {
+                      "enum": [
+                        "desktop",
+                        "mobile",
+                        "tablet",
+                        "bot"
+                      ],
+                      "type": "string"
+                    },
+                    "sourceIpCidrs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "method": {
+                      "type": "array",
+                      "items": {
+                        "enum": [
+                          "GET",
+                          "POST",
+                          "PUT",
+                          "DELETE",
+                          "PATCH",
+                          "HEAD",
+                          "OPTIONS"
+                        ],
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [],
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              },
+              "not": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "enum": [
+                          "exact",
+                          "prefix",
+                          "glob"
+                        ],
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "methods": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "GET",
+                        "POST",
+                        "PUT",
+                        "DELETE",
+                        "PATCH",
+                        "HEAD",
+                        "OPTIONS"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "host": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "headers": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "query": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "cookies": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "geo": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 2,
+                      "maxLength": 2
+                    }
+                  },
+                  "asn": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 4294967295
+                    }
+                  },
+                  "device": {
+                    "enum": [
+                      "desktop",
+                      "mobile",
+                      "tablet",
+                      "bot"
+                    ],
+                    "type": "string"
+                  },
+                  "sourceIpCidrs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "method": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "GET",
+                        "POST",
+                        "PUT",
+                        "DELETE",
+                        "PATCH",
+                        "HEAD",
+                        "OPTIONS"
+                      ],
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "action": {
+            "$ref": "#/components/schemas/EdgeRuleActionAuthoring4"
+          }
+        },
+        "required": [
+          "id",
+          "action"
+        ],
+        "additionalProperties": false
+      },
+      "EdgeRuleActionAuthoring4": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "allow",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "log",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "deny",
+                "type": "string"
+              },
+              "statusCode": {
+                "type": "integer",
+                "minimum": 400,
+                "maximum": 599
+              },
+              "mode": {
+                "enum": [
+                  "shadow",
+                  "enforce"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "redirect",
+                "type": "string"
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1
+              },
+              "statusCode": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "ifNoFile": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "rewrite",
+                "type": "string"
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1
+              },
+              "external": {
+                "type": "boolean"
+              },
+              "ifNoFile": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "set_headers",
+                "type": "string"
+              },
+              "headers": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "headers"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "remove_headers",
+                "type": "string"
+              },
+              "headers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "type",
+              "headers"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "cache",
+                "type": "string"
+              },
+              "ttlSeconds": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "exclusiveMinimum": 0
+              },
+              "swrSeconds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "vary": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "geo",
+                    "asn",
+                    "device",
+                    "header",
+                    "cookie",
+                    "query"
+                  ],
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "ttlSeconds"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "bypass_cache",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "pipeline",
+                "type": "string"
+              },
+              "override": {
+                "type": "boolean"
+              },
+              "inheritGate": {
+                "type": "boolean"
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "use": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+                        },
+                        "mode": {
+                          "enum": [
+                            "request",
+                            "response",
+                            "observe"
+                          ],
+                          "type": "string"
+                        },
+                        "as": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "failure": {
+                          "enum": [
+                            "closed",
+                            "open"
+                          ],
+                          "type": "string"
+                        },
+                        "cachePosition": {
+                          "enum": [
+                            "before",
+                            "after"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "use",
+                        "mode"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "$ref": "#/components/schemas/PipelineHandleStep4"
+                    }
+                  ]
+                },
+                "minItems": 1
+              }
+            },
+            "required": [
+              "type",
+              "steps"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "rate_limit",
+                "type": "string"
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100000
+              },
+              "windowSeconds": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 600
+              },
+              "key": {
+                "enum": [
+                  "ip",
+                  "ip_path",
+                  "ip_host",
+                  "host"
+                ],
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "shadow",
+                  "enforce"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "limit",
+              "windowSeconds"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "PipelineHandleStep4": {
+        "type": "object",
+        "properties": {
+          "handle": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "handle"
+        ],
+        "additionalProperties": false
+      },
+      "RemoteImageSourceAuthoring4": {
         "type": "object",
         "properties": {
           "id": {

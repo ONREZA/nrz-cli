@@ -7,7 +7,7 @@ use super::{SourceBundleVerificationFailure, failure};
 use crate::manifest::{
     SourceLogicalManifestFile, SourceLogicalManifestLayer, SourceLogicalManifestRoute,
 };
-use crate::path_graph::MAX_SYMLINK_EXPANSIONS;
+use crate::path_graph::{MAX_SYMLINK_EXPANSIONS, PATH_INDEX_CHILD_BYTES, PATH_INDEX_NODE_BYTES};
 
 #[derive(Default)]
 struct Memory {
@@ -77,8 +77,8 @@ impl Memory {
             ));
         let indices = hash_bytes(files, size_of::<(String, SourceLogicalManifestFile)>())
             .saturating_add(hash_bytes(files, size_of::<String>()))
-            .saturating_add(hash_bytes(files, size_of::<(&str, Option<&str>)>()))
-            .saturating_add(hash_bytes(directories, size_of::<&str>()));
+            .saturating_add(vector_bytes(graph_nodes, PATH_INDEX_NODE_BYTES))
+            .saturating_add(hash_bytes(graph_nodes, PATH_INDEX_CHILD_BYTES));
         // Symlink traversal can revisit a target up to the shared graph expansion limit.
         let traversal = if self.symlinks {
             let components = self

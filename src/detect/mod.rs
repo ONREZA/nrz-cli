@@ -9,6 +9,7 @@ pub mod native;
 pub mod package_json;
 pub mod package_manager;
 pub mod presets;
+mod pubspec;
 pub mod python;
 pub mod python_launch;
 pub mod ssr;

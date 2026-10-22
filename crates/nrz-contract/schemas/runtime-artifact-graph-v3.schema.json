@@ -1,0 +1,706 @@
+{
+  "$id": "https://docs.onreza.ru/schemas/runtime-artifact-graph-v3.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "definitions": {
+    "ApplicationMembership": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "items": {
+            "$ref": "#/definitions/PackageDescriptor"
+          },
+          "maxItems": 2,
+          "type": "array"
+        },
+        "manifest": {
+          "$ref": "#/definitions/BlobReference"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/MembershipSchemaVersion"
+        }
+      },
+      "required": [
+        "components",
+        "manifest",
+        "schemaVersion"
+      ],
+      "type": "object"
+    },
+    "BlobDigest": {
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "$ref": "#/definitions/DigestAlgorithm"
+        },
+        "value": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "algorithm",
+        "value"
+      ],
+      "type": "object"
+    },
+    "BlobReference": {
+      "additionalProperties": false,
+      "description": "New physical objects use the existing BLAKE3-only source digest domain.",
+      "properties": {
+        "digest": {
+          "$ref": "#/definitions/BlobDigest"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "size": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "digest",
+        "mediaType",
+        "size"
+      ],
+      "type": "object"
+    },
+    "DependencyDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "legacy": {
+          "additionalProperties": false,
+          "properties": {
+            "blobDescriptor": {
+              "additionalProperties": false,
+              "properties": {
+                "digest": {
+                  "pattern": "^sha256:[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                "mediaType": {
+                  "const": "application/vnd.onreza.dependency.erofs.v1",
+                  "type": "string"
+                },
+                "size": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "digest",
+                "mediaType",
+                "size"
+              ],
+              "type": "object"
+            },
+            "compatibility": {
+              "additionalProperties": false,
+              "properties": {
+                "abi": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "architecture": {
+                  "enum": [
+                    "x86_64",
+                    "aarch64"
+                  ],
+                  "type": "string"
+                },
+                "buildPolicyGeneration": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 2147483647,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                },
+                "libc": {
+                  "enum": [
+                    "glibc",
+                    "musl"
+                  ],
+                  "type": "string"
+                },
+                "os": {
+                  "const": "linux",
+                  "type": "string"
+                },
+                "packageManager": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "packageManagerVersion": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "runnerRootfsDigest": {
+                  "pattern": "^sha256:[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                "runtimeFamily": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "runtimeVersion": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "abi",
+                "architecture",
+                "buildPolicyGeneration",
+                "libc",
+                "os",
+                "packageManager",
+                "packageManagerVersion",
+                "runnerRootfsDigest",
+                "runtimeFamily",
+                "runtimeVersion"
+              ],
+              "type": "object"
+            },
+            "kind": {
+              "enum": [
+                "JAVASCRIPT_NODE_MODULES",
+                "PYTHON_SITE_PACKAGES"
+              ],
+              "type": "string"
+            },
+            "manifestDigest": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "materializationId": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "mountPoint": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "blobDescriptor",
+            "compatibility",
+            "kind",
+            "manifestDigest",
+            "materializationId",
+            "mountPoint"
+          ],
+          "type": "object"
+        },
+        "physicalBlob": {
+          "$ref": "#/definitions/BlobReference"
+        }
+      },
+      "required": [
+        "legacy"
+      ],
+      "type": "object"
+    },
+    "DigestAlgorithm": {
+      "enum": [
+        "BLAKE3"
+      ],
+      "type": "string"
+    },
+    "Launch": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "$ref": "#/definitions/RuntimeArgument"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        "profile": {
+          "enum": [
+            "BUN",
+            "NODE_22",
+            "NODE_24",
+            "NODE_26",
+            "CPYTHON_3_12",
+            "CPYTHON_3_13",
+            "CPYTHON_3_14",
+            "EXECUTABLE"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "args",
+        "profile"
+      ],
+      "type": "object"
+    },
+    "Layer": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "$ref": "#/definitions/LayerName"
+            },
+            "rootPath": {
+              "$ref": "#/definitions/NonEmptyString"
+            },
+            "target": {
+              "enum": [
+                "STATIC"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "target"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "buildRuntimeTarget": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "dependencyMounts": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "materializationId": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "mountPoint": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "materializationId",
+                  "mountPoint"
+                ],
+                "type": "object"
+              },
+              "maxItems": 8,
+              "type": "array"
+            },
+            "entrypoint": {
+              "$ref": "#/definitions/NonEmptyString"
+            },
+            "launch": {
+              "$ref": "#/definitions/Launch"
+            },
+            "limits": {
+              "$ref": "#/definitions/RuntimeLimits"
+            },
+            "name": {
+              "$ref": "#/definitions/LayerName"
+            },
+            "network": {
+              "$ref": "#/definitions/Network"
+            },
+            "rootPath": {
+              "$ref": "#/definitions/NonEmptyString"
+            },
+            "runtimePolicyLineage": {
+              "type": "string"
+            },
+            "target": {
+              "enum": [
+                "COMPUTE"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "buildRuntimeTarget",
+            "dependencyMounts",
+            "entrypoint",
+            "launch",
+            "limits",
+            "name",
+            "network",
+            "target"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "LayerName": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f]*$",
+      "type": "string"
+    },
+    "MembershipSchemaVersion": {
+      "enum": [
+        "APPLICATION_MEMBERSHIP_V1.0"
+      ],
+      "type": "string"
+    },
+    "Network": {
+      "additionalProperties": false,
+      "properties": {
+        "allowFrom": {
+          "items": {
+            "$ref": "#/definitions/NetworkAllowFrom"
+          },
+          "maxItems": 128,
+          "type": "array"
+        },
+        "exposure": {
+          "$ref": "#/definitions/NetworkExposure"
+        },
+        "ports": {
+          "items": {
+            "$ref": "#/definitions/NetworkPort"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        },
+        "readiness": {
+          "$ref": "#/definitions/NetworkReadiness"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/NetworkSchemaVersion"
+        }
+      },
+      "required": [
+        "allowFrom",
+        "exposure",
+        "ports",
+        "readiness",
+        "schemaVersion"
+      ],
+      "type": "object"
+    },
+    "NetworkAllowFrom": {
+      "additionalProperties": false,
+      "properties": {
+        "layerName": {
+          "$ref": "#/definitions/LayerName"
+        },
+        "serviceId": {
+          "format": "uuid",
+          "pattern": "^(?!00000000-0000-0000-0000-000000000000$)",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layerName",
+        "serviceId"
+      ],
+      "type": "object"
+    },
+    "NetworkExposure": {
+      "enum": [
+        "PUBLIC",
+        "PRIVATE"
+      ],
+      "type": "string"
+    },
+    "NetworkPort": {
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "#/definitions/PortBinding"
+        },
+        "name": {
+          "$ref": "#/definitions/PortName"
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "protocol": {
+          "$ref": "#/definitions/NetworkProtocol"
+        }
+      },
+      "required": [
+        "binding",
+        "name",
+        "port",
+        "protocol"
+      ],
+      "type": "object"
+    },
+    "NetworkProtocol": {
+      "enum": [
+        "http",
+        "grpc",
+        "websocket",
+        "tcp"
+      ],
+      "type": "string"
+    },
+    "NetworkReadiness": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "type": "string"
+        },
+        "port": {
+          "$ref": "#/definitions/PortName"
+        },
+        "protocol": {
+          "$ref": "#/definitions/NetworkReadinessProtocol"
+        }
+      },
+      "required": [
+        "port",
+        "protocol"
+      ],
+      "type": "object"
+    },
+    "NetworkReadinessProtocol": {
+      "enum": [
+        "tcp",
+        "http"
+      ],
+      "type": "string"
+    },
+    "NetworkSchemaVersion": {
+      "enum": [
+        "COMPUTE_NETWORK_V1"
+      ],
+      "type": "string"
+    },
+    "NonEmptyString": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "PackageDescriptor": {
+      "additionalProperties": false,
+      "properties": {
+        "blob": {
+          "$ref": "#/definitions/BlobReference"
+        },
+        "canonicalizationProfile": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000]*$",
+          "type": "string"
+        },
+        "erofsSize": {
+          "description": "Exact EROFS length before canonical alignment padding.",
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "generatorIdentity": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[^\\u0000]*$",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/Role"
+        },
+        "schemaVersion": {
+          "$ref": "#/definitions/SchemaVersion2"
+        },
+        "verity": {
+          "$ref": "#/definitions/VerityGeometry"
+        }
+      },
+      "required": [
+        "blob",
+        "canonicalizationProfile",
+        "erofsSize",
+        "generatorIdentity",
+        "role",
+        "schemaVersion",
+        "verity"
+      ],
+      "title": "ONREZA Application Package V1",
+      "type": "object"
+    },
+    "PortBinding": {
+      "enum": [
+        "primary",
+        "fixed"
+      ],
+      "type": "string"
+    },
+    "PortName": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+      "type": "string"
+    },
+    "Role": {
+      "enum": [
+        "STATIC",
+        "COMPUTE"
+      ],
+      "type": "string"
+    },
+    "RuntimeArgument": {
+      "maxLength": 4096,
+      "pattern": "^[^\\u0000]*$",
+      "type": "string"
+    },
+    "RuntimeLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "memoryMb": {
+          "format": "uint64",
+          "maximum": 8192,
+          "minimum": 32,
+          "type": "integer"
+        },
+        "timeoutMs": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "SchemaVersion": {
+      "enum": [
+        "RUNTIME_ARTIFACT_GRAPH_V3.0"
+      ],
+      "type": "string"
+    },
+    "SchemaVersion2": {
+      "enum": [
+        "APPLICATION_PACKAGE_V1.0"
+      ],
+      "type": "string"
+    },
+    "VerityGeometry": {
+      "additionalProperties": false,
+      "properties": {
+        "dataBlockCount": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "dataBlockSize": {
+          "format": "uint32",
+          "maximum": 4096,
+          "minimum": 4096,
+          "type": "integer"
+        },
+        "dataOffset": {
+          "format": "uint64",
+          "maximum": 0,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hashAlgorithm": {
+          "$ref": "#/definitions/VerityHashAlgorithm"
+        },
+        "hashBlockSize": {
+          "format": "uint32",
+          "maximum": 4096,
+          "minimum": 4096,
+          "type": "integer"
+        },
+        "rootHash": {
+          "description": "A verity root authenticates this geometry, not the whole package digest.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "salt": {
+          "description": "V1 fixes a 32-byte salt; recipe derivation belongs to trusted materialization.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "treeLength": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "treeOffset": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "version": {
+          "format": "uint32",
+          "maximum": 1,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dataBlockCount",
+        "dataBlockSize",
+        "dataOffset",
+        "hashAlgorithm",
+        "hashBlockSize",
+        "rootHash",
+        "salt",
+        "treeLength",
+        "treeOffset",
+        "version"
+      ],
+      "type": "object"
+    },
+    "VerityHashAlgorithm": {
+      "enum": [
+        "SHA256"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "Bounded immutable application and launch projection. Routing and execution authority remain release-owned; canonical byte identity and publication binding require independent verification.",
+  "properties": {
+    "application": {
+      "$ref": "#/definitions/ApplicationMembership"
+    },
+    "dependencies": {
+      "items": {
+        "$ref": "#/definitions/DependencyDescriptor"
+      },
+      "maxItems": 16,
+      "type": "array"
+    },
+    "layers": {
+      "items": {
+        "$ref": "#/definitions/Layer"
+      },
+      "maxItems": 10,
+      "type": "array"
+    },
+    "schemaVersion": {
+      "$ref": "#/definitions/SchemaVersion"
+    }
+  },
+  "required": [
+    "application",
+    "dependencies",
+    "layers",
+    "schemaVersion"
+  ],
+  "title": "ONREZA Runtime Artifact Graph V3",
+  "type": "object"
+}

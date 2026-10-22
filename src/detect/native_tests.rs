@@ -82,6 +82,119 @@ fn flutter_text_in_comment_does_not_select_web_recipe() {
 }
 
 #[test]
+fn flutter_pubspec_preserves_yaml_keys_aliases_and_tags() {
+    let deep_key = format!(
+        "? {}0{}\n: custom\ndependencies: {{flutter: {{sdk: flutter}}}}",
+        "[".repeat(127),
+        "]".repeat(127)
+    );
+    for pubspec in [
+        "dependencies: {flutter: {sdk: flutter}}\ncustom:\n  ? [linux, windows]\n  : supported\n",
+        "? [linux, windows]\n: supported\ndependencies: {flutter: {sdk: flutter}}\n",
+        "dependencies: {flutter: {sdk: flutter}, ? [linux, windows]: supported}\n",
+        "dependencies: {flutter: {sdk: flutter, ? [linux, windows]: supported}}\n",
+        "sdk: &sdk {sdk: flutter}\ndependencies: {flutter: *sdk}\n",
+        "!pubspec\ndependencies: !deps {flutter: !flutter {sdk: !sdk flutter}}\n",
+        "dependencies: {flutter: {sdk: flutter}}\ncustom: [.nan, .inf]\n",
+        "!!str dependencies: {flutter: {sdk: flutter}}",
+        "!<tag:example.org,2020:custom> dependencies: {flutter: {sdk: flutter}}",
+        "dependencies: {flutter: {sdk: flutter}}\ntrue: a\nnull: b\n1: c\n\"1\": d\n1.2: e",
+        deep_key.as_str(),
+    ] {
+        let input = fs(&[
+            ("pubspec.yaml", pubspec),
+            ("web/index.html", "html"),
+            ("bin/server.dart", "void main() {}"),
+        ]);
+        assert_eq!(
+            detect_native(&input).unwrap().framework,
+            "flutter",
+            "{pubspec}"
+        );
+    }
+}
+
+#[test]
+fn dart_pubspec_preserves_valid_yaml_shapes_without_applying_merges() {
+    let nested = format!("custom: {}0{}", "[".repeat(127), "]".repeat(127));
+    for pubspec in [
+        "",
+        "# empty",
+        "null",
+        "flutter",
+        "[flutter, dart]",
+        "dependencies: [flutter]",
+        "dependencies: {flutter: {sdk: [flutter]}}",
+        "!key dependencies: {flutter: {sdk: flutter}}",
+        "! dependencies: {flutter: {sdk: flutter}}",
+        "dependencies: {!key flutter: {sdk: flutter}}",
+        "dependencies: {flutter: {!key sdk: flutter}}",
+        "dependencies: {flutter: {sdk: !!binary Zmx1dHRlcg==}}",
+        "defaults: &deps {flutter: {sdk: flutter}}\ndependencies: {<<: *deps}",
+        nested.as_str(),
+    ] {
+        let input = fs(&[
+            ("pubspec.yaml", pubspec),
+            ("web/index.html", "html"),
+            ("bin/server.dart", "void main() {}"),
+        ]);
+        assert_eq!(
+            detect_native(&input).unwrap().framework,
+            "dart",
+            "{pubspec}"
+        );
+    }
+}
+
+#[test]
+fn invalid_pubspec_does_not_select_flutter_or_dart() {
+    for pubspec in [
+        "dependencies: [",
+        "dependencies: {}\ndependencies: {flutter: {sdk: flutter}}",
+        "dependencies: {flutter: {sdk: flutter}}\ncustom: {a: 1, a: 2}",
+        "dependencies: {flutter: {sdk: flutter}}\ncustom:\n  ? {a: 1, b: 2}\n  : one\n  ? {b: 2, a: 1}\n  : two",
+        "dependencies: {flutter: {sdk: flutter}}\n---\nname: second",
+        "dependencies: {flutter: {sdk: flutter}}\ncustom: &cycle [*cycle]",
+        "dependencies: {flutter: {sdk: !!int flutter}}",
+        "dependencies: {flutter: {sdk: flutter}}\ncustom: !!bool maybe",
+    ] {
+        let input = fs(&[
+            ("pubspec.yaml", pubspec),
+            ("web/index.html", "html"),
+            ("bin/server.dart", "void main() {}"),
+            ("go.mod", "module example.org/server"),
+            ("server.go", "package main\nfunc main() {}"),
+        ]);
+        assert_eq!(detect_native(&input).unwrap().framework, "go", "{pubspec}");
+    }
+}
+
+#[test]
+fn pubspec_rejects_excessive_depth_and_alias_expansion() {
+    let nested = format!("custom: {}0{}", "[".repeat(140), "]".repeat(140));
+    let nested_key = format!(
+        "? {}0{}\n: custom\ndependencies: {{flutter: {{sdk: flutter}}}}",
+        "[".repeat(140),
+        "]".repeat(140)
+    );
+    let mut aliases = String::from("a0: &a0 [x,x,x,x,x,x,x,x,x,x]\n");
+    for level in 1..=6 {
+        aliases.push_str(&format!(
+            "a{level}: &a{level} [{}]\n",
+            vec![format!("*a{}", level - 1); 10].join(",")
+        ));
+    }
+    for pubspec in [nested, nested_key, aliases] {
+        let input = fs(&[
+            ("pubspec.yaml", &pubspec),
+            ("web/index.html", "html"),
+            ("bin/server.dart", "void main() {}"),
+        ]);
+        assert!(detect_native(&input).is_none());
+    }
+}
+
+#[test]
 fn hugo_with_go_modules_stays_static_without_fake_package_manager() {
     let input = fs(&[
         ("hugo.toml", "baseURL = 'https://example.org/'"),

@@ -48,6 +48,7 @@ pub(crate) mod health_check;
 #[cfg(test)]
 mod health_check_tests;
 mod ignored_build;
+mod ingress_v2;
 pub(crate) use ignored_build::remove_git_repository_environment;
 #[cfg(test)]
 mod ignored_build_tests;

@@ -15,8 +15,12 @@ use crate::artifact::source_bundle_v1::SourceBundlePlan;
 use crate::cli::DeployArgs;
 use crate::deploy::hash::sha256_finalize_hex;
 
+#[path = "edge_handoff_v2.rs"]
+mod v2;
+
 pub(super) const EDGE_BUILD_HANDOFF_MODE_ENV: &str = "NRZ_EDGE_BUILD_HANDOFF";
 pub(super) const EDGE_BUILD_HANDOFF_MODE_V1: &str = "V1";
+pub(super) const EDGE_BUILD_HANDOFF_MODE_V2: &str = "V2";
 const OUTPUT_DIRECTORY_ENV: &str = "ONREZA_OUTPUT_DIR";
 const PLATFORM_RUNNER_ENV: &str = "NRZ_RUNNER";
 const PLATFORM_RUNNER_VALUE: &str = "PLATFORM";
@@ -24,6 +28,8 @@ const COPY_BUFFER_BYTES: usize = 65_536;
 
 pub(super) struct EdgeBuildHandoffOutput {
     root: PathBuf,
+    mode: &'static str,
+    binding: Option<nrz_source_bundle::EdgeBuildBindingV2>,
 }
 
 pub(super) fn validate_resume_arguments(args: &DeployArgs) -> anyhow::Result<()> {
@@ -72,12 +78,20 @@ impl EdgeBuildHandoffOutput {
         let output = std::env::var_os(OUTPUT_DIRECTORY_ENV).map(PathBuf::from);
         let platform_runner =
             std::env::var(PLATFORM_RUNNER_ENV).is_ok_and(|value| value == PLATFORM_RUNNER_VALUE);
-        Self::from_values(
+        let mut output = Self::from_values(
             mode.as_deref(),
             output.as_deref(),
             platform_runner,
             resume_deployment_id,
-        )
+        )?;
+        if let Some(output) = &mut output
+            && output.is_v2()
+        {
+            output.binding = Some(v2::binding_from_environment(
+                resume_deployment_id.context("V2 handoff requires deployment")?,
+            )?);
+        }
+        Ok(output)
     }
 
     pub(super) fn publish(
@@ -149,7 +163,7 @@ impl EdgeBuildHandoffOutput {
             );
             return Ok(None);
         };
-        if mode != EDGE_BUILD_HANDOFF_MODE_V1 {
+        if mode != EDGE_BUILD_HANDOFF_MODE_V1 && mode != EDGE_BUILD_HANDOFF_MODE_V2 {
             bail!("unsupported {EDGE_BUILD_HANDOFF_MODE_ENV} mode");
         }
         ensure!(
@@ -167,6 +181,12 @@ impl EdgeBuildHandoffOutput {
         );
         Ok(Some(Self {
             root: output.to_path_buf(),
+            mode: if mode == EDGE_BUILD_HANDOFF_MODE_V2 {
+                EDGE_BUILD_HANDOFF_MODE_V2
+            } else {
+                EDGE_BUILD_HANDOFF_MODE_V1
+            },
+            binding: None,
         }))
     }
 

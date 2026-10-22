@@ -9,7 +9,7 @@ description = "ONREZA platform client generated from the server OpenAPI contract
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
 http = "1"
-oas3-gen-support = "=0.28.0"
+oas3-gen-support = "=0.29.0"
 regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "multipart", "http2", "query", "stream"] }
 serde = { version = "1", features = ["derive"] }

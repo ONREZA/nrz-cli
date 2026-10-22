@@ -90,11 +90,18 @@ pub struct SourceLogicalManifestRoute {
 }
 
 pub fn validate_source_route_headers(manifest: &SourceLogicalManifest) -> Result<(), String> {
-    for headers in manifest
-        .routes
-        .iter()
-        .filter_map(|route| route.headers.as_ref())
-    {
+    validate_source_route_header_maps(
+        manifest
+            .routes
+            .iter()
+            .filter_map(|route| route.headers.as_ref()),
+    )
+}
+
+pub(crate) fn validate_source_route_header_maps<'a>(
+    headers: impl Iterator<Item = &'a std::collections::BTreeMap<String, String>>,
+) -> Result<(), String> {
+    for headers in headers {
         if headers.len() > 128 {
             return Err("source route response headers exceed the supported count".into());
         }

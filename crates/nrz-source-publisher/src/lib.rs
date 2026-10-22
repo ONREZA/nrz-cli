@@ -4,6 +4,7 @@
 mod bundle;
 mod error;
 mod http;
+pub mod ingress_v2;
 mod publisher;
 mod runtime;
 

@@ -5,11 +5,12 @@
   },
   "scripts": {
     "test": "bun test scripts",
-    "typecheck": "tsc --noEmit --project tsconfig.scripts.json"
+    "typecheck": "bun node_modules/typescript7/bin/tsc --noEmit --project tsconfig.scripts.json"
   },
   "dependencies": {
     "@types/bun": "1.4.3",
     "@types/node": "26.6.5",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "typescript7": "npm:typescript@7.0.2"
   }
 }

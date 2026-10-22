@@ -1,20 +1,25 @@
 use std::collections::{HashMap, HashSet};
 
+use nrz_contract::runtime_artifact_graph::OnrezaRuntimeArtifactGraphV2RuntimeArtifactGraphDependenciesItem as RuntimeDependencyWire;
 use nrz_contract::{DependencyMaterializationManifestV1Wire, RuntimeArtifactGraphV2Wire};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+pub mod application_package_v1;
 mod execution_compatibility;
 mod launch;
 mod native_executable;
 mod rooted;
+pub mod runtime_artifact_graph_v3;
+pub mod source_graph_v3;
 pub use rooted::{ArtifactFileType, ArtifactRoot};
 mod native_platform;
 pub use native_platform::{has_native_payload_header, verify_linux_x86_64_native_platform};
 mod python_startup;
 pub use native_executable::{
-    NATIVE_EXECUTION_TARGET, NativeExecutableRequirements, verify_native_executable,
+    NATIVE_EXECUTION_TARGET, NativeClosureReadBudget, NativeClosureReadLimits,
+    NativeExecutableRequirements, verify_native_executable,
 };
 pub use python_startup::{PYTHON_SITE_PACKAGES_INITIALIZER, python_script_launch_arguments};
 mod source_graph;
@@ -48,8 +53,8 @@ pub const DEPENDENCY_EROFS_MEDIA_TYPE: &str = "application/vnd.onreza.dependency
 pub const SOURCE_BUNDLE_MEDIA_TYPE: &str = "application/vnd.onreza.source-bundle.tar+zstd.v1";
 
 const MAX_DEPENDENCIES: usize = 16;
-const MAX_RUNTIME_LAYERS: usize = 10;
-const MAX_LAYER_DEPENDENCIES: usize = 8;
+pub const MAX_RUNTIME_LAYERS: usize = 10;
+pub const MAX_LAYER_DEPENDENCIES: usize = 8;
 const MAX_POLICY_GENERATION: u64 = 2_147_483_647;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -268,25 +273,7 @@ pub fn verify_runtime_artifact_graph(
                 "duplicate dependency materialization '{materialization_id}'"
             ));
         }
-        verify_mount_point(dependency.mount_point.as_str())?;
-        require_equal(
-            "dependency.blobDescriptor.mediaType",
-            &dependency.blob_descriptor.media_type,
-            DEPENDENCY_EROFS_MEDIA_TYPE,
-        )?;
-        require_safe_size(
-            "dependency.blobDescriptor.size",
-            dependency.blob_descriptor.size,
-        )?;
-        require_equal(
-            "dependency.compatibility.os",
-            &dependency.compatibility.os,
-            "linux",
-        )?;
-        require_policy_generation(
-            "dependency.compatibility.buildPolicyGeneration",
-            dependency.compatibility.build_policy_generation.get(),
-        )?;
+        verify_runtime_dependency(dependency)?;
     }
 
     let mut mounts = if explicit_bindings {
@@ -366,35 +353,12 @@ pub fn verify_runtime_artifact_graph(
                 ));
             }
             if let Some(launch) = &layer.launch {
-                let expected = match launch.profile {
-                    RuntimeProfile::Node22 => Some("node-22"),
-                    RuntimeProfile::Node24 => Some("node-24"),
-                    RuntimeProfile::Node26 => Some("node-26"),
-                    _ => None,
-                };
                 let dependency = wire
                     .dependencies
                     .iter()
                     .find(|value| value.materialization_id.as_str() == materialization_id)
                     .expect("known dependency");
-                if let Some(minor) = python_minor_for_profile(launch.profile)
-                    && (dependency.compatibility.runtime_family.as_str() != "python"
-                        || dependency.compatibility.runtime_version.as_str() != minor.target()
-                        || dependency.kind.to_string() != "PYTHON_SITE_PACKAGES")
-                {
-                    return invariant(
-                        "Python launch profile conflicts with dependency build minor",
-                    );
-                }
-                if expected.is_some_and(|version| {
-                    dependency.compatibility.runtime_family.as_str() != "javascript"
-                        || dependency.compatibility.runtime_version.as_str() != version
-                        || dependency.kind.to_string() != "JAVASCRIPT_NODE_MODULES"
-                }) {
-                    return invariant(
-                        "Node launch profile conflicts with dependency runtime target",
-                    );
-                }
+                verify_dependency_build_profile(dependency, launch.profile)?;
             }
             if !layer_dependencies.insert(materialization_id) {
                 return invariant(format!(
@@ -457,6 +421,57 @@ pub fn verify_runtime_artifact_graph(
     }
 
     Ok(VerifiedRuntimeArtifactGraph { wire })
+}
+
+fn verify_runtime_dependency(
+    dependency: &RuntimeDependencyWire,
+) -> Result<(), RuntimeArtifactError> {
+    verify_mount_point(dependency.mount_point.as_str())?;
+    require_equal(
+        "dependency.blobDescriptor.mediaType",
+        &dependency.blob_descriptor.media_type,
+        DEPENDENCY_EROFS_MEDIA_TYPE,
+    )?;
+    require_safe_size(
+        "dependency.blobDescriptor.size",
+        dependency.blob_descriptor.size,
+    )?;
+    require_equal(
+        "dependency.compatibility.os",
+        &dependency.compatibility.os,
+        "linux",
+    )?;
+    require_policy_generation(
+        "dependency.compatibility.buildPolicyGeneration",
+        dependency.compatibility.build_policy_generation.get(),
+    )
+}
+
+fn verify_dependency_build_profile(
+    dependency: &RuntimeDependencyWire,
+    profile: RuntimeProfile,
+) -> Result<(), RuntimeArtifactError> {
+    let expected = match profile {
+        RuntimeProfile::Node22 => Some("node-22"),
+        RuntimeProfile::Node24 => Some("node-24"),
+        RuntimeProfile::Node26 => Some("node-26"),
+        _ => None,
+    };
+    if let Some(minor) = python_minor_for_profile(profile)
+        && (dependency.compatibility.runtime_family.as_str() != "python"
+            || dependency.compatibility.runtime_version.as_str() != minor.target()
+            || dependency.kind.to_string() != "PYTHON_SITE_PACKAGES")
+    {
+        return invariant("Python launch profile conflicts with dependency build minor");
+    }
+    if expected.is_some_and(|version| {
+        dependency.compatibility.runtime_family.as_str() != "javascript"
+            || dependency.compatibility.runtime_version.as_str() != version
+            || dependency.kind.to_string() != "JAVASCRIPT_NODE_MODULES"
+    }) {
+        return invariant("Node launch profile conflicts with dependency runtime target");
+    }
+    Ok(())
 }
 
 pub fn finalize_runtime_artifact_graph(

@@ -6,8 +6,8 @@ impl ApiClient {
     pub async fn admit_deployment(
         &self,
         id: &str,
-        body: AdmitRequestBody,
-    ) -> anyhow::Result<Admit200Response> {
+        body: AdmitRequestBody2,
+    ) -> anyhow::Result<Admit200Response2> {
         let response = self
             .platform()?
             .post_v1projects_by_id_deployments_admit(PostV1projectsByIdDeploymentsAdmitRequest {
@@ -138,6 +138,52 @@ impl ApiClient {
             response,
             PostV1deploymentsByIdSourceRequest,
             PostV1deploymentsByIdSourceResponse::Ok
+        )
+    }
+    pub async fn register_source_v2_metadata(
+        &self,
+        id: &str,
+        body: SourceRequestBody2,
+    ) -> anyhow::Result<Metadatum200Response> {
+        // Both routes share the server schema; generator names are operation-local.
+        let body: MetadatumRequestBody = serde_json::from_value(serde_json::to_value(body)?)?;
+        let response = self
+            .platform()?
+            .post_v1deployments_by_id_source_v2metadata(
+                PostV1deploymentsByIdSourceV2metadataRequest {
+                    path: PostV1deploymentsByIdSourceV2metadataRequestPath {
+                        id: id.parse().context("invalid resource ID")?,
+                    },
+                    body,
+                },
+            )
+            .await?;
+        api_success!(
+            response,
+            PostV1deploymentsByIdSourceV2metadataRequest,
+            PostV1deploymentsByIdSourceV2metadataResponse::Ok
+        )
+    }
+    pub async fn admit_static_source_v2(
+        &self,
+        id: &str,
+        body: AdmitRequestBody,
+    ) -> anyhow::Result<Admit200Response> {
+        let response = self
+            .platform()?
+            .post_v1deployments_by_id_static_source_v2admit(
+                PostV1deploymentsByIdStaticSourceV2admitRequest {
+                    path: PostV1deploymentsByIdStaticSourceV2admitRequestPath {
+                        id: id.parse().context("invalid resource ID")?,
+                    },
+                    body,
+                },
+            )
+            .await?;
+        api_success!(
+            response,
+            PostV1deploymentsByIdStaticSourceV2admitRequest,
+            PostV1deploymentsByIdStaticSourceV2admitResponse::Ok
         )
     }
     pub async fn update_compute_config(

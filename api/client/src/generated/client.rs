@@ -1474,6 +1474,27 @@ impl PlatformClient {
         let response = self.client.post(url).json(&request.body).send().await?;
         Ok(PostV1deploymentsByIdUploadCompleteRequest::parse_response(response).await?)
     }
+    /// Admit static source publication metadata
+    ///
+    /// Creates or replays a Source V2 operation with a scoped transfer grant when ingress is configured.
+    ///
+    /// * Path: `POST /v1/deployments/{id}/static-source-v2/admit`
+    pub async fn post_v1deployments_by_id_static_source_v2admit(
+        &self,
+        request: PostV1deploymentsByIdStaticSourceV2admitRequest,
+    ) -> anyhow::Result<PostV1deploymentsByIdStaticSourceV2admitResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("deployments")
+            .push(&request.path.id.to_string())
+            .push("static-source-v2")
+            .push("admit");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(PostV1deploymentsByIdStaticSourceV2admitRequest::parse_response(response).await?)
+    }
     /// Resolve execution context
     ///
     /// * Path: `POST /v1/projects/{id}/execution-context/resolve`
@@ -1633,6 +1654,25 @@ impl PlatformClient {
             PostV1deploymentsByIdExecutionContextSkipBeforeSourceRequest::parse_response(response)
                 .await?,
         )
+    }
+    /// Register immutable Source V2 deployment metadata
+    ///
+    /// * Path: `POST /v1/deployments/{id}/source-v2/metadata`
+    pub async fn post_v1deployments_by_id_source_v2metadata(
+        &self,
+        request: PostV1deploymentsByIdSourceV2metadataRequest,
+    ) -> anyhow::Result<PostV1deploymentsByIdSourceV2metadataResponse> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("deployments")
+            .push(&request.path.id.to_string())
+            .push("source-v2")
+            .push("metadata");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(PostV1deploymentsByIdSourceV2metadataRequest::parse_response(response).await?)
     }
     /// Register admitted deployment source
     ///
@@ -3074,6 +3114,27 @@ impl PlatformClientRaw {
         let response = self.client.post(url).json(&request.body).send().await?;
         Ok(response)
     }
+    /// Admit static source publication metadata
+    ///
+    /// Creates or replays a Source V2 operation with a scoped transfer grant when ingress is configured.
+    ///
+    /// * Path: `POST /v1/deployments/{id}/static-source-v2/admit`
+    pub async fn post_v1deployments_by_id_static_source_v2admit(
+        &self,
+        request: PostV1deploymentsByIdStaticSourceV2admitRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("deployments")
+            .push(&request.path.id.to_string())
+            .push("static-source-v2")
+            .push("admit");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(response)
+    }
     /// Resolve execution context
     ///
     /// * Path: `POST /v1/projects/{id}/execution-context/resolve`
@@ -3222,6 +3283,25 @@ impl PlatformClientRaw {
             .push(&request.path.id.to_string())
             .push("execution-context")
             .push("skip-before-source");
+        let response = self.client.post(url).json(&request.body).send().await?;
+        Ok(response)
+    }
+    /// Register immutable Source V2 deployment metadata
+    ///
+    /// * Path: `POST /v1/deployments/{id}/source-v2/metadata`
+    pub async fn post_v1deployments_by_id_source_v2metadata(
+        &self,
+        request: PostV1deploymentsByIdSourceV2metadataRequest,
+    ) -> anyhow::Result<reqwest::Response> {
+        request.validate().context("parameter validation")?;
+        let mut url = self.base_url.clone();
+        url.path_segments_mut()
+            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
+            .push("v1")
+            .push("deployments")
+            .push(&request.path.id.to_string())
+            .push("source-v2")
+            .push("metadata");
         let response = self.client.post(url).json(&request.body).send().await?;
         Ok(response)
     }

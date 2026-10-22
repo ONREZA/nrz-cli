@@ -1,0 +1,191 @@
+{
+  "$id": "https://docs.onreza.ru/schemas/application-package-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "definitions": {
+    "BlobDigest": {
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "$ref": "#/definitions/DigestAlgorithm"
+        },
+        "value": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "algorithm",
+        "value"
+      ],
+      "type": "object"
+    },
+    "BlobReference": {
+      "additionalProperties": false,
+      "description": "New physical objects use the existing BLAKE3-only source digest domain.",
+      "properties": {
+        "digest": {
+          "$ref": "#/definitions/BlobDigest"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "size": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "digest",
+        "mediaType",
+        "size"
+      ],
+      "type": "object"
+    },
+    "DigestAlgorithm": {
+      "enum": [
+        "BLAKE3"
+      ],
+      "type": "string"
+    },
+    "Role": {
+      "enum": [
+        "STATIC",
+        "COMPUTE"
+      ],
+      "type": "string"
+    },
+    "SchemaVersion": {
+      "enum": [
+        "APPLICATION_PACKAGE_V1.0"
+      ],
+      "type": "string"
+    },
+    "VerityGeometry": {
+      "additionalProperties": false,
+      "properties": {
+        "dataBlockCount": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "dataBlockSize": {
+          "format": "uint32",
+          "maximum": 4096,
+          "minimum": 4096,
+          "type": "integer"
+        },
+        "dataOffset": {
+          "format": "uint64",
+          "maximum": 0,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hashAlgorithm": {
+          "$ref": "#/definitions/VerityHashAlgorithm"
+        },
+        "hashBlockSize": {
+          "format": "uint32",
+          "maximum": 4096,
+          "minimum": 4096,
+          "type": "integer"
+        },
+        "rootHash": {
+          "description": "A verity root authenticates this geometry, not the whole package digest.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "salt": {
+          "description": "V1 fixes a 32-byte salt; recipe derivation belongs to trusted materialization.",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "treeLength": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "treeOffset": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "version": {
+          "format": "uint32",
+          "maximum": 1,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dataBlockCount",
+        "dataBlockSize",
+        "dataOffset",
+        "hashAlgorithm",
+        "hashBlockSize",
+        "rootHash",
+        "salt",
+        "treeLength",
+        "treeOffset",
+        "version"
+      ],
+      "type": "object"
+    },
+    "VerityHashAlgorithm": {
+      "enum": [
+        "SHA256"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "Application package descriptor. Exact bytes, checked geometry, allowlisted profiles and publication authority require independent domain verification.",
+  "properties": {
+    "blob": {
+      "$ref": "#/definitions/BlobReference"
+    },
+    "canonicalizationProfile": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^[^\\u0000]*$",
+      "type": "string"
+    },
+    "erofsSize": {
+      "description": "Exact EROFS length before canonical alignment padding.",
+      "format": "uint64",
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "generatorIdentity": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^[^\\u0000]*$",
+      "type": "string"
+    },
+    "role": {
+      "$ref": "#/definitions/Role"
+    },
+    "schemaVersion": {
+      "$ref": "#/definitions/SchemaVersion"
+    },
+    "verity": {
+      "$ref": "#/definitions/VerityGeometry"
+    }
+  },
+  "required": [
+    "blob",
+    "canonicalizationProfile",
+    "erofsSize",
+    "generatorIdentity",
+    "role",
+    "schemaVersion",
+    "verity"
+  ],
+  "title": "ONREZA Application Package V1",
+  "type": "object"
+}
