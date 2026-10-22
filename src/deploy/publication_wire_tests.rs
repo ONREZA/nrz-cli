@@ -28,7 +28,7 @@ async fn source_registration_preparation_limit_preserves_human_and_json_diagnost
     let body = json!({"code":"RUNTIME_PREPARATION_LIMIT","message":"Preparation limit exceeded","details":details});
     let requests = Arc::new(Mutex::new(0));
     let app = Router::new().route(
-        "/v1/deployments/{id}/source",
+        "/v1/deployments/{id}/source-v2/metadata",
         post({
             let requests = Arc::clone(&requests);
             move || {
@@ -43,7 +43,7 @@ async fn source_registration_preparation_limit_preserves_human_and_json_diagnost
     );
     let (client, server) = serve_api(app).await;
     for json_mode in [false, true] {
-        let error = register_deployment_source(&client, DEPLOYMENT, 3,
+        let error = register_deployment_source_v2_metadata(&client, DEPLOYMENT, 3,
             json!({"version":2,"layers":[{"name":"static","target":"STATIC","directory":"."}],"routes":[{"pattern":"^/.*","layer":"static"}]}), None, json_mode
         ).await.unwrap_err();
         let diagnostic = pre_source_failure_diagnostic(&error, None).unwrap();
@@ -74,26 +74,7 @@ async fn source_registration_preparation_limit_preserves_human_and_json_diagnost
 }
 
 #[tokio::test]
-async fn source_registration_retries_the_same_operation_and_snapshot() {
-    let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
-    let app = Router::new().route("/v1/deployments/{id}/source", post(
-        |State(requests):State<Arc<Mutex<Vec<Value>>>>, Json(body):Json<Value>| async move {
-            let mut received = requests.lock().unwrap();
-            received.push(body);
-            if received.len() == 1 {
-                (StatusCode::TOO_MANY_REQUESTS, [("retry-after","0")], Json(json!({"message":"busy"}))).into_response()
-            } else { Json(json!({"id":DEPLOYMENT,"status":"UPLOADING","url":null})).into_response() }
-        })).with_state(Arc::clone(&requests));
-    let (client, server) = serve_api(app).await;
-    register_deployment_source(&client, DEPLOYMENT, 3, source_config_json(), None, true)
-        .await
-        .unwrap();
-    assert_source_retries(&requests.lock().unwrap());
-    server.abort();
-}
-
-#[tokio::test]
-async fn source_v2_metadata_retries_without_the_legacy_upload_transition() {
+async fn source_v2_metadata_retries_the_same_operation_without_legacy_upload() {
     let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
     let app = Router::new().route("/v1/deployments/{id}/source-v2/metadata", post(
         |State(requests):State<Arc<Mutex<Vec<Value>>>>, Json(body):Json<Value>| async move {

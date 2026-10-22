@@ -1,26 +1,6 @@
 use super::*;
 use anyhow::ensure;
 
-pub(super) async fn register_deployment_source(
-    client: &ApiClient,
-    deployment_id: &str,
-    attempt: u32,
-    manifest: serde_json::Value,
-    functions: Option<serde_json::Value>,
-    json: bool,
-) -> anyhow::Result<()> {
-    register_source(
-        client,
-        deployment_id,
-        attempt,
-        manifest,
-        functions,
-        json,
-        Registration::Legacy,
-    )
-    .await
-}
-
 pub(super) async fn register_deployment_source_v2_metadata(
     client: &ApiClient,
     deployment_id: &str,
@@ -28,33 +8,6 @@ pub(super) async fn register_deployment_source_v2_metadata(
     manifest: serde_json::Value,
     functions: Option<serde_json::Value>,
     json: bool,
-) -> anyhow::Result<()> {
-    register_source(
-        client,
-        deployment_id,
-        attempt,
-        manifest,
-        functions,
-        json,
-        Registration::FamilyMetadata,
-    )
-    .await
-}
-
-#[derive(Clone, Copy)]
-enum Registration {
-    Legacy,
-    FamilyMetadata,
-}
-
-async fn register_source(
-    client: &ApiClient,
-    deployment_id: &str,
-    attempt: u32,
-    manifest: serde_json::Value,
-    functions: Option<serde_json::Value>,
-    json: bool,
-    registration: Registration,
 ) -> anyhow::Result<()> {
     let namespace = Uuid::parse_str(deployment_id).context("deployment ID is not a valid UUID")?;
     let operation_id = Uuid::new_v5(
@@ -75,26 +28,15 @@ async fn register_source(
         }
         let response =
             tokio::time::timeout(SOURCE_REGISTRATION_REQUEST_TIMEOUT.min(remaining), async {
-                match registration {
-                    Registration::Legacy => {
-                        let response = client.register_source(deployment_id, body.clone()).await?;
-                        ensure!(
-                            response.id == namespace && response.status == "UPLOADING",
-                            "deployment source registration returned an unexpected state"
-                        );
-                    }
-                    Registration::FamilyMetadata => {
-                        let response = client
-                            .register_source_v2_metadata(deployment_id, body.clone())
-                            .await?;
-                        ensure!(
-                            response.id == namespace
-                                && response.attempt == i64::from(attempt)
-                                && response.registered,
-                            "deployment source metadata registration returned an unexpected state"
-                        );
-                    }
-                }
+                let response = client
+                    .register_source_v2_metadata(deployment_id, body.clone())
+                    .await?;
+                ensure!(
+                    response.id == namespace
+                        && response.attempt == i64::from(attempt)
+                        && response.registered,
+                    "deployment source metadata registration returned an unexpected state"
+                );
                 Ok::<_, anyhow::Error>(())
             })
             .await;

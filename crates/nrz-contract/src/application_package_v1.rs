@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::source_bundle_v2::BlobDigest;
 
+pub const APPLICATION_EROFS_PROFILE_V1: &str = "nrz.application.erofs-zstd3-4k.v1";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(schemars08::JsonSchema))]
 #[cfg_attr(feature = "codegen", schemars(crate = "schemars08"))]

@@ -421,11 +421,11 @@ fn publication_limit_error_in_human_mode_is_actionable() {
 
 #[test]
 fn publication_platform_error_in_json_mode_is_not_swallowed() {
-    let error = nrz_source_publisher::StructuredControlPlaneError {
-        status: reqwest::StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
+    let error = crate::api::StructuredApiError {
+        status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
         code: "INTERNAL".into(),
         message: "boom".into(),
-        retry_after: None,
+        retry_after_seconds: None,
         details: None,
     }
     .into();

@@ -45,7 +45,7 @@ use crate::{
 /// Fixed by this version: zstd level 3, 4 KiB blocks/clusters, one worker,
 /// epoch timestamps, uid/gid zero, no xattrs/hardlinks, files/dirs 0775,
 /// symlinks 0777, and UUID/salt derived from the role tree and exact tools.
-pub const APPLICATION_EROFS_PROFILE_V1: &str = "nrz.application.erofs-zstd3-4k.v1";
+pub use nrz_contract::application_package_v1::APPLICATION_EROFS_PROFILE_V1;
 const RECIPE_CONTEXT: &str = "ONREZA application package role recipe v1";
 const WORKING_HEADROOM: u64 = 256 * 1024;
 

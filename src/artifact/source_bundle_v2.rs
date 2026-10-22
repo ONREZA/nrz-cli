@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use super::source_bundle_v1::{
     RuntimeDependencyPackaging, SourceBundleEntryKind, SourceLogicalManifestFileRole,
-    build_logical_manifest, source_entries_rooted,
+    SourceRuntimeMetadata, prepare_source_bundle_inventory,
 };
 use super::{FileEntry, RuntimeArtifactScan};
 use crate::build::manifest::Manifest;
@@ -27,12 +27,53 @@ pub(crate) fn freeze_source_bundle(
     scan: &RuntimeArtifactScan,
     dependency_packaging: RuntimeDependencyPackaging,
     destination: &Path,
+    metadata: SourceRuntimeMetadata<'_>,
 ) -> anyhow::Result<(Vec<u8>, VerifiedSourceBundleV2Manifest)> {
-    let entries = source_entries_rooted(root, files, scan)?;
-    let mut logical = build_logical_manifest(manifest, &entries, scan, dependency_packaging, None)?;
+    let (entries, mut logical) = prepare_source_bundle_inventory(
+        root,
+        manifest,
+        files,
+        scan,
+        dependency_packaging,
+        metadata.readiness,
+        metadata.runtime_policy_lineage,
+    )?;
     for layer in &mut logical.layers {
-        nrz_source_bundle::layer_application_runtime(layer.runtime_config.as_ref())
-            .map_err(anyhow::Error::msg)?;
+        let application =
+            nrz_source_bundle::layer_application_runtime(layer.runtime_config.as_ref())
+                .map_err(anyhow::Error::msg)?;
+        if layer.target == super::source_bundle_v1::SourceLogicalManifestLayerTarget::Compute
+            && application.is_none()
+        {
+            let runtime = layer
+                .runtime_config
+                .as_ref()
+                .context("Source V2 requires a frozen runtime configuration")?;
+            let target = runtime
+                .get("buildRuntimeVersion")
+                .and_then(serde_json::Value::as_str)
+                .context("Source V2 requires the retained or admitted runtime target")?;
+            let launch =
+                nrz_runtime_artifact::source_layer_launch_for_target(Some(runtime), Some(target))?;
+            ensure!(
+                matches!(
+                    launch.profile,
+                    nrz_runtime_artifact::RuntimeProfile::Node22
+                        | nrz_runtime_artifact::RuntimeProfile::Node24
+                        | nrz_runtime_artifact::RuntimeProfile::Node26
+                ),
+                "Source V2 requires an explicit application runtime for this launcher"
+            );
+            layer
+                .runtime_config
+                .as_mut()
+                .and_then(serde_json::Value::as_object_mut)
+                .context("Source V2 runtime configuration must be an object")?
+                .insert(
+                    "applicationRuntime".into(),
+                    serde_json::json!({"family":"NODE","args":launch.args}),
+                );
+        }
         if let Some(serde_json::Value::Object(runtime)) = &mut layer.runtime_config
             && runtime.contains_key("applicationRuntime")
         {

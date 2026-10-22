@@ -121,25 +121,36 @@ fn deploy_dry_json_outputs_plan_without_creating_deployment() {
         String::from_utf8_lossy(&output.stderr)
     );
     let json = stdout_json(&output);
-    assert_eq!(json["schemaVersion"], "DEPLOY_PLAN_V1");
+    assert_eq!(json["schemaVersion"], "DEPLOY_PLAN_V2");
     assert_eq!(json["framework"]["slug"], "static-html");
     assert_eq!(json["compute"], "STATIC");
     assert_eq!(json["target"]["environment"], "default");
     assert_eq!(json["build"]["outputManifestSource"], "generated");
     assert_eq!(
         json["runtimeArtifact"]["uploadStrategy"],
-        "source_bundle_v1"
+        "source_bundle_v2"
     );
-    assert_eq!(json["sourceBundle"]["format"], "tar.zst");
-    assert!(json["sourceBundle"]["sourceSizeBytes"].as_u64().unwrap() > 0);
-    assert!(json["sourceBundle"]["sourceSha256"].as_str().unwrap().len() >= 12);
-    assert!(
-        json["sourceBundle"]["logicalManifestSha256"]
-            .as_str()
-            .unwrap()
-            .len()
-            >= 12
+    let source = &json["sourceBundle"];
+    assert_eq!(source["format"], "SOURCE_BUNDLE_V2");
+    assert_eq!(
+        source["packageProfile"],
+        nrz_contract::application_package_v1::APPLICATION_EROFS_PROFILE_V1
     );
+    let digest = source["manifestBlake3"].as_str().unwrap();
+    assert_eq!(digest.len(), 64);
+    assert!(digest.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert!(source["manifestSizeBytes"].as_u64().unwrap() > 0);
+    assert_eq!(
+        source["summary"],
+        json!({
+            "fileCount": 1,
+            "logicalStaticBytes": 14,
+            "artifactSizeBytes": 0,
+            "maxStaticFileSizeBytes": 14,
+        })
+    );
+    assert!(source.get("sourceSizeBytes").is_none());
+    assert!(source.get("multipart").is_none());
     assert_eq!(json["files"]["deployableFiles"], 1);
 }
 

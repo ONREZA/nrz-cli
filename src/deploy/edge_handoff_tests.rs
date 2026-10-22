@@ -67,7 +67,7 @@ fn edge_handoff_mode_is_explicit_and_runner_scoped() {
     assert!(
         error
             .to_string()
-            .contains("requires NRZ_EDGE_BUILD_HANDOFF=V1")
+            .contains("requires NRZ_EDGE_BUILD_HANDOFF=V2")
     );
 
     let error = EdgeBuildHandoffOutput::from_values(

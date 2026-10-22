@@ -958,3 +958,6 @@ fn is_framework_build_only_path(
 
     path == ".next/cache" || path.starts_with(".next/cache/") || path.contains("/.next/cache/")
 }
+
+#[cfg(test)]
+mod native_test_support;

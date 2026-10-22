@@ -1,17 +1,40 @@
-//! Opt-in external publication through the authenticated, observed ArtifactAgent.
+//! External publication through the authenticated, observed ArtifactAgent.
 use super::*;
 use anyhow::ensure;
+use nrz_contract::application_package_v1::APPLICATION_EROFS_PROFILE_V1;
 use nrz_contract::source_bundle_v2::FileEntry;
 use nrz_source_publisher::ingress_v2::{FrozenBlob, TransferProvider, TransferTarget};
 use std::io::Write as _;
 
-pub(super) fn enabled() -> anyhow::Result<bool> {
-    match std::env::var("NRZ_SOURCE_TRANSFER") {
-        Err(std::env::VarError::NotPresent) => Ok(false),
-        Ok(value) if value == "V1" => Ok(false),
-        Ok(value) if value == "V2" => Ok(true),
-        _ => bail!("NRZ_SOURCE_TRANSFER must be V1 or V2"),
+pub(super) fn validate_configuration() -> anyhow::Result<()> {
+    let transfer = std::env::var_os("NRZ_SOURCE_TRANSFER");
+    let profile = std::env::var_os("NRZ_SOURCE_PACKAGE_PROFILE");
+    validate_values(transfer.as_deref(), profile.as_deref())
+}
+
+fn validate_values(
+    transfer: Option<&std::ffi::OsStr>,
+    profile: Option<&std::ffi::OsStr>,
+) -> anyhow::Result<()> {
+    if transfer.is_some_and(|value| value == "V1") {
+        return Err(output::coded_error(
+            "CLI_UPDATE_REQUIRED",
+            "Source V1 deployment writes are no longer supported; remove NRZ_SOURCE_TRANSFER=V1",
+        ));
     }
+    if transfer.is_some_and(|value| value != "V2") {
+        return Err(output::coded_error(
+            "INVALID_ARGUMENT",
+            "NRZ_SOURCE_TRANSFER must be V2",
+        ));
+    }
+    if profile.is_some_and(|value| value != APPLICATION_EROFS_PROFILE_V1) {
+        return Err(output::coded_error(
+            "INVALID_ARGUMENT",
+            format!("NRZ_SOURCE_PACKAGE_PROFILE must be {APPLICATION_EROFS_PROFILE_V1}"),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) struct PublicationScope<'a> {
@@ -27,6 +50,7 @@ pub(super) async fn publish(
     plan: &plan::DeployPlan,
     scope: PublicationScope<'_>,
     source_admitted_or_unknown: &mut bool,
+    json: bool,
 ) -> anyhow::Result<()> {
     let PublicationScope {
         deployment_id,
@@ -35,21 +59,11 @@ pub(super) async fn publish(
         environment_id,
         attempt,
     } = scope;
-    let package_profile = std::env::var("NRZ_SOURCE_PACKAGE_PROFILE")
-        .context("Source V2 requires an installed NRZ_SOURCE_PACKAGE_PROFILE")?;
-    ensure!(
-        !package_profile.is_empty() && package_profile.len() <= 128,
-        "invalid Source V2 package profile"
-    );
     let frozen = tempfile::Builder::new()
         .prefix("nrz-source-v2-")
         .tempdir()?;
     let tree = frozen.path().join("tree");
-    let (bytes, verified) = crate::artifact::source_bundle_v2::freeze_source_bundle(
-        &plan.artifact.root,
-        &plan.artifact.runtime.manifest,
-        &plan.files,
-        &plan.artifact.runtime.scan,
+    let (bytes, verified) = plan.freeze_source_bundle(
         crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::Embedded,
         &tree,
     )?;
@@ -87,7 +101,7 @@ pub(super) async fn publish(
         "cliIdempotencyKey":idempotency_key,
         "cliAttemptId":Uuid::now_v7(),
         "protocolVersion":2,
-        "packageProfile":package_profile,
+        "packageProfile":APPLICATION_EROFS_PROFILE_V1,
         "manifest":{"algorithm":"BLAKE3","value":verified.manifest_blake3()},
         "manifestSizeBytes":verified.manifest_size_bytes(),
         "fileCount":summary.file_count,
@@ -96,11 +110,10 @@ pub(super) async fn publish(
         "maxFileSize":summary.max_static_file_size_bytes,
         "cliEndpointId":provider.endpoint_id(),
     }))?;
-    // Once a request is sent, an unavailable reply may hide an active operation.
-    // The legacy fail-before-source transition must not supersede its custody.
-    *source_admitted_or_unknown = true;
     // Retries are confined to this exact frozen input and live endpoint identity.
-    let admitted = admit(client, deployment_id, &body).await?;
+    let admitted = admit(client, deployment_id, &body, source_admitted_or_unknown)
+        .await
+        .map_err(|error| map_publication_error(error, json, &plan.artifact.file_breakdown))?;
     validate_admission(
         &admitted,
         &body,
@@ -159,6 +172,7 @@ async fn admit(
     client: &ApiClient,
     deployment: &str,
     body: &nrz_api::AdmitRequestBody,
+    source_admitted_or_unknown: &mut bool,
 ) -> anyhow::Result<nrz_api::Admit200Response> {
     let start = Instant::now();
     let mut delay = SOURCE_REGISTRATION_INITIAL_RETRY_DELAY;
@@ -168,6 +182,10 @@ async fn admit(
             !remaining.is_zero(),
             "Source V2 admission deadline; original operation may remain pending"
         );
+        // Only a first owner quota refusal proves no admission. An earlier
+        // unavailable reply may hide committed custody, even if a retry refuses.
+        let previous_outcome_unknown = *source_admitted_or_unknown;
+        *source_admitted_or_unknown = true;
         let result = tokio::time::timeout(
             SOURCE_REGISTRATION_REQUEST_TIMEOUT.min(remaining),
             client.admit_static_source_v2(deployment, body.clone()),
@@ -177,6 +195,16 @@ async fn admit(
             Ok(Ok(response)) => return Ok(response),
             Ok(Err(error)) => {
                 let Some(retry) = classify_api_retry(&error) else {
+                    if !previous_outcome_unknown
+                        && error
+                            .downcast_ref::<crate::api::StructuredApiError>()
+                            .is_some_and(|error| {
+                                error.status == reqwest::StatusCode::FORBIDDEN
+                                    && error.code == "LIMIT_EXCEEDED"
+                            })
+                    {
+                        *source_admitted_or_unknown = false;
+                    }
                     return Err(error);
                 };
                 tokio::time::sleep(retry.retry_after.unwrap_or(delay).min(remaining)).await;
@@ -246,3 +274,7 @@ fn digest(input: &str) -> anyhow::Result<[u8; 32]> {
     }
     Ok(digest)
 }
+
+#[cfg(test)]
+#[path = "ingress_v2_tests.rs"]
+mod tests;

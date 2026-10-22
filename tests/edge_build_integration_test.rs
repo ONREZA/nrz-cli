@@ -4,11 +4,10 @@ mod source_v2;
 mod support;
 use axum::{
     Json, Router,
-    body::Bytes,
     extract::{OriginalUri, State},
-    http::{HeaderMap, Method, StatusCode},
+    http::{Method, StatusCode},
     response::IntoResponse,
-    routing::{get, post, put},
+    routing::{get, post},
 };
 use serde_json::json;
 use std::{
@@ -251,6 +250,27 @@ fn spawn_edge_build_handoff_mock_with_commands(
             "/v1/deployments/{deployment_id}/source-v2/metadata",
             post(edge_build_source_v2_metadata),
         )
+        .route("/v1/projects/{id}/execution-context/resolve", post(|State(state):State<EdgeBuildApiState>, uri:OriginalUri| async move {
+            state.record(Method::POST, &uri);
+            Json(json!({"protocolVersion":"execution-context-v3","context":edge_build_execution_context()}))
+        }))
+        .route("/v1/projects/{id}/deployments/admit", post(|State(state):State<EdgeBuildApiState>, uri:OriginalUri| async move {
+            state.record(Method::POST, &uri);
+            Json(json!({"protocolVersion":"execution-context-v3","context":edge_build_execution_context(),
+                "deployment":{"id":state.deployment_id,"attempt":state.retry_count,"status":"BUILDING","url":null},
+                "snapshot":{"fingerprint":format!("v1:{}","0".repeat(64)),"resolvedAt":"2026-10-22T00:00:00Z"}}))
+        }))
+        .route("/v1/deployments/{id}/static-source-v2/admit", post(|State(state):State<EdgeBuildApiState>, uri:OriginalUri, Json(body):Json<serde_json::Value>| async move {
+            state.record(Method::POST, &uri);
+            assert_eq!(body["packageProfile"], nrz_contract::application_package_v1::APPLICATION_EROFS_PROFILE_V1);
+            Json(closed_source_v2_admission(body, state.retry_count))
+        }))
+        .route("/v1/deployments/{id}/status", get(|State(state):State<EdgeBuildApiState>, uri:OriginalUri| async move {
+            state.record(Method::GET, &uri);
+            Json(json!({"id":state.deployment_id,"status":"live","url":null,"production":false,
+                "error":null,"errorCode":null,"errorDetails":null,"runtimeArtifactGraphDigest":null,"runtimeArtifactGraph":null,
+                "createdAt":"2026-10-22T00:00:00Z","readyAt":null}))
+        }))
         .fallback(reject_unexpected_edge_build_request)
         .with_state(state);
     (support::api_mock::spawn(app), requests)
@@ -277,7 +297,26 @@ fn edge_build_command(
         .env("ONREZA_RUNTIME_OS", "linux")
         .env("ONREZA_RUNTIME_ARCH", "x86_64")
         .env("ONREZA_RUNTIME_LIBC", "glibc")
-        .env("NRZ_EDGE_BUILD_HANDOFF", "V1")
+        .env("NRZ_EDGE_BUILD_HANDOFF", "V2")
+        .env(
+            "NRZ_EDGE_BUILD_COMMAND_ID",
+            "77777777-7777-4777-8777-777777777777",
+        )
+        .env("NRZ_EDGE_BUILD_COMMAND_DIGEST", "a".repeat(64))
+        .env(
+            "NRZ_EDGE_BUILD_BUILD_ATTEMPT_ID",
+            "11111111-1111-4111-8111-111111111111",
+        )
+        .env("NRZ_EDGE_BUILD_ATTEMPT", "2")
+        .env("NRZ_EDGE_BUILD_SOURCE_WRITER_GENERATION", "9")
+        .env(
+            "NRZ_EDGE_BUILD_SOURCE_ENVIRONMENT_ID",
+            edge_build_execution_context()["productEnvironmentId"]
+                .as_str()
+                .unwrap(),
+        )
+        .env_remove("NRZ_SOURCE_TRANSFER")
+        .env_remove("NRZ_SOURCE_PACKAGE_PROFILE")
         .env("NRZ_LOG_UPLOAD", "0")
         .env("ONREZA_OUTPUT_DIR", output)
         .args([
@@ -294,39 +333,67 @@ fn edge_build_command(
 fn successful_handoff(
     output: &std::process::Output,
     scenario: &str,
-) -> nrz_source_bundle::EdgeBuildHandoffV1 {
+) -> nrz_source_bundle::EdgeBuildHandoffV2 {
     assert!(
         output.status.success(),
         "{scenario} stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let handoff: nrz_source_bundle::EdgeBuildHandoffV1 =
+    let handoff: nrz_source_bundle::EdgeBuildHandoffV2 =
         serde_json::from_value(stdout_json(output)).unwrap();
     handoff.validate().unwrap();
     handoff
+}
+
+#[derive(serde::Deserialize)]
+struct SourceV2Manifest {
+    layers: Vec<nrz_source_bundle::SourceLogicalManifestLayer>,
+    files: Vec<SourceV2File>,
+}
+
+#[derive(serde::Deserialize)]
+struct SourceV2File {
+    path: String,
+    role: String,
 }
 
 fn source_bundle_manifest(
     output: &std::path::Path,
     cli_output: &std::process::Output,
     scenario: &str,
-) -> nrz_source_bundle::SourceLogicalManifest {
+) -> SourceV2Manifest {
     let handoff = successful_handoff(cli_output, scenario);
-    let decoder =
-        zstd::Decoder::new(fs::File::open(output.join(&handoff.source_bundle.path)).unwrap())
-            .unwrap();
-    let mut archive = tar::Archive::new(decoder);
-    archive
-        .entries()
-        .unwrap()
-        .map(Result::unwrap)
-        .find(|entry| {
-            entry.path().unwrap().as_ref()
-                == std::path::Path::new(nrz_source_bundle::SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH)
-        })
-        .map(|entry| serde_json::from_reader(entry).unwrap())
-        .unwrap()
+    let bytes = fs::read(output.join(&handoff.source_manifest.path)).unwrap();
+    assert_eq!(
+        blake3::hash(&bytes).to_hex().as_str(),
+        handoff.source_manifest.blake3
+    );
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+fn closed_source_v2_admission(mut body: serde_json::Value, retry_count: u32) -> serde_json::Value {
+    let operation_id = body["operationId"].clone();
+    let idempotency_key = body["cliIdempotencyKey"].clone();
+    let input = body.as_object_mut().unwrap();
+    input.remove("operationId");
+    input.remove("cliIdempotencyKey");
+    let context = edge_build_execution_context();
+    for name in ["workspaceId", "projectId", "environmentId"] {
+        input.insert(name.into(), context[name].clone());
+    }
+    input.insert("deploymentAttempt".into(), json!(retry_count + 1));
+    let identity = "77777777-7777-4777-8777-777777777777";
+    json!({
+        "operationId":operation_id,"cliIdempotencyKey":idempotency_key,"state":"CLOSED","input":body,
+        "inputDigest":"a".repeat(64),"writerGeneration":"9","installationId":identity,
+        "assignmentId":identity,"assignmentGeneration":"1","nodeIncarnationId":identity,
+        "nodeId":"edge-test","nodeBootId":identity,"identityGeneration":"1",
+        "receiverInstanceId":identity,"receiverSessionId":identity,"receiverEndpointId":"b".repeat(64),
+        "profileDigest":"c".repeat(64),"observationId":identity,"observedAt":"2026-10-22T00:00:00Z",
+        "observationValidUntil":"2099-01-01T00:00:00Z","expiresAt":"2099-01-01T00:00:00Z",
+        "reservedBusinessBytes":0,"terminalReason":"PUBLISHED","terminalAt":"2026-10-22T00:01:00Z"
+    })
 }
 
 #[test]
@@ -338,7 +405,6 @@ fn local_sets_publish_before_activation_and_keep_one_terminal_json() {
         let deployment = uuid::Uuid::now_v7();
         let operation = uuid::Uuid::now_v7();
         let key = uuid::Uuid::now_v7();
-        let upload_session = uuid::Uuid::now_v7();
         let service = context["serviceId"].as_str().unwrap();
         let receipt = project
             .path()
@@ -384,12 +450,6 @@ fn local_sets_publish_before_activation_and_keep_one_terminal_json() {
         };
         let admitted = json!({"operationId":operation,"generation":"8","status":"PENDING","replayed":true,
             "deployments":[{"id":deployment,"serviceId":service,"status":"BUILDING"}]});
-        let published = Arc::new(Mutex::new(
-            json!({"request":null,"graph":null,"digest":null}),
-        ));
-        let prepare_state = Arc::clone(&published);
-        let upload_state = Arc::clone(&published);
-        let status_state = Arc::clone(&published);
         let app = Router::new()
             .route("/v1/projects/{id}/deployments/admit-set", post(move || {
                 let admitted = admitted.clone();
@@ -397,59 +457,33 @@ fn local_sets_publish_before_activation_and_keep_one_terminal_json() {
             }))
             .route("/v1/deployments/{id}/runner-context", get(edge_build_runner_context))
             .route("/v1/deployments/{id}/execution-context/materialize", post(edge_build_materialize))
-            .route("/v1/deployments/{id}/source", post(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri, Json(body):Json<serde_json::Value>| async move {
+            .route("/v1/deployments/{id}/source-v2/metadata", post(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri, Json(body):Json<serde_json::Value>| async move {
                 state.record(Method::POST, &uri);
                 assert_eq!(body["attempt"],1);
                 assert_eq!(body["manifest"]["version"].as_f64(),Some(2.0));
                 if scenario == "register-error" {
                     (StatusCode::BAD_REQUEST,Json(json!({"code":"EDGE_RULES_DIVERGED","message":"pull reviewed rules", "details":{"field":"edgeRules.remote-7"}}))).into_response()
                 } else {
-                    Json(json!({"id":deployment,"status":"UPLOADING","url":null})).into_response()
+                    Json(json!({"id":deployment,"attempt":1,"registered":true})).into_response()
                 }
             }))
-            .route("/v1/deployments/{id}/prepare-upload", post(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri, headers:HeaderMap, Json(body):Json<serde_json::Value>| {
-                let published = Arc::clone(&prepare_state);
-                async move {
+            .route("/v1/deployments/{id}/static-source-v2/admit", post(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri, Json(body):Json<serde_json::Value>| async move {
                 state.record(Method::POST, &uri);
+                assert_eq!(body["packageProfile"], nrz_contract::application_package_v1::APPLICATION_EROFS_PROFILE_V1);
                 if scenario == "prepare-error" {
-                    return (StatusCode::FORBIDDEN,Json(json!({"code":"LIMIT_EXCEEDED","message":"source limit", "details":{"limitType":"maxArtifactFiles","current":2,"limit":1,"remaining":0}}))).into_response();
-                }
-                let source_artifact = nrz_source_bundle::compute_source_artifact_id(
-                    edge_build_execution_context()["workspaceId"].as_str().unwrap(),
-                    body["logicalManifestSha256"].as_str().unwrap(),
-                    body["sourceSha256"].as_str().unwrap(),None,
-                );
-                published.lock().unwrap()["request"]=body.clone();
-                Json(json!({"bucket":"fixture","expiresAt":"2099-01-01T00:00:00Z",
-                    "fastPath":false,"kind":"source-upload","requiredComplete":"upload-complete",
-                    "presignedPut":{"mode":"single","url":format!("http://{}/source/fixture",headers["host"].to_str().unwrap()),
-                        "contentLength":body["sourceSizeBytes"].as_str().unwrap().parse::<u64>().unwrap(),"sha256":body["sourceSha256"],
-                        "headers":{"content-type":"application/zstd","if-none-match":"*"}},
-                    "sourceArtifactId":source_artifact,"sourceObjectKey":"source/fixture","uploadSessionId":upload_session})).into_response()
-            }}))
-            .route("/source/fixture",put(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri, bytes:Bytes| {
-                let published = Arc::clone(&upload_state);
-                async move {
-                    state.record(Method::PUT,&uri);
-                    let request = published.lock().unwrap()["request"].clone();
-                    assert_eq!(nrz_source_bundle::sha256_hex(&bytes),request["sourceSha256"].as_str().unwrap());
-                    assert_eq!(bytes.len() as u64,request["sourceSizeBytes"].as_str().unwrap().parse::<u64>().unwrap());
-                    let decoder = zstd::Decoder::new(&bytes[..]).unwrap();
-                    let mut archive = tar::Archive::new(decoder);
-                    let manifest:nrz_source_bundle::SourceLogicalManifest = archive.entries().unwrap().map(Result::unwrap)
-                        .find(|entry|entry.path().unwrap().as_ref()==std::path::Path::new(nrz_source_bundle::SOURCE_BUNDLE_LOGICAL_MANIFEST_PATH))
-                        .map(|entry|serde_json::from_reader(entry).unwrap()).unwrap();
-                    let graph = nrz_runtime_artifact::finalize_source_bundle_runtime_graph(request["logicalManifestSha256"].as_str().unwrap(),request["sourceSha256"].as_str().unwrap(),bytes.len() as u64,&manifest).unwrap();
-                    let mut published = published.lock().unwrap();
-                    published["digest"]=json!(graph.graph_digest());
-                    published["graph"]=serde_json::to_value(graph.into_wire()).unwrap();
-                    StatusCode::OK
+                    (StatusCode::FORBIDDEN,Json(json!({"code":"LIMIT_EXCEEDED","message":"source limit", "details":{"limitType":"maxDeploymentFiles","current":2,"limit":1,"remaining":0}}))).into_response()
+                } else {
+                    Json(closed_source_v2_admission(body, state.retry_count)).into_response()
                 }
             }))
-            .route("/v1/deployments/{id}/upload-complete", post(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri, Json(body):Json<serde_json::Value>| async move {
+            .route("/v1/deployments/{id}/execution-context/fail-before-source", post(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri, Json(body):Json<serde_json::Value>| async move {
                 state.record(Method::POST, &uri);
-                assert_eq!(body["uploadSessionId"],upload_session.to_string());
-                Json(json!({"kind":"source-upload-completed","deploymentId":deployment,"uploadSessionId":upload_session}))
+                assert_eq!(body["attempt"], 1);
+                if scenario == "prepare-error" {
+                    assert_eq!(body["diagnostic"]["code"], "LIMIT_EXCEEDED");
+                    assert_eq!(body["diagnostic"]["details"]["limitType"], "maxDeploymentFiles");
+                }
+                Json(json!({"id":deployment,"accepted":true}))
             }))
             .route("/v1/deployments/{id}/execution-context/skip-before-source", post(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri| async move {
                 state.record(Method::POST, &uri);
@@ -457,11 +491,10 @@ fn local_sets_publish_before_activation_and_keep_one_terminal_json() {
             }))
             .route("/v1/deployments/{id}/status", get(move |State(state):State<EdgeBuildApiState>, uri:OriginalUri| {
                 state.record(Method::GET,&uri);
-                let published = status_state.lock().unwrap().clone();
                 async move {
                 Json(json!({"id":deployment,"status":if scenario == "skip" {"skipped"} else {"live"},
                     "url":null,"production":false,"error":null,"errorCode":null,"errorDetails":null,
-                    "runtimeArtifactGraphDigest":published["digest"],"runtimeArtifactGraph":published["graph"],"createdAt":"2026-10-14T00:00:00Z","readyAt":null}))
+                    "runtimeArtifactGraphDigest":null,"runtimeArtifactGraph":null,"createdAt":"2026-10-14T00:00:00Z","readyAt":null}))
             }}))
             .fallback(reject_unexpected_edge_build_request)
             .with_state(state);
@@ -471,6 +504,8 @@ fn local_sets_publish_before_activation_and_keep_one_terminal_json() {
             .current_dir(project.path())
             .env("NRZ_API_URL", api)
             .env("NRZ_LOG_UPLOAD", "0")
+            .env_remove("NRZ_SOURCE_TRANSFER")
+            .env_remove("NRZ_SOURCE_PACKAGE_PROFILE")
             .env_remove("NRZ_RUNNER")
             .env_remove("NRZ_EDGE_BUILD_HANDOFF")
             .env_remove("ONREZA_OUTPUT_DIR")
@@ -510,13 +545,11 @@ fn local_sets_publish_before_activation_and_keep_one_terminal_json() {
         if scenario == "complete" {
             assert_eq!(terminal["status"], "live");
             assert_eq!(terminal["operation"]["operationId"], operation.to_string());
-            assert!(called("source") && called("prepare-upload") && called("upload-complete"));
-            assert!(calls.iter().any(|call| call == "PUT /source/fixture"));
+            assert!(called("source-v2/metadata") && called("static-source-v2/admit"));
+            assert!(!called("source") && !called("prepare-upload") && !called("upload-complete"));
             let sequence = [
-                format!("POST /v1/deployments/{deployment}/source"),
-                format!("POST /v1/deployments/{deployment}/prepare-upload"),
-                "PUT /source/fixture".into(),
-                format!("POST /v1/deployments/{deployment}/upload-complete"),
+                format!("POST /v1/deployments/{deployment}/source-v2/metadata"),
+                format!("POST /v1/deployments/{deployment}/static-source-v2/admit"),
                 format!("GET /v1/deployments/{deployment}/status"),
             ];
             let positions =
@@ -536,14 +569,24 @@ fn local_sets_publish_before_activation_and_keep_one_terminal_json() {
                 "register-error" => {
                     assert_eq!(terminal["code"], "EDGE_RULES_DIVERGED");
                     assert_eq!(terminal["details"]["field"], "edgeRules.remote-7");
-                    assert!(called("source"));
-                    assert!(!called("prepare-upload"));
+                    assert!(called("source-v2/metadata"));
+                    assert!(!called("static-source-v2/admit"));
                 }
                 "prepare-error" => {
                     assert_eq!(terminal["code"], "LIMIT_EXCEEDED");
                     assert_eq!(terminal["details"]["limit"].as_f64(), Some(1.0));
-                    assert!(called("prepare-upload"));
+                    assert!(
+                        terminal["details"]["runtimeArtifactFiles"]["total"]
+                            .as_u64()
+                            .unwrap()
+                            > 0
+                    );
+                    assert!(called("static-source-v2/admit"));
                     assert!(!called("upload-complete"));
+                    assert!(
+                        called("execution-context/fail-before-source"),
+                        "definite quota refusal must terminalize the unaccepted deployment: {calls:?}"
+                    );
                 }
                 "skip" => {
                     assert_eq!(terminal["code"], "DEPLOY_SKIPPED");
@@ -618,15 +661,16 @@ fn edge_build_publishes_local_handoff_without_legacy_source_mutations() {
 
     successful_handoff(&output, "static handoff");
     assert_eq!(
-        fs::read(output_dir.path().join("edge-build-handoff-v1.json")).unwrap(),
+        fs::read(output_dir.path().join("edge-build-handoff-v2.json")).unwrap(),
         output.stdout
     );
-    assert!(output_dir.path().join("source-bundle-v1.tar.zst").is_file());
+    assert!(output_dir.path().join("source-manifest-v2.json").is_file());
     assert_eq!(
         requests.lock().unwrap().as_slice(),
         [
             format!("GET /v1/deployments/{deployment_id}/runner-context"),
             format!("POST /v1/deployments/{deployment_id}/execution-context/materialize"),
+            format!("POST /v1/deployments/{deployment_id}/source-v2/metadata"),
         ]
     );
 }
@@ -719,7 +763,8 @@ fn edge_build_handoff_preserves_python_and_native_serving_under_node_compiler() 
             requests.lock().unwrap().as_slice(),
             [
                 format!("GET /v1/deployments/{deployment_id}/runner-context"),
-                format!("POST /v1/deployments/{deployment_id}/execution-context/materialize")
+                format!("POST /v1/deployments/{deployment_id}/execution-context/materialize"),
+                format!("POST /v1/deployments/{deployment_id}/source-v2/metadata"),
             ]
         );
     }
@@ -814,7 +859,7 @@ fn build_generated_package_infers_process_without_changing_frozen_runtime() {
                 .as_ref()
         );
         let expected_intent = if frozen_runtime.is_null() {
-            serde_json::Value::Null
+            json!({"family":"NODE","args":[]})
         } else {
             json!({"family":"BUN","args":["literal argument"]})
         };
@@ -899,7 +944,7 @@ fn build_generated_elysia_rejects_node_and_keeps_explicit_static_before_source_h
         .unwrap();
         if explicit_static {
             successful_handoff(&output, "explicit static elysia");
-            assert!(output_dir.path().join("source-bundle-v1.tar.zst").exists());
+            assert!(output_dir.path().join("source-manifest-v2.json").exists());
             continue;
         }
         assert!(!output.status.success());
@@ -918,7 +963,7 @@ fn build_generated_elysia_rejects_node_and_keeps_explicit_static_before_source_h
         assert!(
             !output_dir
                 .path()
-                .join("edge-build-handoff-v1.json")
+                .join("edge-build-handoff-v2.json")
                 .exists()
         );
     }
@@ -1235,13 +1280,9 @@ fn fresh_python_module_handoff_keeps_project_owned_bootstrap_with_dist_output() 
     assert_eq!(runtime["buildRuntimeVersion"], "python-3.14");
     assert_eq!(runtime["runtimePolicyLineage"], "PYTHON:3.13");
     assert!(manifest.files.iter().any(|file| file.path == "app.py"));
-    let unpacked = tempfile::tempdir().unwrap();
-    tar::Archive::new(
-        zstd::Decoder::new(fs::File::open(output.path().join("source-bundle-v1.tar.zst")).unwrap())
-            .unwrap(),
-    )
-    .unpack(unpacked.path())
-    .unwrap();
+    let source_tree = output
+        .path()
+        .join(nrz_source_bundle::EDGE_BUILD_SOURCE_TREE_V2_DIRECTORY);
     fs::remove_dir_all(project.path()).unwrap();
     let executed = std::process::Command::new("python3")
         .args(["-S", primary.entrypoint.as_deref().unwrap()])
@@ -1252,7 +1293,7 @@ fn fresh_python_module_handoff_keeps_project_owned_bootstrap_with_dist_output() 
                 .iter()
                 .map(|argument| argument.as_str().unwrap()),
         )
-        .current_dir(unpacked.path())
+        .current_dir(&source_tree)
         .output()
         .unwrap();
     assert!(
@@ -1354,7 +1395,7 @@ fn admitted_source_manifest(
     api_url: &str,
     deployment_id: &str,
     target: &str,
-) -> nrz_source_bundle::SourceLogicalManifest {
+) -> SourceV2Manifest {
     let result = edge_build_command(project, output, api_url, deployment_id, true)
         .env("ONREZA_RUNTIME_VERSION", target)
         .output()

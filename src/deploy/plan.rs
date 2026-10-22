@@ -6,9 +6,15 @@ use anyhow::Context;
 use serde::Serialize;
 
 use crate::artifact::source_bundle_v1::{
-    RuntimeDependencyPackaging, RuntimeReadinessContract, SOURCE_BUNDLE_FORMAT, SourceBundlePlan,
-    build_source_bundle_plan_with_root,
+    RuntimeDependencyPackaging, RuntimeReadinessContract, SourceRuntimeMetadata,
 };
+#[cfg(test)]
+use crate::artifact::source_bundle_v1::{SourceBundlePlan, build_source_bundle_plan_with_root};
+use nrz_contract::application_package_v1::APPLICATION_EROFS_PROFILE_V1;
+use nrz_source_bundle::source_bundle_v2::{
+    SourceBundleV2ManifestSummary, VerifiedSourceBundleV2Manifest,
+};
+
 use crate::artifact::{
     ArtifactFileCollection, ArtifactRootScope, BuildArtifact, BuildManifestSource, FileEntry,
     RuntimeArtifact, RuntimeArtifactFileBreakdown, RuntimeArtifactScan,
@@ -137,11 +143,11 @@ impl DeployPlan {
         &self,
         command: &crate::context::CommandContext,
         project_id: Option<&str>,
-        source_bundle: &SourceBundlePlan,
+        source_bundle: &VerifiedSourceBundleV2Manifest,
     ) -> DeployPlanExplain {
         let detection = &self.artifact.build.detection;
         DeployPlanExplain {
-            schema_version: "DEPLOY_PLAN_V1",
+            schema_version: "DEPLOY_PLAN_V2",
             project_id: project_id.map(str::to_string),
             root_dir: command.root_dir.to_string_lossy().into_owned(),
             project_dir: command.project_dir.to_string_lossy().into_owned(),
@@ -203,18 +209,16 @@ impl DeployPlan {
                     .to_string_lossy()
                     .into_owned(),
                 scan: self.artifact.runtime.scan.explain(),
-                upload_strategy: "source_bundle_v1",
+                upload_strategy: "source_bundle_v2",
                 has_compute_layer: self.has_compute_layer,
                 file_breakdown: self.artifact.file_breakdown.clone(),
             },
             source_bundle: SourceBundleExplain {
-                format: SOURCE_BUNDLE_FORMAT,
-                source_size_bytes: source_bundle.source_size_bytes,
-                source_sha256: source_bundle.source_sha256.clone(),
-                logical_manifest_sha256: source_bundle.logical_manifest_sha256.clone(),
-                multipart: nrz_source_publisher::source_uses_multipart(
-                    source_bundle.source_size_bytes,
-                ),
+                format: "SOURCE_BUNDLE_V2",
+                package_profile: APPLICATION_EROFS_PROFILE_V1,
+                manifest_blake3: source_bundle.manifest_blake3().to_string(),
+                manifest_size_bytes: source_bundle.manifest_size_bytes(),
+                summary: source_bundle.summary(),
             },
             files: self.artifact.files.summary.clone(),
             health_check: self
@@ -309,6 +313,53 @@ impl DeployPlan {
         Ok(())
     }
 
+    fn source_dependency_packaging(
+        &self,
+        requested: RuntimeDependencyPackaging,
+    ) -> RuntimeDependencyPackaging {
+        if self.retained_platform_output {
+            // Retained bytes are not receipts from a new installation.
+            RuntimeDependencyPackaging::Embedded
+        } else {
+            requested
+        }
+    }
+
+    fn source_runtime_metadata(&self) -> SourceRuntimeMetadata<'_> {
+        SourceRuntimeMetadata {
+            readiness: self.health_check.as_ref().map(|health_check| {
+                health_check.path.as_deref().map_or(
+                    RuntimeReadinessContract::Tcp,
+                    RuntimeReadinessContract::Http,
+                )
+            }),
+            runtime_policy_lineage: self
+                .runtime_policy_lineage
+                .as_ref()
+                .map(|(layer, lineage)| (layer.as_str(), lineage.as_str())),
+        }
+    }
+
+    pub(super) fn freeze_source_bundle(
+        &self,
+        dependency_packaging: RuntimeDependencyPackaging,
+        destination: &Path,
+    ) -> anyhow::Result<(
+        Vec<u8>,
+        nrz_source_bundle::source_bundle_v2::VerifiedSourceBundleV2Manifest,
+    )> {
+        crate::artifact::source_bundle_v2::freeze_source_bundle(
+            &self.artifact.root,
+            &self.artifact.runtime.manifest,
+            &self.files,
+            &self.artifact.runtime.scan,
+            self.source_dependency_packaging(dependency_packaging),
+            destination,
+            self.source_runtime_metadata(),
+        )
+    }
+
+    #[cfg(test)]
     pub(super) fn materialize_source_bundle(
         &self,
         json: bool,
@@ -325,22 +376,9 @@ impl DeployPlan {
             &self.artifact.runtime.manifest,
             &self.files,
             &self.artifact.runtime.scan,
-            if self.retained_platform_output {
-                // Retained dependencies are authenticated artifact bytes, not
-                // receipts from a new installation under the admitted target.
-                RuntimeDependencyPackaging::Embedded
-            } else {
-                dependency_packaging
-            },
-            self.health_check.as_ref().map(|health_check| {
-                health_check.path.as_deref().map_or(
-                    RuntimeReadinessContract::Tcp,
-                    RuntimeReadinessContract::Http,
-                )
-            }),
-            self.runtime_policy_lineage
-                .as_ref()
-                .map(|(layer, lineage)| (layer.as_str(), lineage.as_str())),
+            self.source_dependency_packaging(dependency_packaging),
+            self.source_runtime_metadata().readiness,
+            self.source_runtime_metadata().runtime_policy_lineage,
         )
         .context("failed to prepare SOURCE_BUNDLE_V1 upload plan")
     }
@@ -430,10 +468,10 @@ struct RuntimeArtifactExplain {
 #[serde(rename_all = "camelCase")]
 struct SourceBundleExplain {
     format: &'static str,
-    source_size_bytes: u64,
-    source_sha256: String,
-    logical_manifest_sha256: String,
-    multipart: bool,
+    package_profile: &'static str,
+    manifest_blake3: String,
+    manifest_size_bytes: u64,
+    summary: SourceBundleV2ManifestSummary,
 }
 
 pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<DeployPlan> {

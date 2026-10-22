@@ -16,6 +16,86 @@ const EXECUTION_ID: &str = "11111111-1111-4111-8111-111111111111";
 const COMMAND_DIGEST: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 #[test]
+fn ordinary_deploy_uses_the_installed_v2_profile_without_environment_overrides() {
+    let (api_url, requests) = spawn_edge_build_handoff_mock_with_retry_count(DEPLOYMENT_ID, 0);
+    let project = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join("index.html"),
+        "<h1>Default Source V2</h1>",
+    )
+    .unwrap();
+    let context = edge_build_execution_context();
+    let result = super::nrz()
+        .current_dir(project.path())
+        .env("NRZ_API_URL", api_url)
+        .env("NRZ_LOG_UPLOAD", "0")
+        .env_remove("NRZ_SOURCE_TRANSFER")
+        .env_remove("NRZ_SOURCE_PACKAGE_PROFILE")
+        .env_remove("NRZ_EDGE_BUILD_HANDOFF")
+        .env_remove("NRZ_RUNNER")
+        .args([
+            "--json",
+            "--token",
+            "fixture-token",
+            "deploy",
+            ".",
+            "--project-id",
+            context["projectId"].as_str().unwrap(),
+            "--service-id",
+            context["serviceId"].as_str().unwrap(),
+            "--environment",
+            "preview",
+            "--skip-build",
+            "--skip-install",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(super::stdout_json(&result)["status"], "live");
+    let requests = requests.lock().unwrap();
+    assert!(requests.contains(&format!(
+        "POST /v1/deployments/{DEPLOYMENT_ID}/source-v2/metadata"
+    )));
+    assert!(requests.contains(&format!(
+        "POST /v1/deployments/{DEPLOYMENT_ID}/static-source-v2/admit"
+    )));
+    assert!(
+        !requests
+            .iter()
+            .any(|request| request.ends_with("/source") || request.ends_with("/prepare-upload"))
+    );
+}
+
+#[test]
+fn source_configuration_errors_never_reach_admission() {
+    for (name, value, code) in [
+        ("NRZ_SOURCE_TRANSFER", "V1", "CLI_UPDATE_REQUIRED"),
+        (
+            "NRZ_SOURCE_PACKAGE_PROFILE",
+            "uninstalled-profile",
+            "INVALID_ARGUMENT",
+        ),
+        ("NRZ_EDGE_BUILD_HANDOFF", "V1", "CLI_UPDATE_REQUIRED"),
+    ] {
+        let project = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        let (api_url, requests) = spawn_edge_build_handoff_mock_with_retry_count(DEPLOYMENT_ID, 0);
+        let result = command(project.path(), output.path(), &api_url)
+            .env(name, value)
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        assert_eq!(super::stdout_json(&result)["code"], code);
+        assert!(requests.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
 fn generated_log_session_dto_accepts_disabled_by_workspace_and_rejects_disabled() {
     use nrz_api::{
         BuildLogSession200Response, BuildLogSession200ResponseSessionShippingPolicy,

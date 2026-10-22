@@ -66,7 +66,7 @@ async fn assert_static_deploy_plan_publishes_v2(retry_count: u32) -> anyhow::Res
     assert!(
         !output
             .path()
-            .join(EDGE_BUILD_SOURCE_BUNDLE_V1_FILE)
+            .join(nrz_source_bundle::EDGE_BUILD_SOURCE_BUNDLE_V1_FILE)
             .exists()
     );
     assert!(

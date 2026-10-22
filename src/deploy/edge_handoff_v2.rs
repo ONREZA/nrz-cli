@@ -41,13 +41,7 @@ impl EdgeBuildHandoffOutput {
         retry_count: u32,
     ) -> anyhow::Result<EdgeBuildHandoffV2> {
         let binding = self.validate_v2_binding(deployment_id, environment_id, retry_count)?;
-        self.publish_v2_inventory(
-            binding,
-            &plan.artifact.root,
-            &plan.artifact.runtime.manifest,
-            &plan.files,
-            &plan.artifact.runtime.scan,
-        )
+        self.publish_v2_inventory(binding, plan)
     }
 
     pub(in crate::deploy) fn validate_v2_binding(
@@ -80,10 +74,7 @@ impl EdgeBuildHandoffOutput {
     fn publish_v2_inventory(
         &self,
         binding: &EdgeBuildBindingV2,
-        source_root: &nrz_runtime_artifact::ArtifactRoot,
-        manifest: &crate::build::manifest::Manifest,
-        files: &[crate::artifact::FileEntry],
-        scan: &crate::artifact::RuntimeArtifactScan,
+        plan: &crate::deploy::plan::DeployPlan,
     ) -> anyhow::Result<EdgeBuildHandoffV2> {
         binding.validate().map_err(anyhow::Error::msg)?;
         fs::create_dir_all(&self.root)?;
@@ -98,11 +89,7 @@ impl EdgeBuildHandoffOutput {
             .prefix(".source-v2-")
             .tempdir_in(&root)?;
         let staged_tree = staging.path().join(EDGE_BUILD_SOURCE_TREE_V2_DIRECTORY);
-        let (bytes, verified) = crate::artifact::source_bundle_v2::freeze_source_bundle(
-            source_root,
-            manifest,
-            files,
-            scan,
+        let (bytes, verified) = plan.freeze_source_bundle(
             crate::artifact::source_bundle_v1::RuntimeDependencyPackaging::TrustedMaterialization,
             &staged_tree,
         )?;

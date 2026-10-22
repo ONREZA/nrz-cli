@@ -33,6 +33,7 @@ fn freezes_zero_byte_index_without_a_logical_size_minimum() -> anyhow::Result<()
         &RuntimeArtifactScan::All,
         RuntimeDependencyPackaging::Embedded,
         &destination,
+        SourceRuntimeMetadata::default(),
     )?;
     assert_eq!(verified.summary().logical_static_bytes, 0);
     assert_eq!(verified.summary().max_static_file_size_bytes, 0);
@@ -62,6 +63,7 @@ fn freezes_only_planned_bytes_and_preserves_prerender_roles() -> anyhow::Result<
         &RuntimeArtifactScan::All,
         RuntimeDependencyPackaging::Embedded,
         &destination,
+        SourceRuntimeMetadata::default(),
     )?;
     assert_eq!(
         verified.manifest_blake3(),
@@ -110,6 +112,7 @@ fn freezes_workspace_projection_when_it_expands_the_planned_inventory() -> anyho
         &scan,
         RuntimeDependencyPackaging::Embedded,
         &destination,
+        SourceRuntimeMetadata::default(),
     )?;
     assert_eq!(verified.summary().file_count, 4);
     assert!(verified.summary().file_count > files.len() as u64);
@@ -136,7 +139,8 @@ fn rejects_inventory_mutation_before_output_copy() -> anyhow::Result<()> {
             &files,
             &RuntimeArtifactScan::All,
             RuntimeDependencyPackaging::Embedded,
-            &destination
+            &destination,
+            SourceRuntimeMetadata::default(),
         )
         .is_err()
     );
@@ -165,6 +169,7 @@ fn preserves_contained_symlink_and_refuses_root_substitution() -> anyhow::Result
         &RuntimeArtifactScan::All,
         RuntimeDependencyPackaging::Embedded,
         &destination,
+        SourceRuntimeMetadata::default(),
     )?;
     assert!(
         matches!(&verified.wire().files[0], wire::FileEntry::Symlink {link_target,..} if link_target.0 == "index.html")
@@ -186,7 +191,8 @@ fn preserves_contained_symlink_and_refuses_root_substitution() -> anyhow::Result
             &files,
             &RuntimeArtifactScan::All,
             RuntimeDependencyPackaging::Embedded,
-            &output.path().join("rejected")
+            &output.path().join("rejected"),
+            SourceRuntimeMetadata::default(),
         )
         .is_err()
     );
@@ -221,7 +227,19 @@ fn dependency_roles_follow_explicit_direct_cli_or_builder_packaging() -> anyhow:
         let source = tempdir()?;
         let output = tempdir()?;
         fs::create_dir_all(source.path().join(dependency_path).parent().unwrap())?;
-        fs::write(source.path().join(entry), b"server")?;
+        if family == "EXECUTABLE" {
+            use crate::artifact::native_test_support::native_elf_fixture;
+            fs::write(
+                source.path().join(entry),
+                native_elf_fixture(Some("$ORIGIN/lib")),
+            )?;
+            fs::write(
+                source.path().join("lib/libfoo.so"),
+                native_elf_fixture(None),
+            )?;
+        } else {
+            fs::write(source.path().join(entry), b"server")?;
+        }
         fs::write(source.path().join(dependency_path), b"dependency")?;
         let manifest: Manifest = serde_json::from_value(serde_json::json!({"version":2,
             "layers":[{"name":"server","target":"COMPUTE","directory":".","entry":entry,
@@ -256,7 +274,16 @@ fn dependency_roles_follow_explicit_direct_cli_or_builder_packaging() -> anyhow:
                 &scan,
                 packaging,
                 &destination,
+                SourceRuntimeMetadata::default(),
             )?;
+            if family == "EXECUTABLE" {
+                assert!(
+                    verified.wire().files.iter().any(|file| matches!(file,
+                        wire::FileEntry::File { path, executable: true, .. } if path.0 == entry
+                    )),
+                    "native entry must retain executable authority from shared preparation"
+                );
+            }
             for (path, role) in [
                 (entry, wire::FileRole::Compute),
                 (dependency_path, dependency_role),

@@ -120,26 +120,6 @@ impl ApiClient {
             PostV1deploymentsByIdExecutionContextFailBeforeSourceResponse::Ok
         )
     }
-    pub async fn register_source(
-        &self,
-        id: &str,
-        body: SourceRequestBody2,
-    ) -> anyhow::Result<Source200Response> {
-        let response = self
-            .platform()?
-            .post_v1deployments_by_id_source(PostV1deploymentsByIdSourceRequest {
-                path: PostV1deploymentsByIdSourceRequestPath {
-                    id: id.parse().context("invalid resource ID")?,
-                },
-                body,
-            })
-            .await?;
-        api_success!(
-            response,
-            PostV1deploymentsByIdSourceRequest,
-            PostV1deploymentsByIdSourceResponse::Ok
-        )
-    }
     pub async fn register_source_v2_metadata(
         &self,
         id: &str,

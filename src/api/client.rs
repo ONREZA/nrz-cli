@@ -122,8 +122,6 @@ fn format_envelope_errors(errors: &[ApiEnvelopeMessage]) -> String {
 #[derive(Clone)]
 pub struct ApiClient {
     client: reqwest::Client,
-    /// Plain client without auth headers, reused for presigned S3 uploads.
-    upload_client: reqwest::Client,
     base_url: String,
 }
 
@@ -141,22 +139,8 @@ impl ApiClient {
         client: reqwest::Client,
     ) -> anyhow::Result<Self> {
         nrz_api::PlatformClient::with_client(&base_url, client.clone())?;
-        Ok(Self {
-            base_url,
-            client,
-            upload_client: build_upload_client()?,
-        })
+        Ok(Self { base_url, client })
     }
-    pub(crate) fn source_publication_transport(
-        &self,
-    ) -> nrz_source_publisher::HttpSourcePublicationTransport {
-        nrz_source_publisher::HttpSourcePublicationTransport::from_clients(
-            self.base_url.clone(),
-            self.client.clone(),
-            self.upload_client.clone(),
-        )
-    }
-
     pub fn anonymous() -> anyhow::Result<Self> {
         let base_url = resolve_base_url();
         let mut headers = HeaderMap::new();
@@ -199,17 +183,6 @@ impl ApiClient {
 fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     let raw = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
     raw.trim().parse::<u64>().ok().map(Duration::from_secs)
-}
-
-fn build_upload_client() -> anyhow::Result<reqwest::Client> {
-    // The shared publisher owns retries; keep each request below its total
-    // upload budget so a hung connection cannot consume the entire operation.
-    reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(120))
-        .build()
-        .context("failed to create upload HTTP client")
 }
 
 pub(super) fn build_api_http_client(headers: HeaderMap) -> anyhow::Result<reqwest::Client> {

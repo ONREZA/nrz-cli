@@ -167,14 +167,14 @@ fn selected_local_publication_defers_limit_errors_until_recovery_is_attached() {
     for code in ["LIMIT_EXCEEDED", "SUBSCRIPTION_REQUIRED"] {
         let operation = json!(Uuid::now_v7());
         let key = Uuid::now_v7();
-        let error = nrz_source_publisher::StructuredControlPlaneError {
-            status: 403,
+        let error = crate::api::StructuredApiError {
+            status: reqwest::StatusCode::FORBIDDEN,
             code: code.into(),
             message: "admission limit exceeded".into(),
-            retry_after: None,
+            retry_after_seconds: None,
             details: Some(json!({"limitType": "maxActiveDeployments", "limit": 4})),
         };
-        let error = super::super::source_upload::map_publication_error(
+        let error = super::super::publication_errors::map_publication_error(
             error.into(),
             false,
             &crate::artifact::RuntimeArtifactFileBreakdown::default(),

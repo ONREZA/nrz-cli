@@ -84,12 +84,12 @@ mod runtime_files_tests;
 mod scan_tests;
 mod workspace_artifact_tests;
 
-fn limit_exceeded_publication_error() -> nrz_source_publisher::SourcePublicationError {
-    nrz_source_publisher::StructuredControlPlaneError {
-        status: reqwest::StatusCode::FORBIDDEN.as_u16(),
+fn limit_exceeded_publication_error() -> anyhow::Error {
+    crate::api::StructuredApiError {
+        status: reqwest::StatusCode::FORBIDDEN,
         code: "LIMIT_EXCEEDED".into(),
         message: "Deployment exceeds maximum file count (20679 / 20000).".into(),
-        retry_after: None,
+        retry_after_seconds: None,
         details: Some(serde_json::json!({
             "limitType": "maxDeploymentFiles",
             "current": 20679,

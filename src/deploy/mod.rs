@@ -59,6 +59,7 @@ mod package_manager_toolchain;
 #[cfg(test)]
 mod package_manager_toolchain_tests;
 mod plan;
+mod publication_errors;
 mod python_launch;
 #[cfg(test)]
 mod python_launch_tests;
@@ -68,7 +69,6 @@ mod python_toolchain_tests;
 mod runtime_artifact;
 mod runtime_packaging;
 mod scan;
-mod source_upload;
 #[cfg(test)]
 mod test_support;
 mod verify;
@@ -82,6 +82,7 @@ use health_check::resolve_health_check;
 #[cfg(test)]
 use health_check::validate_health_path;
 use ignored_build::{IgnoredBuildOutcome, IgnoredBuildRequest};
+use publication_errors::*;
 use runtime_artifact::*;
 pub(crate) use runtime_artifact::{
     application_runtime_in_output, apply_application_runtime_manifest,
@@ -92,7 +93,6 @@ pub(crate) use scan::hash_open_file_streaming;
 #[cfg(test)]
 pub(crate) use scan::scan_dir;
 use scan::*;
-use source_upload::*;
 
 use std::collections::{HashSet, VecDeque};
 use std::io::Read;
@@ -106,7 +106,7 @@ use sha2::{Digest, Sha256};
 
 use crate::api::{ApiClient, classify_api_retry};
 use crate::artifact::source_bundle_v1::{
-    SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, SourceBundlePlan, source_bundle_contract_characters,
+    SOURCE_BUNDLE_LINK_TARGET_MAX_CHARACTERS, source_bundle_contract_characters,
 };
 use crate::artifact::{ArtifactRootScope, FileEntry, RuntimeArtifact, RuntimeArtifactScan};
 use crate::auth;
@@ -461,20 +461,6 @@ async fn sync_compute_config(
     }
 }
 
-// ── Shared upload step ───────────────────────────────────────
-
-/// Drive the SOURCE_BUNDLE_V1 upload protocol:
-/// prepare-upload → source object PUT(s) → multipart-complete? → upload-complete.
-#[allow(clippy::too_many_arguments)]
-#[derive(Debug, Serialize)]
-struct ResumeDeployOutput {
-    deployment_id: String,
-    status: String,
-    runtime_artifact_files: crate::artifact::RuntimeArtifactFileBreakdown,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    warnings: Vec<String>,
-}
-
 fn map_source_registration_error(error: anyhow::Error, json: bool, context: &str) -> anyhow::Error {
     let Some(api_error) = error.downcast_ref::<crate::api::StructuredApiError>() else {
         return error.context(context.to_string());
@@ -536,87 +522,6 @@ fn format_structured_api_failure(context: &str, error: &crate::api::StructuredAp
     } else {
         format!("{context}: {}", fields.join("; "))
     }
-}
-
-struct ResumeDeployRequest<'a> {
-    client: &'a ApiClient,
-    deployment_id: &'a str,
-    workspace_id: &'a str,
-    project_id: &'a str,
-    upload_plan: SourceBundlePlan,
-    warnings: Vec<String>,
-    runtime_artifact_files: crate::artifact::RuntimeArtifactFileBreakdown,
-    json: bool,
-    emit_result: bool,
-}
-
-async fn resume_deploy(request: ResumeDeployRequest<'_>) -> anyhow::Result<()> {
-    let ResumeDeployRequest {
-        client,
-        deployment_id,
-        workspace_id,
-        project_id,
-        upload_plan,
-        warnings,
-        runtime_artifact_files,
-        json,
-        emit_result,
-    } = request;
-
-    output::status(
-        json,
-        "~",
-        format!("Resuming deployment {deployment_id}"),
-        output::Phase::Deploy,
-    );
-
-    output::success(
-        json,
-        format!(
-            "SOURCE_BUNDLE_V1 archive ready ({}, sha256: {}...)",
-            format_u64_bytes(upload_plan.source_size_bytes),
-            &upload_plan.source_sha256[..12]
-        ),
-        output::Phase::Deploy,
-    );
-    let deployment_attempt_id = Uuid::now_v7().to_string();
-
-    prepare_upload_and_complete(PrepareUploadAndCompleteRequest {
-        client,
-        deployment_id,
-        workspace_id,
-        project_id,
-        deployment_attempt_id: &deployment_attempt_id,
-        json,
-        emit_result,
-        plan: &upload_plan,
-        runtime_artifact_files: &runtime_artifact_files,
-    })
-    .await?;
-
-    // Selected local sets publish every component before waiting for their shared activation.
-    if !emit_result {
-        return Ok(());
-    }
-    if json {
-        let data = ResumeDeployOutput {
-            deployment_id: deployment_id.to_string(),
-            status: "upload-complete".into(),
-            runtime_artifact_files,
-            warnings,
-        };
-        output::json_output(&data);
-    } else {
-        eprintln!();
-        eprintln!(
-            "  {} Deployment {} upload completed",
-            console::style("✓").green().bold(),
-            console::style(deployment_id).bold(),
-        );
-        eprintln!();
-    }
-
-    Ok(())
 }
 
 fn map_create_deployment_error(error: anyhow::Error, json: bool) -> anyhow::Error {
