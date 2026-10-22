@@ -76,6 +76,16 @@ async fn source_registration_preparation_limit_preserves_human_and_json_diagnost
 #[tokio::test]
 async fn source_v2_metadata_retries_the_same_operation_without_legacy_upload() {
     let requests = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let functions = json!({
+        "origin": "DEPLOYMENT",
+        "functions": [],
+        "edgeRulesForce": false,
+        "generatedEdgeRuleSets": [{
+            "producer": "nextjs-adapter",
+            "version": "16.2.9",
+            "edgeRules": {"schemaVersion": "EDGE_RULE_SET_V1", "rules": []},
+        }],
+    });
     let app = Router::new().route("/v1/deployments/{id}/source-v2/metadata", post(
         |State(requests):State<Arc<Mutex<Vec<Value>>>>, Json(body):Json<Value>| async move {
             let mut received = requests.lock().unwrap();
@@ -90,12 +100,14 @@ async fn source_v2_metadata_retries_the_same_operation_without_legacy_upload() {
         DEPLOYMENT,
         3,
         source_config_json(),
-        None,
+        Some(functions.clone()),
         true,
     )
     .await
     .unwrap();
-    assert_source_retries(&requests.lock().unwrap());
+    let requests = requests.lock().unwrap();
+    assert_source_retries(&requests);
+    assert_eq!(requests[0]["functions"], functions);
     server.abort();
 }
 

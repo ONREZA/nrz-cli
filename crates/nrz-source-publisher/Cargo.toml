@@ -3,37 +3,24 @@ name = "nrz-source-publisher"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "Shared SOURCE_BUNDLE_V1 publication state machine used by nrz CLI binary builds"
+description = "Source V2 transfer provider used by nrz CLI binary builds"
 
 [dependencies]
 tempfile = "3"
 iroh = { git = "https://github.com/ONREZA/iroh", rev = "672d73df8ca359e720f1779ac2a6f9b0383906a8", default-features = false, features = ["tls-ring"] }
 iroh-blobs = { git = "https://github.com/ONREZA/iroh-blobs", rev = "cceaac145549701f543fefc4f02be8070ecda0d0", default-features = false }
 bao-tree = { version = "0.16", default-features = false, features = ["fs", "validate"] }
-nrz-api = { path = "../../api/client" }
 anyhow = "1"
-validator = { version = "0.21", features = ["derive"] }
-base64 = "0.23"
 bytes = "1"
-futures = "0.3"
 hex = "0.4"
 libc = "0.2"
 nrz-contract = { path = "../nrz-contract" }
-nrz-runtime-artifact = { path = "../nrz-runtime-artifact" }
-nrz-source-bundle = { path = "../nrz-source-bundle" }
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.11"
 thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-util", "time", "rt", "sync", "macros"] }
-tokio-util = { version = "0.7", features = ["io"] }
-tracing = "0.1"
 uuid = { version = "1", features = ["v7"] }
 
 [dev-dependencies]
-axum = "0.8"
-tar = "0.4"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
-zstd = "0.14"

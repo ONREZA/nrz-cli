@@ -77,13 +77,10 @@ fn compute_config_response_matches_current_server_fields() {
 }
 
 #[test]
-fn node_runtime_publication_responses_preserve_launch_profiles() {
+fn historical_runtime_graph_readback_preserves_node_launch_profiles() {
     let digest = "a".repeat(64);
     for major in [22, 24, 26] {
-        let complete = json!({
-            "deploymentId": "00000000-0000-0000-0000-000000000001",
-            "runtimeArtifactGraphDigest": digest,
-            "runtimeArtifactGraph": {
+        let graph = json!({
                 "schemaVersion": "RUNTIME_ARTIFACT_GRAPH_V2.0",
                 "application": {
                     "artifactId": digest, "manifestDigest": digest,
@@ -100,15 +97,10 @@ fn node_runtime_publication_responses_preserve_launch_profiles() {
                     "runtimeConfig": {"runtimeFamily": "JAVASCRIPT"}
                 }],
                 "graphDigest": digest
-            }
         });
-        let mut prepare = complete.clone();
-        prepare["uploads"] = json!([]);
-        let parsed: nrz_api::Prepare200Response = serde_json::from_value(prepare.clone()).unwrap();
-        assert_eq!(serde_json::to_value(parsed).unwrap(), prepare);
-        let parsed: nrz_api::Complete200Response =
-            serde_json::from_value(complete.clone()).unwrap();
-        assert_eq!(serde_json::to_value(parsed).unwrap(), complete);
+        let parsed: nrz_api::Status200ResponseRuntimeArtifactGraph =
+            serde_json::from_value(graph.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), graph);
     }
 }
 

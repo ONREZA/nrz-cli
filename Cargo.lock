@@ -3050,32 +3050,19 @@ name = "nrz-source-publisher"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum",
  "bao-tree",
- "base64 0.23.1",
  "bytes",
- "futures",
  "hex",
  "iroh",
  "iroh-blobs",
  "libc",
- "nrz-api",
  "nrz-contract",
- "nrz-runtime-artifact",
- "nrz-source-bundle",
- "reqwest",
  "serde",
  "serde_json",
- "sha2",
- "tar",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "tokio-util",
- "tracing",
  "uuid",
- "validator",
- "zstd",
 ]
 
 [[package]]

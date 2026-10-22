@@ -1352,91 +1352,9 @@ impl PlatformClient {
         let response = self.client.get(url).send().await?;
         Ok(GetV1deploymentsByIdStatusRequest::parse_response(response).await?)
     }
-    /// Prepare source bundle upload
-    ///
-    /// Creates a SOURCE_BUNDLE_V1 upload plan for a deployment.
-    ///
-    /// * Path: `POST /v1/deployments/{id}/prepare-upload`
-    pub async fn post_v1deployments_by_id_prepare_upload(
-        &self,
-        request: PostV1deploymentsByIdPrepareUploadRequest,
-    ) -> anyhow::Result<PostV1deploymentsByIdPrepareUploadResponse> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("prepare-upload");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(PostV1deploymentsByIdPrepareUploadRequest::parse_response(response).await?)
-    }
-    /// Prepare runtime artifact publication
-    ///
-    /// Returns immutable upload plans for missing dependency materializations.
-    ///
-    /// * Path: `POST /v1/deployments/{id}/runtime-artifacts/prepare`
-    pub async fn post_v1deployments_by_id_runtime_artifacts_prepare(
-        &self,
-        request: PostV1deploymentsByIdRuntimeArtifactsPrepareRequest,
-    ) -> anyhow::Result<PostV1deploymentsByIdRuntimeArtifactsPrepareResponse> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("runtime-artifacts")
-            .push("prepare");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(PostV1deploymentsByIdRuntimeArtifactsPrepareRequest::parse_response(response).await?)
-    }
-    /// Complete runtime artifact publication
-    ///
-    /// Persists the exact verified runtime graph after immutable blob readback.
-    ///
-    /// * Path: `POST /v1/deployments/{id}/runtime-artifacts/complete`
-    pub async fn post_v1deployments_by_id_runtime_artifacts_complete(
-        &self,
-        request: PostV1deploymentsByIdRuntimeArtifactsCompleteRequest,
-    ) -> anyhow::Result<PostV1deploymentsByIdRuntimeArtifactsCompleteResponse> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("runtime-artifacts")
-            .push("complete");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(PostV1deploymentsByIdRuntimeArtifactsCompleteRequest::parse_response(response).await?)
-    }
-    /// Complete multipart source upload
-    ///
-    /// Finalizes a SOURCE_BUNDLE_V1 multipart upload.
-    ///
-    /// * Path: `POST /v1/deployments/{id}/multipart-complete`
-    pub async fn post_v1deployments_by_id_multipart_complete(
-        &self,
-        request: PostV1deploymentsByIdMultipartCompleteRequest,
-    ) -> anyhow::Result<PostV1deploymentsByIdMultipartCompleteResponse> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("multipart-complete");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(PostV1deploymentsByIdMultipartCompleteRequest::parse_response(response).await?)
-    }
     /// Mark source upload failed
     ///
-    /// Records a terminal client-side SOURCE_BUNDLE_V1 upload failure.
+    /// Recovers a terminal failure for an existing historical source upload session.
     ///
     /// * Path: `POST /v1/deployments/{id}/upload-failed`
     pub async fn post_v1deployments_by_id_upload_failed(
@@ -1453,26 +1371,6 @@ impl PlatformClient {
             .push("upload-failed");
         let response = self.client.post(url).json(&request.body).send().await?;
         Ok(PostV1deploymentsByIdUploadFailedRequest::parse_response(response).await?)
-    }
-    /// Complete source upload
-    ///
-    /// Confirms SOURCE_BUNDLE_V1 upload completion and starts artifact ingest.
-    ///
-    /// * Path: `POST /v1/deployments/{id}/upload-complete`
-    pub async fn post_v1deployments_by_id_upload_complete(
-        &self,
-        request: PostV1deploymentsByIdUploadCompleteRequest,
-    ) -> anyhow::Result<PostV1deploymentsByIdUploadCompleteResponse> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("upload-complete");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(PostV1deploymentsByIdUploadCompleteRequest::parse_response(response).await?)
     }
     /// Admit static source publication metadata
     ///
@@ -1673,24 +1571,6 @@ impl PlatformClient {
             .push("metadata");
         let response = self.client.post(url).json(&request.body).send().await?;
         Ok(PostV1deploymentsByIdSourceV2metadataRequest::parse_response(response).await?)
-    }
-    /// Register admitted deployment source
-    ///
-    /// * Path: `POST /v1/deployments/{id}/source`
-    pub async fn post_v1deployments_by_id_source(
-        &self,
-        request: PostV1deploymentsByIdSourceRequest,
-    ) -> anyhow::Result<PostV1deploymentsByIdSourceResponse> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("source");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(PostV1deploymentsByIdSourceRequest::parse_response(response).await?)
     }
     /// Get project runtime logs
     ///
@@ -2992,91 +2872,9 @@ impl PlatformClientRaw {
         let response = self.client.get(url).send().await?;
         Ok(response)
     }
-    /// Prepare source bundle upload
-    ///
-    /// Creates a SOURCE_BUNDLE_V1 upload plan for a deployment.
-    ///
-    /// * Path: `POST /v1/deployments/{id}/prepare-upload`
-    pub async fn post_v1deployments_by_id_prepare_upload(
-        &self,
-        request: PostV1deploymentsByIdPrepareUploadRequest,
-    ) -> anyhow::Result<reqwest::Response> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("prepare-upload");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(response)
-    }
-    /// Prepare runtime artifact publication
-    ///
-    /// Returns immutable upload plans for missing dependency materializations.
-    ///
-    /// * Path: `POST /v1/deployments/{id}/runtime-artifacts/prepare`
-    pub async fn post_v1deployments_by_id_runtime_artifacts_prepare(
-        &self,
-        request: PostV1deploymentsByIdRuntimeArtifactsPrepareRequest,
-    ) -> anyhow::Result<reqwest::Response> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("runtime-artifacts")
-            .push("prepare");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(response)
-    }
-    /// Complete runtime artifact publication
-    ///
-    /// Persists the exact verified runtime graph after immutable blob readback.
-    ///
-    /// * Path: `POST /v1/deployments/{id}/runtime-artifacts/complete`
-    pub async fn post_v1deployments_by_id_runtime_artifacts_complete(
-        &self,
-        request: PostV1deploymentsByIdRuntimeArtifactsCompleteRequest,
-    ) -> anyhow::Result<reqwest::Response> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("runtime-artifacts")
-            .push("complete");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(response)
-    }
-    /// Complete multipart source upload
-    ///
-    /// Finalizes a SOURCE_BUNDLE_V1 multipart upload.
-    ///
-    /// * Path: `POST /v1/deployments/{id}/multipart-complete`
-    pub async fn post_v1deployments_by_id_multipart_complete(
-        &self,
-        request: PostV1deploymentsByIdMultipartCompleteRequest,
-    ) -> anyhow::Result<reqwest::Response> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("multipart-complete");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(response)
-    }
     /// Mark source upload failed
     ///
-    /// Records a terminal client-side SOURCE_BUNDLE_V1 upload failure.
+    /// Recovers a terminal failure for an existing historical source upload session.
     ///
     /// * Path: `POST /v1/deployments/{id}/upload-failed`
     pub async fn post_v1deployments_by_id_upload_failed(
@@ -3091,26 +2889,6 @@ impl PlatformClientRaw {
             .push("deployments")
             .push(&request.path.id.to_string())
             .push("upload-failed");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(response)
-    }
-    /// Complete source upload
-    ///
-    /// Confirms SOURCE_BUNDLE_V1 upload completion and starts artifact ingest.
-    ///
-    /// * Path: `POST /v1/deployments/{id}/upload-complete`
-    pub async fn post_v1deployments_by_id_upload_complete(
-        &self,
-        request: PostV1deploymentsByIdUploadCompleteRequest,
-    ) -> anyhow::Result<reqwest::Response> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("upload-complete");
         let response = self.client.post(url).json(&request.body).send().await?;
         Ok(response)
     }
@@ -3302,24 +3080,6 @@ impl PlatformClientRaw {
             .push(&request.path.id.to_string())
             .push("source-v2")
             .push("metadata");
-        let response = self.client.post(url).json(&request.body).send().await?;
-        Ok(response)
-    }
-    /// Register admitted deployment source
-    ///
-    /// * Path: `POST /v1/deployments/{id}/source`
-    pub async fn post_v1deployments_by_id_source(
-        &self,
-        request: PostV1deploymentsByIdSourceRequest,
-    ) -> anyhow::Result<reqwest::Response> {
-        request.validate().context("parameter validation")?;
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| anyhow::anyhow!("URL cannot be a base"))?
-            .push("v1")
-            .push("deployments")
-            .push(&request.path.id.to_string())
-            .push("source");
         let response = self.client.post(url).json(&request.body).send().await?;
         Ok(response)
     }

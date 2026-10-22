@@ -10,13 +10,7 @@ use crate::cli::DeployArgs;
 #[path = "edge_handoff_v2.rs"]
 mod v2;
 
-#[cfg(test)]
-#[path = "legacy_handoff_test_support.rs"]
-mod legacy_test_support;
-
 pub(super) const EDGE_BUILD_HANDOFF_MODE_ENV: &str = "NRZ_EDGE_BUILD_HANDOFF";
-#[cfg(test)]
-pub(super) const EDGE_BUILD_HANDOFF_MODE_V1: &str = "V1";
 pub(super) const EDGE_BUILD_HANDOFF_MODE_V2: &str = "V2";
 const OUTPUT_DIRECTORY_ENV: &str = "ONREZA_OUTPUT_DIR";
 const PLATFORM_RUNNER_ENV: &str = "NRZ_RUNNER";
@@ -24,7 +18,6 @@ const PLATFORM_RUNNER_VALUE: &str = "PLATFORM";
 
 pub(super) struct EdgeBuildHandoffOutput {
     root: PathBuf,
-    mode: &'static str,
     binding: Option<nrz_source_bundle::EdgeBuildBindingV2>,
 }
 
@@ -71,12 +64,6 @@ impl EdgeBuildHandoffOutput {
         resume_deployment_id: Option<Uuid>,
     ) -> anyhow::Result<Option<Self>> {
         let mode = std::env::var(EDGE_BUILD_HANDOFF_MODE_ENV).ok();
-        if mode.as_deref() == Some("V1") {
-            return Err(crate::output::coded_error(
-                "CLI_UPDATE_REQUIRED",
-                "Source V1 build handoff is no longer supported; use NRZ_EDGE_BUILD_HANDOFF=V2",
-            ));
-        }
         let output = std::env::var_os(OUTPUT_DIRECTORY_ENV).map(PathBuf::from);
         let platform_runner =
             std::env::var(PLATFORM_RUNNER_ENV).is_ok_and(|value| value == PLATFORM_RUNNER_VALUE);
@@ -86,9 +73,7 @@ impl EdgeBuildHandoffOutput {
             platform_runner,
             resume_deployment_id,
         )?;
-        if let Some(output) = &mut output
-            && output.is_v2()
-        {
+        if let Some(output) = &mut output {
             output.binding = Some(v2::binding_from_environment(
                 resume_deployment_id.context("V2 handoff requires deployment")?,
             )?);
@@ -109,7 +94,13 @@ impl EdgeBuildHandoffOutput {
             );
             return Ok(None);
         };
-        if mode != "V1" && mode != EDGE_BUILD_HANDOFF_MODE_V2 {
+        if mode == "V1" {
+            return Err(crate::output::coded_error(
+                "CLI_UPDATE_REQUIRED",
+                "Source V1 build handoff is no longer supported; use NRZ_EDGE_BUILD_HANDOFF=V2",
+            ));
+        }
+        if mode != EDGE_BUILD_HANDOFF_MODE_V2 {
             bail!("unsupported {EDGE_BUILD_HANDOFF_MODE_ENV} mode");
         }
         ensure!(
@@ -127,11 +118,6 @@ impl EdgeBuildHandoffOutput {
         );
         Ok(Some(Self {
             root: output.to_path_buf(),
-            mode: if mode == EDGE_BUILD_HANDOFF_MODE_V2 {
-                EDGE_BUILD_HANDOFF_MODE_V2
-            } else {
-                "V1"
-            },
             binding: None,
         }))
     }

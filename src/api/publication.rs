@@ -123,10 +123,8 @@ impl ApiClient {
     pub async fn register_source_v2_metadata(
         &self,
         id: &str,
-        body: SourceRequestBody2,
+        body: MetadatumRequestBody,
     ) -> anyhow::Result<Metadatum200Response> {
-        // Both routes share the server schema; generator names are operation-local.
-        let body: MetadatumRequestBody = serde_json::from_value(serde_json::to_value(body)?)?;
         let response = self
             .platform()?
             .post_v1deployments_by_id_source_v2metadata(

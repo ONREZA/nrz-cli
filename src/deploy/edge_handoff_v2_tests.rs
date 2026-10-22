@@ -45,7 +45,6 @@ async fn assert_static_deploy_plan_publishes_v2(retry_count: u32) -> anyhow::Res
     scope.attempt = u64::from(retry_count) + 1;
     let publisher = EdgeBuildHandoffOutput {
         root: output.path().into(),
-        mode: EDGE_BUILD_HANDOFF_MODE_V2,
         binding: Some(scope.clone()),
     };
     let handoff = publisher.publish_v2(
@@ -105,7 +104,6 @@ fn authenticated_binding_rejects_stale_wrong_scope_zero_and_overflow() {
     let scope = binding();
     let publisher = |binding| EdgeBuildHandoffOutput {
         root: std::path::PathBuf::new(),
-        mode: EDGE_BUILD_HANDOFF_MODE_V2,
         binding: Some(binding),
     };
     let output = publisher(scope.clone());

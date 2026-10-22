@@ -29,10 +29,6 @@ pub(super) fn binding_from_environment(deployment_id: Uuid) -> anyhow::Result<Ed
 }
 
 impl EdgeBuildHandoffOutput {
-    pub(in crate::deploy) fn is_v2(&self) -> bool {
-        self.mode == EDGE_BUILD_HANDOFF_MODE_V2
-    }
-
     pub(in crate::deploy) fn publish_v2(
         &self,
         plan: &crate::deploy::plan::DeployPlan,
@@ -50,7 +46,6 @@ impl EdgeBuildHandoffOutput {
         environment_id: &str,
         retry_count: u32,
     ) -> anyhow::Result<&EdgeBuildBindingV2> {
-        ensure!(self.is_v2(), "Source V2 requires the V2 handoff contract");
         let binding = self
             .binding
             .as_ref()
