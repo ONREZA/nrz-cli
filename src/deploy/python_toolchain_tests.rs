@@ -1098,12 +1098,49 @@ async fn export_qualification_artifact(
     tar::Archive::new(decoded).unpack(destination).unwrap();
     let smoke = entry.is_empty().then(|| serde_json::json!({"module":"demo", "expectedValue":if name.starts_with("poetry") {"poetry-installed-project"} else {"installed-project"}, "dependency":"packaging", "dependencyVersion":"26.3", "absent":"six"}));
     std::fs::write(destination.join("launch.json"), serde_json::to_vec(&serde_json::json!({"family":"python", "pythonMinor":minor.version(), "framework":name, "entry":entry, "args":launch.args, "cwd":launch.cwd, "expectedBody":expected_body,"smoke":smoke})).unwrap()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fn normalize_directories(path: &std::path::Path) {
+            if !std::fs::symlink_metadata(path).unwrap().is_dir() {
+                return;
+            }
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            for child in std::fs::read_dir(path).unwrap() {
+                normalize_directories(&child.unwrap().path());
+            }
+        }
+        normalize_directories(destination);
+        std::fs::set_permissions(
+            destination.join("launch.json"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+    }
 }
 
 #[cfg(unix)]
 #[tokio::test]
 async fn python_qualification_export_uses_canonical_artifact_permissions() {
     use std::os::unix::fs::PermissionsExt as _;
+    const CHILD: &str = "NRZ_PYTHON_QUALIFICATION_PERMISSIONS_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        assert!(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "deploy::python_toolchain_tests::python_qualification_export_uses_canonical_artifact_permissions",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .status()
+                .unwrap()
+                .success()
+        );
+        return;
+    }
+    // SAFETY: This isolated one-test child owns its process-wide umask.
+    unsafe { libc::umask(0o077) };
     let project = tempfile::tempdir().unwrap();
     std::fs::set_permissions(project.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let entry = ".onreza/python/launch.py";
@@ -1114,6 +1151,15 @@ async fn python_qualification_export_uses_canonical_artifact_permissions() {
         std::fs::Permissions::from_mode(0o600),
     )
     .unwrap();
+    let executable = ".onreza/python/tool";
+    std::fs::write(project.path().join(executable), "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(
+        project.path().join(executable),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink("launch.py", project.path().join(".onreza/python/alias.py"))
+        .unwrap();
     let output = tempfile::tempdir().unwrap();
     let destination = output.path().join("application");
     export_qualification_artifact(
@@ -1149,6 +1195,32 @@ async fn python_qualification_export_uses_canonical_artifact_permissions() {
             .mode()
             & 0o777,
         0o644
+    );
+    assert_eq!(
+        std::fs::metadata(destination.join(executable))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o755
+    );
+    assert_eq!(
+        std::fs::metadata(destination.join("launch.json"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o644
+    );
+    assert!(
+        std::fs::symlink_metadata(destination.join(".onreza/python/alias.py"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        std::fs::read_link(destination.join(".onreza/python/alias.py")).unwrap(),
+        std::path::Path::new("launch.py")
     );
 }
 
