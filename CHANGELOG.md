@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.48.1] - 2026-10-23
+
+### 🐛 Bug Fixes
+
+- **release:** use repository rust toolchain ([fc59fd1](https://github.com/ONREZA/nrz-cli/commit/fc59fd133071022b3ad45ffdf9b2db43f26baa72))
+
 ## [0.48.0] - 2026-10-23
 
 ### ♻️ Changed
