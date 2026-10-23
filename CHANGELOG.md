@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.48.2] - 2026-10-23
+
+### 🐛 Bug Fixes
+
+- **deploy:** bound native verification memory ([e71f45b](https://github.com/ONREZA/nrz-cli/commit/e71f45be6660b9ef5768a2735bc161a489829e4e))
+
 ## [0.48.1] - 2026-10-23
 
 ### 🐛 Bug Fixes
