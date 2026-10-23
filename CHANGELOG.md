@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.48.0] - 2026-10-23
+
+### ♻️ Changed
+
+- **deploy:** remove v1 publication ([4efad6b](https://github.com/ONREZA/nrz-cli/commit/4efad6b1fd923ec2db7b745ee3d4e99ac291daca))
+- **deploy:** reuse runtime layer predicate ([7c47010](https://github.com/ONREZA/nrz-cli/commit/7c47010cf1871ec1491222d23b220c64452bae37))
+
+### 🐛 Bug Fixes
+
+- **deploy:** preserve inferred bun launch ([d833036](https://github.com/ONREZA/nrz-cli/commit/d833036138b9b09168e1a8874f632f52019ca078))
+- **deploy:** preserve preparation diagnostics ([9af7df3](https://github.com/ONREZA/nrz-cli/commit/9af7df3e459cb117bfdeb6a8ed5bc59508dc7fd1))
+- **build:** integrate verifier memory admission ([fe8ebd2](https://github.com/ONREZA/nrz-cli/commit/fe8ebd26964fec7b267041da843fa9f5c6e23677))
+- **deploy:** recover uploads after s3 conflict ([8d6d21d](https://github.com/ONREZA/nrz-cli/commit/8d6d21d4a6f6c81391f7b5c2818a8e9abe5502d8))
+- **build:** admit source verifier memory ([4ea1625](https://github.com/ONREZA/nrz-cli/commit/4ea1625de5802600372711aefe6f09b7e8b55a68))
+
+### ✨ Features
+
+- **deploy:** default to source v2 ([ff3e664](https://github.com/ONREZA/nrz-cli/commit/ff3e66464ea95bbb065684765cd620fa1186d48f))
+- **build:** publish bounded artifact sources ([fd47995](https://github.com/ONREZA/nrz-cli/commit/fd479951f4e429b9488b120c96126e756285e730))
+
+### 🔧 Changed
+
+- **deps:** update tools and dependencies ([0ad5c25](https://github.com/ONREZA/nrz-cli/commit/0ad5c2575fbabbb78b2eeeeafc9c86742b5772aa))
+
 ## [0.47.2] - 2026-10-19
 
 ### 🐛 Bug Fixes
