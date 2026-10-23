@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.48.3] - 2026-10-23
+
+### 🐛 Bug Fixes
+
+- **cli:** normalize qualification export ([9aee28c](https://github.com/ONREZA/nrz-cli/commit/9aee28c1d0979ac3cb76ed1aa4195b435ceea790))
+
 ## [0.48.2] - 2026-10-23
 
 ### 🐛 Bug Fixes
