@@ -99,6 +99,19 @@ enum PathGrammar {
 }
 
 impl<'a> SourceArchivePathIndex<'a> {
+    /// Conservative borrowed-index and lookup scratch allowance, independent of
+    /// the manifest strings it borrows. Includes simultaneous growth allocations.
+    pub fn working_memory_bytes(max_nodes: u64, max_path_bytes: u64) -> Option<u64> {
+        if PATH_INDEX_NODE_BYTES > 64 || PATH_INDEX_CHILD_BYTES > 32 {
+            return None;
+        }
+        max_nodes
+            .checked_add(1)?
+            .checked_mul(512)?
+            .checked_add(max_path_bytes.checked_mul(4)?)?
+            .checked_add(SYMLINK_VALIDATION_SCRATCH_BYTES as u64)
+    }
+
     pub fn from_entries(
         entries: impl IntoIterator<Item = (&'a str, Option<&'a str>)>,
     ) -> Result<Self, SourcePathGraphError> {

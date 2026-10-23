@@ -16,6 +16,28 @@ fn v1_memory_admission_covers_deep_component_index() {
 }
 
 #[test]
+fn shared_index_working_allowance_covers_actual_growth_and_checks_overflow() {
+    for count in [1, 7, 64, 257, 1025] {
+        let paths: Vec<_> = (0..count).map(|index| format!("d{index}/file")).collect();
+        let index =
+            SourceArchivePathIndex::from_entries(paths.iter().map(|path| (path.as_str(), None)))
+                .unwrap();
+        let forecast =
+            SourceArchivePathIndex::working_memory_bytes(index.nodes.len() as u64, 4096).unwrap();
+        let node_bytes = index.nodes.capacity() * super::PATH_INDEX_NODE_BYTES;
+        let child_bytes = index.children.capacity() * (super::PATH_INDEX_CHILD_BYTES + 1);
+        // Retained tables plus an old table during growth and bounded lookup frames.
+        assert!(
+            forecast
+                >= (2 * (node_bytes + child_bytes) + super::SYMLINK_VALIDATION_SCRATCH_BYTES)
+                    as u64
+        );
+    }
+    assert!(SourceArchivePathIndex::working_memory_bytes(u64::MAX, 1).is_none());
+    assert!(SourceArchivePathIndex::working_memory_bytes(1, u64::MAX).is_none());
+}
+
+#[test]
 fn required_paths_preserve_intermediate_aliases_and_directory_visits() {
     let index = SourceArchivePathIndex::from_entries([
         ("assets/pkg", Some("../package.json")),

@@ -101,9 +101,10 @@ pub(super) fn verification_reservation(counts: &StructuralCounts) -> Option<u64>
     let semantic = strings
         .checked_add(wire_containers)?
         .checked_add(counts.files.checked_mul(192)?)?
-        .checked_add(counts.unique_path_nodes.checked_add(1)?.checked_mul(512)?)?
-        .checked_add(counts.max_path_bytes.checked_mul(4)?)?
-        .checked_add(crate::path_graph::SYMLINK_VALIDATION_SCRATCH_BYTES as u64)?
+        .checked_add(crate::SourceArchivePathIndex::working_memory_bytes(
+            counts.unique_path_nodes,
+            counts.max_path_bytes,
+        )?)?
         .checked_add(metadata)?
         .checked_add(diagnostics)?;
     let peak = parse

@@ -9,11 +9,58 @@ use std::{fs, os::unix::fs::symlink};
 
 fn limits() -> RuntimeVerificationLimits {
     RuntimeVerificationLimits {
+        max_metadata_bytes: 1024 * 1024,
         max_native_file_bytes: 1024 * 1024,
         max_native_total_bytes: 4 * 1024 * 1024,
         max_path_nodes: 100,
         max_path_work: 100_000,
     }
+}
+
+#[test]
+fn runtime_working_allowance_funds_native_index_and_managed_growth_separately() {
+    use std::collections::HashSet;
+    for files in [1_u64, 7, 64, 257, 1025] {
+        let nodes = files * 2;
+        let mut profile = limits();
+        profile.max_path_nodes = nodes;
+        let mut paths = HashSet::new();
+        let mut directories = HashSet::new();
+        let mut pending = Vec::new();
+        for index in 0..files as usize {
+            paths.insert((index, false));
+            paths.insert((index, true));
+            pending.push(index);
+        }
+        for index in 0..nodes as usize {
+            directories.insert((index, index + 1, false));
+            directories.insert((index, index + 1, true));
+        }
+        let hash_growth = |capacity: usize, element: usize| {
+            let buckets = (capacity + 1).next_power_of_two();
+            (buckets + buckets / 2) * (element + 1) + 32
+        };
+        let managed = hash_growth(paths.capacity(), std::mem::size_of::<(usize, bool)>())
+            + hash_growth(
+                directories.capacity(),
+                std::mem::size_of::<(usize, usize, bool)>(),
+            )
+            + 2 * pending.capacity() * std::mem::size_of::<usize>();
+        let index =
+            nrz_source_bundle::SourceArchivePathIndex::working_memory_bytes(nodes, 4096).unwrap();
+        let declared = profile.working_memory_bytes(files, 4096).unwrap();
+        assert!(
+            declared
+                >= profile
+                    .max_native_file_bytes
+                    .min(profile.max_native_total_bytes)
+                    + profile.max_metadata_bytes
+                    + index
+                    + managed as u64
+        );
+    }
+    assert!(limits().working_memory_bytes(u64::MAX, 1).is_none());
+    assert!(limits().working_memory_bytes(1, u64::MAX).is_none());
 }
 
 fn file(path: &str, role: &str, owner: Option<&str>) -> Value {

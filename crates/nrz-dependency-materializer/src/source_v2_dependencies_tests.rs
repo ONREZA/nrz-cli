@@ -98,6 +98,7 @@ fn fixture_entries(roots: &[&str], cross_link: bool, nested: bool) -> Fixture {
 }
 fn runtime_limits() -> RuntimeVerificationLimits {
     RuntimeVerificationLimits {
+        max_metadata_bytes: 1024 * 1024,
         max_native_file_bytes: 1024 * 1024,
         max_native_total_bytes: 4 * 1024 * 1024,
         max_path_nodes: 100,

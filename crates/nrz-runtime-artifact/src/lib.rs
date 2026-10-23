@@ -18,8 +18,8 @@ mod native_platform;
 pub use native_platform::{has_native_payload_header, verify_linux_x86_64_native_platform};
 mod python_startup;
 pub use native_executable::{
-    NATIVE_EXECUTION_TARGET, NativeClosureReadBudget, NativeClosureReadLimits,
-    NativeExecutableRequirements, verify_native_executable,
+    DEFAULT_NATIVE_METADATA_BYTES, NATIVE_EXECUTION_TARGET, NativeClosureReadBudget,
+    NativeClosureReadLimits, NativeExecutableRequirements, verify_native_executable,
 };
 pub use python_startup::{PYTHON_SITE_PACKAGES_INITIALIZER, python_script_launch_arguments};
 mod source_graph;

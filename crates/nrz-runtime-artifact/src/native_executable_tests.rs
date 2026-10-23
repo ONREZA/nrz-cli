@@ -165,6 +165,7 @@ fn bounded_native_closure_rejects_oversized_regular_files_before_reading() {
     let artifact = Artifact::new();
     let root = ArtifactRoot::open(&artifact.0).unwrap();
     let mut budget = NativeClosureReadBudget::new(NativeClosureReadLimits {
+        max_metadata_bytes: super::DEFAULT_NATIVE_METADATA_BYTES,
         max_file_bytes: 4096,
         max_total_bytes: u64::MAX,
     });
@@ -211,6 +212,7 @@ fn bounded_native_closure_charges_entry_and_every_provider_read() {
         (12288, 3, true),
     ] {
         let mut budget = NativeClosureReadBudget::new(NativeClosureReadLimits {
+            max_metadata_bytes: super::DEFAULT_NATIVE_METADATA_BYTES,
             max_file_bytes: 4096,
             max_total_bytes: total_limit,
         });
@@ -256,6 +258,7 @@ fn bounded_native_closures_share_one_aggregate_budget() {
     .unwrap();
     let root = ArtifactRoot::open(&artifact.0).unwrap();
     let mut budget = NativeClosureReadBudget::new(NativeClosureReadLimits {
+        max_metadata_bytes: super::DEFAULT_NATIVE_METADATA_BYTES,
         max_file_bytes: 4096,
         max_total_bytes: 8191,
     });
@@ -364,6 +367,157 @@ fn versioned_elf(
         bytes[offset + 8..offset + 16].copy_from_slice(&value.to_le_bytes());
     }
     bytes
+}
+
+#[test]
+fn lazy_loader_rejects_malformed_consumed_metadata_without_panicking() {
+    let original = versioned_elf(Some(("libc.so.6", "GLIBC_2.2.5")), None, None, true);
+    for (tag, value) in [
+        (dynamic::DT_AUDIT, 1),
+        (dynamic::DT_DEPAUDIT, 1),
+        (0x7fff_ffff, 1),
+        (0x7fff_fffd, 1),
+        (dynamic::DT_FLAGS_1, dynamic::DF_1_NODEFLIB),
+    ] {
+        let mut unsupported = original.clone();
+        unsupported[592..600].copy_from_slice(&tag.to_le_bytes());
+        unsupported[600..608].copy_from_slice(&value.to_le_bytes());
+        unsupported[152..160].copy_from_slice(&112_u64.to_le_bytes());
+        let error = super::verify_native_executable(&unsupported).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported audit/filter/nodefaultlib")
+        );
+    }
+    let mut invalid_utf8 = original.clone();
+    invalid_utf8[769] = 0xff;
+    let mut invalid_offset = original.clone();
+    invalid_offset[520..528].copy_from_slice(&u64::MAX.to_le_bytes());
+    let mut invalid_size = original.clone();
+    invalid_size[536..544].copy_from_slice(&u64::MAX.to_le_bytes());
+    let mut invalid_dynamic = original.clone();
+    invalid_dynamic[152..160].copy_from_slice(&15_u64.to_le_bytes());
+    let mut unterminated = original.clone();
+    unterminated[592..600].copy_from_slice(&dynamic::DT_DEBUG.to_le_bytes());
+    let mut invalid_program_table = original.clone();
+    invalid_program_table[32..40].copy_from_slice(&u64::MAX.to_le_bytes());
+    let mut duplicate_dynamic = original.clone();
+    duplicate_dynamic[56..58].copy_from_slice(&4_u16.to_le_bytes());
+    duplicate_dynamic[232..288].copy_from_slice(&original[120..176]);
+    let mut missing_string_terminator = original.clone();
+    missing_string_terminator[769..1280].fill(b'x');
+    for bytes in [
+        invalid_utf8,
+        invalid_offset,
+        invalid_size,
+        invalid_dynamic,
+        unterminated,
+        invalid_program_table,
+        duplicate_dynamic,
+        missing_string_terminator,
+    ] {
+        assert!(super::verify_native_executable(&bytes).is_err());
+    }
+    let mut too_many_libraries = original;
+    too_many_libraries.resize(8192, 0);
+    too_many_libraries[96..104].copy_from_slice(&8192_u64.to_le_bytes());
+    too_many_libraries[128..136].copy_from_slice(&4096_u64.to_le_bytes());
+    too_many_libraries[152..160].copy_from_slice(&(132_u64 * 16).to_le_bytes());
+    for (index, (tag, value)) in std::iter::once((dynamic::DT_STRTAB, 0x400300_u64))
+        .chain(std::iter::once((dynamic::DT_STRSZ, 512)))
+        .chain(std::iter::repeat_n((dynamic::DT_NEEDED, 1), 129))
+        .chain(std::iter::once((dynamic::DT_NULL, 0)))
+        .enumerate()
+    {
+        let offset = 4096 + index * 16;
+        too_many_libraries[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        too_many_libraries[offset + 8..offset + 16].copy_from_slice(&value.to_le_bytes());
+    }
+    assert!(super::verify_native_executable(&too_many_libraries).is_err());
+}
+
+#[test]
+fn native_metadata_budget_covers_recursive_parent_paths_and_versions() {
+    let artifact = Artifact::new();
+    for (name, needed, executable) in [
+        ("server", Some(("libfirst.so", "FIRST_1")), true),
+        ("libfirst.so", Some(("liblast.so", "LAST_1")), false),
+        ("liblast.so", None, false),
+    ] {
+        let definition = if name == "libfirst.so" {
+            Some("FIRST_1")
+        } else if name == "liblast.so" {
+            Some("LAST_1")
+        } else {
+            None
+        };
+        let mut bytes = versioned_elf(needed, definition, Some("$ORIGIN"), executable);
+        // Exercise inherited DT_RPATH, whose parent paths stay live during descent.
+        for offset in (512..768).step_by(16) {
+            if u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
+                == dynamic::DT_RUNPATH
+            {
+                bytes[offset..offset + 8].copy_from_slice(&dynamic::DT_RPATH.to_le_bytes());
+            }
+        }
+        std::fs::write(artifact.0.join(name), bytes).unwrap();
+    }
+    let root = ArtifactRoot::open(&artifact.0).unwrap();
+    let limits = |metadata| NativeClosureReadLimits {
+        max_file_bytes: 4096,
+        max_total_bytes: 4096 * 5,
+        max_metadata_bytes: metadata,
+    };
+    let mut full = NativeClosureReadBudget::new(limits(super::DEFAULT_NATIVE_METADATA_BYTES));
+    NativeExecutableRequirements::verify_rooted_artifact_closure_bounded(
+        &root,
+        Path::new("server"),
+        Path::new(""),
+        &mut full,
+        |_, _| Ok(()),
+    )
+    .unwrap();
+    let admitted = full.used_metadata_bytes();
+    assert!(admitted > 0);
+    let mut exact = NativeClosureReadBudget::new(limits(admitted));
+    NativeExecutableRequirements::verify_rooted_artifact_closure_bounded(
+        &root,
+        Path::new("server"),
+        Path::new(""),
+        &mut exact,
+        |_, _| Ok(()),
+    )
+    .unwrap();
+    let mut denied = NativeClosureReadBudget::new(limits(admitted - 1));
+    let mut reads = 0;
+    let error = NativeExecutableRequirements::verify_rooted_artifact_closure_bounded(
+        &root,
+        Path::new("server"),
+        Path::new(""),
+        &mut denied,
+        |_, _| {
+            reads += 1;
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("metadata byte limit"));
+    assert!(
+        reads >= 4,
+        "the shared allowance must reach and account for recursive frames"
+    );
+    let mut tiny = NativeClosureReadBudget::new(limits(0));
+    let error = NativeExecutableRequirements::verify_rooted_artifact_closure_bounded(
+        &root,
+        Path::new("server"),
+        Path::new(""),
+        &mut tiny,
+        |_, _| panic!("metadata admission must precede file reads"),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("metadata byte limit"));
+    assert_eq!(tiny.used_bytes(), 0);
 }
 
 #[test]
@@ -657,7 +811,13 @@ fn dynamic_entry_requires_an_interpreter_while_shared_providers_do_not() {
     let provider = versioned_elf(Some(("libc.so.6", "GLIBC_2.2.5")), None, None, false);
     let elf = Elf::parse(&provider).unwrap();
     assert!(elf.interpreter.is_none());
-    super::inspect_elf(&elf, &provider, false).unwrap();
+    super::inspect_elf(
+        &elf,
+        &provider,
+        false,
+        &mut super::standalone_budget(provider.len()),
+    )
+    .unwrap();
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
@@ -742,7 +902,13 @@ fn real_native_entry_interpreter_qualification() {
     let elf = Elf::parse(&provider).unwrap();
     assert!(elf.interpreter.is_none());
     assert!(elf.libraries.contains(&"libc.so.6"));
-    super::inspect_elf(&elf, &provider, false).unwrap();
+    super::inspect_elf(
+        &elf,
+        &provider,
+        false,
+        &mut super::standalone_budget(provider.len()),
+    )
+    .unwrap();
 
     // The first loader header is authoritative to Linux; goblin's optional
     // interpreter value alone can hide duplicate or truncated loader metadata.
@@ -1036,10 +1202,16 @@ fn qualified_compute_system_library_versions_match_baseline() {
     for library in NativeExecutableRequirements::QUALIFIED_SYSTEM_LIBRARIES {
         let bytes = std::fs::read(root.join(library)).unwrap();
         let elf = Elf::parse(&bytes).unwrap();
-        super::inspect_elf(&elf, &bytes, false).unwrap();
+        super::inspect_elf(
+            &elf,
+            &bytes,
+            false,
+            &mut super::standalone_budget(bytes.len()),
+        )
+        .unwrap();
         actual.insert(
             (*library).to_owned(),
-            version_definitions(&elf, &bytes).unwrap(),
+            version_definitions(&elf, &bytes, &mut super::standalone_budget(bytes.len())).unwrap(),
         );
     }
     if let Some(output) = std::env::var_os("NRZ_NATIVE_SYSTEM_LIBRARY_VERSIONS_OUTPUT") {

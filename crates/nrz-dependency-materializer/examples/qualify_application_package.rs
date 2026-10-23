@@ -162,6 +162,7 @@ fn run(
             max_verification_memory_bytes: 2 * MIB,
         },
         RuntimeVerificationLimits {
+            max_metadata_bytes: 1024 * 1024,
             max_native_file_bytes: MIB,
             max_native_total_bytes: 2 * MIB,
             max_path_nodes: 64,

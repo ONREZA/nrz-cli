@@ -37,6 +37,10 @@ pub struct AdmittedDependencyRoot<'a> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeVerificationLimits {
+    /// Conservative cumulative allowance for owned native loader/closure metadata.
+    /// Reserve independently of max_native_file_bytes, retained manifests and
+    /// the caller's path index/Python reachability state; this is not total RSS.
+    pub max_metadata_bytes: u64,
     /// Maximum bytes buffered for one ELF entry/provider read.
     pub max_native_file_bytes: u64,
     /// Cumulative actual ELF reads across every layer, including provider rereads.
@@ -45,6 +49,37 @@ pub struct RuntimeVerificationLimits {
     pub max_path_nodes: u64,
     /// Shared allowance for the path index, symlink resolution and Python traversal.
     pub max_path_work: u64,
+}
+
+impl RuntimeVerificationLimits {
+    /// Caller-funded working allowance, excluding the retained manifest permit,
+    /// process/allocator headroom and external tools. Sum phases conservatively:
+    /// the borrowed index stays live during native inspection, and managed
+    /// reachability state is built afterwards.
+    pub fn working_memory_bytes(self, max_files: u64, max_path_bytes: u64) -> Option<u64> {
+        // HashSet old/new tables, control bytes and minimum table allocations.
+        let paths = max_files
+            .checked_mul(2)?
+            .checked_mul((std::mem::size_of::<(usize, bool)>() as u64 + 1) * 4)?
+            .checked_add(128)?;
+        let directories = self
+            .max_path_nodes
+            .checked_mul(2)?
+            .checked_mul((std::mem::size_of::<(usize, usize, bool)>() as u64 + 1) * 4)?
+            .checked_add(128)?;
+        let pending = max_files.checked_mul(4 * std::mem::size_of::<usize>() as u64)?;
+        self.max_native_file_bytes
+            .min(self.max_native_total_bytes)
+            .checked_add(self.max_metadata_bytes)?
+            .checked_add(SourceArchivePathIndex::working_memory_bytes(
+                self.max_path_nodes,
+                max_path_bytes,
+            )?)?
+            .checked_add(paths)?
+            .checked_add(directories)?
+            .checked_add(pending)?
+            .checked_add(max_path_bytes.checked_mul(4)?.checked_add(4)?)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -133,6 +168,7 @@ pub(crate) fn verify_prepared_source_v2_runtime(
         })
         .transpose()?;
     let mut native_budget = NativeClosureReadBudget::new(NativeClosureReadLimits {
+        max_metadata_bytes: limits.max_metadata_bytes,
         max_file_bytes: limits.max_native_file_bytes,
         max_total_bytes: limits.max_native_total_bytes,
     });
