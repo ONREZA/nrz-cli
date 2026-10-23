@@ -167,6 +167,6 @@ where
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(runtime_integer)
+        .filter_map(runtime_integer::<u16>)
         .collect())
 }

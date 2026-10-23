@@ -231,10 +231,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: '1.98'
-          targets: ${{ matrix.target }}
+        run: rustup target add ${{ matrix.target }}
 
       - name: Build release binary
         run: cargo build --locked --release --target ${{ matrix.target }}

@@ -506,6 +506,20 @@ test("serialized release workflow never schedules npm on hold or builds on resum
   }
 });
 
+test("native builds install targets for the repository Rust toolchain", () => {
+  for (const [file, job, target] of [
+    ["ci.yml", "musl-build", "x86_64-unknown-linux-musl"],
+    ["release.yml", "build", "${{ matrix.target }}"],
+  ]) {
+    const workflow = Bun.YAML.parse(readFileSync(join(import.meta.dir, "../../.github/workflows", file), "utf8")) as {
+      jobs: Record<string, { steps: { name?: string; run?: string; uses?: string }[] }>;
+    };
+    const install = workflow.jobs[job].steps.find(step => step.name === "Install Rust");
+    assert.equal(install?.run, `rustup target add ${target}`);
+    assert.equal(install?.uses, undefined);
+  }
+});
+
 
 test("resume rejects jointly replaced archives and checksums against the recorded hold digest", () => {
   const dir = mkdtempSync(join(tmpdir(), "nrz-resume-identity-"));
