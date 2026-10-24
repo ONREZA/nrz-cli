@@ -2516,6 +2516,17 @@ fn nextjs_standalone_manifest_route_priorities() {
     assert_eq!(m.routes[1].pattern, "^/.*$");
     assert_eq!(m.routes[2].priority, Some(0));
     assert_eq!(m.routes[2].pattern, "^/.*$");
+
+    let serialized = serde_json::to_value(&m).unwrap();
+    let contract: nrz_contract::manifest::OnrezaBuildOutputManifest =
+        serde_json::from_value(serialized.clone()).unwrap();
+    let frozen: nrz_api::MetadatumRequestBodyManifest =
+        serde_json::from_value(serde_json::to_value(contract).unwrap()).unwrap();
+    for manifest in [serialized, serde_json::to_value(frozen).unwrap()] {
+        assert_eq!(manifest["routes"][1]["fallthrough"], true);
+        assert!(manifest["routes"][0].get("fallthrough").is_none());
+        assert!(manifest["routes"][2].get("fallthrough").is_none());
+    }
 }
 
 #[test]

@@ -758,7 +758,7 @@ pub fn generate_nextjs_standalone_manifest_for_server(
             revalidate: None,
             methods: None,
             headers: None,
-            fallthrough: None,
+            fallthrough: Some(true),
             fallthrough_when: None,
         });
     }
