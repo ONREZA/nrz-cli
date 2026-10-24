@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.48.4] - 2026-10-24
+
+### 🐛 Bug Fixes
+
+- **build:** preserve next public fallback ([1ec9865](https://github.com/ONREZA/nrz-cli/commit/1ec986514d5e26f4234775eaa852c14a8b490264))
+- **deploy:** size publication from source ([cb29ccc](https://github.com/ONREZA/nrz-cli/commit/cb29ccc51a0a6e253b9a73326238d3a1895bcc8f))
+
 ## [0.48.3] - 2026-10-23
 
 ### 🐛 Bug Fixes
