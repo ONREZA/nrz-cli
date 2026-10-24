@@ -205,7 +205,7 @@ pub fn materialize_application_packages(
             .open(&path)?;
         let original = image.metadata()?;
         let tool_limits = ApplicationToolLimits {
-            max_output_bytes: limits.max_package_bytes,
+            max_output_bytes: usage[index].package_bytes,
             max_output_nodes: 1,
         };
         if let Err(error) = tools.generate(&tree, &path, uuid, tool_limits) {
@@ -223,7 +223,7 @@ pub fn materialize_application_packages(
         }
         let size = image.metadata()?.len();
         let layout = application_package_layout(size).map_err(invalid_error)?;
-        if layout.package_size > limits.max_package_bytes {
+        if layout.package_size > usage[index].package_bytes {
             return Err(ApplicationMaterializationError::Limit("package byte limit"));
         }
         let erofs_size = verify_erofs_metadata(
@@ -301,12 +301,18 @@ struct RoleUsage {
     entries: usize,
     nodes: u64,
     file_bytes: u64,
+    package_bytes: u64,
 }
 
 fn preflight(
     files: &[FileEntry],
     limits: ApplicationMaterializationLimits,
 ) -> Result<[RoleUsage; 2], ApplicationMaterializationError> {
+    if application_package_layout(limits.max_package_bytes).is_err() {
+        return Err(ApplicationMaterializationError::Limit("package byte limit"));
+    }
+    let packages = crate::source_v2_storage::application_package_bounds(files)
+        .map_err(|error| ApplicationMaterializationError::Invalid(error.to_string()))?;
     let mut usage = [RoleUsage::default(); 2];
     let mut previous = [""; 2];
     for entry in files {
@@ -355,11 +361,16 @@ fn preflight(
     }
     let mut staging_bytes = 0_u64;
     let mut staging_nodes = 1_u64;
-    for item in usage.iter().filter(|item| item.entries != 0) {
+    for (index, item) in usage
+        .iter_mut()
+        .enumerate()
+        .filter(|(_, item)| item.entries != 0)
+    {
+        item.package_bytes = packages[index].min(limits.max_package_bytes);
         staging_bytes = item
             .file_bytes
             .checked_mul(2)
-            .and_then(|bytes| bytes.checked_add(limits.max_package_bytes))
+            .and_then(|bytes| bytes.checked_add(item.package_bytes))
             .and_then(|bytes| bytes.checked_add(staging_bytes))
             .ok_or(ApplicationMaterializationError::Limit(
                 "staging byte overflow",

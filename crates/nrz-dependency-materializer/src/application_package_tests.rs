@@ -332,6 +332,32 @@ fn partition_preflight_counts_implicit_directories_and_bounds_before_work() {
     }
 }
 
+#[test]
+fn small_role_preflight_does_not_reserve_the_global_package_ceiling() {
+    let files = (0..995)
+        .map(|index| {
+            let mut entry = file(&format!("app/{index:04}.js"), FileRole::Compute);
+            if let FileEntry::File { size, .. } = &mut entry {
+                *size = 6000;
+            }
+            entry
+        })
+        .collect::<Vec<_>>();
+    let usage = preflight(
+        &files,
+        ApplicationMaterializationLimits {
+            max_package_bytes: 12 * 1024 * 1024 * 1024,
+            max_staging_file_bytes: 128 * 1024 * 1024,
+            max_staging_nodes: 4096,
+            ..limits()
+        },
+    )
+    .unwrap();
+    assert_eq!(usage[0].package_bytes, 0);
+    assert!(usage[1].package_bytes < 64 * 1024 * 1024);
+    assert_eq!(usage[1].file_bytes, 995 * 6000);
+}
+
 #[derive(Clone, Copy)]
 enum Failure {
     Execute,

@@ -22,6 +22,7 @@ pub mod source_v2_dependencies;
 pub mod source_v2_materialization;
 pub mod source_v2_preparation;
 pub mod source_v2_runtime;
+pub mod source_v2_storage;
 mod tool_executor;
 
 #[cfg(test)]
