@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.49.0] - 2026-10-26
+
+### ✨ Features
+
+- **deploy:** resume live source transfers ([c8257fe](https://github.com/ONREZA/nrz-cli/commit/c8257fed0620fd295a6e3436e7321314fd33c3af))
+
+### ✅ Testing
+
+- **tests:** qualify source transfers ([a2b06f4](https://github.com/ONREZA/nrz-cli/commit/a2b06f4fb2f3a25d422451b16333f228dc994a79))
+
 ## [0.48.6] - 2026-10-26
 
 ### 🐛 Bug Fixes
