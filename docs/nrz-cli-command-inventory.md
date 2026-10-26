@@ -155,7 +155,7 @@ ProductEnvironment, Workspace Environment и workspace binding generation. Ес�
 | Команда | Назначение | Опции |
 | --- | --- | --- |
 | `nrz db list` | Список managed databases workspace; выбранный Product сужает список. | `--project-id`. |
-| `nrz db create` | Создает самостоятельную managed DB без неявного app binding. | `--name`, `--cu-size`, `--wait`; приложение подключается отдельным `db config`. |
+| `nrz db create` | Принимает асинхронное создание самостоятельной managed DB без неявного app binding. | `--name`, `--cu-size`, `--wait`, `--idempotency-key`; приложение подключается отдельным `db config`. |
 | `nrz db info [DATABASE]` | Детали DB. | DB можно указать ID/name; иначе auto-resolve. |
 | `nrz db delete <DATABASE>` | Удаляет DB. | `--force` для non-interactive/JSON. |
 | `nrz db start [DATABASE]` | Запускает stopped DB. | DB optional, auto-resolve требует единственного подходящего ресурса в выбранном scope. |
@@ -239,8 +239,22 @@ attachments require an exact ID; response ordering never selects a database for
 a mutation. Branch IDs are resolved against the database branch list before a
 branch command runs.
 
-`nrz db create --wait --json` emits the same database information projection as
-`nrz db info --json`. Creation credentials are not included in that projection.
+`nrz db list --json` возвращает `plan`, `creation` и `data` с явным
+`providerContour: PLATFORM_NATIVE | LEGACY`. `creation` описывает только
+квалифицированные native-профили; `UNAVAILABLE` не мешает читать существующие DB
+и выбирать их по имени. Native metadata и `db info` не содержат legacy
+capabilities, provider IDs и credential-полей. Legacy info сохраняет прежнюю
+CLI-проекцию с дополнительным `providerContour: LEGACY`.
+
+`nrz db create` отправляет один запрос с `Idempotency-Key` и возвращает `id`,
+`workspaceId`, `operationId`, `status` и `idempotencyKey`. Без явного
+`--idempotency-key` CLI генерирует UUIDv7 и печатает ключ в stderr до запроса.
+При неизвестном результате повторяйте те же аргументы с тем же ключом; новый
+ключ означает новое создание. CLI не повторяет POST автоматически.
+`--wait --json` сохраняет проекцию `nrz db info --json` и добавляет
+`workspaceId`, `operationId`, `idempotencyKey`. Ошибки ожидания сохраняют ID и
+ключ в JSON diagnostics; ожидание опрашивает только уже известный ID.
+Credentials получают отдельной командой `nrz db connection ID` после ACTIVE.
 Start/stop responses report the accepted operation status; `pending` is not a
 claim that compute has already started or stopped.
 

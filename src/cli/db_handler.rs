@@ -47,8 +47,9 @@ pub async fn run(
         DbCommand::Create {
             name,
             cu_size,
+            idempotency_key,
             wait,
-        } => cmd_create(&client, json, name, cu_size, wait).await,
+        } => cmd_create(&client, json, name, cu_size, idempotency_key, wait).await,
         DbCommand::Info { database } => {
             let db_id =
                 resolve_db(&client, project_id.as_deref(), database.as_deref(), config).await?;

@@ -72,6 +72,7 @@ pub(super) async fn cmd_config(
             .await
             .context("failed to get database info")?;
         let bindings: Vec<_> = info
+            .db
             .project_attachments
             .iter()
             .filter(|binding| binding.project_id.to_string() == project_id)

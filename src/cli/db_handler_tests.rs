@@ -8,10 +8,12 @@ fn database(id: &str, name: &str, projects: &[&str]) -> ManagedDatabase {
         status: None,
         cu_size: None,
         pg_version: None,
-        auto_inject_db_url: None,
-        env_var_name: None,
-        auto_create_preview_branch: None,
-        kaiki_status: None,
+        metadata: DatabaseMetadata::Legacy {
+            auto_inject_db_url: None,
+            env_var_name: None,
+            auto_create_preview_branch: None,
+            kaiki_status: None,
+        },
         project_attachments: projects
             .iter()
             .map(|id| ProjectAttachment {
@@ -68,6 +70,18 @@ fn create_body_serializes_server_contract_and_validates_size() {
     );
     assert!(wire::create_body(None, Some(0.75)).is_err());
     assert!(wire::create_body(None, Some(f64::NAN)).is_err());
+}
+
+#[test]
+fn create_keys_match_the_public_header_contract() {
+    let generated = create_idempotency_key(None).unwrap();
+    assert_eq!(generated.parse::<uuid::Uuid>().unwrap().get_version_num(), 7);
+    for valid in ["a".into(), "Create_1.foo:retry-2".into(), "a".repeat(128)] {
+        assert_eq!(create_idempotency_key(Some(valid.clone())).unwrap(), valid);
+    }
+    for invalid in ["".into(), "_a".into(), "-a".into(), "a b".into(), "a\n".into(), "é".into(), "a".repeat(129)] {
+        assert!(create_idempotency_key(Some(invalid)).is_err());
+    }
 }
 
 #[test]

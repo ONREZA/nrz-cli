@@ -19,19 +19,32 @@ pub(super) async fn cmd_list(
         return Ok(());
     }
 
-    if list.data.is_empty() {
-        eprintln!("  No databases found. Create one with: nrz db create");
-        return Ok(());
-    }
-
     if let Some(plan) = &list.plan {
         eprintln!("  Plan: {}", output::terminal_line(plan));
     }
-    if let Some(sizes) = &list.allowed_cu_sizes {
-        let s: Vec<String> = sizes.iter().map(|v| format!("{v}")).collect();
-        eprintln!("  Allowed CU sizes: {}", s.join(", "));
+    match &list.creation {
+        nrz_api::ManagedDatabaseCreationChoices::ManagedDatabaseCreationChoicesAvailable(choices) => {
+            let profiles: Vec<_> = choices.profiles.iter()
+                .map(|profile| format!("PG {} / {} CU", profile.pg_version, profile.cu_size))
+                .collect();
+            eprintln!("  Create profiles: {}", profiles.join(", "));
+        }
+        nrz_api::ManagedDatabaseCreationChoices::ManagedDatabaseCreationChoicesUnavailable(_) => {
+            eprintln!("  New database creation is unavailable");
+        }
     }
     eprintln!();
+
+    if list.data.is_empty() {
+        eprintln!("  No databases found.");
+        if matches!(
+            &list.creation,
+            nrz_api::ManagedDatabaseCreationChoices::ManagedDatabaseCreationChoicesAvailable(_)
+        ) {
+            eprintln!("  Create one with: nrz db create");
+        }
+        return Ok(());
+    }
 
     for db in &list.data {
         let id = output::terminal_line(&db.id);
@@ -60,63 +73,133 @@ pub(super) async fn cmd_create(
     json: bool,
     name: Option<String>,
     cu_size: Option<f64>,
+    idempotency_key: Option<String>,
     wait: bool,
 ) -> anyhow::Result<()> {
-    output::status(json, "~", "Creating database...", output::Phase::Db);
-
+    let key = create_idempotency_key(idempotency_key)?;
     let body = wire::create_body(name, cu_size)?;
-    let created: CreateResponse = client
-        .create_database(body)
+    output::status(
+        json,
+        "~",
+        format!("Creating database (retry key {key})..."),
+        output::Phase::Db,
+    );
+    let mut created = client
+        .create_database(body, &key)
         .await
-        .context("failed to create database")?
-        .into();
+        .map(|response| wire::created(response, key.clone()))
+        .map_err(|error| create_error(error, &key, None))?;
 
     if wait {
-        output::status(
-            json,
-            "~",
-            "Waiting for database to become active...",
-            output::Phase::Db,
-        );
-        for _ in 0..120 {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            let info = wire::database(client, &created.id)
-                .await
-                .context("failed to check database status")?;
-            match info.status {
-                nrz_api::Database200ResponseDatumStatus::Active => {
-                    output::success(json, "Database is active", output::Phase::Db);
-                    if json {
-                        output::json_output(&DbInfoResponse::from(info));
-                    }
-                    return Ok(());
-                }
-                nrz_api::Database200ResponseDatumStatus::Error => {
-                    bail!("database creation failed; check `nrz db info` for details")
-                }
-                _ => continue,
-            }
-        }
-        bail!(
-            "timed out waiting for database to become active (~4 minutes). \
-             Check status with: nrz db info"
-        );
+        return wait_for_create(client, json, &mut created)
+            .await
+            .map_err(|error| create_error(error, &key, Some(&created)));
     }
 
     if json {
         output::json_output(&created);
     } else {
-        let name = created.db_name.as_deref().unwrap_or("kaikidb");
         output::success(
-            json,
-            format!("Database created: {} ({})", name, created.id),
+            false,
+            format!(
+                "Database creation accepted: {} ({})",
+                created.id,
+                created.status,
+            ),
             output::Phase::Db,
         );
-        if created.status.as_deref() == Some("CREATING") {
-            eprintln!("    Database is being provisioned. Use `nrz db info` to check status.");
-        }
+        eprintln!("    Operation: {}", created.operation_id);
+        eprintln!("    Check status with: nrz db info {}", created.id);
     }
     Ok(())
+}
+
+pub(super) fn create_idempotency_key(key: Option<String>) -> anyhow::Result<String> {
+    let key = key.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    anyhow::ensure!(
+        (1..=128).contains(&key.len())
+            && key.as_bytes()[0].is_ascii_alphanumeric()
+            && key.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"_.:-".contains(&byte)),
+        "--idempotency-key requires 1..128 ASCII characters: start with a letter or digit; use letters, digits, _, ., :, or -"
+    );
+    Ok(key)
+}
+
+async fn wait_for_create(
+    client: &ApiClient,
+    json: bool,
+    created: &mut CreateResponse,
+) -> anyhow::Result<()> {
+    output::status(
+        json,
+        "~",
+        format!(
+            "Waiting for database {} (operation {}) to become active...",
+            created.id, created.operation_id
+        ),
+        output::Phase::Db,
+    );
+    for _ in 0..120 {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let info = wire::database(client, &created.id)
+            .await
+            .context("failed to check database status")?;
+        created.status = info.db.status.clone().unwrap_or_else(|| "unknown".into());
+        match created.status.as_str() {
+            "ACTIVE" => {
+                output::success(json, format!("Database {} is active", created.id), output::Phase::Db);
+                if json {
+                    let mut result = serde_json::to_value(info)?;
+                    result["idempotencyKey"] = serde_json::json!(created.idempotency_key);
+                    result["operationId"] = serde_json::json!(created.operation_id);
+                    result["workspaceId"] = serde_json::json!(created.workspace_id);
+                    output::json_output(&result);
+                }
+                return Ok(());
+            }
+            "ERROR" => {
+                bail!("database creation failed; check `nrz db info` for details")
+            }
+            _ => continue,
+        }
+    }
+    bail!("timed out waiting for database to become active (~4 minutes)");
+}
+
+fn create_error(
+    error: anyhow::Error,
+    key: &str,
+    created: Option<&CreateResponse>,
+) -> anyhow::Error {
+    let api_error = error.downcast_ref::<crate::api::StructuredApiError>();
+    let code = api_error
+        .map(|error| error.code.as_str())
+        .unwrap_or("DB_CREATE_FAILED");
+    let mut details = api_error
+        .and_then(|error| error.details.clone())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !details.is_object() {
+        details = serde_json::json!({"originalDetails": details});
+    }
+    details["idempotencyKey"] = serde_json::json!(key);
+    let hint = if let Some(created) = created {
+        details["databaseId"] = serde_json::json!(created.id);
+        details["operationId"] = serde_json::json!(created.operation_id);
+        details["workspaceId"] = serde_json::json!(created.workspace_id);
+        details["status"] = serde_json::json!(created.status);
+        format!(
+            "Database creation was accepted (operation {}). Check status with: nrz db info {}. Any create retry must reuse --idempotency-key {key} and the same arguments",
+            created.operation_id, created.id
+        )
+    } else {
+        format!("The create result may be unknown. Retry the same arguments with --idempotency-key {key}")
+    };
+    crate::errors::CliError::new(code, format!("{error:#}"))
+        .phase(output::Phase::Db)
+        .details(details)
+        .hint(hint)
+        .with_source(error)
+        .into_anyhow()
 }
 
 pub(super) async fn cmd_info(
@@ -125,10 +208,9 @@ pub(super) async fn cmd_info(
     db_id: &str,
     json: bool,
 ) -> anyhow::Result<()> {
-    let info: DbInfoResponse = wire::database(client, db_id)
+    let info = wire::database(client, db_id)
         .await
-        .context("failed to get database info")?
-        .into();
+        .context("failed to get database info")?;
 
     if json {
         output::json_output(&info);
@@ -159,10 +241,10 @@ pub(super) async fn cmd_info(
             eprintln!("  Preview branches: enabled");
         }
     }
-    if let Some(plan) = &info.plan {
+    if let Some(plan) = info.plan() {
         eprintln!("  Plan:       {}", output::terminal_line(plan));
     }
-    if let Some(sizes) = &info.allowed_cu_sizes {
+    if let Some(sizes) = info.allowed_cu_sizes() {
         let s: Vec<String> = sizes.iter().map(|v| format!("{v}")).collect();
         eprintln!("  Allowed CU: {}", s.join(", "));
     }

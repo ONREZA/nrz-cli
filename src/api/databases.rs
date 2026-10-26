@@ -3,7 +3,7 @@ use anyhow::Context;
 use nrz_api::*;
 
 impl ApiClient {
-    pub async fn databases(&self) -> anyhow::Result<Database200Response> {
+    pub async fn databases(&self) -> anyhow::Result<ManagedDatabaseList> {
         let response = self
             .platform()?
             .get_v1kaiki_databases(GetV1kaikiDatabasesRequest {})
@@ -17,18 +17,24 @@ impl ApiClient {
     pub async fn create_database(
         &self,
         body: DatabaseRequestBody,
-    ) -> anyhow::Result<Database200Response2> {
+        idempotency_key: &str,
+    ) -> anyhow::Result<ManagedDatabaseCreateAccepted> {
         let response = self
             .platform()?
-            .post_v1kaiki_databases(PostV1kaikiDatabasesRequest { body })
+            .post_v1kaiki_databases(PostV1kaikiDatabasesRequest {
+                header: PostV1kaikiDatabasesRequestHeader {
+                    idempotency_key: idempotency_key.to_owned(),
+                },
+                body,
+            })
             .await?;
         api_success!(
             response,
             PostV1kaikiDatabasesRequest,
-            PostV1kaikiDatabasesResponse::Ok
+            PostV1kaikiDatabasesResponse::Accepted
         )
     }
-    pub async fn database(&self, id: &str) -> anyhow::Result<Database200Response3> {
+    pub async fn database(&self, id: &str) -> anyhow::Result<ManagedDatabaseDetail> {
         let response = self
             .platform()?
             .get_v1kaiki_databases_by_id(GetV1kaikiDatabasesByIdRequest {
@@ -187,7 +193,7 @@ impl ApiClient {
         id: &str,
         project_id: &str,
         body: AttachmentRequestBody,
-    ) -> anyhow::Result<Database200ResponseDatumProjectAttachment> {
+    ) -> anyhow::Result<ManagedDatabaseProjectAttachment> {
         let response = self
             .platform()?
             .patch_v1kaiki_databases_by_id_attachments_by_project_id(

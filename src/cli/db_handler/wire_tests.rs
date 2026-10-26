@@ -70,28 +70,28 @@ fn connection() -> Value {
 
 #[tokio::test]
 async fn create_database_keeps_standalone_ownership_without_implicit_attachment() {
-    let created = nrz_api::Database200Response2 {
-        id: DB.parse().unwrap(),
-        product_id: Some(PROJECT.parse().unwrap()),
-        db_name: "primary".into(),
-        password: "private-password".into(),
-        ..Default::default()
-    };
-    let (client, pending, server) = serve(vec![Exchange {
-        method: "POST",
-        path: "/v1/kaiki/databases/".into(),
-        body: Some(json!({"dbName":"primary","cuSize":0.5})),
-        response: serde_json::to_value(created.clone()).unwrap(),
-    }])
-    .await;
-    cmd_create(&client, true, Some("primary".into()), Some(0.5), false)
+    let key = "create-primary:1";
+    let accepted = json!({"id": DB, "workspaceId": PROJECT, "operationId": PROJECT, "status": "CREATING"});
+    let response = accepted.clone();
+    let app = Router::new().fallback(move |request: Request| {
+        let response = response.clone();
+        async move {
+            assert_eq!(request.method(), "POST");
+            assert_eq!(request.uri(), "/v1/kaiki/databases/");
+            assert_eq!(request.headers()["Idempotency-Key"], key);
+            let body = axum::body::to_bytes(request.into_body(), 1024).await.unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), json!({"dbName":"primary","cuSize":0.5}));
+            (axum::http::StatusCode::ACCEPTED, Json(response))
+        }
+    });
+    let (client, server) = serve_api(app).await;
+    cmd_create(&client, true, Some("primary".into()), Some(0.5), Some(key.into()), false)
         .await
         .unwrap();
-    assert!(pending.lock().unwrap().is_empty());
-    let output = serde_json::to_value(CreateResponse::from(created)).unwrap();
+    let output = serde_json::to_value(wire::created(serde_json::from_value(accepted).unwrap(), key.into())).unwrap();
     assert_eq!(
         output,
-        json!({"id":DB,"productId":PROJECT,"dbName":"primary","status":"CREATING"})
+        json!({"id":DB,"workspaceId":PROJECT,"operationId":PROJECT,"status":"CREATING","idempotencyKey":key})
     );
     server.abort();
 }
@@ -206,11 +206,11 @@ async fn database_controls_send_no_body_and_keep_operation_acknowledgements() {
 
 #[tokio::test]
 async fn database_detail_and_attachment_reject_another_resource() {
-    let detail = nrz_api::Database200Response3 {
+    let detail = nrz_api::ManagedDatabaseNativeDetail {
         id: PROJECT.parse().unwrap(),
         ..Default::default()
     };
-    let attachment = nrz_api::Database200ResponseDatumProjectAttachment {
+    let attachment = nrz_api::ManagedDatabaseProjectAttachment {
         managed_database_id: PROJECT.parse().unwrap(),
         project_id: PROJECT.parse().unwrap(),
         ..Default::default()
@@ -271,7 +271,7 @@ async fn attachment_preserves_explicit_targets_and_rejects_another_binding() {
         ..Default::default()
     };
     for changed in [false, true] {
-        let response = nrz_api::Database200ResponseDatumProjectAttachment {
+        let response = nrz_api::ManagedDatabaseProjectAttachment {
             managed_database_id: DB.parse().unwrap(),
             project_id: PROJECT.parse().unwrap(),
             service_id: body.service_id,

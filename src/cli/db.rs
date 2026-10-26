@@ -26,6 +26,10 @@ pub enum DbCommand {
         #[arg(long)]
         cu_size: Option<f64>,
 
+        /// Reuse the same key and create arguments after an unknown response
+        #[arg(long)]
+        idempotency_key: Option<String>,
+
         /// Wait for database to become active before returning
         #[arg(long)]
         wait: bool,

@@ -36,7 +36,7 @@ fn database_summary(
     id: uuid::Uuid,
     product_id: Option<uuid::Uuid>,
     db_name: String,
-    status: nrz_api::Database200ResponseDatumStatus,
+    status: nrz_api::ManagedDatabaseStatus,
     cu_size: f64,
     pg_version: i64,
     project_attachments: Vec<ProjectAttachment>,
@@ -48,16 +48,18 @@ fn database_summary(
         status: Some(status.to_string()),
         cu_size: Some(cu_size),
         pg_version: Some(pg_version),
-        auto_inject_db_url: None,
-        env_var_name: None,
-        auto_create_preview_branch: None,
-        kaiki_status: None,
+        metadata: DatabaseMetadata::Legacy {
+            auto_inject_db_url: None,
+            env_var_name: None,
+            auto_create_preview_branch: None,
+            kaiki_status: None,
+        },
         project_attachments,
     }
 }
 
-impl From<nrz_api::Database200ResponseDatum> for ManagedDatabase {
-    fn from(value: nrz_api::Database200ResponseDatum) -> Self {
+impl From<nrz_api::ManagedDatabaseLegacyListItem> for ManagedDatabase {
+    fn from(value: nrz_api::ManagedDatabaseLegacyListItem) -> Self {
         database_summary(
             value.id,
             value.product_id,
@@ -70,19 +72,8 @@ impl From<nrz_api::Database200ResponseDatum> for ManagedDatabase {
     }
 }
 
-impl From<nrz_api::Database200Response> for ListResponse {
-    fn from(value: nrz_api::Database200Response) -> Self {
-        Self {
-            data: value.data.into_iter().map(Into::into).collect(),
-            allowed_cu_sizes: Some(value.allowed_cu_sizes.into_iter().map(cu).collect()),
-            autoscale_max_cu: value.autoscale_max_cu.map(cu),
-            plan: Some(value.plan.to_string()),
-        }
-    }
-}
-
-impl From<nrz_api::Database200Response3> for DbInfoResponse {
-    fn from(value: nrz_api::Database200Response3) -> Self {
+impl From<nrz_api::ManagedDatabaseNativeMetadata> for ManagedDatabase {
+    fn from(value: nrz_api::ManagedDatabaseNativeMetadata) -> Self {
         let mut db = database_summary(
             value.id,
             value.product_id,
@@ -92,24 +83,109 @@ impl From<nrz_api::Database200Response3> for DbInfoResponse {
             value.pg_version,
             value.project_attachments,
         );
-        db.kaiki_status = value.kaiki_status.map(|status| status.to_string());
+        db.metadata = DatabaseMetadata::Native {
+            workspace_id: value.workspace_id,
+            role_name: value.role_name,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        };
+        db
+    }
+}
+
+impl From<nrz_api::ManagedDatabaseListItem> for ManagedDatabase {
+    fn from(value: nrz_api::ManagedDatabaseListItem) -> Self {
+        match value {
+            nrz_api::ManagedDatabaseListItem::ManagedDatabaseNativeMetadata(value) => value.into(),
+            nrz_api::ManagedDatabaseListItem::ManagedDatabaseLegacyListItem(value) => value.into(),
+        }
+    }
+}
+
+impl From<nrz_api::ManagedDatabaseList> for ListResponse {
+    fn from(value: nrz_api::ManagedDatabaseList) -> Self {
         Self {
-            db,
-            allowed_cu_sizes: Some(value.allowed_cu_sizes.into_iter().map(cu).collect()),
-            autoscale_max_cu: value.autoscale_max_cu.map(cu),
+            data: value.data.into_iter().map(Into::into).collect(),
+            creation: value.creation,
             plan: Some(value.plan.to_string()),
         }
     }
 }
 
-impl From<nrz_api::Database200Response2> for CreateResponse {
-    fn from(value: nrz_api::Database200Response2) -> Self {
+impl From<nrz_api::ManagedDatabaseLegacyDetail> for DbInfoResponse {
+    fn from(value: nrz_api::ManagedDatabaseLegacyDetail) -> Self {
+        let mut db = database_summary(
+            value.id,
+            value.product_id,
+            value.db_name,
+            value.status,
+            value.cu_size,
+            value.pg_version,
+            value.project_attachments,
+        );
+        db.metadata = DatabaseMetadata::Legacy {
+            auto_inject_db_url: None,
+            env_var_name: None,
+            auto_create_preview_branch: None,
+            kaiki_status: value.kaiki_status.map(|status| status.to_string()),
+        };
         Self {
-            id: value.id.to_string(),
-            product_id: value.product_id.map(|id| id.to_string()),
-            db_name: Some(value.db_name),
-            status: Some(value.status.to_string()),
+            db,
+            details: DatabaseInfoDetails::Legacy {
+                allowed_cu_sizes: Some(value.allowed_cu_sizes.into_iter().map(cu).collect()),
+                autoscale_max_cu: value.autoscale_max_cu.map(cu),
+                plan: Some(value.plan.to_string()),
+            },
         }
+    }
+}
+
+impl From<nrz_api::ManagedDatabaseNativeDetail> for DbInfoResponse {
+    fn from(value: nrz_api::ManagedDatabaseNativeDetail) -> Self {
+        let mut db = database_summary(
+            value.id,
+            value.product_id,
+            value.db_name,
+            value.status,
+            value.cu_size,
+            value.pg_version,
+            value.project_attachments,
+        );
+        db.metadata = DatabaseMetadata::Native {
+            workspace_id: value.workspace_id,
+            role_name: value.role_name,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        };
+        Self {
+            db,
+            details: DatabaseInfoDetails::Native {
+                plan: value.plan.to_string(),
+                permissions: value.permissions.into_iter().map(|permission| permission.to_string()).collect(),
+            },
+        }
+    }
+}
+
+impl From<nrz_api::ManagedDatabaseDetail> for DbInfoResponse {
+    fn from(value: nrz_api::ManagedDatabaseDetail) -> Self {
+        match value {
+            nrz_api::ManagedDatabaseDetail::ManagedDatabaseNativeDetail(value) => value.into(),
+            nrz_api::ManagedDatabaseDetail::ManagedDatabaseLegacyDetail(value) => value.into(),
+        }
+    }
+}
+
+pub(super) fn created(
+    value: nrz_api::ManagedDatabaseCreateAccepted,
+    idempotency_key: String,
+) -> CreateResponse {
+    CreateResponse {
+        id: value.id.to_string(),
+        workspace_id: value.workspace_id.to_string(),
+        operation_id: value.operation_id.to_string(),
+        status: value.status.to_string(),
+        idempotency_key,
     }
 }
 
@@ -137,10 +213,10 @@ impl From<nrz_api::Branch200Response2> for Branch {
 pub(super) async fn database(
     client: &ApiClient,
     id: &str,
-) -> anyhow::Result<nrz_api::Database200Response3> {
-    let value = client.database(id).await?;
+) -> anyhow::Result<DbInfoResponse> {
+    let value: DbInfoResponse = client.database(id).await?.into();
     anyhow::ensure!(
-        value.id == id.parse::<uuid::Uuid>()?,
+        value.db.id == id.parse::<uuid::Uuid>()?.to_string(),
         "database response belongs to another database"
     );
     Ok(value)
@@ -151,7 +227,7 @@ pub(super) async fn attach(
     db_id: &str,
     project_id: &str,
     body: nrz_api::AttachmentRequestBody,
-) -> anyhow::Result<nrz_api::Database200ResponseDatumProjectAttachment> {
+) -> anyhow::Result<ProjectAttachment> {
     let selected = (
         body.service_id,
         body.product_environment_id,
