@@ -9,7 +9,6 @@ use serde::Serialize;
 pub enum RuntimeType {
     Node,
     Bun,
-    Deno,
     Python,
     Dart,
     Go,

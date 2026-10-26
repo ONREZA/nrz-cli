@@ -138,9 +138,9 @@ codegen-units = 1
 
 # Keep the blob adapter on the same reviewed private transport implementation.
 [patch.crates-io]
-bao-tree = { git = "https://github.com/ONREZA/bao-tree", rev = "aafb02a0239ed3a45bdde91403e170738924ad28" }
+bao-tree = { git = "https://github.com/ONREZA/bao-tree", rev = "6f2eedded654982680ef7a739c1affcdf6b5d160" }
 iroh-tickets = { git = "https://github.com/ONREZA/iroh-tickets", rev = "0aa7ba6987c6f5ecb7221946c445d5d71354b5ab" }
-iroh = { git = "https://github.com/ONREZA/iroh", rev = "672d73df8ca359e720f1779ac2a6f9b0383906a8" }
-iroh-base = { git = "https://github.com/ONREZA/iroh", rev = "672d73df8ca359e720f1779ac2a6f9b0383906a8" }
-iroh-relay = { git = "https://github.com/ONREZA/iroh", rev = "672d73df8ca359e720f1779ac2a6f9b0383906a8" }
-iroh-dns = { git = "https://github.com/ONREZA/iroh", rev = "672d73df8ca359e720f1779ac2a6f9b0383906a8" }
+iroh = { git = "https://github.com/ONREZA/iroh", rev = "504139691888cab2c8ff0128fbc565a262fc7018" }
+iroh-base = { git = "https://github.com/ONREZA/iroh", rev = "504139691888cab2c8ff0128fbc565a262fc7018" }
+iroh-relay = { git = "https://github.com/ONREZA/iroh", rev = "504139691888cab2c8ff0128fbc565a262fc7018" }
+iroh-dns = { git = "https://github.com/ONREZA/iroh", rev = "504139691888cab2c8ff0128fbc565a262fc7018" }

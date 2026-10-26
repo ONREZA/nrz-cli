@@ -304,8 +304,8 @@ dependencies = [
 
 [[package]]
 name = "bao-tree"
-version = "0.16.1"
-source = "git+https://github.com/ONREZA/bao-tree?rev=aafb02a0239ed3a45bdde91403e170738924ad28#aafb02a0239ed3a45bdde91403e170738924ad28"
+version = "0.17.0"
+source = "git+https://github.com/ONREZA/bao-tree?rev=6f2eedded654982680ef7a739c1affcdf6b5d160#6f2eedded654982680ef7a739c1affcdf6b5d160"
 dependencies = [
  "blake3",
  "bytes",
@@ -1947,8 +1947,8 @@ checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "iroh"
-version = "1.3.0"
-source = "git+https://github.com/ONREZA/iroh?rev=672d73df8ca359e720f1779ac2a6f9b0383906a8#672d73df8ca359e720f1779ac2a6f9b0383906a8"
+version = "1.4.1"
+source = "git+https://github.com/ONREZA/iroh?rev=504139691888cab2c8ff0128fbc565a262fc7018#504139691888cab2c8ff0128fbc565a262fc7018"
 dependencies = [
  "backon",
  "blake3",
@@ -1995,8 +1995,8 @@ dependencies = [
 
 [[package]]
 name = "iroh-base"
-version = "1.3.0"
-source = "git+https://github.com/ONREZA/iroh?rev=672d73df8ca359e720f1779ac2a6f9b0383906a8#672d73df8ca359e720f1779ac2a6f9b0383906a8"
+version = "1.4.1"
+source = "git+https://github.com/ONREZA/iroh?rev=504139691888cab2c8ff0128fbc565a262fc7018#504139691888cab2c8ff0128fbc565a262fc7018"
 dependencies = [
  "curve25519-dalek",
  "data-encoding",
@@ -2014,9 +2014,8 @@ dependencies = [
 [[package]]
 name = "iroh-blobs"
 version = "0.103.1"
-source = "git+https://github.com/ONREZA/iroh-blobs?rev=d0393f46dd04f4fe1150b2c803912936a240a9cb#d0393f46dd04f4fe1150b2c803912936a240a9cb"
+source = "git+https://github.com/ONREZA/iroh-blobs?rev=8676c05036e7983b5aeb4a711917d2ec4a93565f#8676c05036e7983b5aeb4a711917d2ec4a93565f"
 dependencies = [
- "arrayvec",
  "bao-tree",
  "bytes",
  "cfg_aliases",
@@ -2050,8 +2049,8 @@ dependencies = [
 
 [[package]]
 name = "iroh-dns"
-version = "1.3.0"
-source = "git+https://github.com/ONREZA/iroh?rev=672d73df8ca359e720f1779ac2a6f9b0383906a8#672d73df8ca359e720f1779ac2a6f9b0383906a8"
+version = "1.4.1"
+source = "git+https://github.com/ONREZA/iroh?rev=504139691888cab2c8ff0128fbc565a262fc7018#504139691888cab2c8ff0128fbc565a262fc7018"
 dependencies = [
  "arc-swap",
  "cfg_aliases",
@@ -2112,8 +2111,8 @@ dependencies = [
 
 [[package]]
 name = "iroh-relay"
-version = "1.3.0"
-source = "git+https://github.com/ONREZA/iroh?rev=672d73df8ca359e720f1779ac2a6f9b0383906a8#672d73df8ca359e720f1779ac2a6f9b0383906a8"
+version = "1.4.1"
+source = "git+https://github.com/ONREZA/iroh?rev=504139691888cab2c8ff0128fbc565a262fc7018#504139691888cab2c8ff0128fbc565a262fc7018"
 dependencies = [
  "blake3",
  "bytes",
@@ -2134,6 +2133,7 @@ dependencies = [
  "noq",
  "noq-proto",
  "num_enum",
+ "percent-encoding",
  "pin-project",
  "postcard",
  "rand",
@@ -2168,9 +2168,9 @@ dependencies = [
 
 [[package]]
 name = "iroh-util"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20e41eb982f15230c55f0a70a74a514360e1f565b07861924fd0e8db172b3d00"
+checksum = "889d5cc9da2eaac9f63657237c491db17d1fe9fffdc7c0f2f0e04c49d5d45053"
 dependencies = [
  "derive_more",
  "iroh",
@@ -2839,8 +2839,8 @@ dependencies = [
 
 [[package]]
 name = "noq"
-version = "1.3.0"
-source = "git+https://github.com/ONREZA/noq?rev=0e96b6406de05bf36de20cc3522256ee897703f6#0e96b6406de05bf36de20cc3522256ee897703f6"
+version = "1.4.0"
+source = "git+https://github.com/ONREZA/noq?rev=75ff09964a5e5b92463b1daba7cd43b9d38507ad#75ff09964a5e5b92463b1daba7cd43b9d38507ad"
 dependencies = [
  "bytes",
  "cfg_aliases",
@@ -2860,8 +2860,8 @@ dependencies = [
 
 [[package]]
 name = "noq-proto"
-version = "1.3.0"
-source = "git+https://github.com/ONREZA/noq?rev=0e96b6406de05bf36de20cc3522256ee897703f6#0e96b6406de05bf36de20cc3522256ee897703f6"
+version = "1.4.0"
+source = "git+https://github.com/ONREZA/noq?rev=75ff09964a5e5b92463b1daba7cd43b9d38507ad#75ff09964a5e5b92463b1daba7cd43b9d38507ad"
 dependencies = [
  "aes-gcm",
  "bytes",
