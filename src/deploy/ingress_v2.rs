@@ -142,16 +142,20 @@ pub(super) async fn publish(
         .into_iter()
         .map(|address| address.parse())
         .collect::<Result<Vec<_>, _>>()?;
-    let remaining = (admitted.expires_at.min(admitted.observation_valid_until)
-        - chrono::Utc::now())
-    .to_std()
-    .context("receiver admission expired before transfer")?;
+    let now = chrono::Utc::now();
+    let remaining = (admitted.expires_at.min(admitted.observation_valid_until) - now)
+        .to_std()
+        .context("receiver admission expired before transfer")?;
     ensure!(
         !remaining.is_zero(),
         "receiver admission expired before transfer"
     );
+    let continuation = (admitted.expires_at - now)
+        .to_std()
+        .context("source operation expired before transfer")?;
+    let instant = tokio::time::Instant::now();
     provider
-        .publish(
+        .publish_with_deadlines(
             TransferTarget {
                 endpoint_id: admitted.receiver_endpoint_id,
                 direct_addresses: addresses,
@@ -160,7 +164,8 @@ pub(super) async fn publish(
                 manifest_blake3: verified.manifest_blake3().into(),
             },
             grant,
-            tokio::time::Instant::now() + remaining,
+            instant + remaining,
+            instant + continuation,
         )
         .await?;
     // Keep the frozen tree and all its owner handles through actual publication.

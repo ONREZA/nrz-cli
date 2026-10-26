@@ -94,6 +94,22 @@ impl TransferProvider {
         grant: String,
         deadline: Instant,
     ) -> anyhow::Result<()> {
+        self.publish_with_deadlines(target, grant, deadline, deadline)
+            .await
+    }
+    /// Initial admission stays short-lived; the same accepted operation has its
+    /// separate absolute lifetime. This never changes the transfer wire.
+    pub async fn publish_with_deadlines(
+        self,
+        target: TransferTarget,
+        grant: String,
+        opening_deadline: Instant,
+        deadline: Instant,
+    ) -> anyhow::Result<()> {
+        ensure!(
+            opening_deadline <= deadline,
+            "opening exceeds operation deadline"
+        );
         // The actual worker owns files and endpoint independently of its caller.
         // Dropping the observer detaches it; its deadline still drains and joins
         // any blocking file encoder before those owner handles can retire.
@@ -103,11 +119,13 @@ impl TransferProvider {
             {
                 producer.gate = self.encoder_gate.lock().unwrap().take();
             }
-            let result =
-                tokio::time::timeout_at(deadline, self.publish_inner(target, grant, &mut producer))
-                    .await
-                    .context("Source V2 transfer deadline; original operation may remain pending")
-                    .and_then(|result| result);
+            let result = tokio::time::timeout_at(
+                deadline,
+                self.publish_inner(target, grant, opening_deadline, &mut producer),
+            )
+            .await
+            .context("Source V2 transfer deadline; original operation may remain pending")
+            .and_then(|result| result);
             // timeout cancels the QUIC writer/receiver and closes its channel,
             // but the JoinHandle lives outside that cancellable future.
             let retired = producer.retire().await;
@@ -120,6 +138,7 @@ impl TransferProvider {
         &self,
         target: TransferTarget,
         grant: String,
+        opening_deadline: Instant,
         producer: &mut FileProducer,
     ) -> anyhow::Result<()> {
         ensure!(
@@ -139,6 +158,11 @@ impl TransferProvider {
             );
             address = address.with_ip_addr(direct);
         }
+        ensure!(
+            Instant::now() < opening_deadline,
+            "source admission expired before opening"
+        );
+        let (connection, mut receive) = tokio::time::timeout_at(opening_deadline, async {
         let connection = self.endpoint.connect(address, wire::ALPN).await?;
         ensure!(
             connection.remote_id() == peer,
@@ -156,6 +180,9 @@ impl TransferProvider {
             matches!(first,Reply::Accepted {operation_id,session_id} if operation_id==target.operation_id && session_id==target.session_id),
             "receiver did not accept exact granted session"
         );
+            ensure!(Instant::now() < opening_deadline, "source admission expired before Accepted");
+            Ok::<_, anyhow::Error>((connection, receive))
+        }).await.context("Source V2 opening deadline")??;
         // Keep the framed read alive across blob requests; cancelling a partial
         // frame read would consume its prefix and desynchronize the next read.
         let terminal = read_frame::<Reply>(&mut receive, wire::MAX_REPLY_BYTES);
@@ -291,3 +318,7 @@ pub async fn read_frame<T: serde::de::DeserializeOwned>(
     reader.read_exact(&mut bytes).await?;
     Ok(serde_json::from_slice(&bytes)?)
 }
+
+#[cfg(test)]
+#[path = "ingress_v2_continuation_tests.rs"]
+mod continuation_tests;
