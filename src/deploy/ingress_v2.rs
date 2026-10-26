@@ -3,7 +3,9 @@ use super::*;
 use anyhow::ensure;
 use nrz_contract::application_package_v1::APPLICATION_EROFS_PROFILE_V1;
 use nrz_contract::source_bundle_v2::FileEntry;
-use nrz_source_publisher::ingress_v2::{FrozenBlob, TransferProvider, TransferTarget};
+use nrz_source_publisher::ingress_v2::{
+    FrozenBlob, PublicationOutcome, TransferProvider, TransferTarget,
+};
 use std::io::Write as _;
 
 pub(super) fn validate_configuration() -> anyhow::Result<()> {
@@ -123,14 +125,12 @@ pub(super) async fn publish(
         attempt,
     )?;
     if admitted.state == nrz_api::Admit200ResponseState::Closed {
-        ensure!(
-            admitted.terminal_reason.as_deref() == Some("PUBLISHED"),
-            "Source V2 operation closed without publication"
-        );
+        require_published(&admitted)?;
         return Ok(());
     }
     let grant = admitted
         .transfer_grant
+        .as_ref()
         .context("receiver transfer grant unavailable")?;
     ensure!(
         !grant.is_empty() && grant.len() <= 8192,
@@ -138,8 +138,9 @@ pub(super) async fn publish(
     );
     let addresses = admitted
         .receiver_direct_addresses
+        .as_ref()
         .context("observed direct receiver unavailable")?
-        .into_iter()
+        .iter()
         .map(|address| address.parse())
         .collect::<Result<Vec<_>, _>>()?;
     let now = chrono::Utc::now();
@@ -154,20 +155,41 @@ pub(super) async fn publish(
         .to_std()
         .context("source operation expired before transfer")?;
     let instant = tokio::time::Instant::now();
-    provider
-        .publish_with_deadlines(
+    let deadline = instant + continuation;
+    let outcome = provider
+        .publish_resume_with_deadlines(
             TransferTarget {
-                endpoint_id: admitted.receiver_endpoint_id,
+                endpoint_id: admitted.receiver_endpoint_id.clone(),
                 direct_addresses: addresses,
                 operation_id,
                 session_id: admitted.receiver_session_id,
                 manifest_blake3: verified.manifest_blake3().into(),
             },
-            grant,
+            grant.clone(),
             instant + remaining,
-            instant + continuation,
+            deadline,
         )
         .await?;
+    if outcome == PublicationOutcome::Reconcile {
+        let result = admit_before(
+            client,
+            deployment_id,
+            &body,
+            source_admitted_or_unknown,
+            deadline,
+        )
+        .await?;
+        validate_admission(
+            &result,
+            &body,
+            workspace_id,
+            project_id,
+            environment_id,
+            attempt,
+        )?;
+        validate_receiver_custody(&result, &admitted)?;
+        require_published(&result)?;
+    }
     // Keep the frozen tree and all its owner handles through actual publication.
     drop((root, frozen));
     Ok(())
@@ -179,10 +201,26 @@ async fn admit(
     body: &nrz_api::AdmitRequestBody,
     source_admitted_or_unknown: &mut bool,
 ) -> anyhow::Result<nrz_api::Admit200Response> {
-    let start = Instant::now();
+    admit_before(
+        client,
+        deployment,
+        body,
+        source_admitted_or_unknown,
+        tokio::time::Instant::now() + SOURCE_REGISTRATION_RETRY_BUDGET,
+    )
+    .await
+}
+
+async fn admit_before(
+    client: &ApiClient,
+    deployment: &str,
+    body: &nrz_api::AdmitRequestBody,
+    source_admitted_or_unknown: &mut bool,
+    deadline: tokio::time::Instant,
+) -> anyhow::Result<nrz_api::Admit200Response> {
     let mut delay = SOURCE_REGISTRATION_INITIAL_RETRY_DELAY;
     loop {
-        let remaining = SOURCE_REGISTRATION_RETRY_BUDGET.saturating_sub(start.elapsed());
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         ensure!(
             !remaining.is_zero(),
             "Source V2 admission deadline; original operation may remain pending"
@@ -266,6 +304,28 @@ fn validate_admission(
     ensure!(
         !result.receiver_session_id.is_nil() && !result.receiver_instance_id.is_nil(),
         "admission lacks receiver custody identity"
+    );
+    Ok(())
+}
+
+fn validate_receiver_custody(
+    result: &nrz_api::Admit200Response,
+    original: &nrz_api::Admit200Response,
+) -> anyhow::Result<()> {
+    ensure!(
+        result.receiver_session_id == original.receiver_session_id
+            && result.receiver_instance_id == original.receiver_instance_id
+            && result.receiver_endpoint_id == original.receiver_endpoint_id,
+        "authenticated reconciliation changed the original receiver custody"
+    );
+    Ok(())
+}
+
+fn require_published(result: &nrz_api::Admit200Response) -> anyhow::Result<()> {
+    ensure!(
+        result.state == nrz_api::Admit200ResponseState::Closed
+            && result.terminal_reason.as_deref() == Some("PUBLISHED"),
+        "Source V2 publication unresolved; original operation may remain pending"
     );
     Ok(())
 }

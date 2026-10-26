@@ -1,5 +1,5 @@
 //! Manual qualification: cargo run --release -p nrz-source-publisher --example qualify_source_transfer
-//! Measures warm local files and direct loopback only; does not qualify WAN throughput or recovery.
+//! Measures warm local files, direct loopback suffixes and interrupted stream/connection recovery.
 //! The isolated receiver exercises framing, not platform grant signatures or publication authority.
 
 use anyhow::{Context as _, ensure};
@@ -11,13 +11,13 @@ use bao_tree::{
     },
 };
 use iroh::{
-    Endpoint, EndpointAddr,
-    endpoint::{Connection, IncomingAddr, presets},
+    Endpoint,
+    endpoint::{Connection, presets},
 };
 use iroh_blobs::{Hash, get::fsm, protocol::GetRequest};
-use nrz_contract::artifact_ingress_v1::{self as wire, Open, Reply};
+use nrz_contract::artifact_ingress_v1::{self as wire, Open, Reply, Resume};
 use nrz_source_publisher::ingress_v2::{
-    FrozenBlob, TransferProvider, TransferTarget, read_frame, write_frame,
+    FrozenBlob, PublicationOutcome, TransferProvider, TransferTarget, read_frame, write_frame,
 };
 use std::{
     fs::File,
@@ -115,7 +115,7 @@ async fn session(file: &File, hash: Hash, scenario: &str) -> anyhow::Result<()> 
         .clear_ip_transports()
         .bind_addr("127.0.0.1:0")?
         .relay_mode(iroh::RelayMode::Disabled)
-        .alpns(vec![wire::ALPN.to_vec()])
+        .alpns(vec![wire::RESUME_ALPN.to_vec()])
         .bind()
         .await?;
     let provider = TransferProvider::bind([FrozenBlob {
@@ -135,14 +135,14 @@ async fn session(file: &File, hash: Hash, scenario: &str) -> anyhow::Result<()> 
         manifest_blake3: manifest.clone(),
     };
     let deadline = Instant::now() + Duration::from_secs(90);
-    let publishing = tokio::spawn(provider.publish(target, "qualification-grant".into(), deadline));
+    let publishing = tokio::spawn(provider.publish_resume_with_deadlines(
+        target,
+        "qualification-grant".into(),
+        deadline,
+        deadline,
+    ));
     let incoming = receiver.accept().await.context("incoming publisher")?;
-    let IncomingAddr::Ip(provider_address) = incoming.remote_addr() else {
-        anyhow::bail!("qualification must be direct");
-    };
-    let connection = incoming.await?;
-    let reconnect_address =
-        EndpointAddr::new(connection.remote_id()).with_ip_addr(provider_address);
+    let mut connection = incoming.await?;
     let (mut control, mut open) = connection.accept_bi().await?;
     let opening: Open = read_frame(&mut open, wire::MAX_OPEN_BYTES).await?;
     ensure!(opening.transfer_grant == "qualification-grant");
@@ -162,59 +162,57 @@ async fn session(file: &File, hash: Hash, scenario: &str) -> anyhow::Result<()> 
                 print!("iteration={iteration} ");
                 fetch(&connection, hash, 0, None).await?;
             }
-            write_frame(
-                &mut control,
-                &Reply::Published {
-                    operation_id,
-                    session_id,
-                    manifest_blake3: manifest,
-                },
-                wire::MAX_REPLY_BYTES,
-            )
-            .await?;
-            control.finish()?;
-            publishing.await??;
         }
         "range" => {
-            let result = fetch(&connection, hash, INTERRUPT_AT, None).await;
-            ensure!(
-                result.is_err(),
-                "current whole-root provider unexpectedly accepted range"
-            );
-            let result = publishing.await?;
-            let error = result
-                .err()
-                .context("range provider unexpectedly succeeded")?;
-            ensure!(
-                error.to_string() == "only one whole raw root is supported",
-                "unexpected range failure: {error:#}"
-            );
-            println!("rangeRejected={error:#}");
+            fetch(&connection, hash, INTERRUPT_AT, None).await?;
         }
-        "interrupt" => {
+        "interrupt" | "reconnect" => {
             let received = fetch(&connection, hash, 0, Some(INTERRUPT_AT)).await?;
             ensure!(received == INTERRUPT_AT);
-            let retry =
-                tokio::time::timeout(Duration::from_secs(3), fetch(&connection, hash, 0, None))
-                    .await;
-            println!("sameConnectionRetry={retry:?}");
-            ensure!(matches!(retry, Ok(Err(_))), "unexpected retry outcome");
-            let result = publishing.await?;
-            ensure!(result.is_err());
-            println!("interruptedProvider={:#}", result.unwrap_err());
-            let reconnect = tokio::time::timeout(
-                Duration::from_secs(1),
-                receiver.connect(reconnect_address, wire::ALPN),
-            )
-            .await;
-            ensure!(
-                !matches!(reconnect, Ok(Ok(_))),
-                "ephemeral operation unexpectedly reconnectable"
-            );
-            println!("reconnectAccepted=false");
+            if scenario == "reconnect" {
+                let identity = connection.remote_id();
+                connection.close(0u32.into(), b"qualification injected disconnect");
+                connection = receiver
+                    .accept()
+                    .await
+                    .context("resuming publisher")?
+                    .await?;
+                ensure!(
+                    connection.remote_id() == identity,
+                    "provider identity changed"
+                );
+                let (send, mut receive) = connection.accept_bi().await?;
+                control = send;
+                let request: Resume = read_frame(&mut receive, wire::MAX_OPEN_BYTES).await?;
+                ensure!(request.operation_id == operation_id && request.session_id == session_id);
+                write_frame(
+                    &mut control,
+                    &Reply::Accepted {
+                        operation_id,
+                        session_id,
+                    },
+                    wire::MAX_REPLY_BYTES,
+                )
+                .await?;
+            }
+            let suffix = fetch(&connection, hash, received, None).await?;
+            ensure!(received + suffix == BYTES);
+            println!("recovered=true retransmittedPrefixBytes=0");
         }
         _ => unreachable!(),
     }
+    write_frame(
+        &mut control,
+        &Reply::Published {
+            operation_id,
+            session_id,
+            manifest_blake3: manifest,
+        },
+        wire::MAX_REPLY_BYTES,
+    )
+    .await?;
+    control.finish()?;
+    ensure!(publishing.await?? == PublicationOutcome::Published);
     receiver.close().await;
     Ok(())
 }
@@ -264,7 +262,7 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     let hash = Hash::from(*expected.as_bytes());
-    for scenario in ["repeat", "range", "interrupt"] {
+    for scenario in ["repeat", "range", "interrupt", "reconnect"] {
         tokio::time::timeout(Duration::from_secs(100), session(&file, hash, scenario)).await??;
     }
     Ok(())

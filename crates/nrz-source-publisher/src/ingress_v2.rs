@@ -1,4 +1,4 @@
-//! Ephemeral provider for one frozen Source V2 operation on its original connection.
+//! Ephemeral provider for one frozen Source V2 operation and absolute lifetime.
 use anyhow::{Context as _, ensure};
 use bao_tree::{
     BaoTree, ChunkRanges,
@@ -10,15 +10,17 @@ use bao_tree::{
 use bytes::Bytes;
 use iroh::{
     Endpoint, EndpointAddr, EndpointId,
-    endpoint::{QuicTransportConfig, VarInt, presets},
+    endpoint::{Connection, ConnectionError, QuicTransportConfig, VarInt, WriteError, presets},
 };
 use iroh_blobs::protocol::{ChunkRangesSeq, Request};
-use nrz_contract::artifact_ingress_v1::{self as wire, Open, Reply};
+use nrz_contract::artifact_ingress_v1::{self as wire, Open, Reply, Resume};
 use std::{
     collections::BTreeMap,
     fs::File,
     io::{self, Seek as _, SeekFrom, Write},
     net::SocketAddr,
+    ops::{Bound, RangeBounds as _},
+    time::Duration,
 };
 use tokio::{io::AsyncReadExt as _, sync::mpsc, time::Instant};
 use uuid::Uuid;
@@ -37,6 +39,12 @@ pub struct TransferTarget {
     pub session_id: Uuid,
     pub manifest_blake3: String,
 }
+#[derive(Debug, PartialEq, Eq)]
+pub enum PublicationOutcome {
+    Published,
+    /// The exact authenticated admit body must be reconciled; never start a new operation.
+    Reconcile,
+}
 pub struct TransferProvider {
     endpoint: Endpoint,
     blobs: BTreeMap<[u8; 32], FrozenBlob>,
@@ -47,6 +55,7 @@ pub struct TransferProvider {
 pub(crate) type EncoderGate = (
     tokio::sync::oneshot::Sender<()>,
     std::sync::mpsc::Receiver<()>,
+    tokio::sync::oneshot::Sender<()>,
 );
 impl TransferProvider {
     /// Construct before API admission so its fresh peer ID is part of that input.
@@ -97,8 +106,7 @@ impl TransferProvider {
         self.publish_with_deadlines(target, grant, deadline, deadline)
             .await
     }
-    /// Initial admission stays short-lived; the same accepted operation has its
-    /// separate absolute lifetime. This never changes the transfer wire.
+    /// Legacy receivers retain the original single-connection wire and behavior.
     pub async fn publish_with_deadlines(
         self,
         target: TransferTarget,
@@ -106,41 +114,81 @@ impl TransferProvider {
         opening_deadline: Instant,
         deadline: Instant,
     ) -> anyhow::Result<()> {
+        self.run(target, grant, opening_deadline, deadline, false)
+            .await?;
+        Ok(())
+    }
+    pub async fn publish_resume_with_deadlines(
+        self,
+        target: TransferTarget,
+        grant: String,
+        opening_deadline: Instant,
+        deadline: Instant,
+    ) -> anyhow::Result<PublicationOutcome> {
+        self.run(target, grant, opening_deadline, deadline, true)
+            .await
+    }
+    async fn run(
+        self,
+        target: TransferTarget,
+        grant: String,
+        opening_deadline: Instant,
+        deadline: Instant,
+        resume: bool,
+    ) -> anyhow::Result<PublicationOutcome> {
         ensure!(
             opening_deadline <= deadline,
             "opening exceeds operation deadline"
         );
-        // The actual worker owns files and endpoint independently of its caller.
-        // Dropping the observer detaches it; its deadline still drains and joins
-        // any blocking file encoder before those owner handles can retire.
+        // The detached owner drains its encoder even when its observer is cancelled.
         tokio::spawn(async move {
             let mut producer = FileProducer::default();
             #[cfg(test)]
             {
                 producer.gate = self.encoder_gate.lock().unwrap().take();
             }
+            let mut attempted = false;
             let result = tokio::time::timeout_at(
                 deadline,
-                self.publish_inner(target, grant, opening_deadline, &mut producer),
+                self.publish_inner(
+                    target,
+                    grant,
+                    opening_deadline,
+                    deadline,
+                    resume,
+                    &mut attempted,
+                    &mut producer,
+                ),
             )
-            .await
-            .context("Source V2 transfer deadline; original operation may remain pending")
-            .and_then(|result| result);
-            // timeout cancels the QUIC writer/receiver and closes its channel,
-            // but the JoinHandle lives outside that cancellable future.
+            .await;
+            let result = match result {
+                Ok(result) => result,
+                Err(_) if resume && attempted => Ok(PublicationOutcome::Reconcile),
+                Err(error) => Err(anyhow::Error::new(error)
+                    .context("Source V2 transfer deadline; original operation may remain pending")),
+            };
             let retired = producer.retire().await;
             self.endpoint.close().await;
-            result.and(retired)
+            if let Err(error) = retired
+                && !consumer_closed(&error)
+            {
+                return Err(error);
+            }
+            result
         })
         .await?
     }
+    #[allow(clippy::too_many_arguments)]
     async fn publish_inner(
         &self,
         target: TransferTarget,
         grant: String,
         opening_deadline: Instant,
+        deadline: Instant,
+        resume: bool,
+        attempted: &mut bool,
         producer: &mut FileProducer,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<PublicationOutcome> {
         ensure!(
             !target.operation_id.is_nil() && !target.session_id.is_nil(),
             "admitted operation identity required"
@@ -151,55 +199,162 @@ impl TransferProvider {
         );
         let peer: EndpointId = target.endpoint_id.parse()?;
         let mut address = EndpointAddr::new(peer);
-        for direct in target.direct_addresses {
+        for direct in &target.direct_addresses {
             ensure!(
                 direct.port() != 0 && !direct.ip().is_unspecified() && !direct.ip().is_multicast(),
                 "invalid admitted address"
             );
-            address = address.with_ip_addr(direct);
+            address = address.with_ip_addr(*direct);
         }
-        ensure!(
-            Instant::now() < opening_deadline,
-            "source admission expired before opening"
-        );
-        let (connection, mut receive) = tokio::time::timeout_at(opening_deadline, async {
-        let connection = self.endpoint.connect(address, wire::ALPN).await?;
-        ensure!(
-            connection.remote_id() == peer,
-            "admission target peer changed"
-        );
-        let (mut send, mut receive) = connection.open_bi().await?;
         let open = Open {
             transfer_grant: grant,
         };
         ensure!(open.validate(), "bounded signed grant required");
-        write_frame(&mut send, &open, wire::MAX_OPEN_BYTES).await?;
-        send.finish()?;
-        let first: Reply = read_frame(&mut receive, wire::MAX_REPLY_BYTES).await?;
         ensure!(
-            matches!(first,Reply::Accepted {operation_id,session_id} if operation_id==target.operation_id && session_id==target.session_id),
-            "receiver did not accept exact granted session"
+            Instant::now() < opening_deadline,
+            "source admission expired before opening"
         );
-            ensure!(Instant::now() < opening_deadline, "source admission expired before Accepted");
-            Ok::<_, anyhow::Error>((connection, receive))
-        }).await.context("Source V2 opening deadline")??;
-        // Keep the framed read alive across blob requests; cancelling a partial
-        // frame read would consume its prefix and desynchronize the next read.
-        let terminal = read_frame::<Reply>(&mut receive, wire::MAX_REPLY_BYTES);
+        let mut resumable = resume;
+        let mut attaching = false;
+        let mut failures = 0u32;
+        loop {
+            let until = if attaching {
+                deadline
+            } else {
+                opening_deadline
+            };
+            let generation = async {
+                let opening = tokio::time::timeout_at(
+                    if resume {
+                        until.min(Instant::now() + Duration::from_secs(5))
+                    } else {
+                        until
+                    },
+                    async {
+                        let connection = match self
+                            .endpoint
+                            .connect(
+                                address.clone(),
+                                if resumable {
+                                    wire::RESUME_ALPN
+                                } else {
+                                    wire::ALPN
+                                },
+                            )
+                            .await
+                        {
+                            Ok(connection) => connection,
+                            Err(error) if resumable && !attaching && unsupported_alpn(&error) => {
+                                resumable = false;
+                                self.endpoint.connect(address.clone(), wire::ALPN).await?
+                            }
+                            Err(error) => return Err(error.into()),
+                        };
+                        ensure!(
+                            connection.remote_id() == peer,
+                            "admission target peer changed"
+                        );
+                        let (mut send, mut receive) = connection.open_bi().await?;
+                        *attempted = true;
+                        if attaching {
+                            write_frame(
+                                &mut send,
+                                &Resume {
+                                    operation_id: target.operation_id,
+                                    session_id: target.session_id,
+                                },
+                                wire::MAX_OPEN_BYTES,
+                            )
+                            .await?;
+                        } else {
+                            write_frame(&mut send, &open, wire::MAX_OPEN_BYTES).await?;
+                        }
+                        send.finish()?;
+                        let first: Reply = read_frame(&mut receive, wire::MAX_REPLY_BYTES).await?;
+                        ensure!(Instant::now() < until, "Source V2 opening deadline");
+                        if attaching && matches!(first, Reply::Unavailable) {
+                            connection.close(0u32.into(), b"resume unavailable");
+                            return Ok(None);
+                        }
+                        ensure!(
+                            matches!(first, Reply::Accepted {operation_id,session_id}
+                    if operation_id == target.operation_id && session_id == target.session_id),
+                            "receiver did not accept exact granted session"
+                        );
+                        Ok::<_, anyhow::Error>(Some((connection, receive)))
+                    },
+                )
+                .await?;
+                let Some((connection, mut receive)) = opening? else {
+                    return Ok(PublicationOutcome::Reconcile);
+                };
+                let result = self
+                    .serve_generation(&connection, &mut receive, &target, producer, resumable)
+                    .await;
+                connection.close(0u32.into(), b"provider generation retired");
+                result
+            }
+            .await;
+            match generation {
+                Ok(outcome) => return Ok(outcome),
+                Err(error)
+                    if resume
+                        && (retryable_connection(&error)
+                            || error.is::<tokio::time::error::Elapsed>()) =>
+                {
+                    if *attempted && !resumable {
+                        return Ok(PublicationOutcome::Reconcile);
+                    }
+                    failures += 1;
+                    if failures >= 4 {
+                        if *attempted {
+                            return Ok(PublicationOutcome::Reconcile);
+                        }
+                        return Err(error);
+                    }
+                    attaching = *attempted;
+                    tokio::time::sleep(Duration::from_millis(100u64 << (failures - 1))).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    async fn serve_generation(
+        &self,
+        connection: &Connection,
+        receive: &mut iroh::endpoint::RecvStream,
+        target: &TransferTarget,
+        producer: &mut FileProducer,
+        resumable: bool,
+    ) -> anyhow::Result<PublicationOutcome> {
+        // Keep a partial framed control read alive while serially serving blobs.
+        let terminal = read_frame::<Reply>(receive, wire::MAX_REPLY_BYTES);
         tokio::pin!(terminal);
         loop {
             tokio::select! {
-                terminal=&mut terminal=> {
-                    ensure!(matches!(terminal?,Reply::Published {operation_id,session_id,manifest_blake3} if operation_id==target.operation_id && session_id==target.session_id && manifest_blake3==target.manifest_blake3),"exact family publication not confirmed");
-                    connection.close(0u32.into(),b"publication observed");return Ok(());
+                terminal = &mut terminal => {
+                    ensure!(matches!(terminal?, Reply::Published {operation_id,session_id,manifest_blake3}
+                        if operation_id == target.operation_id && session_id == target.session_id
+                        && manifest_blake3 == target.manifest_blake3), "exact family publication not confirmed");
+                    connection.close(0u32.into(), b"publication observed");
+                    return Ok(PublicationOutcome::Published);
                 }
-                streams=connection.accept_bi()=> {
-                    let (mut writer,mut reader)=streams?;
-                    let (request,_)=Request::read_async(&mut reader).await?;
-                    let Request::Get(request)=request else {anyhow::bail!("only exact raw Get is supported");};
-                    ensure!(request.ranges==ChunkRangesSeq::from_ranges([ChunkRanges::all()]),"only one whole raw root is supported");
-                    let blob=self.blobs.get(request.hash.as_bytes()).context("requested blob is outside frozen operation")?;
-                    serve_file(blob,&mut writer,producer).await?;writer.finish()?;
+                streams = connection.accept_bi() => {
+                    let (mut writer, mut reader) = streams?;
+                    let (request, _) = Request::read_async(&mut reader).await?;
+                    let Request::Get(request) = request else { anyhow::bail!("only exact raw Get is supported"); };
+                    let blob = self.blobs.get(request.hash.as_bytes())
+                        .context("requested blob is outside frozen operation")?;
+                    let ranges = if resumable { suffix_ranges(&request.ranges, blob.bytes)? } else {
+                        ensure!(request.ranges == ChunkRangesSeq::from_ranges([ChunkRanges::all()]),
+                            "only one whole raw root is supported");
+                        ChunkRanges::all()
+                    };
+                    match serve_file(blob, ranges, &mut writer, producer).await {
+                        Ok(()) => { writer.finish()?; }
+                        Err(error) if resumable && stream_interrupted(&error) => {}
+                        Err(error) => return Err(error),
+                    }
                 }
             }
         }
@@ -210,6 +365,8 @@ struct FileProducer {
     task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
     #[cfg(test)]
     gate: Option<EncoderGate>,
+    #[cfg(test)]
+    joined: Option<tokio::sync::oneshot::Sender<()>>,
 }
 impl FileProducer {
     async fn retire(&mut self) -> anyhow::Result<()> {
@@ -218,11 +375,16 @@ impl FileProducer {
         };
         let result = task.await;
         self.task = None;
+        #[cfg(test)]
+        if let Some(joined) = self.joined.take() {
+            let _ = joined.send(());
+        }
         result?
     }
 }
 async fn serve_file(
     blob: &FrozenBlob,
+    ranges: ChunkRanges,
     writer: &mut iroh::endpoint::SendStream,
     producer: &mut FileProducer,
 ) -> anyhow::Result<()> {
@@ -235,7 +397,10 @@ async fn serve_file(
         "previous file encoder has not retired"
     );
     #[cfg(test)]
-    let gate = producer.gate.take();
+    let gate = producer.gate.take().map(|(entered, release, joined)| {
+        producer.joined = Some(joined);
+        (entered, release)
+    });
     producer.task = Some(tokio::task::spawn_blocking(
         move || -> anyhow::Result<()> {
             #[cfg(test)]
@@ -257,7 +422,7 @@ async fn serve_file(
             );
             let mut output = ChunkWriter(tx);
             output.write_all(&size.to_le_bytes())?;
-            encode_ranges_validated(&file, &outboard, &ChunkRanges::all(), output)?;
+            encode_ranges_validated(&file, &outboard, &ranges, output)?;
             Ok(())
         },
     ));
@@ -271,20 +436,81 @@ async fn serve_file(
     drop(rx);
     // Join the actual file reader even if QUIC cancellation closed its channel.
     let produced = producer.retire().await;
+    if let Err(produced_error) = produced
+        && (!consumer_closed(&produced_error) || error.is_none())
+    {
+        return Err(produced_error);
+    }
     if let Some(error) = error {
         return Err(error.into());
     }
-    produced
+    Ok(())
 }
+fn suffix_ranges(sequence: &ChunkRangesSeq, bytes: u64) -> anyhow::Result<ChunkRanges> {
+    let (root, ranges) = sequence
+        .as_single()
+        .context("only one raw root is supported")?;
+    ensure!(root == 0, "only raw root index zero is supported");
+    let mut iter = ranges.iter();
+    let range = iter.next().context("empty raw root range")?;
+    ensure!(
+        iter.next().is_none() && matches!(range.end_bound(), Bound::Unbounded),
+        "only one contiguous raw root suffix is supported"
+    );
+    let Bound::Included(start) = range.start_bound() else {
+        anyhow::bail!("invalid suffix start");
+    };
+    ensure!(
+        start.0 == 0 || start.0 < bytes.div_ceil(1024),
+        "suffix starts past frozen root"
+    );
+    Ok(ranges.clone())
+}
+#[derive(Debug, thiserror::Error)]
+#[error("provider observer closed")]
+struct ConsumerClosed;
+fn consumer_closed(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<io::Error>()
+            .and_then(|error| error.get_ref())
+            .is_some_and(|error| error.is::<ConsumerClosed>())
+    })
+}
+fn stream_interrupted(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        matches!(cause.downcast_ref::<WriteError>(),
+        Some(WriteError::Stopped(code)) if *code == VarInt::from_u32(0))
+    })
+}
+fn retryable_connection(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| matches!(cause.downcast_ref::<ConnectionError>(),
+        Some(ConnectionError::Reset | ConnectionError::TimedOut))
+        || matches!(cause.downcast_ref::<ConnectionError>(),
+            Some(ConnectionError::ApplicationClosed(close)) if close.error_code == VarInt::from_u32(0)))
+}
+fn unsupported_alpn(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut cause = Some(error);
+    while let Some(current) = cause {
+        if matches!(current.downcast_ref::<ConnectionError>(),
+            Some(ConnectionError::ConnectionClosed(close)) if u64::from(close.error_code) == 0x178)
+            || matches!(current.downcast_ref::<ConnectionError>(),
+                Some(ConnectionError::TransportError(error)) if u64::from(error.code) == 0x178)
+        {
+            return true;
+        }
+        cause = current.source();
+    }
+    false
+}
+
 struct ChunkWriter(mpsc::Sender<Bytes>);
 impl Write for ChunkWriter {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         for chunk in bytes.chunks(16 * 1024) {
             self.0
                 .blocking_send(Bytes::copy_from_slice(chunk))
-                .map_err(|_| {
-                    io::Error::new(io::ErrorKind::BrokenPipe, "provider observer closed")
-                })?;
+                .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, ConsumerClosed))?;
         }
         Ok(bytes.len())
     }
@@ -322,3 +548,7 @@ pub async fn read_frame<T: serde::de::DeserializeOwned>(
 #[cfg(test)]
 #[path = "ingress_v2_continuation_tests.rs"]
 mod continuation_tests;
+
+#[cfg(test)]
+#[path = "ingress_v2_resume_tests.rs"]
+mod resume_tests;
