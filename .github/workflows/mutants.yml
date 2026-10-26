@@ -32,6 +32,8 @@ jobs:
           fetch-depth: 0
           # Mutate the tested PR head so --in-diff refers to exact source lines.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --profile minimal --no-self-update
       - uses: moonrepo/setup-toolchain@v0.6.4
         with:
           auto-install: true

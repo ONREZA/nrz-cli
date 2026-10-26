@@ -25,6 +25,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --profile minimal --no-self-update
+
       - uses: moonrepo/setup-toolchain@v0.6.4
         with:
           auto-install: true
