@@ -2,6 +2,7 @@
 name = "nrz-source-publisher"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 license = "MIT"
 description = "Source V2 transfer provider used by nrz CLI binary builds"
 
@@ -12,8 +13,6 @@ iroh-blobs = { git = "https://github.com/ONREZA/iroh-blobs", rev = "8676c05036e7
 bao-tree = { version = "0.17", default-features = false, features = ["fs", "validate"] }
 anyhow = "1"
 bytes = "1"
-hex = "0.4"
-libc = "0.2"
 nrz-contract = { path = "../nrz-contract" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

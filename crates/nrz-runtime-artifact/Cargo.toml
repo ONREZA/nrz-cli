@@ -2,6 +2,7 @@
 name = "nrz-runtime-artifact"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 license = "MIT"
 description = "Shared runtime artifact graph identity used by nrz CLI binary builds"
 

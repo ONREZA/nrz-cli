@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v6.1.0
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           # Mutate the tested PR head so --in-diff refers to exact source lines.

@@ -6,7 +6,7 @@ import {
   releaseAssetName,
 } from "../scripts/release-assets";
 
-const ALPINE_IMAGE = "alpine:3.20";
+const ALPINE_IMAGE = "alpine:3.24.3";
 const PLATFORMS = new Set<string>(RELEASE_PLATFORMS);
 const CHANNELS = new Set(["stable", "beta"]);
 

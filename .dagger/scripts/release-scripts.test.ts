@@ -498,7 +498,7 @@ test("serialized release workflow never schedules npm on hold or builds on resum
   };
   assert.equal(workflow.jobs.prepare.if, "inputs.npm_tag_version == '' && inputs.resume_version == ''");
   const steps = workflow.jobs.publish.steps;
-  for (const name of ["Setup Node.js", "Generate npm package", "Publish npm package"]) {
+  for (const name of ["Setup Node.js", "Install npm with trusted publishing support", "Generate npm package", "Publish npm package"]) {
     assert.equal(steps.find(step => step.name === name)?.if, "inputs.publish_npm && !inputs.hold_draft");
   }
   for (const name of ["Download all artifacts", "Package release archives", "Attest release archives"]) {

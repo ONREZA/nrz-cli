@@ -2,6 +2,7 @@
 name = "nrz-source-bundle"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 license = "MIT"
 description = "Shared SOURCE_BUNDLE_V1 manifest canonicalization used by nrz CLI binary builds"
 

@@ -34,6 +34,15 @@ npm install -g @onreza/nrz
 npm install -g @onreza/nrz@beta  # prerelease channel
 ```
 
+With npm 12 or newer, allow the native binary installer explicitly:
+
+```bash
+npm install -g --allow-scripts=@onreza/nrz @onreza/nrz
+npm install -g --allow-scripts=@onreza/nrz @onreza/nrz@beta
+```
+
+This permits nrz's postinstall script to download and verify the native binary.
+
 ### From source
 ```bash
 cargo install --git https://github.com/onreza/nrz-cli

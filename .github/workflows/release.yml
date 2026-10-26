@@ -79,15 +79,16 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6.1.0
+      - uses: actions/checkout@v7.0.1
       - name: Validate release mode
         run: bash .github/scripts/validate-release-mode.sh
-      - uses: actions/setup-node@v6.5.0
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
       - name: Install npm with trusted dist-tag support
-        run: npm install --global npm@11.21.0
+        run: npm install --global npm@12.2.1
       - name: Select published version and verify channel
         run: |
           if [[ "$CHANNEL" == stable ]]; then
@@ -116,7 +117,7 @@ jobs:
       npm_dist_tag: ${{ steps.metadata.outputs.npm_dist_tag }}
       release_revision: ${{ steps.commit.outputs.release_revision }}
     steps:
-      - uses: actions/checkout@v6.1.0
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -133,9 +134,9 @@ jobs:
           git config user.email 'github-actions[bot]@users.noreply.github.com'
 
       - name: Setup Node.js for host Git metadata
-        uses: actions/setup-node@v6.5.0
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24'
+          node-version: '24.22.1'
 
       - name: Capture Git metadata from the selected checkout
         run: node .dagger/scripts/capture-git-metadata.ts
@@ -222,7 +223,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             binary: nrz.exe
     steps:
-      - uses: actions/checkout@v6.1.0
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.tag }}
 
@@ -261,7 +262,7 @@ jobs:
       RELEASE_EXPECTED_REVISION: ${{ needs.prepare.outputs.release_revision || inputs.expected_tag_revision }}
       NPM_DIST_TAG: ${{ inputs.channel == 'stable' && 'latest' || 'beta' }}
     steps:
-      - uses: actions/checkout@v6.1.0
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
@@ -324,10 +325,15 @@ jobs:
 
       - name: Setup Node.js
         if: inputs.publish_npm && !inputs.hold_draft
-        uses: actions/setup-node@v6.5.0
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24'
+          node-version: '24.22.1'
           registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Install npm with trusted publishing support
+        if: inputs.publish_npm && !inputs.hold_draft
+        run: npm install --global npm@12.2.1
 
       - name: Generate npm package
         if: inputs.publish_npm && !inputs.hold_draft

@@ -100,7 +100,7 @@ fn requirements_install_uses_managed_python_and_copy_materialization() {
             "pip",
             "install",
             "--python",
-            "3.14.8",
+            "3.14.9",
             "--managed-python",
             "--link-mode",
             "copy",
@@ -126,7 +126,7 @@ fn requirements_install_uses_managed_python_and_copy_materialization() {
         )
         .unwrap()
         .display
-        .contains("uv 0.13.4 / CPython 3.14")
+        .contains("uv 0.13.5 / CPython 3.14")
     );
 }
 
@@ -186,7 +186,7 @@ fn platform_runner_uses_the_pinned_rootfs_python() {
         ]
         .map(OsString::from)
     );
-    assert!(command.display.contains("uv 0.13.4 / CPython 3.14"));
+    assert!(command.display.contains("uv 0.13.5 / CPython 3.14"));
     assert!(!command.arguments.contains(&OsString::from("--only-binary")));
 }
 

@@ -2,6 +2,7 @@
 name = "nrz-dependency-materializer"
 version = "0.1.0"
 edition = "2024"
+rust-version.workspace = true
 license = "MIT"
 description = "Shared trusted dependency EROFS materializer used by nrz CLI binary builds"
 

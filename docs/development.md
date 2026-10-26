@@ -31,6 +31,10 @@ task graph in `moon.yml`; local hooks and CI use the same tasks. Dagger reads
 Rust/Bun image versions from `.prototools` and cargo-deny from the Moon toolchain,
 so container checks use the same pins as local development.
 
+All workspace packages require Rust 1.99 or newer. The development and release
+toolchain remains pinned to 1.99.1. Dependency ranges, reproducible tool pins and
+runtime artifact identities follow the [dependency policy](dependency-maintenance.md).
+
 Moon caches static checks by their declared inputs. Tests, duplicate detection
 and mutation testing always run: their results must not be reused from the task
 cache. Cargo build dependencies and Proto downloads remain cached. Local cache,

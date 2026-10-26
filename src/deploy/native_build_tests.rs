@@ -804,7 +804,7 @@ fn version_probes_observe_exact_toolchain_versions() {
     assert_eq!(
         compiler_version(
             NativeRecipe::DartServer,
-            "Dart SDK version: 3.13.6 (stable) on linux_x64"
+            "Dart SDK version: 3.13.7 (stable) on linux_x64"
         )
         .unwrap(),
         serde_json::from_str::<serde_json::Value>(include_str!(
@@ -829,10 +829,10 @@ fn version_probes_observe_exact_toolchain_versions() {
     assert_eq!(
         compiler_version(
             NativeRecipe::FlutterWeb,
-            r#"{"frameworkVersion":"3.47.7","channel":"stable"}"#
+            r#"{"frameworkVersion":"3.47.8","channel":"stable"}"#
         )
         .unwrap(),
-        "3.47.7"
+        "3.47.8"
     );
     assert!(compiler_version(NativeRecipe::GoServer, "not go").is_err());
 }
@@ -995,7 +995,7 @@ async fn real_go_executable_reads_artifact_assets_and_literal_argv() {
 }
 
 #[tokio::test]
-#[ignore = "requires Linux, pinned Dart 3.13.6 and a C compiler; executes the archived native bundle"]
+#[ignore = "requires Linux, pinned Dart and a C compiler; executes the archived native bundle"]
 async fn real_dart_bundle_reads_artifact_assets_and_literal_argv() {
     let project = tempfile::tempdir().unwrap();
     copy_fixture(&fixture_root().join("native-dart"), project.path());
