@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.48.6] - 2026-10-26
+
+### 🐛 Bug Fixes
+
+- **ci:** install rust before moon setup ([fbe21a0](https://github.com/ONREZA/nrz-cli/commit/fbe21a08d6d1575a11a8ff46265040302e7f8eaa))
+
+### 🔧 Changed
+
+- **deps:** refresh tools and dependencies ([9eed1df](https://github.com/ONREZA/nrz-cli/commit/9eed1df2b222d6ae9fab7ad0568961a70ac5113d))
+- **deps:** refresh transport forks ([acbdf0d](https://github.com/ONREZA/nrz-cli/commit/acbdf0d4d58579a75c773bdcbfb98306abb7a63c))
+
 ## [0.48.5] - 2026-10-26
 
 ### 🐛 Bug Fixes
