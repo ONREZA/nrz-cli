@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.48.5] - 2026-10-26
+
+### 🐛 Bug Fixes
+
+- **deploy:** pin immediate native batches ([3346882](https://github.com/ONREZA/nrz-cli/commit/334688290219f387e68ad99341a0fc854100f6e9))
+- **deploy:** retain admitted transfer lifetime ([d072c8e](https://github.com/ONREZA/nrz-cli/commit/d072c8efbbee966be69f8277a23797778f97db90))
+
 ## [0.48.4] - 2026-10-24
 
 ### 🐛 Bug Fixes
