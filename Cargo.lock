@@ -2014,7 +2014,7 @@ dependencies = [
 [[package]]
 name = "iroh-blobs"
 version = "0.103.1"
-source = "git+https://github.com/ONREZA/iroh-blobs?rev=cceaac145549701f543fefc4f02be8070ecda0d0#cceaac145549701f543fefc4f02be8070ecda0d0"
+source = "git+https://github.com/ONREZA/iroh-blobs?rev=d0393f46dd04f4fe1150b2c803912936a240a9cb#d0393f46dd04f4fe1150b2c803912936a240a9cb"
 dependencies = [
  "arrayvec",
  "bao-tree",
