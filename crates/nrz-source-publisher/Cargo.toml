@@ -6,6 +6,10 @@ rust-version.workspace = true
 license = "MIT"
 description = "Source V2 transfer provider used by nrz CLI binary builds"
 
+[[example]]
+name = "qualify_source_transfer"
+test = true
+
 [dependencies]
 tempfile = "3"
 iroh = { git = "https://github.com/ONREZA/iroh", rev = "504139691888cab2c8ff0128fbc565a262fc7018", default-features = false, features = ["tls-ring"] }
