@@ -61,6 +61,12 @@ impl ManifestMemoryPool {
         self.0.reserved.load(Ordering::Relaxed)
     }
 
+    /// Total configured capacity, unchanged by reservations on any clone.
+    #[must_use]
+    pub fn capacity_bytes(&self) -> u64 {
+        self.0.capacity
+    }
+
     /// Acquire capacity before allocating the body. Feed bounded transport chunks
     /// through `append`; the input owns both its buffer and its reservation.
     pub fn reserve_input(&self, expected_bytes: usize) -> Result<ManifestInput, AdmissionError> {
