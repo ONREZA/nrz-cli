@@ -20,32 +20,49 @@ fn limits() -> RuntimeVerificationLimits {
 #[test]
 fn runtime_working_allowance_funds_native_index_and_managed_growth_separately() {
     use std::collections::HashSet;
+    let contexts = [
+        ManagedContext::Python,
+        ManagedContext::Unlabelled,
+        ManagedContext::Conflicting,
+        ManagedContext::LinuxX64,
+        ManagedContext::LinuxArm64,
+        ManagedContext::DarwinX64,
+        ManagedContext::DarwinArm64,
+        ManagedContext::Win32X64,
+        ManagedContext::Win32Arm64,
+    ];
     for files in [1_u64, 7, 64, 257, 1025] {
         let nodes = files * 2;
         let mut profile = limits();
         profile.max_path_nodes = nodes;
+        if files == 1 {
+            profile.max_native_file_bytes = 1;
+        }
         let mut paths = HashSet::new();
         let mut directories = HashSet::new();
         let mut pending = Vec::new();
         for index in 0..files as usize {
-            paths.insert((index, false));
-            paths.insert((index, true));
-            pending.push(index);
+            for context in contexts {
+                paths.insert((index, context));
+                pending.push((index, context));
+            }
         }
         for index in 0..nodes as usize {
-            directories.insert((index, index + 1, false));
-            directories.insert((index, index + 1, true));
+            for context in contexts {
+                directories.insert((index, index + 1, context));
+            }
         }
         let hash_growth = |capacity: usize, element: usize| {
             let buckets = (capacity + 1).next_power_of_two();
             (buckets + buckets / 2) * (element + 1) + 32
         };
-        let managed = hash_growth(paths.capacity(), std::mem::size_of::<(usize, bool)>())
-            + hash_growth(
-                directories.capacity(),
-                std::mem::size_of::<(usize, usize, bool)>(),
-            )
-            + 2 * pending.capacity() * std::mem::size_of::<usize>();
+        let managed = hash_growth(
+            paths.capacity(),
+            std::mem::size_of::<(usize, ManagedContext)>(),
+        ) + hash_growth(
+            directories.capacity(),
+            std::mem::size_of::<(usize, usize, ManagedContext)>(),
+        ) + 2 * pending.capacity() * std::mem::size_of::<(usize, ManagedContext)>();
         let index =
             nrz_source_bundle::SourceArchivePathIndex::working_memory_bytes(nodes, 4096).unwrap();
         let declared = profile.working_memory_bytes(files, 4096).unwrap();
@@ -54,6 +71,7 @@ fn runtime_working_allowance_funds_native_index_and_managed_growth_separately() 
                 >= profile
                     .max_native_file_bytes
                     .min(profile.max_native_total_bytes)
+                    .max(ADDON_HEADER_BYTES as u64)
                     + profile.max_metadata_bytes
                     + index
                     + managed as u64
@@ -475,6 +493,18 @@ fn elf(executable: bool, needed: Option<&str>) -> Vec<u8> {
     bytes
 }
 
+fn macho(cpu: u32) -> Vec<u8> {
+    let mut bytes = vec![0; 128];
+    bytes[..4].copy_from_slice(&[0xcf, 0xfa, 0xed, 0xfe]);
+    bytes[4..8].copy_from_slice(&cpu.to_le_bytes());
+    bytes[12..16].copy_from_slice(&6u32.to_le_bytes());
+    bytes[16..20].copy_from_slice(&1u32.to_le_bytes());
+    bytes[20..24].copy_from_slice(&24u32.to_le_bytes());
+    bytes[32..36].copy_from_slice(&0x1bu32.to_le_bytes());
+    bytes[36..40].copy_from_slice(&24u32.to_le_bytes());
+    bytes
+}
+
 #[test]
 fn native_entries_and_transitive_providers_use_existing_closure_checks_and_layer_ownership() {
     let executable = elf(true, Some("libfixture.so"));
@@ -814,6 +844,231 @@ fn trusted_javascript_addons_keep_independent_root_and_native_platform_checks() 
         );
         assert!(
             verify_prepared_source_v2_runtime(&source, &target("node-24"), &[], limits()).is_err()
+        );
+    }
+}
+
+#[test]
+fn labelled_foreign_addons_remain_opaque_without_weakening_host_or_alias_checks() {
+    let linux = elf(false, None);
+    let mut arm = linux.clone();
+    arm[18..20].copy_from_slice(&183u16.to_le_bytes());
+    let darwin_arm = macho(0x0100_000c);
+    let darwin_x64 = macho(0x0100_0007);
+    let mut windows = vec![0; 512];
+    windows[..2].copy_from_slice(b"MZ");
+    windows[60..64].copy_from_slice(&128u32.to_le_bytes());
+    windows[128..132].copy_from_slice(b"PE\0\0");
+    windows[132..134].copy_from_slice(&0x8664u16.to_le_bytes());
+    windows[134..136].copy_from_slice(&1u16.to_le_bytes());
+    windows[148..150].copy_from_slice(&112u16.to_le_bytes());
+    windows[150..152].copy_from_slice(&0x2000u16.to_le_bytes());
+    windows[152..154].copy_from_slice(&0x20bu16.to_le_bytes());
+    let root = dependency(
+        "node_modules",
+        "node-24",
+        DependencyMaterializationKind::JavaScriptNodeModules,
+    );
+    let baseline = [
+        ("node_modules/pkg/arm64-darwin.node", darwin_arm.as_slice()),
+        ("node_modules/pkg/x64-darwin.node", darwin_x64.as_slice()),
+        ("node_modules/pkg/x64-win32.node", windows.as_slice()),
+        ("node_modules/pkg/arm64-linux.node", arm.as_slice()),
+        ("node_modules/pkg/x64-linux.node", linux.as_slice()),
+    ];
+    for (extra, payload, accepted) in [
+        ("node_modules/pkg/binding.node", linux.as_slice(), true),
+        (
+            "node_modules/pkg/binding.node",
+            darwin_arm.as_slice(),
+            false,
+        ),
+        (
+            "node_modules/pkg/x64-linux-bad.node",
+            darwin_x64.as_slice(),
+            false,
+        ),
+        (
+            "node_modules/pkg/arm64-darwin-bad.node",
+            darwin_x64.as_slice(),
+            false,
+        ),
+        ("node_modules/pkg/arm64-linux-bad.node", &arm[..20], false),
+        (
+            "node_modules/pkg/x64-win32-bad.node",
+            b"version https://git-lfs.github.com/spec/v1".as_slice(),
+            false,
+        ),
+    ] {
+        let mut files = baseline
+            .iter()
+            .map(|(path, _)| file(path, "dependency", Some("app")))
+            .collect::<Vec<_>>();
+        files.push(file(extra, "dependency", Some("app")));
+        files.push(link(
+            "node_modules/pkg/darwin-arm64.node",
+            "arm64-darwin.node",
+            "dependency",
+            Some("app"),
+        ));
+        let mut payloads = baseline.to_vec();
+        payloads.push((extra, payload));
+        let source = prepare(manifest("NODE", "node-24", files), &payloads);
+        assert_eq!(
+            verify_prepared_source_v2_runtime(&source, &target("node-24"), &[root], limits())
+                .is_ok(),
+            accepted,
+            "{extra}"
+        );
+    }
+    let source = prepare(
+        manifest(
+            "NODE",
+            "node-24",
+            vec![
+                file(
+                    "node_modules/pkg/arm64-darwin.node",
+                    "dependency",
+                    Some("app"),
+                ),
+                link(
+                    "node_modules/pkg/binding.node",
+                    "arm64-darwin.node",
+                    "dependency",
+                    Some("app"),
+                ),
+            ],
+        ),
+        &[("node_modules/pkg/arm64-darwin.node", darwin_arm.as_slice())],
+    );
+    assert!(
+        verify_prepared_source_v2_runtime(&source, &target("node-24"), &[root], limits()).is_err()
+    );
+}
+
+#[test]
+fn javascript_directory_aliases_keep_selected_platform_checks_after_prior_foreign_visits() {
+    let darwin = macho(0x0100_000c);
+    for alias in ["node_modules/pkg/linux-x64", "node_modules/pkg/unlabelled"] {
+        for chained in [false, true] {
+            let mut files = vec![
+                link(
+                    "aaa-darwin-arm64",
+                    "assets/darwin-arm64",
+                    "compute",
+                    Some("app"),
+                ),
+                file("assets/darwin-arm64/binding.node", "static", None),
+                link(alias, "../../assets/darwin-arm64", "compute", Some("app")),
+            ];
+            if chained {
+                files.push(link("assets/bridge", "darwin-arm64", "static", None));
+                files[2] = link(alias, "../../assets/bridge", "compute", Some("app"));
+            }
+            let source = prepare(
+                manifest("NODE", "node-24", files),
+                &[("assets/darwin-arm64/binding.node", darwin.as_slice())],
+            );
+            assert!(
+                verify_prepared_source_v2_runtime(&source, &target("node-24"), &[], limits())
+                    .is_err(),
+                "alias={alias} chained={chained}"
+            );
+        }
+    }
+}
+
+#[test]
+fn javascript_directory_aliases_preserve_foreign_labels_and_reject_conflicts() {
+    let darwin = macho(0x0100_000c);
+    for (alias, directory, name, accepted) in [
+        ("darwin-arm64", "assets/opaque", "binding.node", true),
+        ("unlabelled", "assets/opaque", "darwin-arm64.node", true),
+        ("linux-x64", "assets/opaque", "darwin-arm64.node", false),
+        ("darwin-arm64", "assets/linux-x64", "binding.node", false),
+        ("darwin-arm64", "assets/darwin-x64", "binding.node", false),
+    ] {
+        let payload = format!("{directory}/{name}");
+        let source = prepare(
+            manifest(
+                "NODE",
+                "node-24",
+                vec![
+                    link(alias, directory, "compute", Some("app")),
+                    file(&payload, "static", None),
+                ],
+            ),
+            &[(&payload, darwin.as_slice())],
+        );
+        assert_eq!(
+            verify_prepared_source_v2_runtime(&source, &target("node-24"), &[], limits()).is_ok(),
+            accepted,
+            "alias={alias} physical={payload}"
+        );
+    }
+    let source = prepare(
+        manifest(
+            "NODE",
+            "node-24",
+            vec![
+                link("darwin-arm64", "assets/opaque", "compute", Some("app")),
+                link("assets/opaque/bridge", "../payload", "static", None),
+                link("assets/opaque/cycle", ".", "static", None),
+                file("assets/payload/binding.node", "static", None),
+            ],
+        ),
+        &[("assets/payload/binding.node", darwin.as_slice())],
+    );
+    assert!(verify_prepared_source_v2_runtime(&source, &target("node-24"), &[], limits()).is_ok());
+}
+
+#[test]
+fn javascript_file_aliases_cannot_hide_foreign_addons_by_changing_the_extension() {
+    let darwin = macho(0x0100_000c);
+    let source = prepare(
+        manifest(
+            "NODE",
+            "node-24",
+            vec![
+                link(
+                    "binding",
+                    "assets/darwin-arm64.node",
+                    "compute",
+                    Some("app"),
+                ),
+                file("assets/darwin-arm64.node", "static", None),
+            ],
+        ),
+        &[("assets/darwin-arm64.node", darwin.as_slice())],
+    );
+    assert!(verify_prepared_source_v2_runtime(&source, &target("node-24"), &[], limits()).is_err());
+}
+
+#[test]
+fn javascript_file_aliases_keep_selected_platform_and_physical_agreement() {
+    let darwin = macho(0x0100_000c);
+    for (alias, payload, accepted) in [
+        ("darwin-arm64.node", "assets/opaque.node", true),
+        ("darwin-arm64.node", "assets/linux-x64.node", false),
+        ("darwin-arm64.node", "assets/darwin-x64.node", false),
+        ("linux-x64.node", "assets/darwin-arm64.node", false),
+        ("unlabelled.node", "assets/darwin-arm64.node", false),
+    ] {
+        let source = prepare(
+            manifest(
+                "NODE",
+                "node-24",
+                vec![
+                    link(alias, payload, "compute", Some("app")),
+                    file(payload, "static", None),
+                ],
+            ),
+            &[(payload, darwin.as_slice())],
+        );
+        assert_eq!(
+            verify_prepared_source_v2_runtime(&source, &target("node-24"), &[], limits()).is_ok(),
+            accepted,
+            "alias={alias} physical={payload}"
         );
     }
 }
