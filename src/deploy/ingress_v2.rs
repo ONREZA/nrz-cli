@@ -156,8 +156,12 @@ pub(super) async fn publish(
         .context("source operation expired before transfer")?;
     let instant = tokio::time::Instant::now();
     let deadline = instant + continuation;
+    // The detached transfer owner also owns the frozen tree through reconciliation.
+    let frozen = std::sync::Arc::new((root, frozen));
+    let client = client.clone();
+    let receiver = admitted.clone();
     let outcome = provider
-        .publish_resume_with_deadlines(
+        .publish_resume_with_reconciliation(
             TransferTarget {
                 endpoint_id: admitted.receiver_endpoint_id.clone(),
                 direct_addresses: addresses,
@@ -168,31 +172,54 @@ pub(super) async fn publish(
             grant.clone(),
             instant + remaining,
             deadline,
+            move || {
+                let (client, body, receiver, frozen) = (
+                    client.clone(),
+                    body.clone(),
+                    receiver.clone(),
+                    frozen.clone(),
+                );
+                async move {
+                    let _frozen = frozen;
+                    reconcile_before(&client, &body, &receiver, deadline).await
+                }
+            },
         )
         .await?;
-    if outcome == PublicationOutcome::Reconcile {
-        let result = admit_before(
-            client,
-            deployment_id,
-            &body,
-            source_admitted_or_unknown,
-            deadline,
-        )
-        .await?;
-        validate_admission(
-            &result,
-            &body,
-            workspace_id,
-            project_id,
-            environment_id,
-            attempt,
-        )?;
-        validate_receiver_custody(&result, &admitted)?;
-        require_published(&result)?;
-    }
-    // Keep the frozen tree and all its owner handles through actual publication.
-    drop((root, frozen));
+    ensure!(
+        outcome == PublicationOutcome::Published,
+        "Source V2 publication deadline; original operation may remain pending"
+    );
     Ok(())
+}
+
+async fn reconcile_before(
+    client: &ApiClient,
+    body: &nrz_api::AdmitRequestBody,
+    original: &nrz_api::Admit200Response,
+    deadline: tokio::time::Instant,
+) -> anyhow::Result<PublicationOutcome> {
+    let mut source_admitted_or_unknown = true;
+    let result = admit_before(
+        client,
+        &body.deployment_id.to_string(),
+        body,
+        &mut source_admitted_or_unknown,
+        deadline,
+    )
+    .await?;
+    ensure!(
+        result.operation_id == original.operation_id
+            && result.cli_idempotency_key == original.cli_idempotency_key
+            && result.input == original.input,
+        "authenticated reconciliation changed the exact source operation or scope"
+    );
+    validate_receiver_custody(&result, original)?;
+    if result.state == nrz_api::Admit200ResponseState::Active {
+        return Ok(PublicationOutcome::Reconcile);
+    }
+    require_published(&result)?;
+    Ok(PublicationOutcome::Published)
 }
 
 async fn admit(

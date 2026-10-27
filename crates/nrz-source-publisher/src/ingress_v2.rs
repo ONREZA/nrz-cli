@@ -17,9 +17,11 @@ use nrz_contract::artifact_ingress_v1::{self as wire, Open, Reply, Resume};
 use std::{
     collections::BTreeMap,
     fs::File,
+    future::Future,
     io::{self, Seek as _, SeekFrom, Write},
     net::SocketAddr,
     ops::{Bound, RangeBounds as _},
+    pin::Pin,
     time::Duration,
 };
 use tokio::{io::AsyncReadExt as _, sync::mpsc, time::Instant};
@@ -45,6 +47,10 @@ pub enum PublicationOutcome {
     /// The exact authenticated admit body must be reconciled; never start a new operation.
     Reconcile,
 }
+type Reconciliation = Box<
+    dyn FnMut() -> Pin<Box<dyn Future<Output = anyhow::Result<PublicationOutcome>> + Send>> + Send,
+>;
+
 pub struct TransferProvider {
     endpoint: Endpoint,
     blobs: BTreeMap<[u8; 32], FrozenBlob>,
@@ -114,7 +120,7 @@ impl TransferProvider {
         opening_deadline: Instant,
         deadline: Instant,
     ) -> anyhow::Result<()> {
-        self.run(target, grant, opening_deadline, deadline, false)
+        self.run(target, grant, opening_deadline, deadline, false, None)
             .await?;
         Ok(())
     }
@@ -125,8 +131,34 @@ impl TransferProvider {
         opening_deadline: Instant,
         deadline: Instant,
     ) -> anyhow::Result<PublicationOutcome> {
-        self.run(target, grant, opening_deadline, deadline, true)
+        self.run(target, grant, opening_deadline, deadline, true, None)
             .await
+    }
+    /// Reconcile ambiguous transport results without retiring the frozen producer.
+    /// `Reconcile` from the callback means the original operation is still active.
+    /// The callback retries transient observation failures within `deadline`; an
+    /// error ends publication and retires the producer.
+    pub async fn publish_resume_with_reconciliation<F, Fut>(
+        self,
+        target: TransferTarget,
+        grant: String,
+        opening_deadline: Instant,
+        deadline: Instant,
+        mut reconcile: F,
+    ) -> anyhow::Result<PublicationOutcome>
+    where
+        F: FnMut() -> Fut + Send + 'static,
+        Fut: Future<Output = anyhow::Result<PublicationOutcome>> + Send + 'static,
+    {
+        self.run(
+            target,
+            grant,
+            opening_deadline,
+            deadline,
+            true,
+            Some(Box::new(move || Box::pin(reconcile()))),
+        )
+        .await
     }
     async fn run(
         self,
@@ -135,6 +167,7 @@ impl TransferProvider {
         opening_deadline: Instant,
         deadline: Instant,
         resume: bool,
+        mut reconcile: Option<Reconciliation>,
     ) -> anyhow::Result<PublicationOutcome> {
         ensure!(
             opening_deadline <= deadline,
@@ -158,6 +191,7 @@ impl TransferProvider {
                     resume,
                     &mut attempted,
                     &mut producer,
+                    &mut reconcile,
                 ),
             )
             .await;
@@ -188,6 +222,7 @@ impl TransferProvider {
         resume: bool,
         attempted: &mut bool,
         producer: &mut FileProducer,
+        reconcile: &mut Option<Reconciliation>,
     ) -> anyhow::Result<PublicationOutcome> {
         ensure!(
             !target.operation_id.is_nil() && !target.session_id.is_nil(),
@@ -217,6 +252,7 @@ impl TransferProvider {
         let mut resumable = resume;
         let mut attaching = false;
         let mut failures = 0u32;
+        let can_reconcile = reconcile.is_some();
         loop {
             let until = if attaching {
                 deadline
@@ -272,7 +308,7 @@ impl TransferProvider {
                         send.finish()?;
                         let first: Reply = read_frame(&mut receive, wire::MAX_REPLY_BYTES).await?;
                         ensure!(Instant::now() < until, "Source V2 opening deadline");
-                        if attaching && matches!(first, Reply::Unavailable) {
+                        if (attaching || can_reconcile) && matches!(first, Reply::Unavailable) {
                             connection.close(0u32.into(), b"resume unavailable");
                             return Ok(None);
                         }
@@ -296,26 +332,39 @@ impl TransferProvider {
             }
             .await;
             match generation {
-                Ok(outcome) => return Ok(outcome),
+                Ok(PublicationOutcome::Published) => return Ok(PublicationOutcome::Published),
+                Ok(PublicationOutcome::Reconcile) => failures += 1,
                 Err(error)
                     if resume
                         && (retryable_connection(&error)
                             || error.is::<tokio::time::error::Elapsed>()) =>
                 {
-                    if *attempted && !resumable {
-                        return Ok(PublicationOutcome::Reconcile);
-                    }
                     failures += 1;
-                    if failures >= 4 {
-                        if *attempted {
-                            return Ok(PublicationOutcome::Reconcile);
-                        }
+                    if failures < 4 && (!*attempted || resumable) {
+                        attaching = *attempted;
+                        tokio::time::sleep(Duration::from_millis(100u64 << (failures - 1))).await;
+                        continue;
+                    }
+                    if !*attempted {
                         return Err(error);
                     }
-                    attaching = *attempted;
-                    tokio::time::sleep(Duration::from_millis(100u64 << (failures - 1))).await;
                 }
                 Err(error) => return Err(error),
+            }
+            let Some(reconcile) = reconcile else {
+                return Ok(PublicationOutcome::Reconcile);
+            };
+            loop {
+                if reconcile().await? == PublicationOutcome::Published {
+                    return Ok(PublicationOutcome::Published);
+                }
+                // ACTIVE is not terminal. Never renew the original transport budget.
+                if resumable && failures < 4 {
+                    attaching = true;
+                    tokio::time::sleep(Duration::from_millis(100u64 << (failures - 1))).await;
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(5)).await;
             }
         }
     }

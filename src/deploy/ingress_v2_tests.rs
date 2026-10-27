@@ -291,3 +291,60 @@ fn historical_publication_must_preserve_original_receiver_custody() {
         assert!(validate_receiver_custody(&changed, &original).is_err());
     }
 }
+
+#[tokio::test]
+async fn authenticated_active_retries_transient_observation_before_same_operation_publishes() {
+    use axum::{Json, Router, http::StatusCode, routing::post};
+    use std::sync::{Arc, Mutex};
+    let body = admission_body();
+    let original = nrz_api::Admit200Response {
+        operation_id: body.operation_id,
+        cli_idempotency_key: body.cli_idempotency_key,
+        receiver_session_id: Uuid::from_u128(1),
+        receiver_instance_id: Uuid::from_u128(2),
+        receiver_endpoint_id: "ab".repeat(32),
+        state: nrz_api::Admit200ResponseState::Active,
+        ..Default::default()
+    };
+    let mut published = original.clone();
+    published.state = nrz_api::Admit200ResponseState::Closed;
+    published.terminal_reason = Some("PUBLISHED".into());
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let replies = Arc::new(Mutex::new(
+        vec![
+            (StatusCode::OK, serde_json::to_value(&original).unwrap()),
+            (StatusCode::SERVICE_UNAVAILABLE, serde_json::json!({"code":"SERVICE_UNAVAILABLE","message":"observation unavailable","retryAfterSeconds":0})),
+            (StatusCode::OK, serde_json::to_value(&published).unwrap()),
+        ].into_iter(),
+    ));
+    let app = Router::new().route(
+        "/v1/deployments/{id}/static-source-v2/admit",
+        post({
+            let requests = requests.clone();
+            move |Json(body): Json<serde_json::Value>| {
+                requests.lock().unwrap().push(body);
+                let response = replies.lock().unwrap().next().unwrap();
+                async move { (response.0, Json(response.1)) }
+            }
+        }),
+    );
+    let (client, server) = crate::test_support::serve_api(app).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    assert_eq!(
+        reconcile_before(&client, &body, &original, deadline)
+            .await
+            .unwrap(),
+        PublicationOutcome::Reconcile
+    );
+    assert_eq!(
+        reconcile_before(&client, &body, &original, deadline)
+            .await
+            .unwrap(),
+        PublicationOutcome::Published
+    );
+    let expected = serde_json::to_value(&body).unwrap();
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(requests.iter().all(|request| request == &expected));
+    server.abort();
+}
