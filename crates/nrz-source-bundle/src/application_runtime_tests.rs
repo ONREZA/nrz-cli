@@ -65,6 +65,7 @@ fn declarations_and_intents_admit_only_compatible_runtime_targets() {
         };
         for target in [
             None,
+            Some("bun-0.8.0"),
             Some("bun-1.4.2"),
             Some("bun-2.0.0"),
             Some("node-22"),
@@ -79,7 +80,9 @@ fn declarations_and_intents_admit_only_compatible_runtime_targets() {
             Some("native-linux-aarch64-glibc"),
         ] {
             let allowed = match family {
-                ApplicationRuntimeFamily::Bun => matches!(target, None | Some("bun-1.4.2")),
+                ApplicationRuntimeFamily::Bun => {
+                    matches!(target, None | Some("bun-0.8.0" | "bun-1.4.2" | "bun-2.0.0"))
+                }
                 ApplicationRuntimeFamily::Node => {
                     matches!(target, Some("node-22" | "node-24" | "node-26"))
                 }

@@ -147,14 +147,15 @@ pub fn materialize_source_v2_runtime(
     })
 }
 
-/// Compile a CLI candidate only from the exact admitted declaration and a fixed
-/// installed profile set. This grants no publication authority: the owner must
-/// independently qualify frozen policy, bytes and dependencies before commit.
+/// Compile a CLI candidate from its exact build provenance. This grants no
+/// publication authority: the owner must independently qualify frozen policy,
+/// bytes and dependencies before commit. The legacy target list is ignored;
+/// documented runtime support is not a publication admission policy.
 pub fn materialize_candidate_source_v2_runtime(
     source: PreparedSourceV2,
     staging_parent: &Path,
     tools: &ApplicationErofsTools,
-    allowed_targets: &[String],
+    _allowed_targets: &[String],
     dependencies: &[AdmittedRuntimeDependency<'_>],
     package_limits: ApplicationMaterializationLimits,
     runtime_limits: RuntimeVerificationLimits,
@@ -174,11 +175,6 @@ pub fn materialize_candidate_source_v2_runtime(
             .ok_or(SourceV2MaterializationError::Dependency(
                 "CLI Compute declaration requires an exact candidate build target",
             ))?;
-        if !allowed_targets.iter().any(|allowed| allowed == target) {
-            return Err(SourceV2MaterializationError::Dependency(
-                "CLI candidate profile is not installed",
-            ));
-        }
         declared.push((layer.name.0.clone(), target.to_owned()));
     }
     let targets: Vec<_> = declared

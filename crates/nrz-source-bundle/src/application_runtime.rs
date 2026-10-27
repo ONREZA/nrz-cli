@@ -11,15 +11,13 @@ mod tests;
 
 pub const APPLICATION_RUNTIME_CONFIG_KEY: &str = "applicationRuntime";
 
-/// Newly built Bun declarations use the supported major; retained execution
-/// compatibility has its own publication-owned contract.
+/// Validate Bun build provenance syntax without imposing a support policy.
 pub fn supported_bun_build_target(target: &str) -> bool {
     let Some(version) = target.strip_prefix("bun-") else {
         return false;
     };
     let parts = version.split('.').collect::<Vec<_>>();
     parts.len() == 3
-        && parts[0] == "1"
         && parts.iter().all(|part| {
             !part.is_empty()
                 && part.bytes().all(|byte| byte.is_ascii_digit())

@@ -49,14 +49,13 @@ fn python_identities_match_the_generated_catalog_and_retain_exact_patch_pins() {
 }
 
 #[test]
-fn new_bun_build_declarations_admit_only_canonical_major_one_targets() {
+fn bun_build_declarations_admit_canonical_versions_without_a_support_policy() {
     let declaration: ApplicationRuntimeDeclaration =
         serde_json::from_value(json!({"family":"BUN","args":[]})).unwrap();
-    for target in ["bun-1.4.2", "bun-1.0.0"] {
+    for target in ["bun-0.8.0", "bun-1.4.2", "bun-1.0.0", "bun-2.0.0"] {
         declaration.validate_target(Some(target)).unwrap();
     }
     for target in [
-        "bun-2.0.0",
         "bun-1",
         "bun-1.x.2",
         "bun-01.4.2",

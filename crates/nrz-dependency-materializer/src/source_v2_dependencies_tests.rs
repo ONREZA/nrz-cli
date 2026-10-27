@@ -33,6 +33,15 @@ fn fixture(roots: &[&str], cross_link: bool) -> Fixture {
     fixture_entries(roots, cross_link, false)
 }
 fn fixture_entries(roots: &[&str], cross_link: bool, nested: bool) -> Fixture {
+    fixture_runtime_entries(roots, cross_link, nested, "NODE", "node-24")
+}
+fn fixture_runtime_entries(
+    roots: &[&str],
+    cross_link: bool,
+    nested: bool,
+    family: &str,
+    target: &str,
+) -> Fixture {
     let input = tempfile::tempdir().unwrap();
     let snapshot = tempfile::tempdir().unwrap();
     fs::write(input.path().join("file"), b"abc").unwrap();
@@ -73,7 +82,7 @@ fn fixture_entries(roots: &[&str], cross_link: bool, nested: bool) -> Fixture {
     };
     let bytes = encode_source_bundle_v2_manifest(json!({"schemaVersion":"SOURCE_BUNDLE_V2.0","capabilities":["COMPUTE_NETWORK_V1"],
         "files":files,"layers":[{"name":"app","target":"COMPUTE","entrypoint":"file","runtimeConfig":{
-            "applicationRuntime":{"family":"NODE","args":[]},"buildRuntimeVersion":"node-24","network":nrz_source_bundle::ComputeNetwork::public_default()}}],
+            "applicationRuntime":{"family":family,"args":[]},"buildRuntimeVersion":target,"network":nrz_source_bundle::ComputeNetwork::public_default()}}],
         "routes":[{"pattern":"/","layerName":"app"}],"entrypoints":["file"]}),budget).unwrap();
     let pool = ManifestMemoryPool::new(8 * 1024 * 1024);
     let mut admitted = pool.reserve_input(bytes.len()).unwrap();
@@ -682,6 +691,48 @@ fn app_limits() -> ApplicationMaterializationLimits {
         max_staging_nodes: 100,
         max_path_bytes: 4096,
         max_verification_memory_bytes: 1024 * 1024,
+    }
+}
+
+#[test]
+fn cli_candidates_materialize_bun_provenance_without_a_candidate_allowlist() {
+    for target in ["bun-0.8.0", "bun-1.4.2", "bun-2.0.0"] {
+        for legacy_targets in [Vec::new(), vec!["bun-1.4.4".to_owned()]] {
+            let mut fixture = fixture_runtime_entries(&[], false, false, "BUN", target);
+            let stage = tempfile::tempdir().unwrap();
+            let tools_root = tempfile::tempdir().unwrap();
+            let (tools, calls) = app_tools(
+                tools_root.path(),
+                false,
+                Retained::default(),
+                Arc::new(AtomicUsize::new(0)),
+            );
+            let runtime =
+                crate::source_v2_materialization::materialize_candidate_source_v2_runtime(
+                    fixture.source.take().unwrap(),
+                    stage.path(),
+                    &tools,
+                    &legacy_targets,
+                    &[],
+                    app_limits(),
+                    runtime_limits(),
+                )
+                .unwrap();
+            assert_eq!(calls.load(Ordering::Relaxed), 2);
+            let layer = &runtime.graph().wire().layers[0];
+            let nrz_contract::runtime_artifact_graph_v3::Layer::Compute {
+                launch,
+                build_runtime_target,
+                ..
+            } = layer
+            else {
+                panic!("compute candidate required")
+            };
+            assert_eq!(launch.profile, nrz_runtime_artifact::RuntimeProfile::Bun);
+            assert_eq!(build_runtime_target, target);
+            drop(runtime);
+            assert_eq!(fixture.pool.reserved_bytes(), 0);
+        }
     }
 }
 
