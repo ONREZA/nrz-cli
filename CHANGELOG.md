@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.49.1] - 2026-10-27
+
+### 🐛 Bug Fixes
+
+- **deploy:** retain source during reconciliation ([4ce3ce0](https://github.com/ONREZA/nrz-cli/commit/4ce3ce0be4db9cdd6f9ff392cb044a53d91a0e49))
+- **deploy:** admit bun build provenance ([4281327](https://github.com/ONREZA/nrz-cli/commit/4281327d5ccd019a647c9caf677235d093ab136d))
+- **deploy:** expose manifest pool capacity ([8356319](https://github.com/ONREZA/nrz-cli/commit/8356319e9aa8404edc1a178594e8587b22de5e67))
+- **deploy:** validate foreign addon aliases ([f21663c](https://github.com/ONREZA/nrz-cli/commit/f21663cc952a0f2e1ede2915884cc73d1b6abf30))
+
 ## [0.49.0] - 2026-10-26
 
 ### ✨ Features
