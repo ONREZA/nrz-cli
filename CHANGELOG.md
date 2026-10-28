@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.49.2] - 2026-10-28
+
+### 📚 Documentation
+
+- **release:** reset unpublished changelog ([6725453](https://github.com/ONREZA/nrz-cli/commit/6725453707a88760c4284a3eb12ff1950dc39eed))
+
+### 🐛 Bug Fixes
+
+- **deploy:** probe available python directly ([41c31a9](https://github.com/ONREZA/nrz-cli/commit/41c31a91a607849f52b8c8324953ddebcc162ff7))
+- **deploy:** use available runtime compilers ([ebe25e3](https://github.com/ONREZA/nrz-cli/commit/ebe25e3683a034dde26483e3b5868ef5662e7c87))
+- **deploy:** preserve dependency ownership ([cc727f7](https://github.com/ONREZA/nrz-cli/commit/cc727f7b1114851dfcbc0f31e5d9e1e19a5bee21))
+- **deploy:** preserve runtime declarations ([f7673e0](https://github.com/ONREZA/nrz-cli/commit/f7673e09de8ab66549306a802e6a944f7bfe797d))
+
+### ✅ Testing
+
+- **deploy:** align compiler probe contracts ([4a2536a](https://github.com/ONREZA/nrz-cli/commit/4a2536aab7c424d062324efe117e8bd61807cc74))
+
+### ✨ Features
+
+- **cli:** advertise raw runtime declarations ([e2ffeca](https://github.com/ONREZA/nrz-cli/commit/e2ffeca9e01dcfd1881201d08d66f2aa27d01c60))
+
+### ⚡ Performance
+
+- **deploy:** skip producer file syncs ([bd3f445](https://github.com/ONREZA/nrz-cli/commit/bd3f44597894cc023536516c8f322472967df71f))
+
 ## [0.49.1] - 2026-10-27
 
 ### 🐛 Bug Fixes
