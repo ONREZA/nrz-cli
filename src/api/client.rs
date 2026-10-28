@@ -185,7 +185,11 @@ fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     raw.trim().parse::<u64>().ok().map(Duration::from_secs)
 }
 
-pub(super) fn build_api_http_client(headers: HeaderMap) -> anyhow::Result<reqwest::Client> {
+pub(super) fn build_api_http_client(mut headers: HeaderMap) -> anyhow::Result<reqwest::Client> {
+    headers.insert(
+        "X-Nrz-Runtime-Declarations",
+        HeaderValue::from_static("raw-v1"),
+    );
     reqwest::Client::builder()
         .default_headers(headers)
         .redirect(reqwest::redirect::Policy::none())

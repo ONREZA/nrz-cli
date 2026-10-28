@@ -8,7 +8,13 @@ use super::client::{build_api_http_client, extract_api_error};
 #[tokio::test]
 async fn api_client_does_not_follow_redirects() {
     let app = Router::new()
-        .route("/start", get(|| async { Redirect::temporary("/target") }))
+        .route(
+            "/start",
+            get(|headers: HeaderMap| async move {
+                assert_eq!(headers["x-nrz-runtime-declarations"], "raw-v1");
+                Redirect::temporary("/target")
+            }),
+        )
         .route("/target", get(|| async { "unexpected" }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -99,6 +105,7 @@ async fn generated_user_operation_checks_the_response_contract() {
             let response = response.clone();
             async move {
                 assert_eq!(headers["x-api-key"], "test-key");
+                assert_eq!(headers["x-nrz-runtime-declarations"], "raw-v1");
                 axum::Json(response)
             }
         }),
