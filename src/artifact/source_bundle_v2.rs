@@ -1,4 +1,4 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
 
@@ -168,7 +168,6 @@ pub(crate) fn freeze_source_bundle(
             .any(|file| matches!(file, wire::FileEntry::File { .. })),
         "SOURCE_BUNDLE_V2 output must contain a regular file"
     );
-    sync_tree_directories(destination)?;
     Ok((bytes, verified))
 }
 
@@ -211,7 +210,6 @@ fn copy_file(
         "Source V2 file changed during freeze: {}",
         source.display()
     );
-    output.sync_all()?;
     Ok(blake3.finalize().to_hex().to_string())
 }
 
@@ -223,20 +221,6 @@ fn create_symlink(target: &str, destination: &Path) -> anyhow::Result<()> {
 #[cfg(not(unix))]
 fn create_symlink(_target: &str, _destination: &Path) -> anyhow::Result<()> {
     anyhow::bail!("Source V2 symlink producer requires a Unix host")
-}
-
-fn sync_tree_directories(root: &Path) -> anyhow::Result<()> {
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        for entry in fs::read_dir(&directory)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                pending.push(entry.path());
-            }
-        }
-        File::open(directory)?.sync_all()?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
