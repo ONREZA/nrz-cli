@@ -2714,5 +2714,5 @@ async fn standalone_authored_compute_binds_declared_node_without_fabricating_bui
         runtime.application_runtime.as_ref().unwrap().args,
         ["literal argument"]
     );
-    assert!(runtime.build_runtime_version.is_none());
+    assert_eq!(runtime.build_runtime_version.as_deref(), Some("node"));
 }

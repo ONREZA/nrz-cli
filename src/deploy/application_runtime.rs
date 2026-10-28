@@ -414,7 +414,10 @@ pub(crate) async fn validate_application_runtime_before_build(
             python_interpreter: None,
         }
     };
-    if platform_runner && context.build_toolchain.family == BuildToolchainFamily::Python {
+    if platform_runner
+        && execute_tools
+        && context.build_toolchain.family == BuildToolchainFamily::Python
+    {
         let admitted = resolved
             .context
             .build_toolchain
@@ -446,7 +449,7 @@ pub(crate) async fn validate_application_runtime_before_build(
     }
     let mut measured_bun = None;
     let mut measured_node = None;
-    if platform_runner || execute_tools {
+    if execute_tools {
         let compiler_target = if platform_runner {
             Some(
                 std::env::var("ONREZA_BUILD_RUNTIME_VERSION")

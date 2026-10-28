@@ -336,7 +336,13 @@ async fn platform_retained_output_preserves_claims_after_policy_successor_admiss
                 .unwrap()
                 .build_runtime_version
                 .as_deref(),
-            Some(old_target)
+            Some(if retained_claim {
+                old_target
+            } else if family == "NODE" {
+                "node"
+            } else {
+                "python"
+            })
         );
         assert_eq!(effective.requested_source_build_context(), Some(&original));
         assert_eq!(effective.requested_node_version(), Some("NODE_24"));

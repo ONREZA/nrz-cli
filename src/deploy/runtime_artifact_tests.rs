@@ -74,7 +74,7 @@ fn sole_compute_runtime_selection_ignores_static_layer_position() {
             .unwrap()
             .unwrap();
             if family == "NODE" {
-                assert_eq!(target, "node-24");
+                assert_eq!(target, "node");
             } else {
                 assert!(target.starts_with("bun-"), "{target}");
             }
@@ -159,12 +159,16 @@ fn static_assets_do_not_supply_targets_to_multiple_compute_owners() {
             "name": "python", "target": "COMPUTE", "directory": "python", "entry": "server.py",
             "runtime": {"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime": {"family": "PYTHON", "args": []}, "buildRuntimeVersion": "python-3.12"}
         })).unwrap());
-        let before = serde_json::to_value(&manifest).unwrap();
-        assert!(
-            apply_application_runtime_manifest(&mut manifest, None, Some("node-24"), "other")
-                .is_err()
-        );
-        assert_eq!(serde_json::to_value(&manifest).unwrap(), before);
+        let mut expected = serde_json::to_value(&manifest).unwrap();
+        let server = expected["layers"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|layer| layer["name"] == "server")
+            .unwrap();
+        server["runtime"]["buildRuntimeVersion"] = "node".into();
+        apply_application_runtime_manifest(&mut manifest, None, Some("node-24"), "other").unwrap();
+        assert_eq!(serde_json::to_value(&manifest).unwrap(), expected);
 
         manifest
             .layers
@@ -268,7 +272,7 @@ fn identified_primary_launch_arguments_cannot_override_the_declaration() {
 }
 
 #[test]
-fn typed_same_family_sibling_launch_requires_its_own_target() {
+fn typed_same_family_sibling_launch_gets_its_own_generic_target() {
     let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
         family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
         python_version: None,
@@ -283,17 +287,11 @@ fn typed_same_family_sibling_launch_requires_its_own_target() {
         }))
         .unwrap(),
     );
-    let before = serde_json::to_value(&manifest).unwrap();
-    assert!(
-        apply_application_runtime_manifest(
-            &mut manifest,
-            Some(&declaration),
-            Some("node-24"),
-            "other"
-        )
-        .is_err()
-    );
-    assert_eq!(serde_json::to_value(manifest).unwrap(), before);
+    let mut expected = serde_json::to_value(&manifest).unwrap();
+    expected["layers"][2]["runtime"]["buildRuntimeVersion"] = "node".into();
+    apply_application_runtime_manifest(&mut manifest, Some(&declaration), Some("node-24"), "other")
+        .unwrap();
+    assert_eq!(serde_json::to_value(manifest).unwrap(), expected);
 }
 
 #[test]
@@ -336,7 +334,6 @@ fn a_primary_in_a_subdirectory_must_match_its_declared_launch() {
 
 #[test]
 fn identical_intent_typed_siblings_cannot_inherit_the_primary_target() {
-    let mut accepted = Vec::new();
     for primary_entry in [Some("server.js"), None] {
         let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
             family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
@@ -352,19 +349,16 @@ fn identical_intent_typed_siblings_cannot_inherit_the_primary_target() {
             }))
             .unwrap(),
         );
-        let before = serde_json::to_value(&manifest).unwrap();
-        if apply_application_runtime_manifest(
+        let mut expected = serde_json::to_value(&manifest).unwrap();
+        expected["layers"][2]["runtime"]["buildRuntimeVersion"] = "node".into();
+        apply_application_runtime_manifest(
             &mut manifest,
             Some(&declaration),
             Some("node-24"),
             "other",
         )
-        .is_ok()
-        {
-            accepted.push(primary_entry);
-        } else {
-            assert_eq!(serde_json::to_value(&manifest).unwrap(), before);
-        }
+        .unwrap();
+        assert_eq!(serde_json::to_value(&manifest).unwrap(), expected);
         manifest
             .layers
             .iter_mut()
@@ -384,10 +378,6 @@ fn identical_intent_typed_siblings_cannot_inherit_the_primary_target() {
         .unwrap();
         assert_eq!(serde_json::to_value(manifest).unwrap(), before);
     }
-    assert!(
-        accepted.is_empty(),
-        "typed siblings without targets were accepted with primary entry {accepted:?}"
-    );
 }
 
 #[test]
@@ -473,7 +463,7 @@ fn untyped_javascript_siblings_keep_the_legacy_shared_target_default() {
 }
 
 #[test]
-fn selected_javascript_primary_rejects_admitted_target_mismatch_with_either_layout() {
+fn selected_javascript_primary_distinguishes_metadata_from_trusted_build_targets() {
     let declaration = nrz_source_bundle::ApplicationRuntimeDeclaration {
         family: nrz_source_bundle::ApplicationRuntimeFamily::Node,
         python_version: None,
@@ -505,7 +495,26 @@ fn selected_javascript_primary_rejects_admitted_target_mismatch_with_either_layo
             let selected = crate::deploy::canonical_build_runtime_target(
                 &runtime,
                 false,
-                Some("bun-1.4.2"),
+                None,
+                Some(&manifest),
+                Some(&declaration),
+                Some("NODE_24"),
+                true,
+            )
+            .unwrap();
+            assert_eq!(selected.as_deref(), Some("node-22"));
+            apply_application_runtime_manifest(
+                &mut manifest,
+                Some(&declaration),
+                selected.as_deref(),
+                "other",
+            )
+            .unwrap();
+            assert_eq!(serde_json::to_value(&manifest).unwrap(), before);
+            let selected = crate::deploy::canonical_build_runtime_target(
+                &runtime,
+                false,
+                Some("node-24"),
                 Some(&manifest),
                 Some(&declaration),
                 Some("NODE_24"),
@@ -528,7 +537,7 @@ fn selected_javascript_primary_rejects_admitted_target_mismatch_with_either_layo
 }
 
 #[tokio::test]
-async fn selected_node_primary_build_rejects_conflicting_authored_target() {
+async fn selected_node_primary_without_rebuild_keeps_authored_target() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::write(directory.path().join("index.html"), "<html></html>").unwrap();
     std::fs::write(directory.path().join("server.js"), "console.log('hello')").unwrap();
@@ -564,33 +573,12 @@ async fn selected_node_primary_build_rejects_conflicting_authored_target() {
         config,
     );
     effective.bind_admitted_node_version("NODE_24").unwrap();
-    let error = crate::build::run_with_effective_config(
-        crate::cli::BuildArgs {
-            dir: directory.path().to_string_lossy().into_owned(),
-            skip_validation: false,
-        },
-        true,
-        &effective,
-        Some(&detection),
-        false,
-        directory.path(),
-        None,
-    )
-    .await
-    .unwrap_err();
+    let result = inspect_build_output(directory.path(), &effective, &detection)
+        .await
+        .unwrap();
     assert_eq!(
-        error
-            .downcast_ref::<crate::output::CodedError>()
-            .unwrap()
-            .code
-            .as_str(),
-        "APPLICATION_RUNTIME_INVALID"
-    );
-    assert!(
-        error
-            .to_string()
-            .contains("runtime version differs from validated pre-build runtime"),
-        "{error:#}"
+        serde_json::to_value(result.manifest.unwrap()).unwrap(),
+        serde_json::to_value(manifest).unwrap()
     );
 }
 
@@ -610,24 +598,14 @@ fn unknown_primary_identity_does_not_supply_a_typed_sibling_target() {
         ]
     }))
     .unwrap();
-    assert!(
-        apply_application_runtime_manifest(
-            &mut manifest,
-            Some(&declaration),
-            Some("node-24"),
-            "other"
-        )
-        .is_err(),
-        "ambiguous typed api owner inherited the parent's target"
-    );
-    assert!(
-        manifest.layers[1]
-            .runtime
-            .as_ref()
-            .unwrap()
-            .build_runtime_version
-            .is_none()
-    );
+    let mut expected = serde_json::to_value(&manifest).unwrap();
+    expected["layers"][0]["runtime"]["applicationRuntime"] =
+        serde_json::to_value(declaration.intent()).unwrap();
+    expected["layers"][0]["runtime"]["buildRuntimeVersion"] = "node-24".into();
+    expected["layers"][1]["runtime"]["buildRuntimeVersion"] = "node".into();
+    apply_application_runtime_manifest(&mut manifest, Some(&declaration), Some("node-24"), "other")
+        .unwrap();
+    assert_eq!(serde_json::to_value(manifest).unwrap(), expected);
 }
 
 #[test]
@@ -839,19 +817,7 @@ async fn build_binds_only_the_selected_entry_in_the_output_coordinate_frame() {
             config,
         );
         effective.bind_admitted_node_version("NODE_24").unwrap();
-        let result = crate::build::run_with_effective_config(
-            crate::cli::BuildArgs {
-                dir: directory.path().to_string_lossy().into_owned(),
-                skip_validation: false,
-            },
-            true,
-            &effective,
-            Some(&detection),
-            false,
-            directory.path(),
-            None,
-        )
-        .await;
+        let result = inspect_build_output(directory.path(), &effective, &detection).await;
         assert_eq!(
             result.is_ok(),
             accepted,
@@ -893,20 +859,9 @@ async fn inferred_source_entry_uses_process_output_mapping_before_manifest_bindi
     let mut effective =
         nrz::config::EffectiveProjectConfig::from_project_config(project.path().to_owned(), config);
     effective.bind_admitted_node_version("NODE_24").unwrap();
-    let result = crate::build::run_with_effective_config(
-        crate::cli::BuildArgs {
-            dir: project.path().to_string_lossy().into_owned(),
-            skip_validation: false,
-        },
-        true,
-        &effective,
-        Some(&detection),
-        false,
-        project.path(),
-        None,
-    )
-    .await
-    .unwrap();
+    let result = inspect_build_output(project.path(), &effective, &detection)
+        .await
+        .unwrap();
     assert_eq!(
         result.manifest.unwrap().layers[0].entry.as_deref(),
         Some("server.js")
@@ -1085,4 +1040,24 @@ fn code_only_typed_siblings_keep_family_only_build_facts() {
             .as_deref(),
         Some("python")
     );
+}
+
+async fn inspect_build_output(
+    directory: &std::path::Path,
+    effective: &nrz::config::EffectiveProjectConfig,
+    detection: &crate::detect::types::DetectionResult,
+) -> anyhow::Result<crate::build::BuildResult> {
+    crate::build::run_with_effective_config(
+        crate::cli::BuildArgs {
+            dir: directory.to_string_lossy().into_owned(),
+            skip_validation: false,
+        },
+        true,
+        effective,
+        Some(detection),
+        false,
+        directory,
+        None,
+    )
+    .await
 }

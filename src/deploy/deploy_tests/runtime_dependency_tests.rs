@@ -191,7 +191,9 @@ async fn relocated_python_dependencies_keep_frozen_primary_owner() {
     ] {
         for sibling_target in ["python-3.14", "python-3.12"] {
             for reverse_order in [false, true] {
-                for output_prefix in ["dist", "."] {
+                for (configured_output_entry, output_prefix) in
+                    [(false, "dist"), (false, "."), (true, "dist")]
+                {
                     for scope in ["scoped", "equal", "primary-root", "sibling-root"] {
                         let project = tempdir().unwrap();
                         let output_dir = project.path().join(output_prefix);
@@ -233,7 +235,11 @@ async fn relocated_python_dependencies_keep_frozen_primary_owner() {
                             application_runtime: Some(ApplicationRuntimeDeclaration {
                                 family: ApplicationRuntimeFamily::Python,
                                 python_version: Some(minor.version()),
-                                entry: Some(api_entry.clone()),
+                                entry: Some(if configured_output_entry {
+                                    "api/main.py".into()
+                                } else {
+                                    api_entry.clone()
+                                }),
                                 args: vec![],
                             }),
                         });
@@ -247,15 +253,26 @@ async fn relocated_python_dependencies_keep_frozen_primary_owner() {
                         if reverse_order {
                             manifest.layers.swap(0, 1);
                         }
-                        let artifact = resolve_runtime_artifact(
+                        let artifact = super::super::runtime_packaging::resolve_runtime_artifact_with_manifest_source(
                             project.path(),
                             project.path(),
                             output_dir,
                             manifest,
                             &detection,
                             true,
+                            super::super::runtime_packaging::RuntimeArtifactManifestContext {
+                                source: crate::artifact::BuildManifestSource::File,
+                                configured_output_entry,
+                            },
                         )
                         .unwrap();
+                        assert_eq!(
+                            super::super::runtime_packaging::artifact_python_runtime_minor(
+                                &artifact
+                            )
+                            .unwrap(),
+                            Some(minor),
+                        );
                         let files =
                             scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
                         let source = source_bundle_v1::build_source_bundle_plan_with_scan(
@@ -431,6 +448,79 @@ fn relocated_python_dependencies_refuse_ambiguous_or_incompatible_primary() {
             }
         }
     }
+}
+
+#[test]
+fn configured_python_entry_keeps_its_output_scope_when_prefixes_collide() {
+    let project = tempdir().unwrap();
+    for (root, file) in [
+        ("dist", "main.py"),
+        ("dist/dist", "main.py"),
+        (".onreza/python/3.14/site-packages", "demo.py"),
+        (".onreza/python/3.12/site-packages", "stale.py"),
+    ] {
+        fs::create_dir_all(project.path().join(root)).unwrap();
+        fs::write(project.path().join(root).join(file), "VALUE=42").unwrap();
+    }
+    let mut detection = make_detection("other", None);
+    detection.metadata.source_build_context = Some(serde_json::from_value(serde_json::json!({
+        "schemaVersion":1,"buildToolchain":{"family":"PYTHON","pythonVersion":"4.x"},
+        "applicationRuntime":{"family":"PYTHON","pythonVersion":"2.7","entry":"dist/main.py","args":[]}
+    })).unwrap());
+    let mut manifest: build_manifest::Manifest = serde_json::from_value(serde_json::json!({
+        "version":2,"routes":[{"pattern":"^/.*$","layer":"primary"}],"layers":[
+            {"name":"primary","target":"COMPUTE","directory":"dist","entry":"main.py",
+             "runtime":{"network":nrz_source_bundle::ComputeNetwork::public_default(),
+                "applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}},
+            {"name":"sibling","target":"COMPUTE","directory":".","entry":"main.py",
+             "runtime":{"network":nrz_source_bundle::ComputeNetwork::public_default(),
+                "applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.12"}}
+        ]
+    })).unwrap();
+    manifest.layers[1]
+        .runtime
+        .as_mut()
+        .unwrap()
+        .network
+        .as_mut()
+        .unwrap()
+        .exposure = "PRIVATE".into();
+    let artifact = super::super::runtime_packaging::resolve_runtime_artifact_with_manifest_source(
+        project.path(),
+        project.path(),
+        project.path().join("dist"),
+        manifest,
+        &detection,
+        true,
+        super::super::runtime_packaging::RuntimeArtifactManifestContext {
+            source: crate::artifact::BuildManifestSource::File,
+            configured_output_entry: true,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        super::super::runtime_packaging::artifact_python_runtime_minor(&artifact).unwrap(),
+        Some(nrz_source_bundle::PythonMinor::Python314),
+    );
+    let files = scan_runtime_artifact(&artifact.root_dir, &artifact.scan).unwrap();
+    assert!(
+        files
+            .iter()
+            .any(|file| file.path.ends_with("site-packages/demo.py"))
+    );
+    assert!(
+        files
+            .iter()
+            .all(|file| !file.path.ends_with("site-packages/stale.py"))
+    );
+    assert_eq!(
+        artifact
+            .scan
+            .source_layer_match(&artifact.manifest, ".onreza/python/3.14/site-packages")
+            .unwrap()
+            .name,
+        "primary",
+    );
 }
 
 #[tokio::test]

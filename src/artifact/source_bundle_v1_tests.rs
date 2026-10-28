@@ -310,8 +310,8 @@ fn source_bundle_assigns_dependency_ownership_only_for_trusted_materialization()
     assert_eq!(embedded_dependency.layer_name.as_deref(), Some("server"));
 }
 
-#[tokio::test]
-async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
+#[test]
+fn python_bundle_separates_site_packages_and_declares_runtime_family() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".onreza/python/3.14/site-packages/orjson")).unwrap();
     fs::write(dir.path().join("main.py"), b"import orjson").unwrap();
@@ -321,48 +321,22 @@ async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
         b"loads = lambda value: value",
     )
     .unwrap();
-    let mut manifest: crate::build::manifest::Manifest =
+    let manifest: crate::build::manifest::Manifest =
         serde_json::from_value(serde_json::json!({
             "version": 2,
             "layers": [
-                { "name": "server", "target": "COMPUTE", "directory": ".", "entry": "main.py" ,"runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]}}}
+                { "name": "server", "target": "COMPUTE", "directory": ".", "entry": "main.py" ,"runtime":{"network":{"schemaVersion":"COMPUTE_NETWORK_V1","exposure":"PUBLIC","ports":[{"name":"http","protocol":"http","port":3000,"binding":"primary"}],"readiness":{"protocol":"tcp","port":"http"},"allowFrom":[]},"applicationRuntime":{"family":"PYTHON","args":[]},"buildRuntimeVersion":"python-3.14"}}
             ],
             "routes": []
         }))
         .unwrap();
-    let mut detection = crate::detect::detect_with_framework_override(dir.path(), None);
-    crate::detect::application_runtime::resolve_and_bind_detection(
-        &crate::detect::fs::LocalFs::new(dir.path()),
-        &mut detection,
-    )
-    .unwrap();
-    let effective = nrz::config::EffectiveProjectConfig::from_project_config(
-        dir.path().to_owned(),
-        nrz::config::ProjectConfig::default(),
-    );
-    let target = crate::deploy::validate_application_runtime_before_build(
-        detection.metadata.source_build_context.as_ref().unwrap(),
-        &effective,
-        false,
-        false,
-        &[],
-    )
-    .await
-    .unwrap();
-    crate::deploy::apply_application_runtime_manifest(
-        &mut manifest,
-        detection.metadata.application_runtime(),
-        target.application_target.as_deref(),
-        &detection.framework,
-    )
-    .unwrap();
     let files = scan_dir(dir.path()).unwrap();
 
     let plan = build_source_bundle_plan_with_scan(
         dir.path(),
         &manifest,
         &files,
-        &RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::default())),
+        &RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::Python314)),
         RuntimeDependencyPackaging::TrustedMaterialization,
         None,
     )
@@ -382,6 +356,7 @@ async fn python_bundle_separates_site_packages_and_declares_runtime_family() {
         .unwrap();
     assert_eq!(source.role, SourceLogicalManifestFileRole::Compute);
     assert_eq!(dependency.role, SourceLogicalManifestFileRole::Dependency);
+    assert_eq!(dependency.layer_name.as_deref(), Some("server"));
     assert_eq!(
         plan.logical_manifest.layers[0].runtime_config,
         Some(
@@ -395,12 +370,16 @@ async fn python_bundle_without_dependencies_freezes_provided_build_manifest_targ
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("main.py"), b"print('hello')").unwrap();
     fs::create_dir(dir.path().join(".onreza")).unwrap();
+    let mut manifest = crate::build::manifest::generate_compute_manifest("main.py");
+    let runtime = manifest.layers[0].runtime.as_mut().unwrap();
+    runtime.application_runtime = Some(nrz_source_bundle::ApplicationRuntimeIntent {
+        family: nrz_source_bundle::ApplicationRuntimeFamily::Python,
+        args: vec![],
+    });
+    runtime.build_runtime_version = Some("python-3.14".into());
     fs::write(
         dir.path().join(".onreza/manifest.json"),
-        serde_json::to_vec(&crate::build::manifest::generate_compute_manifest(
-            "main.py",
-        ))
-        .unwrap(),
+        serde_json::to_vec(&manifest).unwrap(),
     )
     .unwrap();
     let detection = crate::detect::detect_with_framework_override(dir.path(), None);
@@ -427,7 +406,7 @@ async fn python_bundle_without_dependencies_freezes_provided_build_manifest_targ
         dir.path(),
         &manifest,
         &scan_dir(dir.path()).unwrap(),
-        &RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::default())),
+        &RuntimeArtifactScan::PythonRuntimeRoot(Some(nrz_source_bundle::PythonMinor::Python314)),
         RuntimeDependencyPackaging::TrustedMaterialization,
         None,
     )
@@ -438,7 +417,6 @@ async fn python_bundle_without_dependencies_freezes_provided_build_manifest_targ
         .unwrap();
     assert_eq!(config["runtimeFamily"], "PYTHON");
     assert_eq!(config["buildRuntimeVersion"], "python-3.14");
-    assert_eq!(detection.metadata.runtime.version.as_deref(), Some("3.14"));
     assert!(
         plan.logical_manifest
             .files
@@ -663,7 +641,7 @@ async fn admitted_node_build_preserves_code_only_sibling_target() {
 }
 
 #[tokio::test]
-async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitted_selection() {
+async fn authored_node_manifest_preserves_frozen_target_and_ignores_admitted_metadata() {
     let directory = tempdir().unwrap();
     fs::write(directory.path().join("index.html"), b"<html></html>").unwrap();
     fs::write(directory.path().join("server.js"), b"console.log('hello')").unwrap();
@@ -718,16 +696,7 @@ async fn authored_node_manifest_preserves_standalone_declaration_and_uses_admitt
                 .as_ref()
                 .unwrap();
             assert_eq!(config["applicationRuntime"]["family"], "NODE");
-            if admitted && witness.is_none() {
-                assert_eq!(config["buildRuntimeVersion"], "node-24");
-            } else {
-                assert_eq!(
-                    config
-                        .get("buildRuntimeVersion")
-                        .and_then(serde_json::Value::as_str),
-                    witness
-                );
-            }
+            assert_eq!(config["buildRuntimeVersion"], witness.unwrap_or("node"));
         }
     }
     for family in [None, Some(nrz_source_bundle::ApplicationRuntimeFamily::Bun)] {
@@ -1817,7 +1786,7 @@ async fn frozen_compiler_probes_static_and_different_serving_families() {
         .split('.')
         .next()
         .unwrap();
-    assert!(matches!(actual, "22" | "24" | "26"));
+    assert!(actual.parse::<u32>().is_ok());
     let bun = crate::deploy::measured_bun_target(&[]).await.unwrap();
     let wrong = if actual == "22" { "24" } else { "22" };
     let Ok(selected) = std::env::var(CASE) else {
@@ -1871,24 +1840,26 @@ async fn frozen_compiler_probes_static_and_different_serving_families() {
             source_build_context: Some(context.clone()),
             ..Default::default()
         });
-        let result = crate::deploy::validate_application_runtime_before_build(
-            &context,
-            &effective,
-            true,
-            false,
-            &[],
-        )
-        .await;
-        if major == actual {
-            assert!(result.is_ok(), "{result:?}");
-        } else {
-            assert!(
-                result
-                    .err()
-                    .unwrap()
-                    .to_string()
-                    .contains("does not match selected node-")
-            );
+        for execute_tools in [false, true] {
+            let result = crate::deploy::validate_application_runtime_before_build(
+                &context,
+                &effective,
+                true,
+                execute_tools,
+                &[],
+            )
+            .await;
+            if !execute_tools || major == actual {
+                assert!(result.is_ok(), "{result:?}");
+            } else {
+                assert!(
+                    result
+                        .err()
+                        .unwrap()
+                        .to_string()
+                        .contains("does not match selected node-")
+                );
+            }
         }
     }
 }

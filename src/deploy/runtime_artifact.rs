@@ -764,8 +764,7 @@ pub(crate) fn apply_application_runtime_manifest(
                     && build_runtime_version.is_none()
                     && intent.family == nrz_source_bundle::ApplicationRuntimeFamily::Node
                 {
-                    // `nrz build` preserves an authored Node primary until the
-                    // independently admitted Node version can freeze its target.
+                    // Code-only Node can defer its generic target to source compilation.
                     continue;
                 }
             }

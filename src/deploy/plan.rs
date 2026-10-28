@@ -948,13 +948,16 @@ pub(super) async fn build(request: DeployPlanRequest<'_>) -> anyhow::Result<Depl
         manifest_for_planning,
         &build_artifact.detection,
         json,
-        deployment_manifest_source,
+        super::RuntimeArtifactManifestContext {
+            source: deployment_manifest_source,
+            configured_output_entry: effective.deploy_entry().is_some(),
+        },
     )?;
     if let Some(launch) = materialized_python_launch {
         super::python_launch::materialize_python_entry(
             project_dir,
             &launch,
-            super::selected_python_runtime_minor(project_dir, Some(&runtime_artifact.manifest))?,
+            super::artifact_python_runtime_minor(&runtime_artifact)?,
         )
         .map_err(|error| {
             output::coded_error("APPLICATION_RUNTIME_INVALID", format!("{error:#}"))

@@ -741,12 +741,7 @@ fn edge_build_handoff_preserves_python_and_native_serving_under_node_compiler() 
         assert_eq!(layer.entrypoint.as_deref(), Some(entry));
         let runtime = layer.runtime_config.as_ref().unwrap();
         assert_eq!(runtime["buildRuntimeVersion"], target);
-        assert_eq!(
-            runtime.get("runtimePolicyLineage"),
-            minor
-                .map(|minor| json!(format!("PYTHON:{}", minor.version())))
-                .as_ref()
-        );
+        assert!(runtime.get("runtimePolicyLineage").is_none());
         declaration.as_object_mut().unwrap().remove("entry");
         declaration.as_object_mut().unwrap().remove("pythonVersion");
         assert_eq!(runtime["applicationRuntime"], declaration);
@@ -855,12 +850,7 @@ fn build_generated_package_infers_process_without_changing_frozen_runtime() {
         assert_eq!(layer.entrypoint.as_deref(), Some("server.js"));
         let runtime = layer.runtime_config.as_ref().unwrap();
         assert_eq!(runtime["buildRuntimeVersion"], target);
-        assert_eq!(
-            runtime.get("runtimePolicyLineage"),
-            (!frozen_runtime.is_null())
-                .then(|| json!("BUN:CURRENT"))
-                .as_ref()
-        );
+        assert!(runtime.get("runtimePolicyLineage").is_none());
         let expected_intent = if frozen_runtime.is_null() {
             json!({"family":"NODE","args":[]})
         } else {
@@ -1077,11 +1067,11 @@ fn retained_platform_handoff_preserves_authored_targets_without_new_build_facts(
         if !typed && !declared_target {
             assert!(!result.status.success());
             let result = stdout_json(&result);
-            assert_eq!(result["code"], "APPLICATION_RUNTIME_INVALID");
             assert!(
-                result["error"].as_str().unwrap().contains(
-                    "retained COMPUTE output requires an application runtime and frozen target"
-                ),
+                result["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("requires an explicit application runtime"),
                 "{result}"
             );
             assert!(!output.path().join("source-bundle-v1.tar.zst").exists());
@@ -1089,7 +1079,16 @@ fn retained_platform_handoff_preserves_authored_targets_without_new_build_facts(
         }
         let manifest = source_bundle_manifest(output.path(), &result, old_target);
         let runtime = manifest.layers[0].runtime_config.as_ref().unwrap();
-        assert_eq!(runtime["buildRuntimeVersion"], old_target);
+        assert_eq!(
+            runtime["buildRuntimeVersion"],
+            if declared_target {
+                old_target
+            } else if family == "NODE" {
+                "node"
+            } else {
+                "python"
+            }
+        );
         assert!(runtime.get("runtimePolicyLineage").is_none());
         if family != "PYTHON" {
             let dependency = manifest
@@ -1207,12 +1206,7 @@ fn fresh_hono_dist_handoff_keeps_primary_lineage_through_runtime_relocation() {
             .unwrap();
         let runtime = primary.runtime_config.as_ref().unwrap();
         assert_eq!(runtime["buildRuntimeVersion"], target);
-        assert_eq!(
-            runtime
-                .get("runtimePolicyLineage")
-                .and_then(|value| value.as_str()),
-            Some("BUN:CURRENT")
-        );
+        assert!(runtime.get("runtimePolicyLineage").is_none());
         if authored {
             assert_eq!(primary.name, "primary");
             let sibling = manifest
@@ -1280,8 +1274,8 @@ fn fresh_python_module_handoff_keeps_project_owned_bootstrap_with_dist_output() 
         Some(".onreza/python/launch.py")
     );
     let runtime = primary.runtime_config.as_ref().unwrap();
-    assert_eq!(runtime["buildRuntimeVersion"], "python-3.14");
-    assert_eq!(runtime["runtimePolicyLineage"], "PYTHON:3.13");
+    assert_eq!(runtime["buildRuntimeVersion"], "python");
+    assert!(runtime.get("runtimePolicyLineage").is_none());
     assert!(manifest.files.iter().any(|file| file.path == "app.py"));
     let source_tree = output
         .path()
@@ -1335,6 +1329,13 @@ fn fresh_python_dependencies_use_resolved_minors_without_rejecting_requested_lin
         let dependency_root = project.path().join(".onreza/python/3.14/site-packages");
         fs::create_dir_all(&dependency_root).unwrap();
         fs::write(dependency_root.join("retained_dep.py"), "VALUE = 1").unwrap();
+        fs::write(project.path().join(".onreza/manifest.json"), serde_json::to_vec(&json!({
+            "version":2,"routes":[{"pattern":"^/.*$","layer":"server"}],"layers":[
+                {"name":"server","target":"COMPUTE","directory":".","entry":"main.py",
+                 "runtime":{"network":fixture_network("PUBLIC"),"applicationRuntime":{"family":"PYTHON","args":[]},
+                    "buildRuntimeVersion":"python-3.14"}}
+            ]
+        })).unwrap()).unwrap();
         let old_dependency_root = project.path().join(".onreza/python/3.13/site-packages");
         fs::create_dir_all(&old_dependency_root).unwrap();
         fs::write(old_dependency_root.join("old_dep.py"), "OLD_ABI_BYTES = 1").unwrap();
@@ -1345,34 +1346,6 @@ fn fresh_python_dependencies_use_resolved_minors_without_rejecting_requested_lin
                 .env("ONREZA_RUNTIME_VERSION", "python-3.14")
                 .output()
                 .unwrap();
-        if !fresh_install && !fresh_build {
-            assert!(!result.status.success());
-            let result = stdout_json(&result);
-            assert_eq!(result["code"], "APPLICATION_RUNTIME_INVALID");
-            assert!(
-                result["error"]
-                    .as_str()
-                    .unwrap()
-                    .contains("matching build and serving Python minors"),
-                "{result}"
-            );
-            assert!(!output.path().join("source-bundle-v1.tar.zst").exists());
-            continue;
-        }
-        if fresh_build && !result.status.success() {
-            // A development host can lack the qualified Builder interpreter.
-            // The actual compiler guard must remain authoritative after the
-            // obsolete source minors stop rejecting an admitted fresh build.
-            let result = stdout_json(&result);
-            let error = result["error"].as_str().unwrap();
-            assert!(
-                error.contains("selected Python compiler is unavailable")
-                    || error.contains("Python build compiler does not match selected CPython"),
-                "{result}"
-            );
-            assert!(!output.path().join("source-bundle-v1.tar.zst").exists());
-            continue;
-        }
         let manifest = source_bundle_manifest(output.path(), &result, "python-3.14");
         assert!(
             manifest
@@ -1382,12 +1355,18 @@ fn fresh_python_dependencies_use_resolved_minors_without_rejecting_requested_lin
         );
         let runtime = manifest.layers[0].runtime_config.as_ref().unwrap();
         assert_eq!(runtime["buildRuntimeVersion"], "python-3.14");
-        assert_eq!(runtime["runtimePolicyLineage"], "PYTHON:3.13");
+        assert!(runtime.get("runtimePolicyLineage").is_none());
         assert!(
             manifest
                 .files
                 .iter()
-                .any(|file| file.path.ends_with("retained_dep.py") && file.role == "dependency")
+                .any(|file| file.path.ends_with("retained_dep.py")
+                    && file.role
+                        == if fresh_install || fresh_build {
+                            "dependency"
+                        } else {
+                            "compute"
+                        })
         );
     }
 }

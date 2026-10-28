@@ -1,5 +1,10 @@
 use super::*;
 
+pub(super) struct RuntimeArtifactManifestContext {
+    pub(super) source: crate::artifact::BuildManifestSource,
+    pub(super) configured_output_entry: bool,
+}
+
 pub(super) struct NodeProjectRuntimePlan {
     runtime_root: PathBuf,
     build_output_prefix: String,
@@ -22,7 +27,10 @@ pub(super) fn resolve_runtime_artifact(
         manifest,
         detection,
         json,
-        crate::artifact::BuildManifestSource::File,
+        RuntimeArtifactManifestContext {
+            source: crate::artifact::BuildManifestSource::File,
+            configured_output_entry: false,
+        },
     )
 }
 
@@ -33,11 +41,24 @@ pub(super) fn resolve_runtime_artifact_with_manifest_source(
     mut manifest: build_manifest::Manifest,
     detection: &crate::detect::types::DetectionResult,
     json: bool,
-    manifest_source: crate::artifact::BuildManifestSource,
+    context: RuntimeArtifactManifestContext,
 ) -> anyhow::Result<RuntimeArtifact> {
     let python_runtime = has_python_runtime(&manifest, detection);
+    let primary = super::application_runtime_in_output(
+        detection.metadata.application_runtime(),
+        project_dir,
+        &build_output_dir,
+        context.configured_output_entry,
+    );
+    let primary_owner = primary
+        .as_ref()
+        .filter(|primary| primary.family == nrz_source_bundle::ApplicationRuntimeFamily::Python)
+        .map(|primary| super::select_application_runtime_primary(&manifest, primary))
+        .transpose()?
+        .flatten()
+        .map(|index| manifest.layers[index].name.as_str());
     let python_minor = if python_runtime {
-        selected_python_runtime_minor(project_dir, Some(&manifest))?
+        selected_python_runtime_minor(project_dir, Some(&manifest), primary_owner)?
     } else {
         None
     };
@@ -51,15 +72,7 @@ pub(super) fn resolve_runtime_artifact_with_manifest_source(
             manifest,
             json,
             python_minor,
-            manifest_source == crate::artifact::BuildManifestSource::Generated
-                && detection
-                    .metadata
-                    .application_runtime()
-                    .is_some_and(|runtime| {
-                        runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
-                            && runtime.entry.as_deref()
-                                == Some(crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY)
-                    }),
+            &context,
             detection,
         )?;
         if validate_python_layer_dependencies(
@@ -234,18 +247,41 @@ fn validate_compute_entry_ownership(
     Ok(())
 }
 
-pub(super) fn selected_python_runtime_minor(
+fn selected_python_runtime_minor(
     project_dir: &Path,
     manifest: Option<&build_manifest::Manifest>,
+    owner: Option<&str>,
 ) -> anyhow::Result<Option<nrz_source_bundle::PythonMinor>> {
     let mut targets = manifest
         .into_iter()
         .flat_map(|manifest| &manifest.layers)
+        .filter(|layer| owner.is_none_or(|owner| layer.name == owner))
         .filter_map(|layer| layer.runtime.as_ref()?.build_runtime_version.as_deref())
         .filter_map(nrz_source_bundle::PythonMinor::from_target);
     if let Some(first) = targets.next()
         && targets.all(|minor| minor == first)
     {
+        if !python_dependency_root_populated(project_dir, first)
+            && manifest.is_some_and(|manifest| {
+                manifest.layers.iter().any(|layer| {
+                    owner.is_some_and(|owner| owner != layer.name)
+                        && layer
+                            .runtime
+                            .as_ref()
+                            .and_then(|runtime| runtime.build_runtime_version.as_deref())
+                            .and_then(nrz_source_bundle::PythonMinor::from_target)
+                            .is_some_and(|minor| {
+                                minor != first
+                                    && python_dependency_root_populated(project_dir, minor)
+                            })
+                })
+            })
+        {
+            return Err(output::coded_error(
+                "APPLICATION_RUNTIME_INVALID",
+                "Retained Python dependency closure belongs to another frozen owning layer",
+            ));
+        }
         return Ok(Some(first));
     }
     let mut roots = std::fs::read_dir(project_dir.join(".onreza/python"))
@@ -256,12 +292,7 @@ pub(super) fn selected_python_runtime_minor(
         .filter_map(|entry| {
             nrz_source_bundle::PythonMinor::from_version(entry.file_name().to_str()?)
         })
-        .filter(|minor| {
-            project_dir
-                .join(minor.site_packages_root())
-                .read_dir()
-                .is_ok_and(|mut entries| entries.next().is_some())
-        });
+        .filter(|minor| python_dependency_root_populated(project_dir, *minor));
     let root = roots.next();
     if roots.next().is_some() {
         return Err(output::coded_error(
@@ -270,6 +301,28 @@ pub(super) fn selected_python_runtime_minor(
         ));
     }
     Ok(root)
+}
+
+fn python_dependency_root_populated(
+    project_dir: &Path,
+    minor: nrz_source_bundle::PythonMinor,
+) -> bool {
+    project_dir
+        .join(minor.site_packages_root())
+        .read_dir()
+        .is_ok_and(|mut entries| entries.next().is_some())
+}
+
+pub(super) fn artifact_python_runtime_minor(
+    artifact: &RuntimeArtifact,
+) -> anyhow::Result<Option<nrz_source_bundle::PythonMinor>> {
+    let owner = match &artifact.scan {
+        RuntimeArtifactScan::Relocated { ownership, .. } => {
+            ownership.python_dependency_owner.as_deref()
+        }
+        _ => None,
+    };
+    selected_python_runtime_minor(&artifact.root_dir, Some(&artifact.manifest), owner)
 }
 
 fn has_python_runtime(
@@ -312,16 +365,13 @@ fn uses_python_dependency_materialization(
 fn requires_authored_python_dependencies(
     project_dir: &Path,
     detection: &crate::detect::types::DetectionResult,
-    manifest: Option<&build_manifest::Manifest>,
+    minor: Option<nrz_source_bundle::PythonMinor>,
 ) -> anyhow::Result<bool> {
     if !uses_python_dependency_materialization(detection) {
         return Ok(false);
     }
     let fs = crate::detect::fs::LocalFs::new(project_dir);
-    crate::detect::python::requires_dependency_stage_for_runtime(
-        &fs,
-        selected_python_runtime_minor(project_dir, manifest)?,
-    )
+    crate::detect::python::requires_dependency_stage_for_runtime(&fs, minor)
 }
 
 /// Required dependencies must survive the plan's actual scan and retention.
@@ -333,7 +383,11 @@ pub(super) fn requires_retained_python_runtime_dependencies(
 ) -> anyhow::Result<bool> {
     Ok(manifest_has_compute_layer(&artifact.manifest)
         && has_python_runtime(&artifact.manifest, detection)
-        && requires_authored_python_dependencies(project_dir, detection, Some(&artifact.manifest))?)
+        && requires_authored_python_dependencies(
+            project_dir,
+            detection,
+            artifact_python_runtime_minor(artifact)?,
+        )?)
 }
 
 pub(super) fn validate_retained_python_runtime_dependencies(
@@ -344,7 +398,7 @@ pub(super) fn validate_retained_python_runtime_dependencies(
     if !required {
         return Ok(());
     }
-    let minor = selected_python_runtime_minor(&artifact.root_dir, Some(&artifact.manifest))?;
+    let minor = artifact_python_runtime_minor(artifact)?;
     let minor = minor.ok_or_else(|| {
         output::coded_error(
             "MISSING_RUNTIME_DEPENDENCIES",
@@ -423,7 +477,7 @@ fn validate_python_layer_dependencies(
     }
 
     let authored_dependencies =
-        requires_authored_python_dependencies(project_dir, detection, Some(&artifact.manifest))?;
+        requires_authored_python_dependencies(project_dir, detection, minor)?;
     let staged = minor.is_some_and(|minor| {
         project_dir
             .join(minor.site_packages_root())
@@ -600,7 +654,14 @@ fn declared_javascript_dependency_owner(
     if candidates.len() == 1 {
         return Some(candidates[0].name.clone());
     }
-    declared_primary_dependency_owner(project_dir, manifest_root, candidates, detection, false)
+    declared_primary_dependency_owner(
+        project_dir,
+        manifest_root,
+        candidates,
+        detection,
+        false,
+        false,
+    )
 }
 
 fn declared_python_dependency_owner(
@@ -609,6 +670,7 @@ fn declared_python_dependency_owner(
     manifest: &build_manifest::Manifest,
     detection: &crate::detect::types::DetectionResult,
     project_owned_entry: bool,
+    configured_output_entry: bool,
 ) -> Option<String> {
     use nrz_source_bundle::ApplicationRuntimeFamily;
     let primary = detection.metadata.application_runtime();
@@ -639,6 +701,7 @@ fn declared_python_dependency_owner(
         candidates,
         detection,
         project_owned_entry,
+        configured_output_entry,
     )
 }
 
@@ -648,10 +711,11 @@ fn declared_primary_dependency_owner(
     candidates: Vec<&build_manifest::Layer>,
     detection: &crate::detect::types::DetectionResult,
     project_owned_entry: bool,
+    configured_output_entry: bool,
 ) -> Option<String> {
     let primary = detection.metadata.application_runtime()?;
-    let entry = if project_owned_entry {
-        // Generated bootstrap provenance explicitly anchors this entry at the project.
+    let entry = if project_owned_entry || configured_output_entry {
+        // These entries already carry their authoritative project/output-relative scope.
         primary.entry.clone()?
     } else {
         crate::detect::resolve_application_entry(
@@ -735,9 +799,18 @@ fn resolve_python_runtime_artifact(
     manifest: build_manifest::Manifest,
     json: bool,
     minor: Option<nrz_source_bundle::PythonMinor>,
-    project_owned_bootstrap: bool,
+    context: &RuntimeArtifactManifestContext,
     detection: &crate::detect::types::DetectionResult,
 ) -> anyhow::Result<RuntimeArtifact> {
+    let project_owned_bootstrap = context.source == crate::artifact::BuildManifestSource::Generated
+        && detection
+            .metadata
+            .application_runtime()
+            .is_some_and(|runtime| {
+                runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python
+                    && runtime.entry.as_deref()
+                        == Some(crate::detect::python_launch::PYTHON_BOOTSTRAP_ENTRY)
+            });
     let build_output_prefix = relative_runtime_artifact_path(project_dir, &build_output_dir)
         .map_err(|_| {
             output::coded_error(
@@ -761,6 +834,7 @@ fn resolve_python_runtime_artifact(
                 &manifest,
                 detection,
                 project_owned_bootstrap,
+                context.configured_output_entry,
             ),
             python_primary_declared: detection.metadata.application_runtime().is_some_and(
                 |runtime| runtime.family == nrz_source_bundle::ApplicationRuntimeFamily::Python,

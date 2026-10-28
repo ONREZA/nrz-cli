@@ -658,7 +658,14 @@ fn python_process_runtime_uses_project_root_with_versioned_dependencies() {
         &mut detection,
     )
     .unwrap();
-    let manifest = build_manifest::generate_compute_manifest("main.py");
+    let mut manifest = build_manifest::generate_compute_manifest("main.py");
+    apply_application_runtime_manifest(
+        &mut manifest,
+        detection.metadata.application_runtime(),
+        Some("python-3.14"),
+        "python",
+    )
+    .unwrap();
 
     let artifact = resolve_runtime_artifact(
         dir.path(),
@@ -800,7 +807,7 @@ fn python_process_runtime_rejects_missing_installed_dependencies() {
     )
     .unwrap_err();
 
-    assert!(error.to_string().contains("installed dependencies"));
+    expect_code(&error, "MISSING_RUNTIME_DEPENDENCIES");
 }
 
 #[test]
@@ -1179,7 +1186,12 @@ fn mixed_python_minors_keep_dependencies_with_their_declared_owner() {
             family: BuildToolchainFamily::Python,
             python_version: Some(PythonMinor::Python314.version()),
         },
-        application_runtime: None,
+        application_runtime: Some(nrz_source_bundle::ApplicationRuntimeDeclaration {
+            family: nrz_source_bundle::ApplicationRuntimeFamily::Python,
+            python_version: Some("4.x".into()),
+            entry: Some("main.py".into()),
+            args: vec![],
+        }),
     });
     let manifest = manifest_with_python_sibling("PYTHON", "main.py", "python-3.14");
     let artifact = project_root_runtime_artifact(project.path(), manifest, &detection);
@@ -1222,7 +1234,12 @@ fn mixed_python_minors_keep_dependencies_with_their_declared_owner() {
     )
     .unwrap_err();
     expect_code(&error, "APPLICATION_RUNTIME_INVALID");
-    assert!(error.to_string().contains("owning layer 'api'"));
+    assert!(
+        error
+            .to_string()
+            .contains("conflicts with the actual build target"),
+        "{error:#}"
+    );
 }
 
 #[test]
