@@ -892,8 +892,7 @@ async fn managed_build_declarations_preserve_frozen_targets_and_static_publicati
                 .as_ref()
                 .unwrap()
                 .python_version,
-            nrz_source_bundle::PythonMinor::from_target(&selected)
-                .map(nrz_source_bundle::PythonMinor::version)
+            context.application_runtime.as_ref().unwrap().python_version
         );
     }
 
@@ -1849,17 +1848,11 @@ async fn frozen_compiler_probes_static_and_different_serving_families() {
                 &[],
             )
             .await;
-            if !execute_tools || major == actual {
-                assert!(result.is_ok(), "{result:?}");
-            } else {
-                assert!(
-                    result
-                        .err()
-                        .unwrap()
-                        .to_string()
-                        .contains("does not match selected node-")
-                );
+            let resolved = result.unwrap();
+            if execute_tools {
+                assert_eq!(resolved.node_version, Some(format!("NODE_{actual}")));
             }
+            assert_eq!(effective.requested_source_build_context(), Some(&context));
         }
     }
 }
