@@ -131,28 +131,17 @@ pub(super) struct PythonInterpreter {
     pub(super) version: String,
 }
 
-impl PythonInterpreter {
-    pub(super) fn matches_build_target(&self, target: &str) -> bool {
-        let Some(expected) = target.strip_prefix("python-") else {
-            return false;
-        };
-        if expected.split('.').count() == 3 {
-            expected == self.version
-        } else {
-            PythonMinor::from_target(target) == Some(self.minor)
-        }
-    }
-}
-
 pub(super) async fn available_interpreter(
+    mode: PythonInstallMode,
     environment: &[(String, String)],
 ) -> anyhow::Result<PythonInterpreter> {
-    let uv = resolve_for(PythonInstallMode::ManagedLocal).await?;
+    let uv = resolve_for(mode).await?;
     let command = PythonInstallCommand {
         program: uv.clone(),
         arguments: [
             "python",
             "find",
+            "cpython",
             "--no-project",
             "--no-config",
             "--no-python-downloads",
@@ -235,12 +224,9 @@ async fn build_environment_for_host(
     validate_local_build_dependency_host_with_glibc(project_dir, mode, minor, host, glibc_version)?;
     let interpreter = match selected_interpreter {
         Some(path) => path.to_owned(),
-        None if mode == PythonInstallMode::PinnedPlatform => {
-            PathBuf::from(minor.platform_interpreter())
-        }
-        None => available_interpreter(environment).await?.path,
+        None => available_interpreter(mode, environment).await?.path,
     };
-    build_environment_for_interpreter(project_dir, mode, minor, &interpreter, environment).await
+    build_environment_for_interpreter(project_dir, &interpreter, environment).await
 }
 
 #[cfg(test)]
@@ -572,21 +558,12 @@ fn is_python_compute_file(
 
 async fn build_environment_for_interpreter(
     project_dir: &Path,
-    mode: PythonInstallMode,
-    minor: PythonMinor,
     interpreter: &Path,
     environment: &[(String, String)],
 ) -> anyhow::Result<Vec<(String, String)>> {
     let selected = probe_interpreter(interpreter).await?;
-    if mode == PythonInstallMode::PinnedPlatform && selected.minor != minor {
-        bail!(
-            "actual Python compiler {} differs from admitted compiler {}",
-            selected.minor.version(),
-            minor.version()
-        );
-    }
     let interpreter = selected.path;
-    let dependency_root = project_dir.join(minor.site_packages_root());
+    let dependency_root = project_dir.join(selected.minor.site_packages_root());
     let startup = materialize_python_build_startup(project_dir, &dependency_root)?;
     let inherited_path = environment
         .iter()
@@ -756,10 +733,9 @@ pub(super) fn install_commands(
             arguments: [
                 OsString::from("-I"),
                 OsString::from("-c"),
-                OsString::from("import sys; actual = '.'.join(map(str, sys.version_info[:2])); expected = sys.argv[1]; sys.exit(0 if sys.implementation.name == 'cpython' and actual == expected else 'actual CPython minor differs from admitted compiler: ' + actual)"),
-                OsString::from(minor.version()),
+                OsString::from("import sys; sys.exit(0 if sys.implementation.name == 'cpython' else 'selected compiler must be CPython')"),
             ].to_vec(),
-            display: format!("verify admitted CPython compiler {}", minor.version()),
+            display: "verify selected CPython compiler".into(),
             portable_wheel_directory: None,
         });
     }

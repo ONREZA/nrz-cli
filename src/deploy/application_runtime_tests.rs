@@ -33,7 +33,7 @@ fn admitted_targets_replace_requested_lines_without_mutating_source_intent() {
     );
     assert_eq!(
         resolved.context.application_runtime.unwrap().python_version,
-        Some(PythonMinor::Python313.version())
+        Some(PythonMinor::Python312.version())
     );
     assert_eq!(
         original.build_toolchain.python_version,
@@ -389,7 +389,7 @@ fn local_python_context_records_actual_compiler_independently_of_declared_minors
             python_interpreter: None,
         };
         let path = std::path::PathBuf::from("/available/python3");
-        bind_local_python_runtime(
+        bind_python_compiler(
             &mut resolved,
             crate::deploy::python_toolchain::PythonInterpreter {
                 path: path.clone(),
@@ -403,7 +403,7 @@ fn local_python_context_records_actual_compiler_independently_of_declared_minors
         );
         assert_eq!(
             resolved.context.application_runtime.unwrap().python_version,
-            Some(PythonMinor::Python314.version())
+            Some(hint.to_owned())
         );
         assert_eq!(resolved.python_interpreter, Some(path));
         assert_eq!(original.build_toolchain.python_version.unwrap(), hint);
@@ -442,11 +442,14 @@ async fn local_node_version_outside_the_catalog_is_observed_without_admission_fi
             "v23.1.0"
         );
     }
-    assert!(
-        qualify_javascript_binary("node", Some("node-23.1.1"), &environment)
-            .await
-            .is_err()
-    );
+    for target in ["node-24", "node-24.1.1", "node"] {
+        assert_eq!(
+            qualify_javascript_binary("node", Some(target), &environment)
+                .await
+                .unwrap(),
+            "v23.1.0"
+        );
+    }
     let resolved =
         resolve_platform_runtime(&context("NODE", "NODE"), "node-23.1.0", "node-23.1.0", None)
             .unwrap();
@@ -549,8 +552,45 @@ async fn python_probe_preserves_full_patch_witness_without_a_version_resolver() 
         .await
         .unwrap();
     assert_eq!(observed.version, "3.14.10");
-    assert!(observed.matches_build_target("python-3.14"));
-    assert!(observed.matches_build_target("python-3.14.10"));
-    assert!(!observed.matches_build_target("python-3.14.9"));
-    assert!(!observed.matches_build_target("python-3.13"));
+    assert_eq!(observed.minor, PythonMinor::Python314);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn selected_node_declaration_does_not_reject_available_newer_or_older_compiler() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let executable = root.path().join("node");
+    let environment = vec![("PATH".into(), root.path().display().to_string())];
+    for actual in ["v26.0.0", "v22.14.1"] {
+        std::fs::write(
+            &executable,
+            format!("#!/bin/sh\nprintf '%s\n' '{actual}'\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            qualify_javascript_binary("node", Some("node-24"), &environment)
+                .await
+                .unwrap(),
+            actual
+        );
+    }
+    assert!(
+        qualify_javascript_binary("node", Some("bun-1.4.3"), &environment)
+            .await
+            .is_err()
+    );
+    std::fs::write(&executable, "#!/bin/sh\nprintf 'invalid-version\n'\n").unwrap();
+    assert!(
+        qualify_javascript_binary("node", Some("node-24"), &environment)
+            .await
+            .is_err()
+    );
+    std::fs::remove_file(executable).unwrap();
+    assert!(
+        qualify_javascript_binary("node", Some("node-24"), &environment)
+            .await
+            .is_err()
+    );
 }

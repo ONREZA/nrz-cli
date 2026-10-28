@@ -324,15 +324,11 @@ fn resolve_platform_runtime(
         resolved.build_toolchain.python_version =
             PythonMinor::from_target(compiler).map(PythonMinor::version);
     }
-    let application_target = if let Some(declaration) = &mut resolved.application_runtime {
+    let application_target = if let Some(declaration) = &resolved.application_runtime {
         declaration
             .intent()
             .validate_target(Some(application))
             .map_err(anyhow::Error::msg)?;
-        if declaration.family == ApplicationRuntimeFamily::Python {
-            declaration.python_version =
-                PythonMinor::from_target(application).map(PythonMinor::version);
-        }
         Some(application.to_string())
     } else {
         None
@@ -414,38 +410,28 @@ pub(crate) async fn validate_application_runtime_before_build(
             python_interpreter: None,
         }
     };
-    if platform_runner
-        && execute_tools
-        && context.build_toolchain.family == BuildToolchainFamily::Python
-    {
-        let admitted = resolved
-            .context
-            .build_toolchain
-            .resolved_python_minor()
-            .context("trusted Python compiler target is missing")?;
-        let interpreter = super::python_toolchain::probe_interpreter(std::path::Path::new(
-            &admitted.platform_interpreter(),
-        ))
-        .await?;
-        let target = std::env::var("ONREZA_BUILD_RUNTIME_VERSION")
-            .context("trusted Python compiler target is missing")?;
-        if !interpreter.matches_build_target(&target) {
-            return Err(output::coded_error(
-                "APPLICATION_RUNTIME_INVALID",
-                "observed Python compiler differs from the frozen Builder target",
-            ));
-        }
-    }
-    if !platform_runner
-        && execute_tools
+    if execute_tools
         && (context.build_toolchain.family == BuildToolchainFamily::Python
             || context
                 .application_runtime
                 .as_ref()
                 .is_some_and(|runtime| runtime.family == ApplicationRuntimeFamily::Python))
     {
-        let interpreter = super::python_toolchain::available_interpreter(environment).await?;
-        bind_local_python_runtime(&mut resolved, interpreter);
+        let mode = if platform_runner {
+            super::python_toolchain::PythonInstallMode::PinnedPlatform
+        } else {
+            super::python_toolchain::PythonInstallMode::ManagedLocal
+        };
+        let interpreter = super::python_toolchain::available_interpreter(mode, environment).await?;
+        if !platform_runner
+            && context
+                .application_runtime
+                .as_ref()
+                .is_some_and(|runtime| runtime.family == ApplicationRuntimeFamily::Python)
+        {
+            resolved.application_target = Some(format!("python-{}", interpreter.version));
+        }
+        bind_python_compiler(&mut resolved, interpreter);
     }
     let mut measured_bun = None;
     let mut measured_node = None;
@@ -479,7 +465,10 @@ pub(crate) async fn validate_application_runtime_before_build(
                 if context.build_toolchain.family != BuildToolchainFamily::Node
                     || compiler_target.as_deref() != Some(auxiliary_target.as_str())
                 {
-                    qualify_javascript_binary("node", Some(&auxiliary_target), environment).await?;
+                    measured_node = Some(
+                        qualify_javascript_binary("node", Some(&auxiliary_target), environment)
+                            .await?,
+                    );
                 }
             } else if context.build_toolchain.family == BuildToolchainFamily::Bun {
                 return Err(output::coded_error(
@@ -499,7 +488,7 @@ pub(crate) async fn validate_application_runtime_before_build(
     {
         measured_node = Some(qualify_javascript_binary("node", None, environment).await?);
     }
-    if !platform_runner && let Some(actual) = measured_node {
+    if let Some(actual) = measured_node {
         let major = actual
             .strip_prefix('v')
             .unwrap_or(&actual)
@@ -524,14 +513,7 @@ pub(crate) async fn validate_application_runtime_before_build(
                 .as_deref()
                 .map(node_build_target)
                 .transpose()?,
-            Some(ApplicationRuntimeFamily::Python) => resolved
-                .context
-                .application_runtime
-                .as_ref()
-                .and_then(|runtime| runtime.python_version.as_deref())
-                .and_then(nrz_source_bundle::PythonMinor::from_version)
-                .filter(|_| execute_tools)
-                .map(|minor| minor.target()),
+            Some(ApplicationRuntimeFamily::Python) => resolved.application_target.clone(),
             Some(ApplicationRuntimeFamily::Executable) => {
                 Some(nrz_runtime_artifact::NATIVE_EXECUTION_TARGET.into())
             }
@@ -541,17 +523,12 @@ pub(crate) async fn validate_application_runtime_before_build(
     Ok(resolved)
 }
 
-fn bind_local_python_runtime(
+fn bind_python_compiler(
     resolved: &mut ResolvedBuildRuntime,
     interpreter: super::python_toolchain::PythonInterpreter,
 ) {
     if resolved.context.build_toolchain.family == nrz_source_bundle::BuildToolchainFamily::Python {
         resolved.context.build_toolchain.python_version = Some(interpreter.minor.version());
-    }
-    if let Some(runtime) = resolved.context.application_runtime.as_mut()
-        && runtime.family == ApplicationRuntimeFamily::Python
-    {
-        runtime.python_version = Some(interpreter.minor.version());
     }
     resolved.python_interpreter = Some(interpreter.path);
 }
@@ -597,14 +574,13 @@ async fn qualify_javascript_binary(
                 });
                 matches!(observed, Some(nrz_contract::RuntimeProfile::Node(_)))
                     && target.is_none_or(|target| {
-                        let Some(expected) = target.strip_prefix("node-") else {
-                            return false;
-                        };
-                        if expected.contains('.') {
-                            version == Some(expected)
-                        } else {
-                            nrz_contract::RuntimeProfile::node_build_target(target) == observed
-                        }
+                        matches!(
+                            nrz_contract::RuntimeProfile::node_build_target(target),
+                            Some(
+                                nrz_contract::RuntimeProfile::Node(_)
+                                    | nrz_contract::RuntimeProfile::NodeAny
+                            )
+                        )
                     })
             }
             "bun" => target.map_or_else(
@@ -620,10 +596,14 @@ async fn qualify_javascript_binary(
     if !matches {
         return Err(output::coded_error(
             "APPLICATION_RUNTIME_INVALID",
-            format!(
-                "local {binary} does not match selected {}; select the correct executable before building",
-                target.unwrap_or("canonical runtime version")
-            ),
+            if binary == "node" {
+                "available node must report its canonical Node version".to_owned()
+            } else {
+                format!(
+                    "local {binary} does not match selected {}; select the correct executable before building",
+                    target.unwrap_or("canonical runtime version")
+                )
+            },
         ));
     }
     Ok(actual.to_string())

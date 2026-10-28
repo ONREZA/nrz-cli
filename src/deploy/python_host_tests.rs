@@ -438,31 +438,22 @@ async fn python_compiler_probe_accepts_actual_minors_and_patches_outside_the_cat
 
 #[cfg(unix)]
 #[tokio::test]
-async fn platform_build_verifies_the_admitted_minor_without_a_catalog_patch_gate() {
+async fn platform_build_uses_available_python_minor_without_declaration_gate() {
     use std::os::unix::fs::PermissionsExt;
     let directory = tempfile::tempdir().unwrap();
     let interpreter = directory.path().join("python");
     std::fs::write(&interpreter, "#!/bin/sh\nprintf '3.15.1\\n'\n").unwrap();
     std::fs::set_permissions(&interpreter, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let error = build_environment_for_interpreter(
-        directory.path(),
-        PythonInstallMode::PinnedPlatform,
-        PythonMinor::Python314,
-        &interpreter,
-        &[],
-    )
-    .await
-    .unwrap_err();
-    assert!(error.to_string().contains("differs from admitted compiler"));
-    assert!(!directory.path().join(".onreza/python/build").exists());
+    let environment = build_environment_for_interpreter(directory.path(), &interpreter, &[])
+        .await
+        .unwrap();
+    assert!(
+        environment.iter().any(|(name, value)| name == "PYTHONPATH"
+            && value.contains(".onreza/python/3.15/site-packages"))
+    );
+    assert!(directory.path().join(".onreza/python/build").exists());
     std::fs::write(&interpreter, "#!/bin/sh\nprintf '3.14.999\\n'\n").unwrap();
-    build_environment_for_interpreter(
-        directory.path(),
-        PythonInstallMode::PinnedPlatform,
-        PythonMinor::Python314,
-        &interpreter,
-        &[],
-    )
-    .await
-    .unwrap();
+    build_environment_for_interpreter(directory.path(), &interpreter, &[])
+        .await
+        .unwrap();
 }
