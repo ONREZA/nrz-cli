@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.49.2] - 2026-10-28
+
+### 🐛 Bug Fixes
+
+- **deploy:** use available runtime compilers ([ebe25e3](https://github.com/ONREZA/nrz-cli/commit/ebe25e3683a034dde26483e3b5868ef5662e7c87))
+- **deploy:** preserve dependency ownership ([cc727f7](https://github.com/ONREZA/nrz-cli/commit/cc727f7b1114851dfcbc0f31e5d9e1e19a5bee21))
+- **deploy:** preserve runtime declarations ([f7673e0](https://github.com/ONREZA/nrz-cli/commit/f7673e09de8ab66549306a802e6a944f7bfe797d))
+- **deploy:** retain source during reconciliation ([4ce3ce0](https://github.com/ONREZA/nrz-cli/commit/4ce3ce0be4db9cdd6f9ff392cb044a53d91a0e49))
+- **deploy:** admit bun build provenance ([4281327](https://github.com/ONREZA/nrz-cli/commit/4281327d5ccd019a647c9caf677235d093ab136d))
+- **deploy:** expose manifest pool capacity ([8356319](https://github.com/ONREZA/nrz-cli/commit/8356319e9aa8404edc1a178594e8587b22de5e67))
+- **deploy:** validate foreign addon aliases ([f21663c](https://github.com/ONREZA/nrz-cli/commit/f21663cc952a0f2e1ede2915884cc73d1b6abf30))
+
+### ✨ Features
+
+- **cli:** advertise raw runtime declarations ([e2ffeca](https://github.com/ONREZA/nrz-cli/commit/e2ffeca9e01dcfd1881201d08d66f2aa27d01c60))
+- **deploy:** resume live source transfers ([c8257fe](https://github.com/ONREZA/nrz-cli/commit/c8257fed0620fd295a6e3436e7321314fd33c3af))
+
+### ⚡ Performance
+
+- **deploy:** skip producer file syncs ([bd3f445](https://github.com/ONREZA/nrz-cli/commit/bd3f44597894cc023536516c8f322472967df71f))
+
+### ✅ Testing
+
+- **tests:** qualify source transfers ([a2b06f4](https://github.com/ONREZA/nrz-cli/commit/a2b06f4fb2f3a25d422451b16333f228dc994a79))
+
 ## [0.49.1] - 2026-10-27
 
 ### 🐛 Bug Fixes
